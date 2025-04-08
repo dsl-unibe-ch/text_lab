@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+
+# Hard-code the container path:
+CONTAINER="/storage/research/dsl_shared/solutions/ondemand/text_lab.sif"
+
+# If needed, load modules or set up the environment here.
+
+# Change into the job directory or wherever you want your app to run from
+cd "${PWD}"
+
+# Run the Streamlit app inside the container
+apptainer exec --nv "$CONTAINER" \
+  streamlit run /storage/homefs/aa22x177/ondemand/dev/text_lab/src/app.py \
+    --server.port "${SERVER_PORT}" \
+    --server.baseUrlPath "${SERVER_BASEURLPATH}" \
+    --server.enableCORS false \
+    --server.headless true \
+    --browser.gatherUsageStats false &
+
+apptainer exec --nv "$CONTAINER" \
+  streamlit run /storage/homefs/aa22x177/ondemand/dev/text_lab/src/app.py \
+    --server.port "$SERVER_PORT" \
+    --server.baseUrlPath "$SERVER_BASEURLPATH" \
+    --server.enableCORS false \
+    --server.headless true

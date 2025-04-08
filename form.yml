@@ -1,0 +1,34 @@
+---
+cluster: "ubelix"
+
+form:
+  - partition
+  - qos
+  - gpu
+
+attributes:
+  partition:
+    widget: "select"
+    label: "SLURM Partition"
+    options:
+      - ["gpu", "gpu"]
+      - ["gpu-invest", "gpu-invest"]
+    value: "gpu"
+
+  qos:
+    widget: "select"
+    label: "Quality of Service (QoS)"
+    options:
+      - ["job_gpu", "job_gpu"]
+      - ["job_gpu_preemptable", "job_gpu_preemptable"]
+    value: "job_gpu"
+
+  gpu:
+    widget: "select"
+    label: "GPU Type"
+    options:
+      - ["rtx4090", "gpu:rtx4090:1"]
+      - ["A100", "gpu:a100:1"]
+      - ["H100", "gpu:h100:1"]
+    value: "rtx4090"
+    help: "Use A100 or H100 with 'job_gpu_preemptable' option from the 'qos'"
