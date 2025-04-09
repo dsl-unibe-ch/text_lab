@@ -4,7 +4,9 @@ cluster: "ubelix"
 form:
   - partition
   - qos
+  - time
   - gpu
+  - gpu_number
 
 attributes:
   partition:
@@ -22,13 +24,32 @@ attributes:
       - ["job_gpu", "job_gpu"]
       - ["job_gpu_preemptable", "job_gpu_preemptable"]
     value: "job_gpu"
+    help: "Choose 'job_gpu_preemptable' for faster connection, but you might get disconnected at any time"
+
+  time:
+    widget: "number_field"
+    label: "Job Time (hours)"
+    min: 1
+    max: 24
+    step: 1
+    value: "1"
+    help: "Total walltime in hours. e.g. 1 means 1:00:00 hour."
 
   gpu:
     widget: "select"
     label: "GPU Type"
     options:
-      - ["rtx4090", "gpu:rtx4090:1"]
-      - ["A100", "gpu:a100:1"]
-      - ["H100", "gpu:h100:1"]
+      - ["rtx4090", "gpu:rtx4090:"]
+      - ["A100", "gpu:a100:"]
+      - ["H100", "gpu:h100:"]
     value: "rtx4090"
     help: "Use A100 or H100 with 'job_gpu_preemptable' option from the 'qos'"
+
+  gpu_number:
+     widget: "number_field"
+     label: "Number of GPU(s) requested"
+     min: 1
+     max: 6
+     step: 1
+     value: "1"
+     help: "Number of GPUs. Ask for more than 1 in case you plan to run large LLM. You might not be able to request more than 1"
