@@ -1,30 +1,35 @@
 import streamlit as st
 import whisper
 from io import BytesIO
+import tempfile
 
 def run_transcribe():
     st.title("Whisper Transcription")
 
-    # Model selection
+    # Model selection: only list models you actually downloaded
+    model_options = [
+        "tiny", "small", "medium", "large-v2", "large-v3"
+    ]
     model_name = st.selectbox(
         "Select Whisper Model:",
-        [
-            "tiny", "base", "small", "medium", "large"
-            # or you can include "large-v2" etc. if you prefer
-        ],
-        index=1  # default to "base"
+        model_options,
+        index=4  # default to large-v3
     )
 
-    # Language selection
-    language_options = [
-        "Detect language automatically",
-        "en", "de", "fr", "es", "it", "zh", "ar"
-        # Add more if you need
-    ]
-    language = st.selectbox("Select Language:", language_options, index=0)
+    # Gather all Whisper-supported languages
+    # This returns a dict like {"english": "en", "chinese": "zh", "german": "de", ...}
+    LANG_DICT = whisper.tokenizer.LANGUAGES
+    # Make a sorted list of language names for the dropdown
+    language_labels = ["Detect language automatically"] + sorted(LANG_DICT.keys())
 
-    # File uploader
-    audio_file = st.file_uploader("Upload an audio file", type=["wav", "mp3", "m4a", "ogg", "flac"])
+    # Language selection
+    selected_label = st.selectbox("Select Language:", language_labels, index=0)
+
+    # File uploader: allow multiple audio formats
+    audio_file = st.file_uploader(
+        "Upload an audio file",
+        type=["m4a","mp3","webm","mp4","mpga","wav","mpeg","ogg","flac"]
+    )
 
     if audio_file is not None:
         st.audio(audio_file, format="audio/*", start_time=0)
@@ -35,27 +40,25 @@ def run_transcribe():
             st.warning("Please upload an audio file first.")
         else:
             with st.spinner("Loading Whisper model and transcribing..."):
-                # Load the selected Whisper model
+                # Load the selected Whisper model.
+                # By default, whisper.load_model() checks the local cache first,
+                # so it should find the .pt file you added in the container
+                # and won't re-download from the internet.
                 model = whisper.load_model(model_name)
 
-                # If user chose "Detect language automatically", do not pass a language
-                # Otherwise pass the chosen language code
+                # Build transcribe options
                 transcribe_options = {}
-                if language != "Detect language automatically":
-                    transcribe_options["language"] = language
+                if selected_label != "Detect language automatically":
+                    # Map the human-friendly label (e.g. "english") to the short code ("en")
+                    transcribe_options["language"] = LANG_DICT[selected_label]
 
-                # Read the uploaded file as bytes and transcribe
+                # Whisper usually needs a real file path, so we write bytes to a temporary file
                 audio_bytes = audio_file.read()
-
-                # Whisper can work on a file path or bytes. 
-                # The simplest might be to save to a temp file, but let's try direct I/O:
-                # Some versions of whisper might require an actual file path. If that's the case,
-                # you'd write the bytes to a NamedTemporaryFile. For now, let's do that approach:
-
-                import tempfile
                 with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
                     tmp.write(audio_bytes)
-                    tmp.flush()  # ensure all data is written
+                    tmp.flush()
+
+                    # Transcribe
                     result = model.transcribe(tmp.name, **transcribe_options)
 
                 text = result["text"]
