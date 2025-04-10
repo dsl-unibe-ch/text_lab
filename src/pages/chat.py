@@ -22,17 +22,22 @@ def ensure_ollama_server():
 
 def extract_model_name(entry):
     """
-    Helper to parse a model dictionary from `ollama.list()` and
-    consistently extract the model's name as a string.
+    Helper to parse a model entry from `ollama.list()['models']
     """
-    if isinstance(entry, str):
+    if hasattr(entry, 'model') and isinstance(getattr(entry, 'model'), str):
+        return entry.model # Access the .model attribute
+
+    # Keep the original dictionary check as a fallback or for other versions
+    elif isinstance(entry, dict) and "name" in entry:
+        return entry["name"]
+
+    # Keep other original fallbacks if needed
+    elif isinstance(entry, str):
         return entry
     elif isinstance(entry, (tuple, list)) and len(entry) > 0:
         return entry[0]
-    elif isinstance(entry, dict) and "name" in entry:
-        return entry["name"]
     else:
-        return str(entry)
+        return str(entry) # Return string representation as last resort
 
 # ------------------------------
 # 2. Generating responses
@@ -112,7 +117,7 @@ def main():
         "deepseek-r1:8b",
         "llama3.2:latest",
         "llama3.1:latest",
-        "mistral"
+        "mistral:latest"
     ]
 
     if "selected_model" not in st.session_state:
@@ -127,8 +132,8 @@ def main():
 
     # Retrieve local models from Ollama by accessing the 'models' key
     try:
-        models_dict = ollama.list()            # returns a dictionary with key 'models'
-        local_models = models_dict["models"]     # list of model dicts
+        models_dict = ollama.list()
+        local_models = models_dict["models"]
         local_model_names = [extract_model_name(m) for m in local_models]
     except Exception as e:
         st.error(f"Error listing locally available models: {str(e)}")
