@@ -1,27 +1,56 @@
-import os
 import streamlit as st
+import os
+import base64
+
+def get_img_as_base64(file_path):
+    """Read an image file and return its base64 encoded string."""
+    with open(file_path, "rb") as f:
+        data = f.read()
+    return base64.b64encode(data).decode()
 
 def main():
+    st.set_page_config(page_title="TEXT LAB", layout="wide")
     st.title("TEXT LAB")
     
-    # Build absolute paths relative to the current file's directory.
+    # Custom CSS for styling the logo container.
+    css = """
+    <style>
+    .logo-container {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 40px;
+      margin-bottom: 20px;
+    }
+    .logo-container img {
+      border: 2px solid #ddd;
+      border-radius: 8px;
+      box-shadow: 4px 4px 12px rgba(0, 0, 0, 0.1);
+      max-width: 150px;
+      height: auto;
+    }
+    </style>
+    """
+    st.markdown(css, unsafe_allow_html=True)
+
+    # Get the absolute paths to the images.
     current_dir = os.path.dirname(os.path.abspath(__file__))
     dsl_icon_path = os.path.join(current_dir, "dsl_icon.png")
     digiki_icon_path = os.path.join(current_dir, "digiki_icon.png")
-    
-    # Check that the files exist (for debugging purposes)
-    if not os.path.exists(dsl_icon_path):
-        st.error(f"File not found: {dsl_icon_path}")
-    if not os.path.exists(digiki_icon_path):
-        st.error(f"File not found: {digiki_icon_path}")
-    
-    # Display logos side by side.
-    col1, col2 = st.columns(2)
-    with col1:
-        st.image(dsl_icon_path, width=150)   # Adjust width as needed.
-    with col2:
-        st.image(digiki_icon_path, width=150)
-    
+
+    # Encode images as base64 strings.
+    dsl_base64 = get_img_as_base64(dsl_icon_path)
+    digiki_base64 = get_img_as_base64(digiki_icon_path)
+
+    # Create an HTML container to display the logos side by side.
+    html_logo_container = f"""
+    <div class="logo-container">
+      <img src="data:image/png;base64,{dsl_base64}" alt="DSL Icon">
+      <img src="data:image/png;base64,{digiki_base64}" alt="Digiki Icon">
+    </div>
+    """
+    st.markdown(html_logo_container, unsafe_allow_html=True)
+
     st.markdown(
         """
         **Welcome to Text Lab** – an interactive application that provides a range of
