@@ -64,6 +64,9 @@ def main():
         still under active development, so expect frequent updates and new
         capabilities soon!
 
+        **Why Use Text Lab?**
+        Using the tools in Text lab insure that your data is only processed privately within the University Network and infrastructure. This may be a privacy requeirment in many cases. 
+
         **Project details**:
         - **Maintained by**: The Data Science Lab (DSL)
         - **Funded by**: The Digitalisation Commission
