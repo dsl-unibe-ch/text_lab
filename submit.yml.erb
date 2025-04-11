@@ -2,15 +2,13 @@
 batch_connect:
   template: "basic"
 
-  # Optionally override how host is determined:
-  # set_host: "host=$(hostname -A | awk '{print $1}')"
 
 script:
   # Source these scripts before and after the main script
   before_file: "template/before.sh.erb"
   after_file: "template/after.sh"
 
-  # Set extra SLURM options
+  
   native:
     - "--partition=<%= partition %>"
     - "--qos=<%= qos %>"

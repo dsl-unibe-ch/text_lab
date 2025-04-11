@@ -1,16 +1,14 @@
 # Function to generate a password
 function create_passwd() {
   local length="${1:-16}"   # default to 16 if not specified
-  # If you have OpenSSL installed, you can do:
   openssl rand -base64 32 2>/dev/null | tr -dc 'A-Za-z0-9' | head -c "$length"
 }
 
-# If the "module" function is available, export it
+
 [[ $(type -t module) == "function" ]] && export -f module
 
 port=$(find_port)
 
-# Use our custom create_passwd function
 password="$(create_passwd 16)"
 
 export SERVER_PORT="$port"
