@@ -2,6 +2,8 @@ import streamlit as st
 import os
 import base64
 
+from auth import check_token
+
 def get_img_as_base64(file_path):
     """Read an image file and return its base64 encoded string."""
     with open(file_path, "rb") as f:
@@ -73,4 +75,5 @@ def main():
     )
 
 if __name__ == "__main__":
+    check_token()
     main()

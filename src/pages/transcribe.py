@@ -4,6 +4,13 @@ import tempfile
 import json
 import zipfile
 import io
+import sys
+import os 
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+from auth import check_token
+
 
 def seconds_to_srt_time(seconds: float) -> str:
     hours = int(seconds // 3600)
@@ -168,4 +175,5 @@ def main():
     run_transcribe()
 
 if __name__ == "__main__":
+    check_token()
     main()

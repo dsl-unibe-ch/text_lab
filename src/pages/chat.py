@@ -2,9 +2,15 @@ import streamlit as st
 import subprocess
 import time
 import ollama
+import sys
+import os 
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+from auth import check_token
 
 # ------------------------------
-# 1. Server setup (unchanged)
+# 1. Server setup 
 # ------------------------------
 def ensure_ollama_server():
     """Checks if the Ollama server is running; if not, starts it in the background."""
@@ -37,7 +43,7 @@ def extract_model_name(entry):
     elif isinstance(entry, (tuple, list)) and len(entry) > 0:
         return entry[0]
     else:
-        return str(entry) # Return string representation as last resort
+        return str(entry) 
 
 # ------------------------------
 # 2. Generating responses
@@ -56,12 +62,11 @@ def generate_response(messages, model_name):
             prompt += f"Assistant: {msg['content']}\n"
     prompt += "Assistant:"
 
-    # Define a generator to yield each streaming chunk after replacing newlines with spaces.
+    # Define a generator to yield each streaming chunk.
     def response_generator():
         for chunk in ollama.generate(model=model_name, prompt=prompt, stream=True):
             if chunk.done:
                 break
-            # Replace newlines with spaces so text flows on a single line.
             yield chunk.response
 
     # Use Streamlit's chat_message container and st.write_stream to display a continuously updated response.
@@ -80,7 +85,7 @@ def main():
         initial_sidebar_state="expanded"
     )
 
-    # Inject custom CSS for a neat chat UI
+    # Inject custom CSS 
     st.markdown(
         """
         <style>
@@ -114,6 +119,7 @@ def main():
     st.sidebar.title("Model Selection")
     available_models_in_ui = [
         "gemma3:12b",
+        "gemma3:27b",
         "deepseek-r1:8b",
         "llama3.2:latest",
         "llama3.1:latest",
@@ -192,4 +198,5 @@ def main():
         st.session_state["messages"].append({"role": "assistant", "content": assistant_reply})
 
 if __name__ == "__main__":
+    check_token()
     main()
