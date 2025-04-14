@@ -6,13 +6,22 @@ CONT_ROOT_DIR="/text_lab"
 CONTAINER="$ROOT_DIR/container/text_lab.sif"
 
 
+# --- Clean the Python environment ---
+unset PYTHONPATH
+unset PYTHONHOME
+export PYTHONNOUSERSITE=1
+
+# Optionally: explicitly set HOME and USER for environment isolation
+export HOME="$HOME"
+export USER="$USER"
+
 
 
 pushd "${PWD}"
 
 
 apptainer exec --nv --bind $ROOT_DIR:$CONT_ROOT_DIR $CONTAINER \
-  streamlit run $CONT_ROOT_DIR/src/Home.py \
+  /usr/bin/python3 -m streamlit run $CONT_ROOT_DIR/src/Home.py \
     --server.port "$SERVER_PORT" \
     --server.baseUrlPath "$SERVER_BASEURLPATH" \
     --server.enableCORS false \
