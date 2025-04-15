@@ -1,0 +1,52 @@
+Bootstrap: docker
+From: nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
+
+%post
+    # Update and upgrade system packages
+    apt update && \
+    apt upgrade -y && \
+    apt install -y --no-install-recommends \
+        build-essential curl ffmpeg git \
+        libsndfile1-dev \
+        libc6 libc-bin pciutils lshw libpq-dev \
+        software-properties-common python3.10 python3-pip
+
+    # Upgrade pip and setuptools
+    python3 -m pip install --no-cache-dir --upgrade pip setuptools
+
+    # Remove blinker (if it conflicts)
+    apt remove -y python3-blinker || true
+    pip3 uninstall -y blinker || true
+
+    # Install core Python packages
+    python3 -m pip install --no-cache-dir \
+        sentence-transformers \
+        elevenlabs \
+        streamlit \
+        streamlit-cookies-manager \
+        openai-whisper \
+        scikit-learn \
+        umap-learn \
+        matplotlib \
+        pandas \
+        seaborn \
+        mlflow \
+        datasets \
+        requests \
+        soundfile \
+        opencv-python-headless \
+        scikit-image \
+        ollama
+
+    # Install Ollama system-wide
+    curl -fsSL https://ollama.com/install.sh | sh
+
+    # Remove any pre-installed Torch versions
+    pip3 uninstall torch torchvision torchaudio -y
+
+    # Install specific Torch/CUDA versions (matching CUDA 12.1 in base image)
+    pip3 install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 \
+      --index-url https://download.pytorch.org/whl/cu121
+
+    # Clean up apt cache to reduce container size
+    apt clean && rm -rf /var/lib/apt/lists/*
