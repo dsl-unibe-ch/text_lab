@@ -26,6 +26,7 @@ apptainer exec --nv --bind $ROOT_DIR:$CONT_ROOT_DIR $CONTAINER \
     --server.baseUrlPath "$SERVER_BASEURLPATH" \
     --server.enableCORS false \
     --server.headless true \
-    --server.maxUploadSize=500
+    --server.maxUploadSize=500 \
+    --client.showErrorDetails= false
 
 popd
