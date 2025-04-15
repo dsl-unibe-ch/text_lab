@@ -1,4 +1,11 @@
 import streamlit as st
+
+st.set_page_config(
+        page_title="Ollama Chat Interface",
+        layout="centered",
+        initial_sidebar_state="expanded"
+    )
+
 import subprocess
 import time
 import ollama
@@ -8,6 +15,8 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from auth import check_token
+
+check_token()
 
 # ------------------------------
 # 1. Server setup 
@@ -63,13 +72,6 @@ def generate_response(messages, model_name):
 # 3. Main UI
 # ------------------------------
 def main():
-    st.set_page_config(
-        page_title="Ollama Chat Interface",
-        layout="centered",
-        initial_sidebar_state="expanded"
-    )
-
-    check_token()
 
     st.markdown(
         """

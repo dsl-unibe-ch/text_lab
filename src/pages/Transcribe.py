@@ -1,4 +1,7 @@
 import streamlit as st
+
+st.set_page_config(page_title="Whisper Transcription", layout="wide")
+
 import whisper
 import tempfile
 import json
@@ -10,6 +13,8 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from auth import check_token
+
+check_token()
 
 
 def seconds_to_srt_time(seconds: float) -> str:
@@ -175,5 +180,4 @@ def main():
     run_transcribe()
 
 if __name__ == "__main__":
-    check_token()
     main()

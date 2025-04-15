@@ -1,23 +1,39 @@
 import streamlit as st
 import os
+from streamlit_cookies_manager import EncryptedCookieManager
+
+cookies = EncryptedCookieManager(
+    prefix="textlab_",
+    password=os.environ.get("TOKEN", "fallback_password_for_dev"),
+)
+if not cookies.ready():
+    st.stop()
 
 def check_token():
     expected_token = os.environ.get("TOKEN")
     if expected_token is None:
         raise RuntimeError("TOKEN environment variable not set.")
 
-    # Check if token already stored in session
-    if "user_token" not in st.session_state:
-        query_params = st.query_params
-        token_in_url = query_params.get("token")
+    # Automatically store token from URL into cookies
+    token_from_url = st.query_params.get("token")
+    if token_from_url:
+        cookies["auth_token"] = token_from_url
+        cookies.save()
 
-        if token_in_url:
-            st.session_state["user_token"] = token_in_url
-        else:
-            st.error("❌ Access Denied: Missing token in URL.")
-            st.stop()
+    # Check token in cookies
+    user_token = cookies.get("auth_token")
 
-    # Now validate the token
-    if st.session_state["user_token"] != expected_token:
-        st.error("❌ Access Denied: Invalid token.")
+    if user_token is None:
+        st.warning("This app requires authentication.")
+        token_input = st.text_input("Enter access token", type="password")
+        if token_input:
+            cookies["auth_token"] = token_input
+            cookies.save()
+            st.rerun()
+        st.stop()
+
+    if user_token != expected_token:
+        st.error("❌ Invalid token.")
+        cookies["auth_token"] = ""
+        cookies.save()
         st.stop()

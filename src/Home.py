@@ -1,8 +1,13 @@
 import streamlit as st
+
+st.set_page_config(page_title="TEXT LAB", layout="wide")
+
 import os
 import base64
 
 from auth import check_token
+
+check_token()
 
 def get_img_as_base64(file_path):
     """Read an image file and return its base64 encoded string."""
@@ -11,7 +16,6 @@ def get_img_as_base64(file_path):
     return base64.b64encode(data).decode()
 
 def main():
-    st.set_page_config(page_title="TEXT LAB", layout="wide")
     st.title("TEXT LAB")
     
     # Custom CSS for styling the logo container.
@@ -65,7 +69,7 @@ def main():
         capabilities soon!
 
         **Why Use Text Lab?**
-        Using the tools in Text lab insure that your data is only processed privately within the University Network and infrastructure. This may be a privacy requeirment in many cases. 
+        Using the tools in Text lab insure that your data is only processed privately within the University Network and infrastructure. This may be a privacy requeirment in many cases.
 
         **Project details**:
         - **Maintained by**: The Data Science Lab (DSL)
@@ -78,5 +82,4 @@ def main():
     )
 
 if __name__ == "__main__":
-    check_token()
     main()
