@@ -26,7 +26,8 @@ def ensure_ollama_server():
     try:
         subprocess.check_output(["pgrep", "ollama"])
     except subprocess.CalledProcessError:
-        st.write("\n\n")
+        st.write("\n")
+        st.write("\n")
         st.info("Starting Ollama server...")
         subprocess.Popen(["ollama", "serve"],
                          stdout=subprocess.DEVNULL,
@@ -109,6 +110,7 @@ def main():
         "gemma3:12b",
         "gemma3:27b",
         "deepseek-r1:8b",
+        "deepseek-r1:14b",
         "llama3.2:latest",
         "llama3.1:latest",
         "mistral:latest"
@@ -154,7 +156,7 @@ def main():
     if model_name not in local_model_names:
         st.write("\n")
         st.write("\n")
-        st.info(f"Model '{model_name}' not found locally. Pulling it now...")
+        st.info(f"Model '{model_name}' not found locally. Pulling it now. This might take 5-10 and only done once. Please stay on the page if you wish to pull the model")
         try:
             ollama.pull(model=model_name)
             st.success(f"Successfully pulled '{model_name}'.")
@@ -163,16 +165,16 @@ def main():
 
     st.title("Ollama Chat Interface")
 
-    # 🟢 Chat history state
+    # Chat history state
     if "messages" not in st.session_state:
         st.session_state["messages"] = []
 
-    # 🟢 Display previous chat
+    # Display previous chat
     for msg in st.session_state["messages"]:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    # 🟢 Chat input and response
+    # Chat input and response
     user_text = st.chat_input("Type your message...")
 
     if user_text:

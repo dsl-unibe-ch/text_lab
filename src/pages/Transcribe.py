@@ -107,7 +107,7 @@ def run_transcribe():
         if audio_file is None:
             st.warning("Please upload an audio file first.")
         else:
-            with st.spinner("Loading Whisper model and transcribing. Please wait..."):
+            with st.spinner("Loading Whisper model and transcribing. This might take a while depending on the audio length. Please don't close or reload this page."):
                 model = whisper.load_model(model_name)
 
                 transcribe_options = {}
