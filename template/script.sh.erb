@@ -5,7 +5,6 @@ ROOT_DIR="/storage/research/dsl_shared/solutions/ondemand/text_lab"
 CONT_ROOT_DIR="/text_lab"
 CONTAINER="$ROOT_DIR/container/text_lab.sif"
 
-
 # --- Clean the Python environment ---
 unset PYTHONPATH
 unset PYTHONHOME
@@ -15,10 +14,7 @@ export PYTHONNOUSERSITE=1
 export HOME="$HOME"
 export USER="$USER"
 
-
-
 pushd "${PWD}"
-
 
 apptainer exec --nv --bind $ROOT_DIR:$CONT_ROOT_DIR $CONTAINER \
   /usr/bin/python3 -m streamlit run $CONT_ROOT_DIR/src/Home.py \

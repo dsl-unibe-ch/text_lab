@@ -1,4 +1,10 @@
 import streamlit as st
+import subprocess
+import time
+import ollama
+import sys
+import os
+from auth import check_token
 
 st.set_page_config(
         page_title="Ollama Chat Interface",
@@ -6,15 +12,7 @@ st.set_page_config(
         initial_sidebar_state="expanded"
     )
 
-import subprocess
-import time
-import ollama
-import sys
-import os
-
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
-from auth import check_token
 
 check_token()
 
@@ -73,36 +71,34 @@ def generate_response(messages, model_name):
 # 3. Main UI
 # ------------------------------
 def main():
-
     st.markdown(
         """
         <style>
-        .main {
-            max-width: 800px;
-            margin: 0 auto;
-        }
-        [data-testid="stChatMessage"] {
-            border: 1px solid #3f3f3f;
-            padding: 1rem;
-            border-radius: 0.5rem;
-            margin: 0.5rem 0;
-        }
-        [data-testid="stChatMessage"]:has(div:has-text("User:")) {
-            background: #313131;
-        }
-        [data-testid="stChatMessage"]:has(div:has-text("Assistant:")) {
-            background: #1e1e1e;
-        }
-        .block-container {
-            padding-top: 1rem;
-        }
+            .main {
+                max-width: 800px;
+                margin: 0 auto;
+            }
+            [data-testid="stChatMessage"] {
+                border: 1px solid #3f3f3f;
+                padding: 1rem;
+                border-radius: 0.5rem;
+                margin: 0.5rem 0;
+            }
+            [data-testid="stChatMessage"]:has(div:has-text("User:")) {
+                background: #313131;
+            }
+            [data-testid="stChatMessage"]:has(div:has-text("Assistant:")) {
+                background: #1e1e1e;
+            }
+            .block-container {
+                padding-top: 1rem;
+            }
         </style>
         """,
         unsafe_allow_html=True
     )
 
     ensure_ollama_server()
-
 
     # Sidebar
     st.sidebar.title("Model Selection")
@@ -156,7 +152,7 @@ def main():
     if model_name not in local_model_names:
         st.write("\n")
         st.write("\n")
-        st.info(f"Model '{model_name}' not found locally. Pulling it now. This might take 5-10 and only done once. Please stay on the page if you wish to pull the model")
+        st.info(f"Model '{model_name}' not found locally. Pulling it now. This might take several minutes and is only done once. Please stay on the page if you wish to pull the model")
         try:
             ollama.pull(model=model_name)
             st.success(f"Successfully pulled '{model_name}'.")

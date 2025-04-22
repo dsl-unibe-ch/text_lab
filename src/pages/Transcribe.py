@@ -1,21 +1,17 @@
 import streamlit as st
-
-st.set_page_config(page_title="Whisper Transcription", layout="wide")
-
 import whisper
 import tempfile
 import json
 import zipfile
 import io
 import sys
-import os 
-
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
+import os
 from auth import check_token
 
-check_token()
+st.set_page_config(page_title="Whisper Transcription", layout="wide")
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+check_token()
 
 def seconds_to_srt_time(seconds: float) -> str:
     hours = int(seconds // 3600)
@@ -23,6 +19,9 @@ def seconds_to_srt_time(seconds: float) -> str:
     secs = int(seconds % 60)
     millis = int((seconds - int(seconds)) * 1000)
     return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
+
+def identity(value: str) -> str:
+    return value
 
 def make_srt(segments) -> str:
     srt_lines = []
@@ -76,6 +75,10 @@ def create_all_formats_zip(text: str, segments, result_dict) -> bytes:
     # Move back to start so we can read the data from the beginning
     zip_buffer.seek(0)
     return zip_buffer.read()
+
+FORMAT_OPTION_TO_EXTENSION = {"Plain text": ".txt", "SRT": ".srt", "CSV": ".csv", "JSON": ".json"}
+FORMAT_OPTION_TO_MIME = {"Plain text": "text/plain", "SRT": "text/plain", "CSV": "text/csv", "JSON": "application/json"}
+FORMAT_OPTION_TO_FUNC = {"Plain text": identity, "SRT": make_srt, "CSV": make_csv, "JSON": make_json}
 
 def run_transcribe():
     st.title("Whisper Transcription")
@@ -133,38 +136,13 @@ def run_transcribe():
         st.subheader("Download your transcription")
         format_option = st.selectbox("Select a single format:", ["Plain text", "SRT", "CSV", "JSON"])
 
-        # Single-format download
-        if format_option == "Plain text":
-            st.download_button(
-                label="Download .txt",
-                data=text,
-                file_name="transcription.txt",
-                mime="text/plain",
-            )
-        elif format_option == "SRT":
-            srt_data = make_srt(segments)
-            st.download_button(
-                label="Download .srt",
-                data=srt_data,
-                file_name="transcription.srt",
-                mime="text/plain",
-            )
-        elif format_option == "CSV":
-            csv_data = make_csv(segments)
-            st.download_button(
-                label="Download .csv",
-                data=csv_data,
-                file_name="transcription.csv",
-                mime="text/csv",
-            )
-        elif format_option == "JSON":
-            json_data = make_json(result)
-            st.download_button(
-                label="Download .json",
-                data=json_data,
-                file_name="transcription.json",
-                mime="application/json",
-            )
+        extension = FORMAT_OPTION_TO_EXTENSION[format_option]
+        st.download_button(
+            label=f"Download {extension}",
+            data=FORMAT_OPTION_TO_FUNC[format_option](text),
+            file_name=f"transcription{extension}",
+            mime=FORMAT_OPTION_TO_MIME[format_option],
+        )
 
         # Download ALL formats in one ZIP
         if st.button("Download All Formats (ZIP)"):

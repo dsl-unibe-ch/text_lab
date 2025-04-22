@@ -1,12 +1,9 @@
 import streamlit as st
-
-st.set_page_config(page_title="TEXT LAB", layout="wide")
-
 import os
 import base64
-
 from auth import check_token
 
+st.set_page_config(page_title="TEXT LAB", layout="wide")
 check_token()
 
 def get_img_as_base64(file_path):
@@ -21,20 +18,20 @@ def main():
     # Custom CSS for styling the logo container.
     css = """
     <style>
-    .logo-container {
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      gap: 40px;
-      margin-bottom: 20px;
-    }
-    .logo-container img {
-      border: 2px solid #ddd;
-      border-radius: 8px;
-      box-shadow: 4px 4px 12px rgba(0, 0, 0, 0.1);
-      max-width: 150px;
-      height: auto;
-    }
+        .logo-container {
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          gap: 40px;
+          margin-bottom: 20px;
+        }
+        .logo-container img {
+          border: 2px solid #ddd;
+          border-radius: 8px;
+          box-shadow: 4px 4px 12px rgba(0, 0, 0, 0.1);
+          max-width: 150px;
+          height: auto;
+        }
     </style>
     """
     st.markdown(css, unsafe_allow_html=True)
