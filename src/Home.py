@@ -66,7 +66,7 @@ def main():
         capabilities soon!
 
         **Why Use Text Lab?**
-        Using the tools in Text lab insure that your data is only processed privately within the University Network and infrastructure. This may be a privacy requeirment in many cases.
+        Using the tools in Text lab insure that your data is only processed privately within the University Network and infrastructure. This may be a privacy requirement in many cases.
 
         **Project details**:
         - **Maintained by**: The Data Science Lab (DSL)
