@@ -1,8 +1,9 @@
 import streamlit as st
-
 import os
 import base64
 from auth import check_token
+
+st.set_page_config(page_title="TEXT LAB", layout="wide")
 
 def get_img_as_base64(file_path):
     """Read an image file and return its base64 encoded string."""
@@ -11,6 +12,8 @@ def get_img_as_base64(file_path):
     return base64.b64encode(data).decode()
 
 def main():
+    check_token()
+
     st.title("TEXT LAB")
     
     # Custom CSS for styling the logo container.
@@ -77,8 +80,4 @@ def main():
     )
 
 if __name__ == "__main__":
-    st.set_page_config(page_title="TEXT LAB", layout="wide")
-
-    check_token()
-
     main()
