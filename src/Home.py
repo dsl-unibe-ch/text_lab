@@ -32,7 +32,7 @@ def main():
     st.markdown(css, unsafe_allow_html=True)
 
     # Get the absolute paths to the images.
-    current_dir = os.getcwd()
+    current_dir = os.path.dirname(os.path.abspath(__file__))
     static_folder = os.path.join(current_dir, "static")
     dsl_icon_path = os.path.join(static_folder, "dsl_icon.png")
     digiki_icon_path = os.path.join(static_folder, "digiki_icon.png")
