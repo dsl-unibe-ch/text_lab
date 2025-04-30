@@ -1,12 +1,12 @@
 import streamlit as st
 import os
-import base64
-from auth import check_token
+from auth import initialize_cookies, check_token
 
 st.set_page_config(page_title="TEXT LAB", layout="wide")
 
 def main():
-    check_token()
+    cookies = initialize_cookies()
+    check_token(cookies)
 
     st.title("TEXT LAB")
     

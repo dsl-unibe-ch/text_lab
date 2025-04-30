@@ -2,14 +2,24 @@ import streamlit as st
 import os
 from streamlit_cookies_manager import EncryptedCookieManager
 
-cookies = EncryptedCookieManager(
-    prefix="textlab_",
-    password=os.environ.get("TOKEN", "fallback_password_for_dev"),
-)
-if not cookies.ready():
-    st.stop()
+def initialize_cookies():
+    """
+        Initialize the cookies manager. This function is explicitly called
+        to ensure Streamlit logic is executed after st.set_page_config().
+    """
+    cookies = EncryptedCookieManager(
+        prefix="textlab_",
+        password=os.environ.get("TOKEN", "fallback_password_for_dev"),
+    )
+    if not cookies.ready():
+        st.stop()
+    return cookies
 
-def check_token():
+
+def check_token(cookies):
+    """
+        Check the authentication token stored in cookies.
+    """
     expected_token = os.environ.get("TOKEN")
     if expected_token is None:
         raise RuntimeError("TOKEN environment variable not set.")
