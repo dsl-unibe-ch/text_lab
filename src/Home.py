@@ -1,12 +1,8 @@
 import streamlit as st
 
-st.set_page_config(page_title="TEXT LAB", layout="wide")
-
 import os
 import base64
 from auth import check_token
-
-check_token()
 
 def get_img_as_base64(file_path):
     """Read an image file and return its base64 encoded string."""
@@ -81,4 +77,8 @@ def main():
     )
 
 if __name__ == "__main__":
+    st.set_page_config(page_title="TEXT LAB", layout="wide")
+
+    check_token()
+
     main()
