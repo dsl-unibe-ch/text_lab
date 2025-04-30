@@ -43,7 +43,9 @@ def main():
         return
 
     # Display images using Streamlit's native image handling
+    st.markdown('<div class="logo-container">', unsafe_allow_html=True)
     st.image([dsl_icon_path, digiki_icon_path], width=150, caption=["DSL Icon", "Digiki Icon"])
+    st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown(
         """
