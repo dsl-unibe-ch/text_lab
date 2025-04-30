@@ -33,17 +33,17 @@ def main():
 
     # Get the absolute paths to the images.
     current_dir = os.getcwd()
-    dsl_icon_path = os.path.join(current_dir, "dsl_icon.png")
-    digiki_icon_path = os.path.join(current_dir, "digiki_icon.png")
+    static_folder = os.path.join(current_dir, "static")
+    dsl_icon_path = os.path.join(static_folder, "dsl_icon.png")
+    digiki_icon_path = os.path.join(static_folder, "digiki_icon.png")
 
-    # Create an HTML container to display the logos side by side.
-    html_logo_container = f"""
-    <div class="logo-container">
-      <img src="/static/dsl_icon.png" alt="DSL Icon">
-      <img src="/static/digiki_icon.png" alt="Digiki Icon">
-    </div>
-    """
-    st.markdown(html_logo_container, unsafe_allow_html=True)
+    # Check if the files exist to avoid errors
+    if not os.path.exists(dsl_icon_path) or not os.path.exists(digiki_icon_path):
+        st.error("Static files not found. Please ensure dsl_icon.png and digiki_icon.png are in the 'static' folder.")
+        return
+
+    # Display images using Streamlit's native image handling
+    st.image([dsl_icon_path, digiki_icon_path], width=150, caption=["DSL Icon", "Digiki Icon"])
 
     st.markdown(
         """
