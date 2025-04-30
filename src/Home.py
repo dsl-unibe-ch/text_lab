@@ -5,12 +5,6 @@ from auth import check_token
 
 st.set_page_config(page_title="TEXT LAB", layout="wide")
 
-def get_img_as_base64(file_path):
-    """Read an image file and return its base64 encoded string."""
-    with open(file_path, "rb") as f:
-        data = f.read()
-    return base64.b64encode(data).decode()
-
 def main():
     check_token()
 
@@ -42,15 +36,11 @@ def main():
     dsl_icon_path = os.path.join(current_dir, "dsl_icon.png")
     digiki_icon_path = os.path.join(current_dir, "digiki_icon.png")
 
-    # Encode images as base64 strings.
-    dsl_base64 = get_img_as_base64(dsl_icon_path)
-    digiki_base64 = get_img_as_base64(digiki_icon_path)
-
     # Create an HTML container to display the logos side by side.
     html_logo_container = f"""
     <div class="logo-container">
-      <img src="data:image/png;base64,{dsl_base64}" alt="DSL Icon">
-      <img src="data:image/png;base64,{digiki_base64}" alt="Digiki Icon">
+      <img src="/static/dsl_icon.png" alt="DSL Icon">
+      <img src="/static/digiki_icon.png" alt="Digiki Icon">
     </div>
     """
     st.markdown(html_logo_container, unsafe_allow_html=True)
