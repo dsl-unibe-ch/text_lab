@@ -47,6 +47,16 @@ def extract_model_name(entry):
 # ------------------------------
 # 2. Generating responses
 # ------------------------------
+def get_response_generator(model_name, prompt):
+    def response_generator():
+        for chunk in ollama.generate(model=model_name, prompt=prompt, stream=True):
+            if chunk.done:
+                break
+            yield chunk.response
+
+    return response_generator
+
+
 def generate_response(messages, model_name):
     prompt = ""
     for msg in messages:
@@ -56,16 +66,13 @@ def generate_response(messages, model_name):
             prompt += f"Assistant: {msg['content']}\n"
     prompt += "Assistant:"
 
-    def response_generator():
-        for chunk in ollama.generate(model=model_name, prompt=prompt, stream=True):
-            if chunk.done:
-                break
-            yield chunk.response
+    response_generator = get_response_generator()
 
     with st.chat_message("assistant"):
         final_response = st.write_stream(response_generator())
-    
+
     return final_response.strip()
+
 
 # ------------------------------
 # 3. Main UI
