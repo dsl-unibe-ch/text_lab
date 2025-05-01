@@ -63,10 +63,10 @@ def generate_response(messages, model_name):
             prompt += f"Assistant: {msg['content']}\n"
     prompt += "Assistant:"
 
-    response_generator = get_response_generator()
+    response_generator = get_response_generator(model_name, prompt)
 
     with st.chat_message("assistant"):
-        final_response = st.write_stream(response_generator())
+        final_response = st.write_stream(response_generator)
 
     return final_response.strip()
 
