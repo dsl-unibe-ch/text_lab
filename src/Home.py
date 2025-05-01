@@ -1,9 +1,11 @@
 import streamlit as st
 import os
 import base64
-from auth import initialize_cookies, check_token
 
 st.set_page_config(page_title="TEXT LAB", layout="wide")
+
+from auth import check_token
+
 
 def get_img_as_base64(file_path):
     """Read an image file and return its base64 encoded string."""
@@ -11,9 +13,9 @@ def get_img_as_base64(file_path):
         data = f.read()
     return base64.b64encode(data).decode()
 
+
 def main():
-    cookies = initialize_cookies()
-    check_token(cookies)
+    check_token()
 
     st.title("TEXT LAB")
     
