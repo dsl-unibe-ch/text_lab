@@ -111,9 +111,10 @@ def main():
         "gemma3:27b",
         "deepseek-r1:8b",
         "deepseek-r1:14b",
+        "deepseek-r1:70b",
         "llama3.2:latest",
         "llama3.1:latest",
-        "mistral:latest"
+        "qwen2.5:32b",
     ]
 
     if "selected_model" not in st.session_state:
@@ -156,7 +157,7 @@ def main():
     if model_name not in local_model_names:
         st.write("\n")
         st.write("\n")
-        st.info(f"Model '{model_name}' not found locally. Pulling it now. This might take 5-10 and only done once. Please stay on the page if you wish to pull the model")
+        st.info(f"Model '{model_name}' not found locally. Pulling it now. This might take 5-10 minutes and only done once. Please stay on the page if you wish to pull the model")
         try:
             ollama.pull(model=model_name)
             st.success(f"Successfully pulled '{model_name}'.")
