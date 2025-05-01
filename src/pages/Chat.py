@@ -34,17 +34,18 @@ def ensure_ollama_server():
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL
         )
+        time.sleep(1)
 
     # Wait until the server is ready with a timeout
     server_started = False
-    for _ in range(30):  # Retry for ~15 seconds (30 * 0.5s)
+    for _ in range(30):  # Retry for ~30 seconds (30 * 1s)
         try:
             # Check server's health (replace this with the actual health check if available)
             subprocess.check_output(["pgrep", "ollama"])
             server_started = True
             break
         except subprocess.CalledProcessError:
-            time.sleep(0.5)
+            time.sleep(1)
 
     if not server_started:
         st.error("Failed to start Ollama server. Please try again.")
