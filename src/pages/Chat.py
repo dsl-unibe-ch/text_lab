@@ -20,17 +20,37 @@ check_token()
 # 1. Server setup 
 # ------------------------------
 def ensure_ollama_server():
-    """Checks if the Ollama server is running; if not, starts it in the background."""
+    """Checks if the Ollama server is running; if not, starts it in the background and waits until it's ready."""
     try:
+        # Check if the Ollama process is already running
         subprocess.check_output(["pgrep", "ollama"])
+        return  # Server is already running
     except subprocess.CalledProcessError:
-        st.write("\n")
+        # Start the server if it's not running
         st.write("\n")
         st.info("Starting Ollama server...")
-        subprocess.Popen(["ollama", "serve"],
-                         stdout=subprocess.DEVNULL,
-                         stderr=subprocess.DEVNULL)
-        time.sleep(2)
+        process = subprocess.Popen(
+            ["ollama", "serve"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+
+    # Wait until the server is ready with a timeout
+    server_started = False
+    for _ in range(30):  # Retry for ~15 seconds (30 * 0.5s)
+        try:
+            # Check server's health (replace this with the actual health check if available)
+            subprocess.check_output(["pgrep", "ollama"])
+            server_started = True
+            break
+        except subprocess.CalledProcessError:
+            time.sleep(0.5)
+
+    if not server_started:
+        st.error("Failed to start Ollama server. Please try again.")
+    else:
+        st.success("Ollama server is now running!")
+
 
 def extract_model_name(entry):
     if hasattr(entry, 'model') and isinstance(getattr(entry, 'model'), str):
