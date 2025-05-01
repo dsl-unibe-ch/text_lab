@@ -4,12 +4,10 @@ import tempfile
 import json
 import zipfile
 import io
-import sys
-import os
-from auth import check_token
 
 st.set_page_config(page_title="Whisper Transcription", layout="wide")
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+from ..auth import check_token
 
 def seconds_to_srt_time(seconds: float) -> str:
     hours = int(seconds // 3600)

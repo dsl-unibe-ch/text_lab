@@ -2,9 +2,6 @@ import streamlit as st
 import subprocess
 import time
 import ollama
-import sys
-import os
-from auth import check_token
 
 st.set_page_config(
         page_title="Ollama Chat Interface",
@@ -12,7 +9,7 @@ st.set_page_config(
         initial_sidebar_state="expanded"
     )
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+from ..auth import check_token
 
 check_token()
 
