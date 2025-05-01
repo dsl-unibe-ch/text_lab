@@ -1,8 +1,15 @@
 import streamlit as st
 import os
+import base64
 from auth import initialize_cookies, check_token
 
 st.set_page_config(page_title="TEXT LAB", layout="wide")
+
+def get_img_as_base64(file_path):
+    """Read an image file and return its base64 encoded string."""
+    with open(file_path, "rb") as f:
+        data = f.read()
+    return base64.b64encode(data).decode()
 
 def main():
     cookies = initialize_cookies()
@@ -33,26 +40,21 @@ def main():
 
     # Get the absolute paths to the images.
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    static_folder = os.path.join(current_dir, "static")
-    dsl_icon_path = os.path.join(static_folder, "dsl_icon.png")
-    digiki_icon_path = os.path.join(static_folder, "digiki_icon.png")
+    dsl_icon_path = os.path.join(current_dir, "dsl_icon.png")
+    digiki_icon_path = os.path.join(current_dir, "digiki_icon.png")
 
-    # Check if the files exist to avoid errors
-    if not os.path.exists(dsl_icon_path) or not os.path.exists(digiki_icon_path):
-        st.error("Static files not found. Please ensure dsl_icon.png and digiki_icon.png are in the 'static' folder.")
-        return
+    # Encode images as base64 strings.
+    dsl_base64 = get_img_as_base64(dsl_icon_path)
+    digiki_base64 = get_img_as_base64(digiki_icon_path)
 
-    # Display images using Streamlit's native image handling
+    # Create an HTML container to display the logos side by side.
     html_logo_container = f"""
-        <div class="logo-container">
-          <img src="/static/dsl_icon.png" alt="DSL Icon">
-          <img src="/static/digiki_icon.png" alt="Digiki Icon">
-        </div>
-        """
+    <div class="logo-container">
+      <img src="data:image/png;base64,{dsl_base64}" alt="DSL Icon">
+      <img src="data:image/png;base64,{digiki_base64}" alt="Digiki Icon">
+    </div>
+    """
     st.markdown(html_logo_container, unsafe_allow_html=True)
-    st.markdown('<div class="logo-container">', unsafe_allow_html=True)
-    st.image([dsl_icon_path, digiki_icon_path], width=150, caption=["DSL Icon", "Digiki Icon"])
-    st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown(
         """
