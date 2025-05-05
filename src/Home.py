@@ -77,7 +77,7 @@ def main():
         - **For questions or issues**: [support.dsl@unibe.ch](mailto:support.dsl@unibe.ch)
 
         **Documentation**:
-        For more details on how to use Text Lab, check out our [GitHub README](https://github.com/ahmad-zurih/Text_lab).
+        For more details on how to use Text Lab, check out our [GitHub README](https://github.com/dsl-unibe-ch/Text_lab).
         """
     )
 
