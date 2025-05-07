@@ -9,6 +9,7 @@ cookies = EncryptedCookieManager(
 if not cookies.ready():
     st.stop()
 
+
 def check_token():
     expected_token = os.environ.get("TOKEN")
     if expected_token is None:

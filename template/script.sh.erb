@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 
-# Hard-code the container path:
-ROOT_DIR="/storage/research/dsl_shared/solutions/ondemand/text_lab"
+# Configurable TEXT_LAB_DIR with a default value
+HOST_ROOT_DIR="${TEXT_LAB_DIR:-/storage/research/dsl_shared/solutions/ondemand/text_lab}"
 CONT_ROOT_DIR="/text_lab"
-CONTAINER="$ROOT_DIR/container/text_lab.sif"
-
+CONTAINER="$HOST_ROOT_DIR/container/text_lab.sif"
 
 # --- Clean the Python environment ---
 unset PYTHONPATH
@@ -15,12 +14,9 @@ export PYTHONNOUSERSITE=1
 export HOME="$HOME"
 export USER="$USER"
 
-
-
 pushd "${PWD}"
 
-
-apptainer exec --nv --bind $ROOT_DIR:$CONT_ROOT_DIR $CONTAINER \
+apptainer exec --nv --bind $HOST_ROOT_DIR:$CONT_ROOT_DIR $CONTAINER \
   /usr/bin/python3 -m streamlit run $CONT_ROOT_DIR/src/Home.py \
     --server.port "$SERVER_PORT" \
     --server.baseUrlPath "$SERVER_BASEURLPATH" \

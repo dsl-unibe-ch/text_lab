@@ -1,17 +1,15 @@
 import streamlit as st
-
-st.set_page_config(
-        page_title="Ollama Chat Interface",
-        layout="centered",
-        initial_sidebar_state="expanded"
-    )
-
 import subprocess
 import time
 import ollama
 import sys
 import os
 
+st.set_page_config(
+    page_title="Ollama Chat Interface",
+    layout="centered",
+    initial_sidebar_state="expanded"
+)
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from auth import check_token
@@ -22,17 +20,38 @@ check_token()
 # 1. Server setup 
 # ------------------------------
 def ensure_ollama_server():
-    """Checks if the Ollama server is running; if not, starts it in the background."""
+    """Checks if the Ollama server is running; if not, starts it in the background and waits until it's ready."""
     try:
+        # Check if the Ollama process is already running
         subprocess.check_output(["pgrep", "ollama"])
+        return  # Server is already running
     except subprocess.CalledProcessError:
-        st.write("\n")
+        # Start the server if it's not running
         st.write("\n")
         st.info("Starting Ollama server...")
-        subprocess.Popen(["ollama", "serve"],
-                         stdout=subprocess.DEVNULL,
-                         stderr=subprocess.DEVNULL)
-        time.sleep(2)
+        process = subprocess.Popen(
+            ["ollama", "serve"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+        time.sleep(1)
+
+    # Wait until the server is ready with a timeout
+    server_started = False
+    for _ in range(30):  # Retry for ~30 seconds (30 * 1s)
+        try:
+            # Check server's health (replace this with the actual health check if available)
+            subprocess.check_output(["pgrep", "ollama"])
+            server_started = True
+            break
+        except subprocess.CalledProcessError:
+            time.sleep(1)
+
+    if not server_started:
+        st.error("Failed to start Ollama server. Please try again.")
+    else:
+        st.success("Ollama server is now running!")
+
 
 def extract_model_name(entry):
     if hasattr(entry, 'model') and isinstance(getattr(entry, 'model'), str):
@@ -49,6 +68,16 @@ def extract_model_name(entry):
 # ------------------------------
 # 2. Generating responses
 # ------------------------------
+def get_response_generator(model_name, prompt):
+    def response_generator():
+        for chunk in ollama.generate(model=model_name, prompt=prompt, stream=True):
+            if chunk.done:
+                break
+            yield chunk.response
+
+    return response_generator
+
+
 def generate_response(messages, model_name):
     prompt = ""
     for msg in messages:
@@ -58,51 +87,46 @@ def generate_response(messages, model_name):
             prompt += f"Assistant: {msg['content']}\n"
     prompt += "Assistant:"
 
-    def response_generator():
-        for chunk in ollama.generate(model=model_name, prompt=prompt, stream=True):
-            if chunk.done:
-                break
-            yield chunk.response
+    response_generator = get_response_generator(model_name, prompt)
 
     with st.chat_message("assistant"):
-        final_response = st.write_stream(response_generator())
-    
+        final_response = st.write_stream(response_generator)
+
     return final_response.strip()
+
 
 # ------------------------------
 # 3. Main UI
 # ------------------------------
 def main():
-
     st.markdown(
         """
         <style>
-        .main {
-            max-width: 800px;
-            margin: 0 auto;
-        }
-        [data-testid="stChatMessage"] {
-            border: 1px solid #3f3f3f;
-            padding: 1rem;
-            border-radius: 0.5rem;
-            margin: 0.5rem 0;
-        }
-        [data-testid="stChatMessage"]:has(div:has-text("User:")) {
-            background: #313131;
-        }
-        [data-testid="stChatMessage"]:has(div:has-text("Assistant:")) {
-            background: #1e1e1e;
-        }
-        .block-container {
-            padding-top: 1rem;
-        }
+            .main {
+                max-width: 800px;
+                margin: 0 auto;
+            }
+            [data-testid="stChatMessage"] {
+                border: 1px solid #3f3f3f;
+                padding: 1rem;
+                border-radius: 0.5rem;
+                margin: 0.5rem 0;
+            }
+            [data-testid="stChatMessage"]:has(div:has-text("User:")) {
+                background: #313131;
+            }
+            [data-testid="stChatMessage"]:has(div:has-text("Assistant:")) {
+                background: #1e1e1e;
+            }
+            .block-container {
+                padding-top: 1rem;
+            }
         </style>
         """,
         unsafe_allow_html=True
     )
 
     ensure_ollama_server()
-
 
     # Sidebar
     st.sidebar.title("Model Selection")
@@ -157,7 +181,7 @@ def main():
     if model_name not in local_model_names:
         st.write("\n")
         st.write("\n")
-        st.info(f"Model '{model_name}' not found locally. Pulling it now. This might take 5-10 minutes and only done once. Please stay on the page if you wish to pull the model")
+        st.info(f"Model '{model_name}' not found locally. Pulling it now. This might take several minutes and is only done once. Please stay on the page if you wish to pull the model")
         try:
             ollama.pull(model=model_name)
             st.success(f"Successfully pulled '{model_name}'.")

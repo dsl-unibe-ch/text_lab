@@ -1,13 +1,11 @@
 import streamlit as st
-
-st.set_page_config(page_title="TEXT LAB", layout="wide")
-
 import os
 import base64
 
+st.set_page_config(page_title="TEXT LAB", layout="wide")
+
 from auth import check_token
 
-check_token()
 
 def get_img_as_base64(file_path):
     """Read an image file and return its base64 encoded string."""
@@ -15,26 +13,29 @@ def get_img_as_base64(file_path):
         data = f.read()
     return base64.b64encode(data).decode()
 
+
 def main():
+    check_token()
+
     st.title("TEXT LAB")
     
     # Custom CSS for styling the logo container.
     css = """
     <style>
-    .logo-container {
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      gap: 40px;
-      margin-bottom: 20px;
-    }
-    .logo-container img {
-      border: 2px solid #ddd;
-      border-radius: 8px;
-      box-shadow: 4px 4px 12px rgba(0, 0, 0, 0.1);
-      max-width: 150px;
-      height: auto;
-    }
+        .logo-container {
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          gap: 40px;
+          margin-bottom: 20px;
+        }
+        .logo-container img {
+          border: 2px solid #ddd;
+          border-radius: 8px;
+          box-shadow: 4px 4px 12px rgba(0, 0, 0, 0.1);
+          max-width: 150px;
+          height: auto;
+        }
     </style>
     """
     st.markdown(css, unsafe_allow_html=True)
@@ -69,7 +70,7 @@ def main():
         capabilities soon!
 
         **Why Use Text Lab?**
-        Using the tools in Text lab insure that your data is only processed privately within the University Network and infrastructure. This may be a privacy requeirment in many cases.
+        Using the tools in Text lab insure that your data is only processed privately within the University Network and infrastructure. This may be a privacy requirement in many cases.
 
         **Project details**:
         - **Maintained by**: The Data Science Lab (DSL)
