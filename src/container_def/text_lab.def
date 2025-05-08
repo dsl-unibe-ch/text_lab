@@ -2,6 +2,12 @@ Bootstrap: docker
 From: nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
 
 %post
+    # Set non-interactive frontend for Debconf
+    export DEBIAN_FRONTEND=noninteractive
+
+    # Accept the EULA for installing ttf-mscorefonts-installer
+    echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" | debconf-set-selections
+
     # Update and upgrade system packages
     apt update && \
     apt upgrade -y && \
