@@ -6,57 +6,64 @@ st.set_page_config(page_title="TEXT LAB", layout="wide")
 
 from auth import check_token
 
-
 def get_img_as_base64(file_path):
     """Read an image file and return its base64 encoded string."""
     with open(file_path, "rb") as f:
         data = f.read()
     return base64.b64encode(data).decode()
 
-
 def main():
     check_token()
 
     st.title("TEXT LAB")
-    
-    # Custom CSS for styling the logo container.
+
+    # Custom CSS for styling the logos.
     css = """
     <style>
-        .logo-container {
+        .main-logo {
+          display: flex;
+          justify-content: center;
+          margin-bottom: 30px;
+        }
+        .main-logo img {
+          max-width: 200px;
+          border: none;
+        }
+        .sub-logos {
           display: flex;
           justify-content: center;
           align-items: center;
           gap: 40px;
-          margin-bottom: 20px;
+          margin-top: 40px;
         }
-        .logo-container img {
+        .sub-logos img {
           border: 2px solid #ddd;
           border-radius: 8px;
           box-shadow: 4px 4px 12px rgba(0, 0, 0, 0.1);
-          max-width: 150px;
+          max-width: 120px;
           height: auto;
         }
     </style>
     """
     st.markdown(css, unsafe_allow_html=True)
 
-    # Get the absolute paths to the images.
+    # Get absolute paths
     current_dir = os.path.dirname(os.path.abspath(__file__))
+    main_logo_path = os.path.join(current_dir, "text_lab_logo.png")
     dsl_icon_path = os.path.join(current_dir, "dsl_icon.png")
     digiki_icon_path = os.path.join(current_dir, "digiki_icon.png")
 
-    # Encode images as base64 strings.
+    # Convert images to base64
+    main_logo_base64 = get_img_as_base64(main_logo_path)
     dsl_base64 = get_img_as_base64(dsl_icon_path)
     digiki_base64 = get_img_as_base64(digiki_icon_path)
 
-    # Create an HTML container to display the logos side by side.
-    html_logo_container = f"""
-    <div class="logo-container">
-      <img src="data:image/png;base64,{dsl_base64}" alt="DSL Icon">
-      <img src="data:image/png;base64,{digiki_base64}" alt="Digiki Icon">
+    # Render main logo
+    st.markdown(f"""
+    <div class="main-logo">
+      <img src="data:image/png;base64,{main_logo_base64}" alt="Text Lab Logo">
     </div>
-    """
-    st.markdown(html_logo_container, unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
 
     st.markdown(
         """
@@ -81,6 +88,14 @@ def main():
         For more details on how to use Text Lab, check out our [GitHub README](https://github.com/dsl-unibe-ch/text_lab).
         """
     )
+
+    # Render supporting logos at the bottom
+    st.markdown(f"""
+    <div class="sub-logos">
+      <img src="data:image/png;base64,{dsl_base64}" alt="DSL Icon">
+      <img src="data:image/png;base64,{digiki_base64}" alt="Digiki Icon">
+    </div>
+    """, unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()

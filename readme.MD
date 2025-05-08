@@ -1,6 +1,10 @@
-# Text Lab 
+# Text Lab
 
-This repository contains the code for the **Text Lab ** – an in-development suite of NLP and text processing tools. Currently, the app includes:
+<p align="center">
+  <img src="src/text_lab_logo.png" alt="Text Lab Logo" width="200"/>
+</p>
+
+This repository contains the code for the **Text Lab** – an in-development suite of NLP and text processing tools. Currently, the app includes:
 
 - **Transcribe:** A tool for processing audio input and converting it to text.
 - **Chat:** An interactive chat interface powered by LLMs.
