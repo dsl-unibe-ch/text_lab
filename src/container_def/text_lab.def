@@ -9,7 +9,9 @@ From: nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
         build-essential curl ffmpeg git \
         libsndfile1-dev \
         libc6 libc-bin pciutils lshw libpq-dev \
-        software-properties-common python3.10 python3-pip
+        software-properties-common python3.10 python3-pip \
+        poppler-utils ttf-mscorefonts-installer msttcorefonts fonts-crosextra-caladea fonts-crosextra-carlito gsfonts \
+        lcdf-typetools
 
     # Upgrade pip and setuptools
     python3 -m pip install --no-cache-dir --upgrade pip setuptools
@@ -50,3 +52,22 @@ From: nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
 
     # Clean up apt cache to reduce container size
     apt clean && rm -rf /var/lib/apt/lists/*
+
+    # Installing anaconda
+    curl https://repo.anaconda.com/archive/Anaconda3-2024.10-1-Linux-x86_64.sh --output anaconda.sh && \
+        bash anaconda.sh -b -p /opt/anaconda && \
+        rm anaconda.sh && \
+        ln -s /opt/anaconda/etc/profile.d/conda.sh /etc/profile.d/conda.sh && \
+        echo ". /opt/anaconda/etc/profile.d/conda.sh" >> ~/.bashrc && \
+        echo "conda activate $CONDA_ENV" >> ~/.bashrc
+
+    export PATH="/opt/anaconda/bin:$PATH"
+
+    conda create -n olmocr python=3.11
+    conda activate olmocr
+
+    git clone https://github.com/allenai/olmocr.git
+    cd olmocr
+
+    # For actually converting the files with your own GPU
+    pip install -e .[gpu] --find-links https://flashinfer.ai/whl/cu124/torch2.4/flashinfer/
