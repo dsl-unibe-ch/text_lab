@@ -1,14 +1,20 @@
 import json
 import zipfile
 import io
-from pages.Transcribe import (
-    seconds_to_srt_time,
-    identity,
-    make_srt,
-    make_csv,
-    make_json,
-    create_all_formats_zip
-)
+
+from unittest.mock import patch, MagicMock
+
+# Mocked the check_token() method in auth to be able to run tests.
+with patch("auth.check_token", MagicMock()):
+    # Import `Transcribe` after patching
+    from pages.Transcribe import (
+        seconds_to_srt_time,
+        identity,
+        make_srt,
+        make_csv,
+        make_json,
+        create_all_formats_zip
+    )
 
 # Sample segment data for testing
 sample_segments = [

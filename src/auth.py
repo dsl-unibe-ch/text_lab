@@ -13,7 +13,7 @@ if not cookies.ready():
 def check_token():
     expected_token = os.environ.get("TOKEN")
     if expected_token is None:
-        raise RuntimeError("TOKEN environment variable not set.")
+        raise ValueError("TOKEN environment variable not set.")
 
     # Automatically store token from URL into cookies
     token_from_url = st.query_params.get("token")
