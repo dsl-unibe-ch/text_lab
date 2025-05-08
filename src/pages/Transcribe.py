@@ -85,7 +85,7 @@ def run_transcribe():
     st.title("Whisper Transcription")
 
     # Model selection
-    model_options = ["tiny", "small", "medium", "large-v2", "large-v3"]
+    model_options = ["tiny", "small", "medium", "large-v2", "large-v3", "turbo"]
     model_name = st.selectbox("Select Whisper Model:", model_options, index=4)
 
     # Language selection
