@@ -61,15 +61,16 @@ From: nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
 
     # Installing anaconda
     curl https://repo.anaconda.com/archive/Anaconda3-2024.10-1-Linux-x86_64.sh --output anaconda.sh && \
-        bash anaconda.sh -b -p /opt/anaconda && \
-        rm anaconda.sh && \
-        ln -s /opt/anaconda/etc/profile.d/conda.sh /etc/profile.d/conda.sh && \
-        echo ". /opt/anaconda/etc/profile.d/conda.sh" >> ~/.bashrc && \
-        echo "conda activate $CONDA_ENV" >> ~/.bashrc
+        bash anaconda.sh -b -p ./anaconda && \
+        rm anaconda.sh
 
-    export PATH="/opt/anaconda/bin:$PATH"
+    export PATH="$PWD/anaconda/bin:$PATH"
+    ln -s $PWD/anaconda/etc/profile.d/conda.sh ./conda.sh
+    echo ". $PWD/anaconda/etc/profile.d/conda.sh" >> ~/.bashrc && \
+    echo "conda activate $CONDA_ENV" >> ~/.bashrc
 
-    conda create -n olmocr python=3.11
+    conda init bash && eval "$(conda shell.bash hook)"
+    conda create -n olmocr python=3.11 -y
     conda activate olmocr
 
     git clone https://github.com/allenai/olmocr.git
