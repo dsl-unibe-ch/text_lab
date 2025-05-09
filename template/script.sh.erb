@@ -11,7 +11,7 @@ unset PYTHONPATH
 unset PYTHONHOME
 export PYTHONNOUSERSITE=1
 
-# Optionally: explicitly set HOME and USER for environment isolation
+#explicitly set HOME and USER for environment isolation
 export HOME="$HOME"
 export USER="$USER"
 
@@ -19,6 +19,8 @@ export USER="$USER"
 
 pushd "${PWD}"
 
+#set the variable for whisper to use models cached from inside the container  
+export WHISPER_CACHE=/opt/whisper
 
 apptainer exec --nv --bind $ROOT_DIR:$CONT_ROOT_DIR $CONTAINER \
   /usr/bin/python3 -m streamlit run $CONT_ROOT_DIR/src/Home.py \
