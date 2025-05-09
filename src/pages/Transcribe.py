@@ -91,9 +91,21 @@ def run_transcribe():
     model_name = st.selectbox("Select Whisper Model:", model_options, index=4)
 
     # Language selection
-    LANG_DICT = whisper.tokenizer.LANGUAGES
-    language_labels = ["Detect language automatically"] + sorted(LANG_DICT.keys())
-    selected_label = st.selectbox("Select Language:", language_labels, index=0)
+    LANG_DICT = whisper.tokenizer.LANGUAGES              
+    language_codes = [None] + sorted(LANG_DICT.keys())     
+
+    def code_to_label(code):
+        if code is None:
+            return "Detect language automatically"
+        return LANG_DICT[code].title()                    
+
+    selected_code = st.selectbox(
+        "Select Language:",
+        language_codes,
+        index=0,
+        format_func=code_to_label
+    )
+
 
     # File uploader
     audio_file = st.file_uploader(
@@ -118,8 +130,9 @@ def run_transcribe():
                 #model = whisper.load_model(model_name)
 
                 transcribe_options = {}
-                if selected_label != "Detect language automatically":
-                    transcribe_options["language"] = LANG_DICT[selected_label]
+                if selected_code is not None:              
+                    transcribe_options["language"] = selected_code
+
 
                 # Write the uploaded file to a temp file for Whisper
                 audio_bytes = audio_file.read()
