@@ -1,11 +1,13 @@
 import streamlit as st
-import whisper
 import tempfile
 import json
 import zipfile
 import io
 import sys
 import os
+os.environ.setdefault("WHISPER_CACHE", "/opt/whisper")
+
+import whisper
 
 st.set_page_config(page_title="Whisper Transcription", layout="wide")
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -112,7 +114,8 @@ def run_transcribe():
             st.warning("Please upload an audio file first.")
         else:
             with st.spinner("Loading Whisper model and transcribing. This might take a while depending on the audio length. Please don't close or reload this page."):
-                model = whisper.load_model(model_name)
+                model = whisper.load_model(model_name, download_root="/opt/whisper")
+                #model = whisper.load_model(model_name)
 
                 transcribe_options = {}
                 if selected_label != "Detect language automatically":
