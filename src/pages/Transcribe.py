@@ -81,7 +81,13 @@ def create_all_formats_zip(text: str, segments, result_dict) -> bytes:
 
 FORMAT_OPTION_TO_EXTENSION = {"Plain text": ".txt", "SRT": ".srt", "CSV": ".csv", "JSON": ".json"}
 FORMAT_OPTION_TO_MIME = {"Plain text": "text/plain", "SRT": "text/plain", "CSV": "text/csv", "JSON": "application/json"}
-FORMAT_OPTION_TO_FUNC = {"Plain text": identity, "SRT": make_srt, "CSV": make_csv, "JSON": make_json}
+FORMAT_OPTION_TO_FUNC = {
+    "Plain text": lambda text, segments, result: text,
+    "SRT":        lambda text, segments, result: make_srt(segments),
+    "CSV":        lambda text, segments, result: make_csv(segments),
+    "JSON":       lambda text, segments, result: make_json(result),
+}
+
 
 def run_transcribe():
     st.title("Whisper Transcription")
@@ -156,7 +162,7 @@ def run_transcribe():
         extension = FORMAT_OPTION_TO_EXTENSION[format_option]
         st.download_button(
             label=f"Download {extension}",
-            data=FORMAT_OPTION_TO_FUNC[format_option](text),
+                data=FORMAT_OPTION_TO_FUNC[format_option](text, segments, result),
             file_name=f"transcription{extension}",
             mime=FORMAT_OPTION_TO_MIME[format_option],
         )
