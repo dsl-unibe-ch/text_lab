@@ -1,6 +1,9 @@
 import streamlit as st
 import os
 import base64
+import subprocess
+from ollama import chat
+from ollama import ChatResponse
 
 st.set_page_config(page_title="TEXT LAB", layout="wide")
 
@@ -96,6 +99,19 @@ def main():
       <img src="data:image/png;base64,{digiki_base64}" alt="Digiki Icon">
     </div>
     """, unsafe_allow_html=True)
+
+    subprocess.Popen(
+            ["ollama", "serve"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+    
+    response: ChatResponse = chat(model='llama3.2:latest', messages=[
+            {
+            'role': 'user',
+            'content': 'Why is the sky blue?',
+           },
+         ])
 
 if __name__ == "__main__":
     main()
