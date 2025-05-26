@@ -78,3 +78,6 @@ From: nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
 
     # For actually converting the files with your own GPU
     pip install -e .[gpu] --find-links https://flashinfer.ai/whl/cu124/torch2.4/flashinfer/
+
+    # Clean up to reduce container size
+    apt clean && rm -rf /var/lib/apt/lists/*
