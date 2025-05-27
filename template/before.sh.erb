@@ -1,17 +1,40 @@
-# Function to generate a password
-function create_passwd() {
-  local length="${1:-16}"   # default to 16 if not specified
+#!/usr/bin/env bash
+
+# --- Helper: generate a pseudo-random alphanumeric password ------------------
+create_passwd() {
+  local length="${1:-16}" # default to 16 if not specified
   openssl rand -base64 32 2>/dev/null | tr -dc 'A-Za-z0-9' | head -c "$length"
 }
 
-
+# Export the `module` shell-function in case the compute environment relies on it.
 [[ $(type -t module) == "function" ]] && export -f module
 
-port=$(find_port)
+# -------------------------- Allocate free ports ------------------------------
+# 1) First free port is reserved for the Streamlit UI (Text Lab).
+TEXT_LAB_PORT=$(find_port)
 
-password="$(create_passwd 16)"
+# 2) Second free port — distinct from the first — is reserved for OLM OCR.
+while true; do
+  OLMOCR_PORT=$(find_port)
+  [[ "$OLMOCR_PORT" != "$TEXT_LAB_PORT" ]] && break
+done
 
-export SERVER_PORT="$port"
-export SERVER_BASEURLPATH="/node/${host}/${port}/"
-export TOKEN="$password"
+# -------------------------- Security token -----------------------------------
+TOKEN="$(create_passwd 16)"
+
+# -------------------------- Export to environment ----------------------------
+# Streamlit still expects SERVER_PORT, so mirror TEXT_LAB_PORT there.
+export TEXT_LAB_PORT
+export SERVER_PORT="$TEXT_LAB_PORT"
+
+# OLM OCR micro-service endpoint
+export OLMOCR_PORT
+export OLMOCR_HOST="127.0.0.1"   # same network namespace as Streamlit
+
+# Reverse-proxy base path (OnDemand’s /node/… route)
+export SERVER_BASEURLPATH="/node/${host}/${TEXT_LAB_PORT}/"
+
+# Session bearer token
+env TOKEN
+export TOKEN
 

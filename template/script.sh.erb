@@ -1,28 +1,64 @@
 #!/usr/bin/env bash
 
-# Configurable TEXT_LAB_DIR with a default value
-HOST_ROOT_DIR="${TEXT_LAB_DIR:-/storage/research/dsl_shared/solutions/ondemand/text_lab}"
-CONT_ROOT_DIR="/text_lab"
-CONTAINER="$HOST_ROOT_DIR/container/text_lab.sif"
+set -euo pipefail
 
-# --- Clean the Python environment ---
-unset PYTHONPATH
-unset PYTHONHOME
+# ---------------------------- Configurable paths ------------------------------
+# Allow callers to override base directories via environment variables.
+HOST_TEXT_LAB_DIR="${TEXT_LAB_DIR:-/storage/research/dsl_shared/solutions/ondemand/text_lab}"
+HOST_OLMOCR_DIR="${OLMOCR_DIR:-/storage/research/dsl_shared/solutions/ondemand/olmocr}"
+
+CONT_TEXT_LAB_DIR="/text_lab"
+CONT_OLMOCR_DIR="/olmocr"
+
+TL_CONTAINER="$HOST_TEXT_LAB_DIR/container/text_lab.sif"
+OCR_CONTAINER="$HOST_OLMOCR_DIR/container/olmocr.sif"
+
+# ---------------------------- Runtime parameters ------------------------------
+# Which ports should each service listen on?
+TEXT_LAB_PORT="${TEXT_LAB_PORT:-${SERVER_PORT:-8502}}"   # streamlit defaults to 8502 if not set
+OLM_OCR_PORT="${OLMOCR_PORT:-8503}"
+
+# Base URL path for reverse‑proxy setups (JupyterHub, etc.). Leave empty for /
+SERVER_BASEURLPATH="${SERVER_BASEURLPATH:-}"  # may already be exported by the hub
+
+# ---------------------------- Tidy Python env ---------------------------------
+unset PYTHONPATH PYTHONHOME
 export PYTHONNOUSERSITE=1
 
-# Optionally: explicitly set HOME and USER for environment isolation
-export HOME="$HOME"
-export USER="$USER"
+# ---------------------------- Helper cleanup ----------------------------------
+cleanup() {
+  echo "Stopping OLM OCR instance …"
+  if [[ -n "${OCR_PID:-}" ]]; then kill "${OCR_PID}" || true; fi
+}
+trap cleanup EXIT INT TERM
 
-pushd "${PWD}"
+echo "Starting OLM OCR on port $OLM_OCR_PORT …"
+apptainer exec --nv \
+  --bind "$HOST_OLMOCR_DIR:$CONT_OLMOCR_DIR" \
+  "$OCR_CONTAINER" \
+  python3 -m olmocr.api.server --port "$OLM_OCR_PORT" &
+OCR_PID=$!
 
-apptainer exec --nv --bind $HOST_ROOT_DIR:$CONT_ROOT_DIR $CONTAINER \
-  /usr/bin/python3 -m streamlit run $CONT_ROOT_DIR/src/Home.py \
-    --server.port "$SERVER_PORT" \
+# Give the OCR service a head start so Text Lab doesn’t race on first call.
+sleep 3
+
+# Tell Text Lab where to find the OCR API.
+export OLMOCR_HOST="127.0.0.1"
+export OLMOCR_PORT="$OLM_OCR_PORT"
+
+# ---------------------------- Launch Text Lab ---------------------------------
+
+echo "Starting Text Lab on port $TEXT_LAB_PORT …"
+
+aapptainer exec --nv \
+  --bind "$HOST_TEXT_LAB_DIR:$CONT_TEXT_LAB_DIR" \
+  "$TL_CONTAINER" \
+  /usr/bin/python3 -m streamlit run "$CONT_TEXT_LAB_DIR/src/Home.py" \
+    --server.port "$TEXT_LAB_PORT" \
     --server.baseUrlPath "$SERVER_BASEURLPATH" \
     --server.enableCORS false \
     --server.headless true \
-    --server.maxUploadSize=500 \
-    --client.showErrorDetails= false
+    --server.maxUploadSize 500 \
+    --client.showErrorDetails false
 
-popd
+# When the streamlit process exits, the trap above cleans up the OCR server.
