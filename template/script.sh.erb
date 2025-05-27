@@ -25,31 +25,28 @@ unset PYTHONPATH PYTHONHOME
 export PYTHONNOUSERSITE=1
 
 # ---------------------------- Helper cleanup ----------------------------------
-cleanup() {
-  echo "Stopping OLM OCR instance …"
-  if [[ -n "${OCR_PID:-}" ]]; then kill "${OCR_PID}" || true; fi
-}
-trap cleanup EXIT INT TERM
+# cleanup() {
+#   echo "Stopping OLM OCR instance …"
+#   if [[ -n "${OCR_PID:-}" ]]; then kill "${OCR_PID}" || true; fi
+# }
+# trap cleanup EXIT INT TERM
 
-echo "Starting OLM OCR on port $OLM_OCR_PORT …"
-apptainer exec --nv \
-  --bind "$HOST_TEXT_LAB_DIR:$CONT_OLMOCR_DIR" \
-  "$OCR_CONTAINER" \
-  python3 -m olmocr.api.server --port "$OLM_OCR_PORT" &
-OCR_PID=$!
+# echo "Starting OLM OCR on port $OLM_OCR_PORT …"
+# apptainer exec --nv --bind "$HOST_TEXT_LAB_DIR:$CONT_OLMOCR_DIR" "$OCR_CONTAINER" \
+#   python3 -m olmocr.pipeline --port "$OLM_OCR_PORT" & OCR_PID=$!
+#
+# # Give the OCR service a head start so Text Lab doesn’t race on first call.
+# sleep 3
 
-# Give the OCR service a head start so Text Lab doesn’t race on first call.
-sleep 3
-
-# Tell Text Lab where to find the OCR API.
-export OLMOCR_HOST="127.0.0.1"
-export OLMOCR_PORT="$OLM_OCR_PORT"
+# # Tell Text Lab where to find the OCR API.
+# export OLMOCR_HOST="127.0.0.1"
+# export OLMOCR_PORT="$OLM_OCR_PORT"
 
 # ---------------------------- Launch Text Lab ---------------------------------
 
 echo "Starting Text Lab on port $TEXT_LAB_PORT …"
 
-aapptainer exec --nv \
+apptainer exec --nv \
   --bind "$HOST_TEXT_LAB_DIR:$CONT_TEXT_LAB_DIR" \
   "$TL_CONTAINER" \
   /usr/bin/python3 -m streamlit run "$CONT_TEXT_LAB_DIR/src/Home.py" \

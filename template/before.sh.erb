@@ -13,11 +13,11 @@ create_passwd() {
 # 1) First free port is reserved for the Streamlit UI (Text Lab).
 TEXT_LAB_PORT=$(find_port)
 
-# 2) Second free port — distinct from the first — is reserved for OLM OCR.
-while true; do
-  OLMOCR_PORT=$(find_port)
-  [[ "$OLMOCR_PORT" != "$TEXT_LAB_PORT" ]] && break
-done
+# # 2) Second free port — distinct from the first — is reserved for OLM OCR.
+# while true; do
+#   OLMOCR_PORT=$(find_port)
+#   [[ "$OLMOCR_PORT" != "$TEXT_LAB_PORT" ]] && break
+# done
 
 # -------------------------- Security token -----------------------------------
 TOKEN="$(create_passwd 16)"
@@ -27,9 +27,9 @@ TOKEN="$(create_passwd 16)"
 export TEXT_LAB_PORT
 export SERVER_PORT="$TEXT_LAB_PORT"
 
-# OLM OCR micro-service endpoint
-export OLMOCR_PORT
-export OLMOCR_HOST="127.0.0.1"   # same network namespace as Streamlit
+# # OLM OCR micro-service endpoint
+# export OLMOCR_PORT
+# export OLMOCR_HOST="127.0.0.1"   # same network namespace as Streamlit
 
 # Reverse-proxy base path (OnDemand’s /node/… route)
 export SERVER_BASEURLPATH="/node/${host}/${TEXT_LAB_PORT}/"
