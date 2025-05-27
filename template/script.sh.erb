@@ -5,13 +5,12 @@ set -euo pipefail
 # ---------------------------- Configurable paths ------------------------------
 # Allow callers to override base directories via environment variables.
 HOST_TEXT_LAB_DIR="${TEXT_LAB_DIR:-/storage/research/dsl_shared/solutions/ondemand/text_lab}"
-HOST_OLMOCR_DIR="${OLMOCR_DIR:-/storage/research/dsl_shared/solutions/ondemand/olmocr}"
 
 CONT_TEXT_LAB_DIR="/text_lab"
 CONT_OLMOCR_DIR="/olmocr"
 
 TL_CONTAINER="$HOST_TEXT_LAB_DIR/container/text_lab.sif"
-OCR_CONTAINER="$HOST_OLMOCR_DIR/container/olmocr.sif"
+OCR_CONTAINER="$HOST_TEXT_LAB_DIR/container/olmocr.sif"
 
 # ---------------------------- Runtime parameters ------------------------------
 # Which ports should each service listen on?
@@ -34,7 +33,7 @@ trap cleanup EXIT INT TERM
 
 echo "Starting OLM OCR on port $OLM_OCR_PORT …"
 apptainer exec --nv \
-  --bind "$HOST_OLMOCR_DIR:$CONT_OLMOCR_DIR" \
+  --bind "$HOST_TEXT_LAB_DIR:$CONT_OLMOCR_DIR" \
   "$OCR_CONTAINER" \
   python3 -m olmocr.api.server --port "$OLM_OCR_PORT" &
 OCR_PID=$!
