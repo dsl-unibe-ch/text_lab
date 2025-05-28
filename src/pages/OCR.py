@@ -44,13 +44,13 @@ def run_ocr():
 
                     try:
                         # Execute OCR using apptainer
-                        olmocr_container = os.getenv('OLMOCR_CONTAINER')
+                        olmocr_container = os.getenv("OCR_CONTAINER")
 
                         if not olmocr_container:
-                            st.error("OLMOCR_CONTAINER environment variable is not set")
+                            st.error("OCR_CONTAINER environment variable is not set")
                             return
                         else:
-                            st.info(f"Using OLMOCR_CONTAINER: {olmocr_container}")
+                            st.info(f"Using OCR_CONTAINER: {olmocr_container}")
 
                         cmd = ["apptainer", "exec", "--nv", olmocr_container, "python", "-m", "olmocr.pipeline",
                               tempfile.gettempdir(), "--markdown", "--pdfs", tmp.name]
@@ -73,7 +73,7 @@ def run_ocr():
     # If we have a stored result, show download options
     if st.session_state["ocr_result"] is not None:
         result_file = st.session_state["ocr_result"]
-        with open(result_file, 'r') as f:
+        with open(result_file, "r") as f:
             text = f.read()
 
         st.subheader("Download your text")
