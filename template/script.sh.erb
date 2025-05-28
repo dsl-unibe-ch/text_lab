@@ -21,9 +21,6 @@ OLM_OCR_PORT="${OLMOCR_PORT:-8503}"
 # Base URL path for reverse‑proxy setups (JupyterHub, etc.). Leave empty for /
 SERVER_BASEURLPATH="${SERVER_BASEURLPATH:-}"  # may already be exported by the hub
 
-# Locate host apptainer once:
-HOST_APPTAINER_BIN=$(command -v apptainer)
-
 # --- Clean the Python environment ---
 unset PYTHONPATH PYTHONHOME
 export PYTHONNOUSERSITE=1
@@ -35,7 +32,6 @@ export USER="$USER"
 pushd "${PWD}"
 
 apptainer exec --nv \
-  --bind "$HOST_APPTAINER_BIN:/usr/bin/apptainer" \
   --bind "$HOST_TEXT_LAB_DIR:$CONT_TEXT_LAB_DIR" \
   "$TL_CONTAINER" \
   /usr/bin/python3 -m streamlit run "$CONT_TEXT_LAB_DIR/src/Home.py" \

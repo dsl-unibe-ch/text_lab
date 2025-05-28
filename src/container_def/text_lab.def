@@ -12,12 +12,10 @@ From: nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
     apt update && \
     apt upgrade -y && \
     apt install -y --no-install-recommends \
-        build-essential curl ffmpeg git \
-        libsndfile1-dev \
-        libc6 libc-bin pciutils lshw libpq-dev \
+        build-essential curl ffmpeg git libsndfile1-dev libc6 libc-bin pciutils lshw libpq-dev \
         software-properties-common python3.10 python3-pip \
         poppler-utils ttf-mscorefonts-installer msttcorefonts fonts-crosextra-caladea fonts-crosextra-carlito gsfonts \
-        lcdf-typetools
+        lcdf-typetools apptainer
 
     # Upgrade pip and setuptools
     python3 -m pip install --no-cache-dir --upgrade pip setuptools

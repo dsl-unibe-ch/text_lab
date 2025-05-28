@@ -30,7 +30,7 @@ def run_ocr():
     # Read button
     if st.button("Read"):
         if document_file is None:
-            st.warning("Please upload an document file first.")
+            st.warning("Please upload a document file first.")
         else:
             with st.spinner("Loading Whisper model and performing OCR. This might take a while. Please don't close or reload this page."):
                 # Write the uploaded file to a temp file for OLM OCR
@@ -52,10 +52,12 @@ def run_ocr():
                         else:
                             st.info(f"Using OCR_CONTAINER: {olmocr_container}")
 
-                        cmd = ["/usr/bin/apptainer", "exec", "--nv", olmocr_container, "python", "-m", "olmocr.pipeline",
+                        cmd = ["apptainer", "exec", "--nv", olmocr_container, "python", "-m", "olmocr.pipeline",
                               tempfile.gettempdir(), "--markdown", "--pdfs", tmp.name]
 
-                        subprocess.run(cmd, capture_output=True, text=True, check=True)
+                        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+                        print(result.stdout)
+
                         md_filename = os.path.splitext(tmp.name)[0] + ".md"
                         if not os.path.exists(md_filename):
                             raise FileNotFoundError(f"OCR result file not found: {md_filename}")
