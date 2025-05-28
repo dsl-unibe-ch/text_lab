@@ -52,7 +52,7 @@ def run_ocr():
                         else:
                             st.info(f"Using OCR_CONTAINER: {olmocr_container}")
 
-                        cmd = ["apptainer", "exec", "--nv", olmocr_container, "python", "-m", "olmocr.pipeline",
+                        cmd = ["apptainer", "exec", "--nv", olmocr_container, "python3", "-m", "olmocr.pipeline",
                               tempfile.gettempdir(), "--markdown", "--pdfs", tmp.name]
 
                         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
