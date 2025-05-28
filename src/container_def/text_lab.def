@@ -8,6 +8,9 @@ From: nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
     # Accept the EULA for installing ttf-mscorefonts-installer
     echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" | debconf-set-selections
 
+    # Add Apptainer repository to be able to install Apptainer
+    add-apt-repository -y ppa:apptainer/ppa
+
     # Update and upgrade system packages
     apt update && \
     apt upgrade -y && \
