@@ -12,6 +12,8 @@ CONT_OLMOCR_DIR="/olmocr"
 TL_CONTAINER="$HOST_TEXT_LAB_DIR/container/text_lab.sif"
 OCR_CONTAINER="$HOST_TEXT_LAB_DIR/container/olmocr.sif"
 
+export OCR_CONTAINER
+
 # ---------------------------- Runtime parameters ------------------------------
 # Which ports should each service listen on?
 TEXT_LAB_PORT="${TEXT_LAB_PORT:-${SERVER_PORT:-8502}}"   # streamlit defaults to 8502 if not set
