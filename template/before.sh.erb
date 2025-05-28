@@ -9,32 +9,11 @@ create_passwd() {
 # Export the `module` shell-function in case the compute environment relies on it.
 [[ $(type -t module) == "function" ]] && export -f module
 
-# -------------------------- Allocate free ports ------------------------------
-# 1) First free port is reserved for the Streamlit UI (Text Lab).
-TEXT_LAB_PORT=$(find_port)
+port=$(find_port)
 
-# # 2) Second free port — distinct from the first — is reserved for OLM OCR.
-# while true; do
-#   OLMOCR_PORT=$(find_port)
-#   [[ "$OLMOCR_PORT" != "$TEXT_LAB_PORT" ]] && break
-# done
+password="$(create_passwd 16)"
 
-# -------------------------- Security token -----------------------------------
-TOKEN="$(create_passwd 16)"
-
-# -------------------------- Export to environment ----------------------------
-# Streamlit still expects SERVER_PORT, so mirror TEXT_LAB_PORT there.
-export TEXT_LAB_PORT
-export SERVER_PORT="$TEXT_LAB_PORT"
-
-# # OLM OCR micro-service endpoint
-# export OLMOCR_PORT
-# export OLMOCR_HOST="127.0.0.1"   # same network namespace as Streamlit
-
-# Reverse-proxy base path (OnDemand’s /node/… route)
-export SERVER_BASEURLPATH="/node/${host}/${TEXT_LAB_PORT}/"
-
-# Session bearer token
-env TOKEN
-export TOKEN
+export SERVER_PORT="$port"
+export SERVER_BASEURLPATH="/node/${host}/${port}/"
+export TOKEN="$password"
 

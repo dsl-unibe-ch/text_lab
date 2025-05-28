@@ -2,7 +2,6 @@
 
 set -euo pipefail
 
-# ---------------------------- Configurable paths ------------------------------
 # Allow callers to override base directories via environment variables.
 HOST_TEXT_LAB_DIR="${TEXT_LAB_DIR:-/storage/research/dsl_shared/solutions/ondemand/text_lab}"
 
@@ -22,31 +21,15 @@ OLM_OCR_PORT="${OLMOCR_PORT:-8503}"
 # Base URL path for reverse‑proxy setups (JupyterHub, etc.). Leave empty for /
 SERVER_BASEURLPATH="${SERVER_BASEURLPATH:-}"  # may already be exported by the hub
 
-# ---------------------------- Tidy Python env ---------------------------------
+# --- Clean the Python environment ---
 unset PYTHONPATH PYTHONHOME
 export PYTHONNOUSERSITE=1
 
-# ---------------------------- Helper cleanup ----------------------------------
-# cleanup() {
-#   echo "Stopping OLM OCR instance …"
-#   if [[ -n "${OCR_PID:-}" ]]; then kill "${OCR_PID}" || true; fi
-# }
-# trap cleanup EXIT INT TERM
+# Optionally: explicitly set HOME and USER for environment isolation
+export HOME="$HOME"
+export USER="$USER"
 
-# echo "Starting OLM OCR on port $OLM_OCR_PORT …"
-# apptainer exec --nv --bind "$HOST_TEXT_LAB_DIR:$CONT_OLMOCR_DIR" "$OCR_CONTAINER" \
-#   python3 -m olmocr.pipeline --port "$OLM_OCR_PORT" & OCR_PID=$!
-#
-# # Give the OCR service a head start so Text Lab doesn’t race on first call.
-# sleep 3
-
-# # Tell Text Lab where to find the OCR API.
-# export OLMOCR_HOST="127.0.0.1"
-# export OLMOCR_PORT="$OLM_OCR_PORT"
-
-# ---------------------------- Launch Text Lab ---------------------------------
-
-echo "Starting Text Lab on port $TEXT_LAB_PORT …"
+pushd "${PWD}"
 
 apptainer exec --nv \
   --bind "$HOST_TEXT_LAB_DIR:$CONT_TEXT_LAB_DIR" \
@@ -59,4 +42,4 @@ apptainer exec --nv \
     --server.maxUploadSize 500 \
     --client.showErrorDetails false
 
-# When the streamlit process exits, the trap above cleans up the OCR server.
+popd
