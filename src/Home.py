@@ -1,7 +1,6 @@
 import streamlit as st
 import os
 import base64
-import olmocr
 
 st.set_page_config(page_title="TEXT LAB", layout="wide")
 
@@ -16,7 +15,7 @@ def get_img_as_base64(file_path):
 def main():
     check_token()
 
-    st.title("TEXT LAB: " + olmocr.pipeline)
+    st.title("TEXT LAB")
 
     # Custom CSS for styling the logos.
     css = """
