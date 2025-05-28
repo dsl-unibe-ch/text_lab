@@ -8,6 +8,11 @@ From: nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
     # Accept the EULA for installing ttf-mscorefonts-installer
     echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" | debconf-set-selections
 
+    # Installing software-properties-common to be able to run add-apt-repository
+    apt update && \
+    apt upgrade -y && \
+    apt install -y --no-install-recommends software-properties-common
+
     # Add Apptainer repository to be able to install Apptainer
     add-apt-repository -y ppa:apptainer/ppa
 
@@ -15,8 +20,7 @@ From: nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
     apt update && \
     apt upgrade -y && \
     apt install -y --no-install-recommends \
-        build-essential curl ffmpeg git libsndfile1-dev libc6 libc-bin pciutils lshw libpq-dev \
-        software-properties-common python3.10 python3-pip \
+        build-essential curl ffmpeg git libsndfile1-dev libc6 libc-bin pciutils lshw libpq-dev python3.10 python3-pip \
         poppler-utils ttf-mscorefonts-installer msttcorefonts fonts-crosextra-caladea fonts-crosextra-carlito gsfonts \
         lcdf-typetools apptainer
 
