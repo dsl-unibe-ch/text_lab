@@ -3,6 +3,9 @@ From: nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
 
 %post
     # Update system
+    apt update
+    apt install -y software-properties-common
+    add-apt-repository -y 'deb http://archive.ubuntu.com/ubuntu jammy-backports main'
     apt update && apt upgrade -y
 
     echo ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true | debconf-set-selections
@@ -13,7 +16,7 @@ From: nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
     apt install -y --no-install-recommends \
         build-essential curl ffmpeg git \
         libsndfile1-dev tesseract-ocr espeak-ng \
-        python3.11 python3-pip python3-dev libc6 libc-bin \
+        python3.11 python3-pip python3.11-dev libc6 libc-bin \
         pciutils lshw
 
     # set 3.11# Install both python3.10 and python3.11 as alternatives
