@@ -55,8 +55,7 @@ def run_ocr():
                         cmd = ["apptainer", "exec", "--nv", olmocr_container, "python3", "-m", "olmocr.pipeline",
                               tempfile.gettempdir(), "--markdown", "--pdfs", tmp.name]
 
-                        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-                        print(result.stdout)
+                        subprocess.run(cmd, check=True)
 
                         md_filename = os.path.splitext(tmp.name)[0] + ".md"
                         if not os.path.exists(md_filename):
