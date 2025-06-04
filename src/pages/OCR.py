@@ -57,7 +57,7 @@ def run_ocr():
                             "--bind", f"{tempfile.gettempdir()}:/localworkspace",
                             olmocr_container,
                             "bash", "-c",
-                            "source /opt/conda/etc/profile.d/conda.sh && "
+                            "source /root/miniconda3/etc/profile.d/conda.sh && "
                             "conda activate olmocr && "
                             f"python -m olmocr.pipeline /localworkspace --markdown --pdfs {os.path.basename(tmp.name)}"
                         ]
