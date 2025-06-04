@@ -52,14 +52,15 @@ def run_ocr():
                         else:
                             st.info(f"Using OCR_CONTAINER: {olmocr_container}")
 
-                        cmd = ["apptainer", "exec", "--nv",
-                               "--bind", tempfile.gettempdir() + ":/localworkspace",
-                               olmocr_container,
-                               "bash", "-c",
-                               "'source /opt/conda/etc/profile.d/conda.sh && conda activate olmocr && "
-                               "python -m olmocr.pipeline /localworkspace --markdown --pdfs "
-                               + tmp.name + "'"]
-
+                        cmd = [
+                            "apptainer", "exec", "--nv",
+                            "--bind", f"{tempfile.gettempdir()}:/localworkspace",
+                            olmocr_container,
+                            "bash", "-c",
+                            "source /opt/conda/etc/profile.d/conda.sh && "
+                            "conda activate olmocr && "
+                            f"python -m olmocr.pipeline /localworkspace --markdown --pdfs {os.path.basename(tmp.name)}"
+                        ]
                         subprocess.run(cmd, check=True)
 
                         md_filename = os.path.splitext(tmp.name)[0] + ".md"
