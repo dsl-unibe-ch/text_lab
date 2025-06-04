@@ -58,7 +58,7 @@ def run_ocr():
                             "--bind", f"{tempfile.gettempdir()}:/localworkspace",
                             olmocr_container,
                             "python", "-m", "olmocr.pipeline", "/localworkspace",
-                            "--model-path", "/opt/models/olmocr-7b",
+                            "--model", "/opt/models/olmocr-7b",
                             "--markdown", "--pdfs",
                             f"/localworkspace/{os.path.basename(tmp.name)}"
                         ]
