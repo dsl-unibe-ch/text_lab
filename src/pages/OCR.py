@@ -55,7 +55,7 @@ def run_ocr():
                         cmd = ["apptainer", "exec", "--nv",
                                "--bind", tempfile.gettempdir() + ":/localworkspace",
                                olmocr_container,
-                               "python3", "-m", "olmocr.pipeline",
+                               "python", "-m", "olmocr.pipeline",
                                "/localworkspace", "--markdown", "--pdfs",  tmp.name]
 
                         subprocess.run(cmd, check=True)
