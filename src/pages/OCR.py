@@ -53,7 +53,7 @@ def run_ocr():
                             st.info(f"Using OCR_CONTAINER: {olmocr_container}")
 
                         cmd = [
-                            "apptainer", "exec", "--nv",
+                            "apptainer", "exec", "--nv", "--writable-tmpfs",
                             "--pwd", "root",
                             "--bind", f"{tempfile.gettempdir()}:/localworkspace",
                             olmocr_container,
