@@ -1,2 +1,44 @@
 Bootstrap: docker
 From: alleninstituteforai/olmocr:v0.1.71
+
+%environment
+    # Keep HF in read-only offline mode inside the final image
+    export HF_HOME=/opt/hf_cache
+    export TRANSFORMERS_CACHE=$HF_HOME
+    export TRANSFORMERS_OFFLINE=1
+    export HF_DATASETS_OFFLINE=1
+    export HF_HUB_DISABLE_XET=1         # skip the Xet transport
+    # Tell olmocr / sglang where the weights really live
+    export OLMOCR_MODEL_PATH=/opt/models/olmocr-7b
+
+%post
+    set -e
+
+    # (1) Extra tools the base image does not contain
+    apt update && apt install -y --no-install-recommends \
+        git-lfs curl ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+    git lfs install --skip-repo   # enable LFS inside container
+
+    # The official image already has torch + sglang + huggingface_hub
+    # but snapshot download is part of huggingface-cli (same package)
+    pip install --no-cache-dir -U huggingface_hub
+
+    # (2) Pre-download the checkpoint
+    mkdir -p /opt/models /opt/hf_cache
+
+    # For private repos set HF_TOKEN before build or here:
+    # export HF_TOKEN=hf_xxxxxxxxxxxxxxxxxxxxxxxxxxx
+    huggingface-cli download allenai/olmOCR-7B-0225-preview \
+        --revision main \
+        --local-dir /opt/models/olmocr-7b \
+        --local-dir-use-symlinks False \
+        ${HF_TOKEN:+--token $HF_TOKEN}
+
+    # Optional: strip Hub’s index files to save a few MB
+    rm -rf /opt/hf_cache/*.json
+
+    # Other clean up to reduce container size
+    apt clean
+    rm -rf /var/lib/apt/lists/*

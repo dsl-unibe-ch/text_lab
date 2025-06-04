@@ -57,7 +57,9 @@ def run_ocr():
                             "--pwd", "root",
                             "--bind", f"{tempfile.gettempdir()}:/localworkspace",
                             olmocr_container,
-                            "python", "-m", "olmocr.pipeline", "/localworkspace", "--markdown", "--pdfs",
+                            "python", "-m", "olmocr.pipeline", "/localworkspace",
+                            "--model-path", "/opt/models/olmocr-7b",
+                            "--markdown", "--pdfs",
                             f"/localworkspace/{os.path.basename(tmp.name)}"
                         ]
                         subprocess.run(cmd, check=True)
