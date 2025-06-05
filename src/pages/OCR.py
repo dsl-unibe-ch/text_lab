@@ -32,7 +32,7 @@ def run_ocr():
         if document_file is None:
             st.warning("Please upload a document file first.")
         else:
-            with st.spinner("Loading Whisper model and performing OCR. This might take a while. Please don't close or reload this page."):
+            with st.spinner("Performing OCR. This might take a while. Please don't close or reload this page."):
                 # Write the uploaded file to a temp file for OLM OCR
                 document_extension = os.path.splitext(document_file.name)[1]
                 bytes = document_file.read()
@@ -49,8 +49,6 @@ def run_ocr():
                         if not olmocr_container:
                             st.error("OCR_CONTAINER environment variable is not set")
                             return
-                        else:
-                            st.info(f"Using OCR_CONTAINER: {olmocr_container}")
 
                         cmd = [
                             "apptainer", "exec", "--nv", "--writable-tmpfs", "--no-home",
