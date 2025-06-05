@@ -1,11 +1,13 @@
 import streamlit as st
-import whisper
 import tempfile
 import json
 import zipfile
 import io
 import sys
 import os
+os.environ.setdefault("WHISPER_CACHE", "/opt/whisper")
+
+import whisper
 
 st.set_page_config(page_title="Whisper Transcription", layout="wide")
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -79,7 +81,13 @@ def create_all_formats_zip(text: str, segments, result_dict) -> bytes:
 
 FORMAT_OPTION_TO_EXTENSION = {"Plain text": ".txt", "SRT": ".srt", "CSV": ".csv", "JSON": ".json"}
 FORMAT_OPTION_TO_MIME = {"Plain text": "text/plain", "SRT": "text/plain", "CSV": "text/csv", "JSON": "application/json"}
-FORMAT_OPTION_TO_FUNC = {"Plain text": identity, "SRT": make_srt, "CSV": make_csv, "JSON": make_json}
+FORMAT_OPTION_TO_FUNC = {
+    "Plain text": lambda text, segments, result: text,
+    "SRT":        lambda text, segments, result: make_srt(segments),
+    "CSV":        lambda text, segments, result: make_csv(segments),
+    "JSON":       lambda text, segments, result: make_json(result),
+}
+
 
 def run_transcribe():
     st.title("Whisper Transcription")
@@ -89,9 +97,21 @@ def run_transcribe():
     model_name = st.selectbox("Select Whisper Model:", model_options, index=4)
 
     # Language selection
-    LANG_DICT = whisper.tokenizer.LANGUAGES
-    language_labels = ["Detect language automatically"] + sorted(LANG_DICT.keys())
-    selected_label = st.selectbox("Select Language:", language_labels, index=0)
+    LANG_DICT = whisper.tokenizer.LANGUAGES              
+    language_codes = [None] + sorted(LANG_DICT.keys())     
+
+    def code_to_label(code):
+        if code is None:
+            return "Detect language automatically"
+        return LANG_DICT[code].title()                    
+
+    selected_code = st.selectbox(
+        "Select Language:",
+        language_codes,
+        index=0,
+        format_func=code_to_label
+    )
+
 
     # File uploader
     audio_file = st.file_uploader(
@@ -112,11 +132,13 @@ def run_transcribe():
             st.warning("Please upload an audio file first.")
         else:
             with st.spinner("Loading Whisper model and transcribing. This might take a while depending on the audio length. Please don't close or reload this page."):
-                model = whisper.load_model(model_name)
+                model = whisper.load_model(model_name, download_root="/opt/whisper")
+                #model = whisper.load_model(model_name)
 
                 transcribe_options = {}
-                if selected_label != "Detect language automatically":
-                    transcribe_options["language"] = LANG_DICT[selected_label]
+                if selected_code is not None:              
+                    transcribe_options["language"] = selected_code
+
 
                 # Write the uploaded file to a temp file for Whisper
                 audio_bytes = audio_file.read()
@@ -140,7 +162,7 @@ def run_transcribe():
         extension = FORMAT_OPTION_TO_EXTENSION[format_option]
         st.download_button(
             label=f"Download {extension}",
-            data=FORMAT_OPTION_TO_FUNC[format_option](text),
+                data=FORMAT_OPTION_TO_FUNC[format_option](text, segments, result),
             file_name=f"transcription{extension}",
             mime=FORMAT_OPTION_TO_MIME[format_option],
         )
