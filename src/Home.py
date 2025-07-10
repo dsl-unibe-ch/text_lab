@@ -2,6 +2,10 @@ import streamlit as st
 import os
 import base64
 import subprocess
+import time
+import sys
+import urllib.request
+import urllib.error
 from ollama import chat
 
 st.set_page_config(page_title="TEXT LAB", layout="wide")
@@ -11,6 +15,34 @@ from auth import check_token
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "127.0.0.1")
 OLLAMA_PORT = int(os.getenv("OLLAMA_PORT", 11434))
 OLLAMA_MODELS = os.getenv("OLLAMA_MODELS", "/tmp/ollama_models")
+OLLAMA_ADDR = f"{OLLAMA_HOST}:{OLLAMA_PORT}"
+
+def start_ollama():
+    os.makedirs(OLLAMA_MODELS, exist_ok=True)
+
+    # launch in background
+    p = subprocess.Popen(
+        ["ollama", "serve", "--addr", OLLAMA_ADDR],
+        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+        env={**os.environ, "OLLAMA_MODELS": OLLAMA_MODELS},
+    )
+
+    # health-check loop
+    alive = False
+    for _ in range(30):                     # ~15 s total
+        try:
+            with urllib.request.urlopen(f"http://{OLLAMA_ADDR}/api/tags", timeout=1):
+                alive = True
+                break
+        except urllib.error.URLError:
+            if p.poll() is not None:        # daemon already exited
+                err = p.stderr.read().decode()
+                sys.exit(f"Ollama died during startup:\n{err}")
+            time.sleep(0.5)
+
+    if not alive:
+        p.terminate()
+        sys.exit("Timed out waiting for Ollama to listen on port 11434")
 
 def get_img_as_base64(file_path):
     """Read an image file and return its base64 encoded string."""
@@ -103,13 +135,7 @@ def main():
     </div>
     """, unsafe_allow_html=True)
 
-    os.makedirs(OLLAMA_MODELS, exist_ok=True)
-    env = os.environ.copy()
-    env.setdefault("OLLAMA_MODELS", OLLAMA_MODELS)
-
-    subprocess.Popen(["ollama", "serve", "--local", "--addr", f"{OLLAMA_HOST}:{OLLAMA_PORT}"],
-                     stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,
-                     env=env)
+    start_ollama()
 
     chat(model='llama3.2:latest', messages=[
             {
