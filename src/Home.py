@@ -23,26 +23,26 @@ def start_ollama():
     # launch in background
     p = subprocess.Popen(
         ["ollama", "serve", "--addr", OLLAMA_ADDR],
-        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+        stdout=subprocess.STDOUT, stderr=subprocess.STDOUT,
         env={**os.environ, "OLLAMA_MODELS": OLLAMA_MODELS},
     )
 
     # health-check loop
     alive = False
-    for _ in range(30):                     # ~15 s total
+    for _ in range(30):
         try:
             with urllib.request.urlopen(f"http://{OLLAMA_ADDR}/api/tags", timeout=1):
                 alive = True
                 break
         except urllib.error.URLError:
-            if p.poll() is not None:        # daemon already exited
+            if p.poll() is not None:
                 err = p.stderr.read().decode()
                 sys.exit(f"Ollama died during startup:\n{err}")
             time.sleep(0.5)
 
     if not alive:
         p.terminate()
-        sys.exit("Timed out waiting for Ollama to listen on port 11434")
+        sys.exit(f"Timed out waiting for Ollama to listen on port {OLLAMA_PORT}")
 
 def get_img_as_base64(file_path):
     """Read an image file and return its base64 encoded string."""

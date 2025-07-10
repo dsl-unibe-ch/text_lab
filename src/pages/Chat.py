@@ -45,8 +45,8 @@ def ensure_ollama_server():
         st.stop()
 
     st.info("Starting Ollama daemon…")
-    subprocess.Popen(["ollama", "serve", "--local", "--addr", f"{OLLAMA_HOST}:{OLLAMA_PORT}"],
-                     stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,
+    subprocess.Popen(["ollama", "serve", "--addr", f"{OLLAMA_HOST}:{OLLAMA_PORT}"],
+                     stdout=subprocess.STDOUT, stderr=subprocess.STDOUT,
                      env=env)
 
     # 3. Wait (max 30 s) until the TCP port answers
