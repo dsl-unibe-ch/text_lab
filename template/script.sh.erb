@@ -38,7 +38,6 @@ pushd "${PWD}"
 
 # choose one – example with shared scratch
 MODEL_ROOT="/storage/homefs/$USER/ollama_models"
-# MODEL_ROOT="$SLURM_TMPDIR/ollama_models"
 mkdir -p "$MODEL_ROOT"
 
 apptainer exec \

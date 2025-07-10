@@ -23,7 +23,7 @@ def start_ollama():
     # launch in background
     p = subprocess.Popen(
         ["ollama", "serve", "--addr", OLLAMA_ADDR],
-        stdout=subprocess.STDOUT, stderr=subprocess.STDOUT,
+        stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,
         env={**os.environ, "OLLAMA_MODELS": OLLAMA_MODELS},
     )
 
