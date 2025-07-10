@@ -36,11 +36,14 @@ export WHISPER_CACHE="/opt/whisper"
 
 pushd "${PWD}"
 
-mkdir -p "/tmp/ollama_models"
+# choose one – example with shared scratch
+# MODEL_ROOT="/scratch/$USER/ollama_models"
+MODEL_ROOT="$SLURM_TMPDIR/ollama_models"
+mkdir -p "$MODEL_ROOT"
 
 apptainer exec \
   --bind "$HOST_TEXT_LAB_DIR:$CONT_TEXT_LAB_DIR" \
-  --bind "/tmp/ollama_models:/ollama_models" \
+  --bind "$MODEL_ROOT:/ollama_models" \
   --env OLLAMA_MODELS="/ollama_models" \
   --nv \
   "$TL_CONTAINER" \

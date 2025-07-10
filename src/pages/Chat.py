@@ -138,13 +138,13 @@ def main():
     # Sidebar
     st.sidebar.title("Model Selection")
     available_models_in_ui = [
+        "llama3.2:latest",
+        "llama3.1:latest",
         "gemma3:12b",
         "gemma3:27b",
         "deepseek-r1:8b",
         "deepseek-r1:14b",
         "deepseek-r1:70b",
-        "llama3.2:latest",
-        "llama3.1:latest",
         "qwen2.5:32b",
     ]
 
