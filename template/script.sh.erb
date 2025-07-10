@@ -36,7 +36,11 @@ export WHISPER_CACHE="/opt/whisper"
 
 pushd "${PWD}"
 
+mkdir -p "/tmp/ollama_models"
+
 apptainer exec --nv --bind "$HOST_TEXT_LAB_DIR:$CONT_TEXT_LAB_DIR" "$TL_CONTAINER" \
+  --bind "/tmp/ollama_models:/ollama_models" \
+  --env OLLAMA_MODELS="/ollama_models"
   /usr/bin/python3 -m streamlit run "$CONT_TEXT_LAB_DIR/src/Home.py" \
     --server.port "$TEXT_LAB_PORT" \
     --server.baseUrlPath "$SERVER_BASEURLPATH" \
