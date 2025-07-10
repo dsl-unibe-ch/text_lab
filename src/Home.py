@@ -100,18 +100,5 @@ def main():
     </div>
     """, unsafe_allow_html=True)
 
-    subprocess.Popen(
-            ["ollama", "serve"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
-        )
-    
-    response: ChatResponse = chat(model='llama3.2:latest', messages=[
-            {
-            'role': 'user',
-            'content': 'Why is the sky blue?',
-           },
-         ])
-
 if __name__ == "__main__":
     main()
