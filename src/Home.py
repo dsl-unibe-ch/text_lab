@@ -3,11 +3,14 @@ import os
 import base64
 import subprocess
 from ollama import chat
-from ollama import ChatResponse
 
 st.set_page_config(page_title="TEXT LAB", layout="wide")
 
 from auth import check_token
+
+OLLAMA_HOST = os.getenv("OLLAMA_HOST", "127.0.0.1")
+OLLAMA_PORT = int(os.getenv("OLLAMA_PORT", 11434))
+OLLAMA_MODELS = os.getenv("OLLAMA_MODELS", "/tmp/ollama_models")
 
 def get_img_as_base64(file_path):
     """Read an image file and return its base64 encoded string."""
@@ -100,11 +103,13 @@ def main():
     </div>
     """, unsafe_allow_html=True)
 
-    subprocess.Popen(
-            ["ollama", "serve"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
-        )
+    os.makedirs(OLLAMA_MODELS, exist_ok=True)
+    env = os.environ.copy()
+    env.setdefault("OLLAMA_MODELS", OLLAMA_MODELS)
+
+    subprocess.Popen(["ollama", "serve", "--local", "--addr", f"{OLLAMA_HOST}:{OLLAMA_PORT}"],
+                     stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,
+                     env=env)
 
     chat(model='llama3.2:latest', messages=[
             {
