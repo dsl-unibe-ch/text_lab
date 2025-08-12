@@ -6,8 +6,8 @@ import time
 import sys
 import os
 
-OLLAMA_HOST = os.getenv("OLLAMA_HOST", "127.0.0.1")
-OLLAMA_PORT = int(os.getenv("OLLAMA_PORT", 11434))
+OLLAMA_HOST = "127.0.0.1"
+OLLAMA_PORT = 11434
 OLLAMA_MODELS = os.getenv("OLLAMA_MODELS", "/tmp/ollama_models")
 
 def _port_open():
@@ -30,7 +30,7 @@ def ensure_ollama_server():
         st.stop()
 
     st.info("Starting Ollama daemon…")
-    subprocess.Popen(["ollama", "serve", "--addr", f"{OLLAMA_HOST}:{OLLAMA_PORT}"],
+    subprocess.Popen(["ollama", "serve"],
                      stdout=sys.stdout, stderr=sys.stderr,
                      env=env)
 
