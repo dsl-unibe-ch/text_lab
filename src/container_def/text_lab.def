@@ -16,7 +16,7 @@ From: nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
     set -e
 
     ###########################################################################
-    # 1-A  Define/cache dirs for the *build* stage
+    # 1.1  Define/cache dirs for the *build* stage
     ###########################################################################
     WHISPER_CACHE=/opt/whisper
     OLLAMA_MODELS=/opt/ollama/models
@@ -27,7 +27,7 @@ From: nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
     chmod -R a+rX "${WHISPER_CACHE}" "${OLLAMA_MODELS}" "${TRANSFORMERS_CACHE}"
 
     ###########################################################################
-    # 1-B Inner Apptainer setup
+    # 1.2 Inner Apptainer setup
     ###########################################################################
     # Set non-interactive frontend for Debconf
     export DEBIAN_FRONTEND=noninteractive
@@ -44,7 +44,7 @@ From: nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
     add-apt-repository -y ppa:apptainer/ppa
 
     ###########################################################################
-    # 1-C  OS packages + Python stack
+    # 1.3  OS packages + Python stack
     ###########################################################################
     apt update && \
     apt upgrade -y && \
@@ -83,7 +83,7 @@ From: nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
         --index-url https://download.pytorch.org/whl/cu121
 
     ###########################################################################
-    # 2.  Pre-download Whisper checkpoints
+    # 1.4  Pre-download Whisper checkpoints
     ###########################################################################
     python3 - << 'PY'
 import os, whisper
@@ -95,7 +95,7 @@ print("All Whisper checkpoints saved to", cache_dir)
 PY
 
     ###########################################################################
-    # 3.  Install Ollama & pull the selected LLM weights
+    # 1.5  Install Ollama & pull the selected LLM weights
     ###########################################################################
     curl -fsSL https://ollama.com/install.sh | sh
 
@@ -125,7 +125,7 @@ PY
     echo ">>> Ollama server stopped"
 
     ###########################################################################
-    # 4.  Quick sanity snapshots (first 10 lines to keep log short)
+    # 1.6  Quick sanity snapshots (first 10 lines to keep log short)
     ###########################################################################
     echo "=== Whisper cache snapshot ==="
     ls -lh "${WHISPER_CACHE}" | head
@@ -133,7 +133,7 @@ PY
     ls -lh "${OLLAMA_MODELS}" | head
 
     ###########################################################################
-    # 5.  Clean-up
+    # 1.7  Clean-up
     ###########################################################################
     apt clean && rm -rf /var/lib/apt/lists/*
     echo "Build finished – all models cached under /opt."
