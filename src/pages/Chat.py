@@ -35,30 +35,21 @@ def extract_model_name(entry):
 # ------------------------------
 # 2. Generating responses
 # ------------------------------
-def get_response_generator(model_name, prompt):
+def get_response_generator(model_name, messages):
     def response_generator():
-        for chunk in ollama.generate(model=model_name, prompt=prompt, stream=True):
-            if chunk.done:
-                break
-            yield chunk.response
-
+        # Disable “thinking” unless you explicitly want it
+        stream = ollama.chat(model=model_name, messages=messages, stream=True, think=False)
+        for chunk in stream:
+            msg = chunk.get("message", {})
+            if content := msg.get("content"):
+                yield content
     return response_generator
 
 
 def generate_response(messages, model_name):
-    prompt = ""
-    for msg in messages:
-        if msg["role"] == "user":
-            prompt += f"User: {msg['content']}\n"
-        else:
-            prompt += f"Assistant: {msg['content']}\n"
-    prompt += "Assistant:"
-
-    response_generator = get_response_generator(model_name, prompt)
-
+    response_generator = get_response_generator(model_name, messages)
     with st.chat_message("assistant"):
         final_response = st.write_stream(response_generator)
-
     return final_response.strip()
 
 

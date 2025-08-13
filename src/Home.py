@@ -106,12 +106,5 @@ def main():
 
     ensure_ollama_server()
 
-    chat(model='llama3.2:latest', messages=[
-        {
-            'role': 'user',
-            'content': 'Hi.',
-        },
-    ])
-
 if __name__ == "__main__":
     main()
