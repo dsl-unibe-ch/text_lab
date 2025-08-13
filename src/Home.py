@@ -10,7 +10,7 @@ from utils import ensure_ollama_server
 
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "127.0.0.1")
 OLLAMA_PORT = int(os.getenv("OLLAMA_PORT", 11434))
-OLLAMA_MODELS = os.getenv("OLLAMA_MODELS", "/tmp/ollama_models")
+OLLAMA_MODELS = os.getenv("OLLAMA_MODELS", "/opt/ollama/models")
 OLLAMA_ADDR = f"{OLLAMA_HOST}:{OLLAMA_PORT}"
 
 def get_img_as_base64(file_path):
