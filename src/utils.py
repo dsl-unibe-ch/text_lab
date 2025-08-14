@@ -8,7 +8,7 @@ import os
 
 OLLAMA_HOST = "127.0.0.1"
 OLLAMA_PORT = 11434
-OLLAMA_MODELS = os.getenv("OLLAMA_MODELS", "/tmp/ollama_models")
+OLLAMA_MODELS = os.getenv("OLLAMA_MODELS", "/opt/ollama/models")
 
 def _port_open():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:

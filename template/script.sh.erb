@@ -14,6 +14,7 @@ TL_CONTAINER="$HOST_TEXT_LAB_DIR/container/text_lab.sif"
 OCR_CONTAINER="$HOST_TEXT_LAB_DIR/container/olmocr.sif"
 
 export OCR_CONTAINER
+export OLLAMA_MODELS="/opt/ollama/models"
 
 # ---------------------------- Runtime parameters ------------------------------
 # Which ports should each service listen on?
@@ -37,14 +38,14 @@ export WHISPER_CACHE="/opt/whisper"
 pushd "${PWD}"
 
 # choose one – example with shared scratch
-MODEL_ROOT="/storage/homefs/$USER/ollama_models"
+MODEL_ROOT="/storage/homefs/$USER/ollama/models"
 mkdir -p "$MODEL_ROOT"
 
 apptainer exec \
   --nv \
   --bind "$HOST_TEXT_LAB_DIR:$CONT_TEXT_LAB_DIR" \
-  --bind "$MODEL_ROOT:/opt/ollama_models" \
-  --env OLLAMA_MODELS="/opt/ollama_models" \
+  --bind "$MODEL_ROOT:/opt/ollama/models" \
+  --env OLLAMA_MODELS="/opt/ollama/models" \
   --env OLLAMA_LLM_LIBRARY="cuda" \
   --env OLLAMA_FLASH_ATTENTION="true" \
   --env LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}" \
