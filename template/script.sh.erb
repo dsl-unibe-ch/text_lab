@@ -38,13 +38,13 @@ export WHISPER_CACHE="/opt/whisper"
 pushd "${PWD}"
 
 # choose one – example with shared scratch
-MODEL_ROOT="/storage/homefs/$USER/ollama/models"
-mkdir -p "$MODEL_ROOT"
+# MODEL_ROOT="/storage/homefs/$USER/ollama/models"
+# mkdir -p "$MODEL_ROOT"
 
 apptainer exec \
   --nv \
   --bind "$HOST_TEXT_LAB_DIR:$CONT_TEXT_LAB_DIR" \
-  --bind "$MODEL_ROOT:/opt/ollama/models" \
+#   --bind "$MODEL_ROOT:/opt/ollama/models" \
   --env OLLAMA_MODELS="/opt/ollama/models" \
   --env OLLAMA_LLM_LIBRARY="cuda" \
   --env OLLAMA_FLASH_ATTENTION="true" \
