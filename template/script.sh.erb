@@ -32,10 +32,16 @@ export PYTHONNOUSERSITE=1
 export HOME="$HOME"
 export USER="$USER"
 
-#set the variable for whisper to use models cached from inside the container
+# Set the variable for whisper to use models cached from inside the container
 export WHISPER_CACHE="/opt/whisper"
 
 pushd "${PWD}"
+
+# Hard fail if the GPU is not visible inside the container
+if ! apptainer exec --nv "$TL_CONTAINER" nvidia-smi >/dev/null 2>&1; then
+  echo "FATAL: No GPU visible inside the container. Request a GPU and keep --nv."
+  exit 1
+fi
 
 apptainer exec \
   --nv \
