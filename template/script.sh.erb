@@ -54,7 +54,7 @@ apptainer exec \
   /usr/bin/python3 -m streamlit run "$CONT_TEXT_LAB_DIR/src/Home.py" \
     --server.port "$TEXT_LAB_PORT" \
     --server.baseUrlPath "$SERVER_BASEURLPATH" \
-    --server.enableCORS false \
+    --server.enableCORS true \
     --server.headless true \
     --server.maxUploadSize 500 \
     --client.showErrorDetails false

@@ -99,6 +99,17 @@ PY
     ###########################################################################
     curl -fsSL https://ollama.com/install.sh | sh
 
+    # Ensure the CUDA backend .so is present even when building without a GPU
+    OLM_VER="$(/usr/local/bin/ollama --version | awk '{print $NF}')"   # e.g. 0.11.4
+    TMP=/tmp/ollama_pkgs && mkdir -p "$TMP" /usr/local/lib/ollama
+    cd "$TMP"
+    curl -fL "https://github.com/ollama/ollama/releases/download/v${OLM_VER}/ollama-linux-amd64.tgz" -o ollama.tgz
+    tar -xzf ollama.tgz
+    cp -f lib/ollama/libggml-*.so /usr/local/lib/ollama/
+    echo "/usr/local/lib/ollama" > /etc/ld.so.conf.d/ollama.conf
+    ldconfig
+    rm -rf "$TMP"
+
     echo ">>> starting Ollama server in the background"
     ollama serve > /tmp/ollama-build.log 2>&1 &
     OLLAMA_PID=$!
