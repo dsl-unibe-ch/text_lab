@@ -55,8 +55,11 @@ apptainer exec \
     --server.port "$TEXT_LAB_PORT" \
     --server.baseUrlPath "$SERVER_BASEURLPATH" \
     --server.enableCORS true \
+    --server.enableXsrfProtection true \
     --server.headless true \
     --server.maxUploadSize 500 \
     --client.showErrorDetails false
+    --browser.serverAddress ondemand.hpc.unibe.ch \
+    --browser.serverPort "$TEXT_LAB_PORT" \
 
 popd
