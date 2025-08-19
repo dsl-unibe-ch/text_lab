@@ -52,16 +52,13 @@ apptainer exec \
   --env LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}" \
   "$TL_CONTAINER" \
   /usr/bin/python3 -m streamlit run "$CONT_TEXT_LAB_DIR/src/Home.py" \
+    --server.address 0.0.0.0 \
     --server.port "$TEXT_LAB_PORT" \
     --server.baseUrlPath "$SERVER_BASEURLPATH" \
-    --server.enableCORS false \
-    --server.enableXsrfProtection false \
     --server.headless true \
     --server.maxUploadSize 500 \
-    --client.showErrorDetails false
-    --browser.gatherUsageStats false \
     --browser.serverAddress ondemand.hpc.unibe.ch \
-    --browser.serverPort 443 \
+    --browser.gatherUsageStats false \
     --logger.level debug
 
 popd
