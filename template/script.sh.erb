@@ -59,7 +59,9 @@ apptainer exec \
     --server.headless true \
     --server.maxUploadSize 500 \
     --client.showErrorDetails false
+    --browser.gatherUsageStats false \
     --browser.serverAddress ondemand.hpc.unibe.ch \
-    --browser.serverPort "$TEXT_LAB_PORT" \
+    --browser.serverPort 443 \
+    --logger.level debug
 
 popd
