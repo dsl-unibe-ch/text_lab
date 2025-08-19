@@ -29,7 +29,7 @@ def ensure_ollama_server():
     # Make sure at least one GPU is visible
     env.setdefault("CUDA_VISIBLE_DEVICES", os.getenv("CUDA_VISIBLE_DEVICES", "0"))
     # (Optional) help dynamic linker find CUDA runtime in some setups
-    env.setdefault("LD_LIBRARY_PATH", f"/usr/local/cuda/lib64:{env.get('LD_LIBRARY_PATH', '')}")
+    env.setdefault("LD_LIBRARY_PATH", f"/usr/local/lib/ollama:/usr/local/cuda/lib64:{env.get('LD_LIBRARY_PATH', '')}")
 
     # 2. Spawn the daemon *once*
     if shutil.which("ollama") is None:

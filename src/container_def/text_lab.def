@@ -105,7 +105,11 @@ PY
     cd "$TMP"
     curl -fL "https://github.com/ollama/ollama/releases/download/v${OLM_VER}/ollama-linux-amd64.tgz" -o ollama.tgz
     tar -xzf ollama.tgz
+    # backends
     cp -f lib/ollama/libggml-*.so /usr/local/lib/ollama/
+    # CUDA dependencies (these are NOT provided by --nv on many clusters)
+    cp -f lib/ollama/libcudart*.so* /usr/local/lib/ollama/
+    cp -f lib/ollama/libcublas*.so* /usr/local/lib/ollama/
     echo "/usr/local/lib/ollama" > /etc/ld.so.conf.d/ollama.conf
     ldconfig
     rm -rf "$TMP"
