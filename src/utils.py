@@ -23,16 +23,11 @@ def ensure_ollama_server():
     os.makedirs(OLLAMA_MODELS, exist_ok=True)
     env = os.environ.copy()
     # Always use the unified models path
-    env["OLLAMA_MODELS"] = os.getenv("OLLAMA_MODELS", OLLAMA_MODELS)
-    # Force CUDA backend to avoid silent CPU fallback
-    env.setdefault("OLLAMA_LLM_LIBRARY", "cuda")
-    # Make sure at least one GPU is visible
-    cvd = os.environ.get("CUDA_VISIBLE_DEVICES", None)
-    if not cvd:  # covers None and empty string
-        env["CUDA_VISIBLE_DEVICES"] = "0"
-    else:
-        env["CUDA_VISIBLE_DEVICES"] = cvd
-    # Help the dynamic linker find both Ollama backends and CUDA runtime
+    env["OLLAMA_LLM_LIBRARY"] = "cuda"
+    # If CUDA_VISIBLE_DEVICES is missing or empty, expose GPU 0
+    cvd = os.environ.get("CUDA_VISIBLE_DEVICES")
+    env["CUDA_VISIBLE_DEVICES"] = (cvd if cvd else "0")
+    # Let the daemon find both the backend and CUDA runtime
     env["LD_LIBRARY_PATH"] = f"/usr/local/lib/ollama:/usr/local/cuda/lib64:{env.get('LD_LIBRARY_PATH', '')}"
 
     # 2. Spawn the daemon *once*
