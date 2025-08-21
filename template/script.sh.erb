@@ -43,6 +43,11 @@ if ! apptainer exec --nv "$TL_CONTAINER" nvidia-smi >/dev/null 2>&1; then
   exit 1
 fi
 
+# If CUDA_VISIBLE_DEVICES is empty, unmask GPU 0 (or whatever your job grants)
+if [ -z "${CUDA_VISIBLE_DEVICES:-}" ]; then
+  export CUDA_VISIBLE_DEVICES=0
+fi
+
 apptainer exec \
   --nv \
   --bind "$HOST_TEXT_LAB_DIR:$CONT_TEXT_LAB_DIR" \
