@@ -5,8 +5,6 @@ set -euo pipefail
 # Allow callers to override base directories via environment variables.
 HOST_TEXT_LAB_DIR="${TEXT_LAB_DIR:-/storage/research/dsl_shared/solutions/ondemand/text_lab}"
 
-echo "HOST_TEXT_LAB_DIR: $HOST_TEXT_LAB_DIR"
-
 CONT_TEXT_LAB_DIR="/text_lab"
 CONT_OLMOCR_DIR="/olmocr"
 
@@ -37,8 +35,11 @@ export WHISPER_CACHE="/opt/whisper"
 
 pushd "${PWD}"
 
+echo "Running apptainer exec --nv '\$TL_CONTAINER' nvidia-smi"
+apptainer exec --nv "$TL_CONTAINER" nvidia-smi
+
 # Hard fail if the GPU is not visible inside the container
-if ! apptainer exec --nv "$TL_CONTAINER" nvidia-smi >/dev/null 2>&1; then
+if ! $? then
   echo "FATAL: No GPU visible inside the container. Request a GPU and keep --nv."
   exit 1
 fi
