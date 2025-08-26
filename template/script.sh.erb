@@ -41,7 +41,7 @@ echo "Running apptainer exec --nv '\$TL_CONTAINER' nvidia-smi"
 apptainer exec --nv "$TL_CONTAINER" nvidia-smi
 
 # Hard fail if the GPU is not visible inside the container
-if ! $?; then
+if $? != 0; then
   echo "FATAL: No GPU visible inside the container. Request a GPU and keep --nv."
   exit 1
 fi
