@@ -35,8 +35,6 @@ export WHISPER_CACHE="/opt/whisper"
 
 pushd "${PWD}"
 
-echo "\$TL_CONTAINER=$TL_CONTAINER"
-
 echo "Running apptainer exec --nv '\$TL_CONTAINER' nvidia-smi"
 apptainer exec --nv "$TL_CONTAINER" nvidia-smi
 

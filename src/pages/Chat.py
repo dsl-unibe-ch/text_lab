@@ -2,6 +2,7 @@ import streamlit as st
 import ollama
 import sys
 import os
+from ollama import ResponseError
 
 st.set_page_config(
     page_title="Ollama Chat Interface",
@@ -35,14 +36,20 @@ def extract_model_name(entry):
 # ------------------------------
 # 2. Generating responses
 # ------------------------------
+
 def get_response_generator(model_name, messages):
     def response_generator():
-        # Disable “thinking” unless you explicitly want it
-        stream = ollama.chat(model=model_name, messages=messages, stream=True, think=False)
-        for chunk in stream:
-            msg = chunk.get("message", {})
-            if content := msg.get("content"):
-                yield content
+        try:
+            stream = ollama.chat(model=model_name, messages=msgs, stream=True)
+            for chunk in stream:
+                yield chunk["message"]["content"]
+        except ResponseError as e:
+            # Safely show status code and message
+            status = getattr(e, "status_code", "?")
+            msg = str(e)
+            st.error(f"Ollama ResponseError (status={status})")
+            # Pretty-print JSON if the message looks like JSON
+            st.code(msg)
     return response_generator
 
 
