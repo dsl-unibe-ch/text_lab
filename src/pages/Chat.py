@@ -40,7 +40,7 @@ def extract_model_name(entry):
 def get_response_generator(model_name, messages):
     def response_generator():
         try:
-            stream = ollama.chat(model=model_name, messages=msgs, stream=True)
+            stream = ollama.chat(model=model_name, messages=messages, stream=True)
             for chunk in stream:
                 yield chunk["message"]["content"]
         except ResponseError as e:
