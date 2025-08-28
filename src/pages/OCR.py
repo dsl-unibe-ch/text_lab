@@ -6,6 +6,10 @@ import json
 import sys
 import os
 import subprocess
+import time
+import signal
+import threading
+from contextlib import contextmanager
 from datetime import datetime
 
 st.set_page_config(page_title="OLM OCR", layout="wide")
@@ -14,14 +18,115 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from auth import check_token
 check_token()
 
+def _count_md_for_pdfs(workdir: str, rel_pdf_paths: list[str]) -> int:
+    n = 0
+    for p in rel_pdf_paths:
+        md_abs = os.path.join(workdir, os.path.splitext(p)[0] + ".md")
+        if os.path.exists(md_abs):
+            n += 1
+    return n
+
+@contextmanager
+def _popen_kill_on_exit(proc):
+    try:
+        yield proc
+    finally:
+        if proc and proc.poll() is None:
+            try:
+                os.killpg(proc.pid, signal.SIGTERM)  # POSIX: kill whole group
+            except Exception:
+                pass
+
+def _stream_exec_with_progress(cmd: list[str],
+                               workdir: str,
+                               rel_pdf_paths: list[str],
+                               env: dict,
+                               stall_timeout_s: int = 300,    # no new .md within N sec -> abort
+                               hard_timeout_s: int = 7200):   # absolute cap
+    log_area = st.container()
+    prog = st.progress(0)
+    status = st.empty()
+    stop_btn = st.button("Cancel run", type="secondary")
+
+    start = time.time()
+    last_progress = start
+    produced_last = 0
+
+    # Make a new process group so we can kill everything cleanly.
+    proc = subprocess.Popen(
+        cmd,
+        stdout=sys.stdout,
+        stderr=sys.stderr,
+        text=True,
+        bufsize=1,
+        env=env,
+        start_new_session=True,
+    )
+
+    st.session_state["_current_ocr_pid"] = proc.pid
+
+    lines = []
+
+    def pump():
+        for line in iter(proc.stdout.readline, ""):
+            lines.append(line.rstrip())
+            # Keep the UI responsive but not too chatty
+            if len(lines) % 8 == 0:
+                log_area.code("\n".join(lines[-400:]))  # tail last 400 lines
+
+    t = threading.Thread(target=pump, daemon=True)
+    t.start()
+
+    with _popen_kill_on_exit(proc):
+        while proc.poll() is None:
+            # Cancel?
+            if stop_btn:
+                os.killpg(proc.pid, signal.SIGTERM)
+                raise RuntimeError("Run cancelled by user.")
+
+            # Progress by counting created .md siblings
+            produced = _count_md_for_pdfs(workdir, rel_pdf_paths)
+            if produced != produced_last:
+                produced_last = produced
+                last_progress = time.time()
+
+            total = max(1, len(rel_pdf_paths))
+            prog.progress(min(1.0, produced / total))
+            status.text(f"Markdown created: {produced}/{total}")
+
+            # Stall timeout (no new .md for too long)
+            if time.time() - last_progress > stall_timeout_s:
+                os.killpg(proc.pid, signal.SIGTERM)
+                raise TimeoutError(
+                    f"No new outputs for {stall_timeout_s}s; killed the job to keep the UI responsive."
+                )
+
+            # Hard timeout
+            if time.time() - start > hard_timeout_s:
+                os.killpg(proc.pid, signal.SIGTERM)
+                raise TimeoutError("OCR exceeded maximum allowed time and was aborted.")
+
+            time.sleep(1.0)
+
+    # Final log flush
+    log_area.code("\n".join(lines[-400:]))
+
+    rc = proc.returncode
+    if rc != 0:
+        raise subprocess.CalledProcessError(rc, cmd)
+
 def _run_apptainer_ocr_batch(workdir: str, rel_pdf_paths: list[str], container: str):
-    """
-    Runs a single Apptainer call to process multiple PDFs.
-    Each rel path is relative to workdir and will be mounted under /localworkspace.
-    Produces .md files next to each PDF.
-    """
     if not rel_pdf_paths:
         return
+
+    # --- NEW: pass in-container env to quiet warnings + reduce sglang flakiness ---
+    env = os.environ.copy()
+    # Apptainer passes APPTAINERENV_* into the container as plain VAR=...
+    env["APPTAINERENV_HF_HOME"] = "/opt/hf_cache"
+    env["APPTAINERENV_TRANSFORMERS_CACHE"] = "/opt/hf_cache"  # backward compat for the warning
+    # Tame sglang memory / stability (these map to server args you see in logs)
+    env["APPTAINERENV_SGLANG_DISABLE_CUDA_GRAPH"] = "1"       # avoid long capture + fragility
+    env["APPTAINERENV_SGLANG_MAX_RUNNING_REQUESTS"] = "1"     # be conservative on concurrency
 
     cmd = [
         "apptainer", "exec", "--nv", "--writable-tmpfs", "--no-home",
@@ -33,8 +138,13 @@ def _run_apptainer_ocr_batch(workdir: str, rel_pdf_paths: list[str], container: 
         "--markdown", "--pdfs",
     ] + [f"/localworkspace/{p}" for p in rel_pdf_paths]
 
-    # One batch run for all PDFs
-    subprocess.run(cmd, stdout=sys.stdout, stderr=sys.stderr, check=True, capture_output=False)
+    # --- NEW: stream logs + progres + timeouts, instead of blocking run() ---
+    _stream_exec_with_progress(
+        cmd=cmd,
+        workdir=workdir,
+        rel_pdf_paths=rel_pdf_paths,
+        env=env,
+    )
 
 
 def run_ocr():
