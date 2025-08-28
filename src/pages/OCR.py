@@ -52,13 +52,15 @@ def _stream_exec_with_progress(cmd: list[str],
     last_progress = start
     produced_last = 0
 
+    stream_logs = True  # set False if you want to inherit to server console
+
     # Make a new process group so we can kill everything cleanly.
     proc = subprocess.Popen(
         cmd,
-        stdout=sys.stdout,
-        stderr=sys.stderr,
-        text=True,
-        bufsize=1,
+        stdout=(subprocess.PIPE if stream_logs else None),
+        stderr=(subprocess.STDOUT if stream_logs else None),
+        text=stream_logs,
+        bufsize=(1 if stream_logs else 0),
         env=env,
         start_new_session=True,
     )
@@ -68,14 +70,20 @@ def _stream_exec_with_progress(cmd: list[str],
     lines = []
 
     def pump():
-        for line in iter(proc.stdout.readline, ""):
-            lines.append(line.rstrip())
-            # Keep the UI responsive but not too chatty
-            if len(lines) % 8 == 0:
-                log_area.code("\n".join(lines[-400:]))  # tail last 400 lines
+        if not proc.stdout:  # extra guard
+            return
+        try:
+            for line in proc.stdout:
+                lines.append(line.rstrip())
+                if len(lines) % 8 == 0:
+                    log_area.code("\n".join(lines[-400:]))
+        except Exception:
+            # Stream ended or session closed; just exit quietly
+            pass
 
-    t = threading.Thread(target=pump, daemon=True)
-    t.start()
+    if stream_logs and proc.stdout:
+        t = threading.Thread(target=pump, daemon=True)
+        t.start()
 
     with _popen_kill_on_exit(proc):
         while proc.poll() is None:
