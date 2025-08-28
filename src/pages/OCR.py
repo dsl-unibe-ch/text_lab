@@ -34,7 +34,7 @@ def _run_apptainer_ocr_batch(workdir: str, rel_pdf_paths: list[str], container: 
     ] + [f"/localworkspace/{p}" for p in rel_pdf_paths]
 
     # One batch run for all PDFs
-    subprocess.run(cmd, stdout=sys.stdout, stderr=sys.stderr, check=True, capture_output=True)
+    subprocess.run(cmd, stdout=sys.stdout, stderr=sys.stderr, check=True, capture_output=False)
 
 
 def run_ocr():
