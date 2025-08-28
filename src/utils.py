@@ -28,7 +28,12 @@ def ensure_ollama_server():
     cvd = os.environ.get("CUDA_VISIBLE_DEVICES")
     env["CUDA_VISIBLE_DEVICES"] = (cvd if cvd else "0")
     # Let the daemon find both the backend and CUDA runtime
-    env["LD_LIBRARY_PATH"] = f"/usr/local/lib/ollama:/usr/local/cuda/lib64:{env.get('LD_LIBRARY_PATH', '')}"
+    env["LD_LIBRARY_PATH"] = (
+        f'{env.get("LD_LIBRARY_PATH", "")}'
+        f':/usr/local/lib/ollama'
+        f':/usr/local/cuda/lib64'
+        f':/usr/local/cuda/targets/x86_64-linux/lib'
+    )
 
     # 2. Spawn the daemon *once*
     if shutil.which("ollama") is None:

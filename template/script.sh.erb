@@ -55,7 +55,6 @@ apptainer exec \
   --env OLLAMA_MODELS="/opt/ollama/models" \
   --env OLLAMA_LLM_LIBRARY="cuda" \
   --env OLLAMA_FLASH_ATTENTION="true" \
-  --env LD_LIBRARY_PATH="/usr/local/lib/ollama:/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}" \
   "$TL_CONTAINER" \
   /usr/bin/python3 -m streamlit run "$CONT_TEXT_LAB_DIR/src/Home.py" \
     --server.address 0.0.0.0 \
