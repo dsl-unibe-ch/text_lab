@@ -41,7 +41,7 @@ def _stream_exec_with_progress(cmd: list[str],
                                workdir: str,
                                rel_pdf_paths: list[str],
                                env: dict,
-                               stall_timeout_s: int = 300,    # no new .md within N sec -> abort
+                               stall_timeout_s: int = 900,    # no new .md within N sec -> abort
                                hard_timeout_s: int = 7200):   # absolute cap
     log_area = st.container()
     prog = st.progress(0)
