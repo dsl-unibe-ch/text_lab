@@ -1,11 +1,14 @@
 OLM_VER="0.11.6"
 OLLAMA_DIR="../container/models/ollama"
 TMP="/tmp/ollama_pkgs"
-mkdir -p "$TMP" "$OLLAMA_DIR"
 
+set -e
+
+mkdir -p "$TMP" "$OLLAMA_DIR"
 pushd "$TMP"
 curl -fL "https://github.com/ollama/ollama/releases/download/v${OLM_VER}/ollama-linux-amd64.tgz" -o ollama.tgz
 tar -xzf ollama.tgz
+ls -al ollama
 popd
 cp -r "$TMP/ollama/lib/ollama/*" "$OLLAMA_DIR"
 rm -rf "$TMP"
