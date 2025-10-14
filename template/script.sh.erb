@@ -11,8 +11,11 @@ CONT_OLMOCR_DIR="/olmocr"
 TL_CONTAINER="$HOST_TEXT_LAB_DIR/container/text_lab.sif"
 OCR_CONTAINER="$HOST_TEXT_LAB_DIR/container/olmocr.sif"
 
+HOST_OLLAMA_DIR="../container/models/ollama"
+CONT_OLLAMA_DIR="/opt/ollama"
+
 export OCR_CONTAINER
-export OLLAMA_MODELS="/opt/ollama/models"
+export OLLAMA_MODELS="$CONT_OLLAMA_DIR/models"
 
 # ---------------------------- Runtime parameters ------------------------------
 # Which ports should each service listen on?
@@ -52,7 +55,8 @@ fi
 apptainer exec \
   --nv \
   --bind "$HOST_TEXT_LAB_DIR:$CONT_TEXT_LAB_DIR" \
-  --env OLLAMA_MODELS="/opt/ollama/models" \
+  --bind "$HOST_OLLAMA_DIR:$CONT_OLLAMA_DIR" \
+  --env OLLAMA_MODELS="$CONT_OLLAMA_DIR/models" \
   --env OLLAMA_LLM_LIBRARY="cuda" \
   --env OLLAMA_FLASH_ATTENTION="true" \
   "$TL_CONTAINER" \

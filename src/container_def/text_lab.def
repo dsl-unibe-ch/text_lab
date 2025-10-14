@@ -99,41 +99,40 @@ PY
     # 1.5  Install Ollama & pull the selected LLM weights
     ###########################################################################
     # Ensure the CUDA backend .so is present even when building without a GPU
-    OLM_VER="0.11.6"
-    TMP=/tmp/ollama_pkgs && mkdir -p "$TMP" /usr/local/lib/ollama
-    cd "$TMP"
-    curl -fL "https://github.com/ollama/ollama/releases/download/v${OLM_VER}/ollama-linux-amd64.tgz" -o ollama.tgz
-    tar -xzf ollama.tgz
-    install -m 0755 bin/ollama /usr/local/bin/ollama
-    cp -r lib/ollama/* /usr/local/lib/ollama/
-    echo "/usr/local/lib/ollama" > /etc/ld.so.conf.d/ollama.conf
-    ldconfig
-    rm -rf "$TMP"
+    #OLM_VER="0.11.6"
+    #TMP=/tmp/ollama_pkgs && mkdir -p "$TMP" /usr/local/lib/ollama
+    #cd "$TMP"
+    #curl -fL "https://github.com/ollama/ollama/releases/download/v${OLM_VER}/ollama-linux-amd64.tgz" -o ollama.tgz
+    #tar -xzf ollama.tgz
+    #install -m 0755 bin/ollama /usr/local/bin/ollama
+    #cp -r lib/ollama/* /usr/local/lib/ollama/
+    #echo "/usr/local/lib/ollama" > /etc/ld.so.conf.d/ollama.conf
+    #ldconfig
+    #rm -rf "$TMP"
 
-    echo ">>> starting Ollama server in the background"
-    ollama serve > /tmp/ollama-build.log 2>&1 &
-    OLLAMA_PID=$!
+    #echo ">>> starting Ollama server in the background"
+    #ollama serve > /tmp/ollama-build.log 2>&1 &
+    #OLLAMA_PID=$!
 
-    sleep 2
+    #sleep 2
 
-    for m in \
-        gemma3:12b \
-        gemma3:27b \
-        deepseek-r1:8b \
-        deepseek-r1:14b \
-        deepseek-r1:70b \
-        llama3.2:latest \
-        llama3.1:latest \
-        qwen2.5:32b; do
-        echo "---> pulling Ollama model: ${m}"
-        ollama pull "${m}" || echo "WARNING: pull failed for ${m}"
-    done
+    #for m in \
+    #    gemma3:12b \
+    #    gemma3:27b \
+    #    deepseek-r1:8b \
+    #    deepseek-r1:14b \
+    #    deepseek-r1:70b \
+    #    llama3.2:latest \
+    #    llama3.1:latest \
+    #    qwen2.5:32b; do
+    #    echo "---> pulling Ollama model: ${m}"
+    #    ollama pull "${m}" || echo "WARNING: pull failed for ${m}"
+    #done
 
-
-    # --- shut the server down ----------------------------------------------
-    kill "$OLLAMA_PID" 2>/dev/null || true
-    wait "$OLLAMA_PID" 2>/dev/null || true
-    echo ">>> Ollama server stopped"
+    ## --- shut the server down ----------------------------------------------
+    #kill "$OLLAMA_PID" 2>/dev/null || true
+    #wait "$OLLAMA_PID" 2>/dev/null || true
+    #echo ">>> Ollama server stopped"
 
     ###########################################################################
     # 1.6  Quick sanity snapshots (first 10 lines to keep log short)
