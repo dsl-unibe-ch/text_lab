@@ -8,7 +8,8 @@ mkdir -p "$TMP" "$OLLAMA_DIR"
 pushd "$TMP"
 curl -fL "https://github.com/ollama/ollama/releases/download/v${OLM_VER}/ollama-linux-amd64.tgz" -o ollama.tgz
 tar -xzf ollama.tgz
-ls -al
+ls -al lib
+ls -al bin
 popd
 cp -r "$TMP/lib/ollama/*" "$OLLAMA_DIR"
 rm -rf "$TMP"
