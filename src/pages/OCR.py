@@ -44,11 +44,19 @@ if not HOST_HOME:
 # Define a base directory for all OCR jobs
 OCR_JOBS_BASE_DIR = pathlib.Path(HOST_HOME) / "ondemand_text_lab_ocr_jobs"
 
+# --- NEW: Function to clear results when a new file is uploaded ---
+def clear_results():
+    """Clears all OCR results from the session state."""
+    for key in ["ocr_complete", "extracted_text", "json_content", "txt_name", "json_name", "ocr_error", "ocr_error_details"]:
+        if key in st.session_state:
+            del st.session_state[key]
 
 # --- 2. Create File Uploader ---
 
 uploaded_file = st.file_uploader(
-    "Choose a PDF or image file", type=["pdf", "png", "jpg", "jpeg"]
+    "Choose a PDF or image file", 
+    type=["pdf", "png", "jpg", "jpeg"],
+    on_change=clear_results  # <-- This clears old results on new upload
 )
 
 # --- 3. Show Button and Run Process ---
@@ -56,10 +64,16 @@ uploaded_file = st.file_uploader(
 if uploaded_file is not None:
     
     st.info(f"File selected: **{uploaded_file.name}**")
-    st.warning("⚠️ **Heads up:** Processing can take 4-5 minutes per page. Please keep this tab open until the process is complete.")
+    
+    # Only show the warning if processing isn't already complete
+    if "ocr_complete" not in st.session_state:
+        st.warning("⚠️ **Heads up:** Processing can take 4-5 minutes per page. Please keep this tab open until the process is complete.")
 
     # Create the button. The logic below will only run if it's clicked.
     if st.button("🚀 Run OCR"):
+    
+        # Clear any previous state before starting
+        clear_results()
     
         # --- 3. Set up temporary job directories ---
         JOB_ID = str(uuid.uuid4())
@@ -88,28 +102,19 @@ if uploaded_file is not None:
 
             cmd = [
                 "apptainer", "exec", "--nv",
-                
-                # Bind the host directories to the container paths
                 "--bind", f"{INPUT_DIR}:{CONT_INPUT_DIR}",
                 "--bind", f"{WORKSPACE_DIR}:{CONT_WORKSPACE_DIR}",
-                
-                # Override BOTH cache variables to point to our writable workspace
                 "--env", "HF_HOME=/workspace/hf_cache",
                 "--env", "TRANSFORMERS_CACHE=/workspace/hf_cache",
-                
                 OCR_SIF_PATH,
-                
-                # The command to run inside the olmocr container
                 "python", "-m", "olmocr.pipeline",
-                CONT_WORKSPACE_DIR,  # The output workspace path
-                "--markdown", # <-- We leave this, as it does no harm
-                "--pdfs", CONT_INPUT_FILE # The input file path
+                CONT_WORKSPACE_DIR,
+                "--markdown", 
+                "--pdfs", CONT_INPUT_FILE
             ]
 
             # --- 5. Run the OCR process ---
             with st.spinner("Running OCR... This may take several minutes. Please wait."):
-                
-                # st.code(" ".join(cmd), language="bash") # <-- HIDDEN as requested
                 
                 result = subprocess.run(
                     cmd, 
@@ -118,64 +123,44 @@ if uploaded_file is not None:
                     encoding='utf-8'
                 )
 
-            # --- 6. Process the result (MODIFIED) ---
+            # --- 6. Process the result (Saving to Session State) ---
             
             results_dir = WORKSPACE_DIR / "results"
-            extracted_text = None
-            jsonl_files = []
-
+            
             if result.returncode == 0 and results_dir.exists():
-                # Find any .jsonl file in the results directory
                 jsonl_files = list(results_dir.glob("*.jsonl"))
                 
                 if jsonl_files:
                     try:
                         output_file_path = jsonl_files[0]
-                        # Read the first line of the .jsonl file
+                        json_file_name = output_file_path.name
+                        
                         with open(output_file_path, 'r', encoding='utf-8') as f:
                             first_line = f.readline()
                             data = json.loads(first_line)
-                            extracted_text = data.get("text")
+                        
+                        # --- SAVE TO SESSION STATE ---
+                        st.session_state.extracted_text = data.get("text")
+                        st.session_state.json_content = first_line
+                        st.session_state.txt_name = input_file_path.with_suffix(".txt").name
+                        st.session_state.json_name = json_file_name
+                        st.session_state.ocr_complete = True  # <-- Set success flag
+                        
                     except Exception as e:
-                        st.error(f"Error parsing JSONL output: {e}")
-                        st.text_area("JSONL Content", first_line, height=100)
-                
-            if extracted_text:
-                st.success("🎉 OCR complete!")
-                
-                st.markdown("### Extracted Text")
-                st.text_area(
-                    "Result", 
-                    extracted_text, 
-                    height=400,
-                    key="md_result"
-                )
-                
-                # Create a name for the download file
-                download_file_name = input_file_path.with_suffix(".txt").name
-                st.download_button(
-                    label="Download as .txt",
-                    data=extracted_text,
-                    file_name=download_file_name,
-                    mime="text/plain",
-                )
+                        st.session_state.ocr_error = f"Error parsing JSONL output: {e}"
+                        if 'first_line' in locals():
+                            st.session_state.ocr_error_details = first_line
+                else:
+                    st.session_state.ocr_error = f"Process ran, but no .jsonl output file was found in {results_dir}"
+                    st.session_state.ocr_error_details = (result.stdout, result.stderr)
 
             else:
                 # Show error details if it failed
-                st.error(f"OCR process failed. Return code: {result.returncode}")
-                if not results_dir.exists():
-                    st.warning(f"Output directory was not found at: {results_dir}")
-                elif not jsonl_files:
-                    st.warning(f"Process ran, but no .jsonl output file was found in {results_dir}")
-                
-                st.subheader("Process STDOUT:")
-                st.text_area("stdout", result.stdout, height=150, key="stdout_err")
-                
-                st.subheader("Process STDERR:")
-                st.text_area("stderr", result.stderr, height=150, key="stderr_err")
+                st.session_state.ocr_error = f"OCR process failed. Return code: {result.returncode}"
+                st.session_state.ocr_error_details = (result.stdout, result.stderr)
 
         except Exception as e:
-            st.error(f"An unexpected error occurred: {e}")
+            st.session_state.ocr_error = f"An unexpected error occurred: {e}"
             st.exception(e)
         
         finally:
@@ -183,6 +168,51 @@ if uploaded_file is not None:
             if JOB_DIR.exists():
                 try:
                     shutil.rmtree(JOB_DIR)
-                    # st.info(f"Cleaned up temporary job directory: {JOB_DIR}") # <-- HIDDEN from user
                 except Exception as e:
                     st.warning(f"Could not clean up {JOB_DIR}. Error: {e}")
+
+# --- 7. DISPLAY RESULTS (Moved outside the button click) ---
+# This block now runs on *every* rerun, checking the session state.
+
+if "ocr_complete" in st.session_state:
+    st.success("🎉 OCR complete!")
+    
+    st.markdown("### Extracted Text")
+    st.text_area(
+        "Result", 
+        st.session_state.extracted_text, 
+        height=400,
+        key="md_result"
+    )
+    
+    # --- Create columns for download buttons ---
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.download_button(
+            label="Download as .txt",
+            data=st.session_state.extracted_text,
+            file_name=st.session_state.txt_name,
+            mime="text/plain",
+        )
+    
+    with col2:
+        st.download_button(
+            label="Download as .jsonl",
+            data=st.session_state.json_content,
+            file_name=st.session_state.json_name,
+            mime="application/json",
+        )
+
+# Display errors if they were saved to session state
+elif "ocr_error" in st.session_state:
+    st.error(st.session_state.ocr_error)
+    if "ocr_error_details" in st.session_state:
+        details = st.session_state.ocr_error_details
+        if isinstance(details, tuple) and len(details) == 2:
+            st.subheader("Process STDOUT:")
+            st.text_area("stdout", details[0], height=150, key="stdout_err")
+            st.subheader("Process STDERR:")
+            st.text_area("stderr", details[1], height=150, key="stderr_err")
+        else:
+            st.text_area("Error Details", str(details), height=100)
