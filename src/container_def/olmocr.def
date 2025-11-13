@@ -1,44 +1,75 @@
 Bootstrap: docker
-From: alleninstituteforai/olmocr:v0.1.71
-
-%environment
-    # Keep HF in read-only offline mode inside the final image
-    export HF_HOME=/opt/hf_cache
-    export TRANSFORMERS_CACHE=$HF_HOME
-    export TRANSFORMERS_OFFLINE=1
-    export HF_DATASETS_OFFLINE=1
-    export HF_HUB_DISABLE_XET=1         # skip the Xet transport
-    # Tell olmocr / sglang where the weights really live
-    export OLMOCR_MODEL_PATH=/opt/models/olmocr-7b
+From: nvidia/cuda:12.5.0-devel-ubuntu22.04
 
 %post
-    set -e
+    export DEBIAN_FRONTEND=noninteractive
 
-    # (1) Extra tools the base image does not contain
-    apt update && apt install -y --no-install-recommends \
-        git-lfs curl ca-certificates && \
+    # --- OS deps (quiet + noninteractive) ---
+    apt-get update
+    echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" | debconf-set-selections
+    apt-get install -y --no-install-recommends \
+        poppler-utils ttf-mscorefonts-installer fonts-crosextra-caladea fonts-crosextra-carlito \
+        gsfonts lcdf-typetools wget curl bzip2 ca-certificates gnupg software-properties-common
     rm -rf /var/lib/apt/lists/*
 
-    git lfs install --skip-repo   # enable LFS inside container
+    # --- Miniconda ---
+    mkdir -p /opt
+    wget -qO /tmp/miniconda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+    bash /tmp/miniconda.sh -b -p /opt/conda
+    rm -f /tmp/miniconda.sh
+    export PATH="/opt/conda/bin:$PATH"
 
-    # The official image already has torch + sglang + huggingface_hub
-    # but snapshot download is part of huggingface-cli (same package)
-    pip install --no-cache-dir -U huggingface_hub
+    # Accept Anaconda channels ToS (prevents build-time prompt)
+    conda config --set auto_update_conda false
+    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main
+    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
 
-    # (2) Pre-download the checkpoint
-    mkdir -p /opt/models /opt/hf_cache
+    # --- Python env (3.11) ---
+    conda create -y -n olmocr311 python=3.11
+    /opt/conda/envs/olmocr311/bin/python -m pip install --upgrade pip
 
-    # For private repos set HF_TOKEN before build or here:
-    # export HF_TOKEN=hf_xxxxxxxxxxxxxxxxxxxxxxxxxxx
-    huggingface-cli download allenai/olmOCR-7B-0225-preview \
-        --revision main \
-        --local-dir /opt/models/olmocr-7b \
-        --local-dir-use-symlinks False \
-        ${HF_TOKEN:+--token $HF_TOKEN}
+    # IMPORTANT: Pin numpy < 2 to keep vLLM/outlines happy
+    /opt/conda/envs/olmocr311/bin/python -m pip install --no-cache-dir "numpy==1.26.4"
 
-    # Optional: strip Hub’s index files to save a few MB
-    rm -rf /opt/hf_cache/*.json
+    # PyTorch 2.4.0 cu118 wheels (works with vLLM 0.11.0)
+    /opt/conda/envs/olmocr311/bin/python -m pip install --no-cache-dir \
+        --index-url https://download.pytorch.org/whl/cu118 \
+        torch==2.4.0+cu118 torchvision==0.19.0+cu118 torchaudio==2.4.0+cu118
 
-    # Other clean up to reduce container size
-    apt clean
+    # vLLM 0.11.0 (the version that works well with torch that work with olmcr)
+    /opt/conda/envs/olmocr311/bin/python -m pip install --no-cache-dir "vllm==0.11.0"
+
+    # olmocr itself, but avoid pulling its strict deps that would force torch>=2.7
+    /opt/conda/envs/olmocr311/bin/python -m pip install --no-cache-dir "olmocr[gpu]==0.4.4" --no-deps
+
+    # Satisfy olmocr runtime deps explicitly with safe pins
+    /opt/conda/envs/olmocr311/bin/python -m pip install --no-cache-dir \
+        "transformers==4.55.2" tokenizers==0.21.4 \
+        beaker-py bleach boto3 cached_path ftfy lingua-language-detector \
+        markdown2 markdownify orjson "pypdf>=5.2.0" pypdfium2 smart_open zstandard \
+        matplotlib pandas seaborn scikit-learn umap-learn opencv-python-headless scikit-image \
+        mlflow datasets flask requests Flask-Cors ollama rich
+
+    # Optional: FlashInfer is nice-to-have only (vLLM will warn if missing)
+    # /opt/conda/envs/olmocr311/bin/python -m pip install --no-cache-dir flashinfer-python
+
+    # Housekeeping
+    conda clean -a -y
+    apt-get clean
     rm -rf /var/lib/apt/lists/*
+
+%environment
+    export DEBIAN_FRONTEND=noninteractive
+    export PATH="/opt/conda/envs/olmocr311/bin:/opt/conda/bin:$PATH"
+    export LD_LIBRARY_PATH="/opt/conda/envs/olmocr311/lib:$LD_LIBRARY_PATH"
+    # vLLM prefers spawn on some HPCs; uncomment if you ever hit multiprocessing issues
+    # export VLLM_WORKER_MULTIPROC_METHOD=spawn
+
+%test
+    /opt/conda/envs/olmocr311/bin/python - <<'PY'
+import sys, torch
+print("torch:", torch.__version__, "cuda:", torch.version.cuda, "py:", sys.version.split()[0])
+import vllm; print("vllm:", getattr(vllm, "__version__", "?"))
+import importlib; importlib.import_module("olmocr")
+print("olmocr import OK")
+PY
