@@ -19,7 +19,7 @@ check_token()
 
 
 st.title("📄 Document OCR (using olmocr)")
-st.markdown("Upload a PDF or image file to extract its text content.")
+st.markdown("Upload a PDF extract its text content.")
 
 # --- 1. Get required paths from environment variables ---
 
@@ -53,7 +53,7 @@ def clear_results():
 
 uploaded_file = st.file_uploader(
     "Choose a PDF or image file", 
-    type=["pdf", "png", "jpg", "jpeg"],
+    type=["pdf"],
     on_change=clear_results  # <-- This clears old results on new upload
 )
 
