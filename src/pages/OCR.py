@@ -9,16 +9,14 @@ import json
 
 st.set_page_config(page_title="OLM OCR", layout="wide")
 
-# --- Authentication ---
-# Add the parent directory to the path to find the auth module
+
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-try:
-    from auth import check_token
-    check_token()
-except ImportError:
-    st.error("Could not import authentication module.")
-    st.stop()
-# -------------------------------------
+
+from auth import check_token
+
+check_token()
+
+
 
 st.title("📄 Document OCR (using olmocr)")
 st.markdown("Upload a PDF or image file to extract its text content.")
