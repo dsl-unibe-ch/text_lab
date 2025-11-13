@@ -8,11 +8,17 @@ HOST_TEXT_LAB_DIR="${TEXT_LAB_DIR:-/storage/research/dsl_shared/solutions/ondema
 CONT_TEXT_LAB_DIR="/text_lab"
 CONT_OLMOCR_DIR="/olmocr"
 
-TL_CONTAINER="$HOST_TEXT_LAB_DIR/container/text_lab.sif"
-OCR_CONTAINER="$HOST_TEXT_LAB_DIR/container/olmocr.sif"
+#point to the apptainer containers on research storage
+TL_CONTAINER="$HOST_TEXT_LAB_DIR/container/text_lab_121125.sif"
+OCR_CONTAINER="$HOST_TEXT_LAB_DIR/container/olmocr_main.sif"
 
-HOST_OLLAMA_DIR="../container/models/ollama"
+#point to where the ollama models are stored on research storage
+HOST_OLLAMA_DIR="/storage/research/dsl_shared/solutions/ondemand/text_lab/container/models/ollama"
 CONT_OLLAMA_DIR="/opt/ollama"
+
+#point to where the whisper models are stored on research storage
+HOST_WHISPER_DIR="/storage/research/dsl_shared/solutions/ondemand/text_lab/container/models/whisper"
+CONT_WHISPER_DIR="/opt/whisper"
 
 export OCR_CONTAINER
 export OLLAMA_MODELS="$CONT_OLLAMA_DIR/models"
@@ -33,21 +39,10 @@ export PYTHONNOUSERSITE=1
 export HOME="$HOME"
 export USER="$USER"
 
-# Set the variable for whisper to use models cached from inside the container
-export WHISPER_CACHE="/opt/whisper"
-
 pushd "${PWD}"
 
-echo "Running apptainer exec --nv '\$TL_CONTAINER' nvidia-smi"
-apptainer exec --nv "$TL_CONTAINER" nvidia-smi
 
-# Hard fail if the GPU is not visible inside the container
-if $? != 0; then
-  echo "FATAL: No GPU visible inside the container. Request a GPU and keep --nv."
-  exit 1
-fi
-
-# If CUDA_VISIBLE_DEVICES is empty, unmask GPU 0 (or whatever your job grants)
+# If CUDA_VISIBLE_DEVICES is empty, unmask GPU 0 
 if [ -z "${CUDA_VISIBLE_DEVICES:-}" ]; then
   export CUDA_VISIBLE_DEVICES=0
 fi
@@ -56,18 +51,21 @@ apptainer exec \
   --nv \
   --bind "$HOST_TEXT_LAB_DIR:$CONT_TEXT_LAB_DIR" \
   --bind "$HOST_OLLAMA_DIR:$CONT_OLLAMA_DIR" \
+  --bind /storage:/storage \
+  --bind "$HOST_WHISPER_DIR:$CONT_WHISPER_DIR:ro" \
   --env OLLAMA_MODELS="$CONT_OLLAMA_DIR/models" \
   --env OLLAMA_LLM_LIBRARY="cuda" \
   --env OLLAMA_FLASH_ATTENTION="true" \
   "$TL_CONTAINER" \
-  /usr/bin/python3 -m streamlit run "$CONT_TEXT_LAB_DIR/src/Home.py" \
+  /usr/bin/python3 -m streamlit run "/storage/homefs/aa22x177/ondemand/dev/text_lab/src/Home.py" \
     --server.address 0.0.0.0 \
     --server.port "$TEXT_LAB_PORT" \
     --server.baseUrlPath "$SERVER_BASEURLPATH" \
     --server.headless true \
-    --server.maxUploadSize 500 \
+    --server.maxUploadSize 10000 \
     --browser.serverAddress ondemand.hpc.unibe.ch \
     --browser.gatherUsageStats false \
-    --logger.level debug
+    --logger.level error #set to debug for development debugging, other options: info, warning, error, critical
+    --client.showErrorDetails=false #for deployment, set to true for debugging
 
 popd
