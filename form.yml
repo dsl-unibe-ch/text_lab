@@ -7,6 +7,8 @@ form:
   - time
   - gpu
   - gpu_number
+  - advanced_mode
+  - reservation
 
 attributes:
   partition:
@@ -42,6 +44,7 @@ attributes:
       - ["rtx4090", "gpu:rtx4090:"]
       - ["A100", "gpu:a100:"]
       - ["H100", "gpu:h100:"]
+      - ["H200", "gpu:h200:"]
     value: "rtx4090"
     help: "Use A100 or H100 with 'job_gpu_preemptable' option from the 'qos'"
 
@@ -53,3 +56,16 @@ attributes:
      step: 1
      value: "1"
      help: "Number of GPUs. Ask for more than 1 in case you plan to run large LLM. You might not be able to request more than 1"
+
+  advanced_mode:
+    widget: "check_box"
+    label: "Advanced Mode"
+    help: "Show advanced Slurm options (e.g. reservation)"
+    html_options:
+      data:
+        hide-reservation-when-un-checked: true
+
+  reservation:
+    widget: "text_field"
+    label: "Reservation"
+    help: "(optional) Name of active Slurm reservation to use for this session."
