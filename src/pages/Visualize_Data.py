@@ -1,279 +1,245 @@
-# pages/Visualize_Data.py
-import os
-import sys
-import io
-import json
-import zipfile
-import tempfile
-import traceback
-import asyncio
-from pathlib import Path
-
 import streamlit as st
+import pandas as pd
+import os
+import uuid
+import shutil
+import asyncio
+import pathlib
+import ollama
+from mcp import ClientSession, StdioServerParameters, types
+from mcp.client.stdio import stdio_client
 
-# --- Streamlit page config ---
-st.set_page_config(page_title="Visualize Data", layout="wide")
+# --- Configuration ---
+MODEL = "qwen2.5:32b"
+# --- Dynamic Path Configuration ---
+# Get the directory of the current script (which is src/pages/)
+_CURRENT_SCRIPT_DIR = pathlib.Path(__file__).parent
+# Get the base 'src' directory (by going up one level from 'pages')
+_SRC_DIR = _CURRENT_SCRIPT_DIR.parent
 
-# Make project root importable (so we can import auth.check_token)
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from auth import check_token  # noqa: E402
+# Define absolute paths
+# NOTE: Your log shows "mcp_server.py". 
+# Change "mcp_server.py" to "mcp_server.py" if you renamed the file.
+MCP_SERVER_SCRIPT = str(_SRC_DIR / "mcp_server.py")
+ARTIFACTS_DIR = str(_SRC_DIR / "mcp_artifacts")
 
-check_token()
+# --- System & Default Prompts ---
+SYSTEM_PROMPT = """
+You are an expert data analyst. Your task is to generate visualisations based on a user's request and the first 5 rows of their dataset.
 
-# --- MCP / stdio plumbing ---
-from mcp import ClientSession, StdioServerParameters, types  # noqa: E402
-from mcp.client.stdio import stdio_client  # noqa: E402
+1.  You have access to plotting tools: `plot_histogram`, `plot_scatterplot`, and `plot_boxplot`.
+2.  The user will provide a prompt and the `head()` of their data.
+3.  Based on the prompt and the data columns (names and types), you must decide which plotting tools to call.
+4.  **CRITICAL:** Your tools require a `data_file_path` argument. You DO NOT need to provide this. It will be injected for you. You only need to provide the *other* arguments (like `column`, `x_column`, `y_column`, `title`, etc.) based on the data head.
+5.  Call multiple tools if it makes sense. For example, if the data has 3 numerical columns, you might call `plot_histogram` for each one.
+6.  After you call the tools, you will receive their output (which are file paths).
+7.  You must then provide a final, single response to the user. This response should be a brief, non-technical summary in Markdown, describing what you did (e.g., "I generated a histogram for the 'Age' column to show its distribution and a scatter plot to explore the relationship between 'Age' and 'Salary'.").
+8.  Do not just list the tool names. Provide a helpful, narrative summary. Do not mention file paths or errors.
+"""
 
-# Paths
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-MCP_SERVER_PATH = str(PROJECT_ROOT / "mcp_server.py")
-MCP_ARTIFACTS_DIR = os.environ.get("MCP_ARTIFACTS_DIR", str(PROJECT_ROOT / "mcp_artifacts"))
+DEFAULT_PROMPT = "Please perform a basic exploratory data analysis. Generate a few useful plots to understand the data's distribution and relationships."
 
+# --- Helper Functions ---
 
-# ------------------------- Async helpers & error handling -------------------------
-def run_async(coro):
-    """Run an async coroutine safely under Streamlit."""
+@st.cache_data
+def load_dataframe(uploaded_file):
+    """Loads an uploaded file into a pandas DataFrame."""
     try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-    if loop.is_running():
-        # Rare under Streamlit, but guard anyway
-        return asyncio.run_coroutine_threadsafe(coro, loop).result()
-    return loop.run_until_complete(coro)
+        if uploaded_file.name.endswith('.csv'):
+            return pd.read_csv(uploaded_file)
+        elif uploaded_file.name.endswith('.tsv'):
+            return pd.read_csv(uploaded_file, sep='\t')
+        elif uploaded_file.name.endswith(('.xls', '.xlsx')):
+            # Reset stream position just in case
+            uploaded_file.seek(0)
+            return pd.read_excel(uploaded_file)
+        elif uploaded_file.name.endswith('.json'):
+            return pd.read_json(uploaded_file)
+        else:
+            st.error(f"Unsupported file type: {uploaded_file.name}")
+            return None
+    except Exception as e:
+        st.error(f"Error reading file: {e}")
+        return None
 
+def save_uploaded_file(uploaded_file, run_dir):
+    """Saves the uploaded file to the specific run directory."""
+    file_extension = os.path.splitext(uploaded_file.name)[1]
+    data_file_path = os.path.join(run_dir, f"uploaded_data{file_extension}")
+    
+    with open(data_file_path, "wb") as f:
+        f.write(uploaded_file.getbuffer())
+    return data_file_path
 
-def _first_exception_msg(exc: BaseException) -> str:
-    """Extract a readable message from ExceptionGroup/TaskGroup errors."""
-    if hasattr(exc, "exceptions"):  # py>=3.11 ExceptionGroup or anyio groups
-        try:
-            inner = exc.exceptions[0]
-            return _first_exception_msg(inner)
-        except Exception:
-            pass
-    return f"{exc.__class__.__name__}: {exc}"
+async def get_mcp_tools(session: ClientSession) -> list:
+    """Fetches tools from the MCP server and formats them for Ollama."""
+    tool_list_response = await session.list_tools()
+    ollama_tools = []
+    for tool in tool_list_response.tools:
+        ollama_tools.append({
+            'type': 'function',
+            'function': {
+                'name': tool.name,
+                'description': tool.description,
+                'parameters': tool.inputSchema,
+            },
+        })
+    return ollama_tools
 
-
-def _read_json_content(tool_result) -> dict | list:
+async def run_analysis(messages, data_file_path):
     """
-    Read MCP tool result that may be:
-      - TextContent (containing JSON text), or
-      - Json-like content on newer MCPs (has .type in {'json','application/json'} and .data)
-    Falls back to parsing .text as JSON. Raises if unsupported.
-    """
-    if not tool_result or not getattr(tool_result, "content", None):
-        raise RuntimeError("Empty tool result content")
-
-    item = tool_result.content[0]
-
-    # --- Newer MCPs: JsonContent or json-like payloads (duck-typed) ---
-    # Handle both the real class and "json-ish" objects without importing JsonContent.
-    item_type = getattr(item, "type", None)  # e.g., 'json', 'application/json', None
-    if item_type in {"json", "application/json"} and hasattr(item, "data"):
-        return item.data  # already a Python object
-
-    # --- Older MCPs: TextContent with JSON string ---
-    # Note: TextContent exists in all versions we've seen.
-    from mcp import types as _types
-    if isinstance(item, _types.TextContent):
-        txt = item.text or ""
-        import json
-        try:
-            return json.loads(txt)
-        except Exception as e:
-            raise RuntimeError(f"Failed to parse JSON from TextContent: {e}\nText was: {txt[:200]}")
-
-    # --- Last resort: try to parse any '.text' field as JSON string ---
-    txt = getattr(item, "text", None)
-    if isinstance(txt, str):
-        import json
-        try:
-            return json.loads(txt)
-        except Exception:
-            pass
-
-    raise RuntimeError(f"Unsupported MCP content type: {type(item).__name__} (no JSON data or text)")
-
-
-# --------------------------- ZIP bundling utilities ---------------------------
-async def _build_zip(dataset_id: str, summary_payload: dict) -> bytes:
-    """
-    Zips all files under mcp_artifacts/<dataset_id>, plus a summary.json and README.txt.
-    Returns bytes.
-    """
-    base_dir = Path(MCP_ARTIFACTS_DIR) / dataset_id
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        # Include all generated artifacts (plots, etc.)
-        if base_dir.exists():
-            for p in base_dir.rglob("*"):
-                if p.is_file():
-                    arcname = str(Path(dataset_id) / p.relative_to(base_dir))
-                    zf.write(p, arcname=arcname)
-
-        # Add summary.json
-        zf.writestr(f"{dataset_id}/summary.json", json.dumps(summary_payload, ensure_ascii=False, indent=2))
-
-        # Add a small README
-        readme = (
-            "# Data Visualization Bundle\n\n"
-            "- `summary.json`: schema, suggestions, and generated plots metadata\n"
-            "- `plots/`: PNG charts generated by auto_explore\n"
-            f"- Source dataset id: `{dataset_id}`\n"
-        )
-        zf.writestr(f"{dataset_id}/README.txt", readme)
-
-    buf.seek(0)
-    return buf.read()
-
-
-# ------------------------------ Core workflow ------------------------------
-async def _register_and_explore(file_path: str, max_plots: int = 6) -> dict:
-    """
-    Launch MCP server (stdio), register dataset, fetch head/schema/suggestions,
-    run auto_explore, collect plot paths, and return data for UI.
+    Main async logic to connect to MCP, call Ollama, and execute tools.
     """
     server_params = StdioServerParameters(
-        command=sys.executable,
-        args=[MCP_SERVER_PATH],
-        env={"MCP_ARTIFACTS_DIR": MCP_ARTIFACTS_DIR, **os.environ},
+        command="python3",
+        args=[MCP_SERVER_SCRIPT],
     )
-
+    
+    plot_paths = []
+    summary = ""
+    
     async with stdio_client(server_params) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
+            tools = await get_mcp_tools(session)
 
-            # 1) Register dataset
-            reg = await session.call_tool("register_dataset_from_file", arguments={"file_path": file_path})
-            ds = _read_json_content(reg)
-            dataset_id = ds.get("dataset_id")
-            if not dataset_id:
-                raise RuntimeError(f"register_dataset_from_file returned no dataset_id. Payload: {ds}")
+            # 1. First call to Ollama to get tool calls
+            try:
+                response = ollama.chat(
+                    model=MODEL,
+                    messages=messages,
+                    tools=tools
+                )
+                messages.append(response['message'])
+            except Exception as e:
+                st.error(f"Error calling Ollama: {e}")
+                return "Failed to get analysis from LLM.", []
 
-            # 2) Head & schema
-            head_res = await session.call_tool("head", arguments={"dataset_id": dataset_id, "n": 10})
-            schema_res = await session.call_tool("schema", arguments={"dataset_id": dataset_id})
-            head_json = _read_json_content(head_res)
-            schema_json = _read_json_content(schema_res)
+            # 2. Check for and execute tool calls
+            if response['message'].get('tool_calls'):
+                tool_calls = response['message']['tool_calls']
+                
+                tool_results = []
+                for tool_call in tool_calls:
+                    tool_name = tool_call['function']['name']
+                    tool_args = tool_call['function']['arguments']
+                    
+                    # --- CRITICAL: Inject the data_file_path ---
+                    tool_args['data_file_path'] = data_file_path
 
-            # 3) Suggestions
-            sugg_res = await session.call_tool("suggest_charts", arguments={"dataset_id": dataset_id, "max_suggestions": 12})
-            suggestions = _read_json_content(sugg_res)
+                    try:
+                        # 3. Execute the tool by calling the MCP server
+                        result = await session.call_tool(tool_name, arguments=tool_args)
+                        
+                        tool_output = ""
+                        if result.content and isinstance(result.content[0], types.TextContent):
+                            tool_output = result.content[0].text
+                        
+                        # Check if tool returned an error
+                        if "Error:" in tool_output:
+                            st.warning(f"Tool '{tool_name}' failed: {tool_output}")
+                            tool_results.append({'role': 'tool', 'content': f"Tool Error: {tool_output}"})
+                        else:
+                            # Success, save the plot path
+                            plot_paths.append(tool_output)
+                            tool_results.append({'role': 'tool', 'content': f"Successfully generated plot at {tool_output}"})
+                            
+                    except Exception as e:
+                        st.error(f"Failed to execute tool '{tool_name}': {e}")
+                        tool_results.append({'role': 'tool', 'content': f"Failed to execute tool: {str(e)}"})
+                
+                # 4. Send tool results back to Ollama for final summary
+                messages.extend(tool_results)
+                try:
+                    final_response = ollama.chat(model=MODEL, messages=messages)
+                    summary = final_response['message']['content']
+                except Exception as e:
+                    st.error(f"Error getting final summary from Ollama: {e}")
+                    summary = "Failed to generate summary, but plots were created."
+            
+            else:
+                # No tool was called, just use the response content
+                summary = response['message']['content']
 
-            # 4) Auto-explore
-            auto_res = await session.call_tool("auto_explore", arguments={"dataset_id": dataset_id, "max_plots": max_plots})
-            auto_json = _read_json_content(auto_res)
+    return summary, plot_paths
 
-            image_paths = [
-                item.get("path")
-                for item in auto_json.get("generated", [])
-                if isinstance(item, dict) and item.get("path")
-            ]
+# --- Streamlit Page UI ---
 
-            summary_payload = {
-                "dataset_id": dataset_id,
-                "shape": ds.get("shape"),
-                "columns": ds.get("columns"),
-                "head": head_json,
-                "schema": schema_json,
-                "suggestions": suggestions,
-                "generated": auto_json.get("generated", []),
-                "skipped": auto_json.get("skipped", []),
-            }
+st.set_page_config(layout="wide")
+st.title("🤖 AI Data Visualiser")
 
-            zip_bytes = await _build_zip(dataset_id, summary_payload)
+st.info(f"Using Model: **{MODEL}**")
 
-            return {
-                "dataset_id": dataset_id,
-                "preview_markdown": ds.get("preview_markdown", ""),
-                "head": head_json,
-                "schema": schema_json,
-                "suggestions": suggestions,
-                "images": image_paths,
-                "zip_bytes": zip_bytes,
-                "artifacts_dir": str(Path(MCP_ARTIFACTS_DIR) / dataset_id),
-            }
-
-
-# --------------------------------- UI ---------------------------------
-st.title("Visualize Data")
-
-st.markdown(
-    "Upload a tabular file (CSV / TSV / Parquet / JSON). "
-    "We’ll analyze its schema and automatically create a small set of useful plots."
+uploaded_file = st.file_uploader(
+    "Upload your data file (CSV, TSV, Excel, JSON)",
+    type=["csv", "tsv", "xls", "xlsx", "json"]
 )
 
-left, right = st.columns([2, 1])
+user_prompt = st.text_area(
+    "Describe what you want to do (optional)",
+    placeholder=DEFAULT_PROMPT
+)
 
-with left:
-    uploaded = st.file_uploader(
-        "Upload file",
-        type=["csv", "tsv", "txt", "parquet", "json", "jsonl", "data"],
-        help="We try to auto-detect delimiter for CSV/TSV/TXT."
-    )
-
-with right:
-    max_plots = st.number_input("Max plots", min_value=1, max_value=20, value=6, step=1)
-
-# Persist last result in session
-if "viz_result" not in st.session_state:
-    st.session_state["viz_result"] = None
-
-if st.button("Process"):
-    if not uploaded:
-        st.warning("Please upload a file first.")
-    else:
-        # Save upload to a temp path (keep extension for delimiter sniffing)
-        suffix = f".{uploaded.name.split('.')[-1]}" if "." in uploaded.name else ".csv"
-        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-            tmp.write(uploaded.read())
-            tmp.flush()
-            tmp_path = tmp.name
-
-        with st.spinner("Processing your data with the MCP server (analyzing & plotting)…"):
-            try:
-                result = run_async(_register_and_explore(tmp_path, max_plots=max_plots))
-                st.session_state["viz_result"] = result
-                st.success("Done! Scroll down to see the preview, schema, and plots. You can also download the ZIP.")
-            except Exception as e:
-                st.error(_first_exception_msg(e))
-                with st.expander("Full traceback"):
-                    st.code("".join(traceback.format_exception(e)))
-
-# Render results if present
-res = st.session_state.get("viz_result")
-if res:
-    st.subheader("Preview (first rows)")
-    # Prefer head() preview if present, else the initial preview_markdown from register
-    head_md = (res.get("head") or {}).get("markdown")
-    preview_md = head_md or res.get("preview_markdown") or "_(no preview)_"
-    st.markdown(preview_md)
-
-    with st.expander("Schema details"):
-        st.json(res.get("schema", {}))
-
-    with st.expander("Chart suggestions"):
-        st.json(res.get("suggestions", []))
-
-    images = res.get("images", [])
-    if images:
-        st.subheader("Generated plots")
-        cols = st.columns(2)
-        for i, p in enumerate(images):
-            try:
-                cols[i % 2].image(p, caption=os.path.basename(p), use_container_width=True)
-            except Exception:
-                pass
-    else:
-        st.info("No plots generated.")
-
-    st.subheader("Download all results")
-    st.download_button(
-        label="Download ZIP",
-        data=res["zip_bytes"],
-        file_name="visualization_bundle.zip",
-        mime="application/zip",
-    )
-
-    st.caption(f"Artifacts folder: `{res['artifacts_dir']}`")
+if st.button("Generate Visualisations", type="primary", disabled=(not uploaded_file)):
+    with st.spinner("AI is analyzing your data and generating plots..."):
+        # 1. Setup directories and save data
+        run_id = f"ds-{uuid.uuid4().hex[:8]}"
+        run_dir = os.path.join(ARTIFACTS_DIR, run_id)
+        plot_dir = os.path.join(run_dir, "plots")
+        os.makedirs(plot_dir, exist_ok=True)
+        
+        data_file_path = save_uploaded_file(uploaded_file, run_dir)
+        
+        # 2. Load data head for the prompt
+        df = load_dataframe(uploaded_file)
+        if df is None:
+            st.stop() # Error was already shown in load_dataframe
+            
+        data_head = df.head().to_string()
+        
+        # 3. Format messages for Ollama
+        final_user_prompt = user_prompt if user_prompt.strip() else DEFAULT_PROMPT
+        
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": f"User Request: {final_user_prompt}\n\nData Head:\n{data_head}"}
+        ]
+        
+        # 4. Run the full async analysis
+        try:
+            summary, plot_paths = asyncio.run(run_analysis(messages, data_file_path))
+            
+            st.success("Analysis Complete!")
+            
+            # 5. Display results
+            st.subheader("Analysis Summary")
+            st.markdown(summary)
+            
+            st.subheader("Generated Visualisations")
+            if not plot_paths:
+                st.warning("No plots were generated. Try refining your prompt.")
+            else:
+                # Display plots
+                for plot_path in plot_paths:
+                    if os.path.exists(plot_path):
+                        st.image(plot_path)
+                    else:
+                        st.error(f"Could not find plot at: {plot_path}")
+                
+                # 6. Create Zip file for download
+                zip_path = os.path.join(run_dir, "visualisations")
+                shutil.make_archive(zip_path, 'zip', plot_dir)
+                
+                with open(f"{zip_path}.zip", "rb") as f:
+                    st.download_button(
+                        label="Download All Plots (.zip)",
+                        data=f,
+                        file_name=f"{run_id}_plots.zip",
+                        mime="application/zip",
+                    )
+                    
+        except Exception as e:
+            st.error(f"An unexpected error occurred: {e}")
+            # Clean up the run directory if something fails badly
+            if os.path.exists(run_dir):
+                shutil.rmtree(run_dir)
