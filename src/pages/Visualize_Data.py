@@ -6,8 +6,18 @@ import shutil
 import asyncio
 import pathlib
 import ollama
+import sys
 from mcp import ClientSession, StdioServerParameters, types
 from mcp.client.stdio import stdio_client
+from utils import ensure_ollama_server
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+from auth import check_token
+
+check_token()
+# Ensure Ollama server is running
+ensure_ollama_server()
 
 # --- Configuration ---
 MODEL = "qwen2.5:32b"
