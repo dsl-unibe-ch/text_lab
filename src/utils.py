@@ -40,7 +40,6 @@ def ensure_ollama_server():
         st.error("`ollama` binary not found in the container.")
         st.stop()
 
-    st.info("Starting Ollama daemon…")
     subprocess.Popen(["ollama", "serve"],
                      stdout=sys.stdout, stderr=sys.stderr,
                      env=env)
@@ -48,7 +47,6 @@ def ensure_ollama_server():
     # 3. Wait (max 30 s) until the TCP port answers
     for _ in range(60):
         if _port_open():
-            st.success("Ollama daemon is ready.")
             return
         time.sleep(0.5)
 
