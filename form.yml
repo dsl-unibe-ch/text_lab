@@ -9,6 +9,7 @@ form:
   - gpu_number
   - advanced_mode
   - reservation
+  - wckey
 
 attributes:
   partition:
@@ -56,6 +57,11 @@ attributes:
      step: 1
      value: "1"
      help: "Number of GPUs. Ask for more than 1 in case you plan to run large LLM. You might not be able to request more than 1"
+
+  wckey:
+    widget: "text_field"
+    label: "wckey"
+    help: 'Provide a valid project identifier ("wckey") for accounting. (Optional when using the gratis account.)'
 
   advanced_mode:
     widget: "check_box"

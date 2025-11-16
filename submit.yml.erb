@@ -20,5 +20,8 @@ script:
 <% unless reservation.blank? %>
     - "--reservation=<%= reservation %>"
 <% end %>
+<% unless wckey.blank? %>
+    - "--wckey=<%= wckey %>"
+<% end %>
 
  
