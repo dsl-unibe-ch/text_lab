@@ -57,7 +57,7 @@ apptainer exec \
   --env OLLAMA_LLM_LIBRARY="cuda" \
   --env OLLAMA_FLASH_ATTENTION="true" \
   "$TL_CONTAINER" \
-  /usr/bin/python3 -m streamlit run "/storage/homefs/aa22x177/ondemand/dev/text_lab/src/Home.py" \
+  /usr/bin/python3 -m streamlit run "/storage/research/dsl_shared/solutions/ondemand/text_lab/src_main/src/Home.py" \
     --server.address 0.0.0.0 \
     --server.port "$TEXT_LAB_PORT" \
     --server.baseUrlPath "$SERVER_BASEURLPATH" \
