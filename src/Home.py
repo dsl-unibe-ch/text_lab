@@ -78,6 +78,8 @@ def main():
         Natural Language Processing (NLP) tools. Currently, you can:
         - **Transcribe** audio files using Whisper.
         - **Chat** with a basic AI chatbot.
+        - **OCR**: Extract text from images using OLMOCR.
+        - **Visualize Data**: Create plots from data using LLMs.
 
         More NLP features and enhancements are on the way. This project is
         still under active development, so expect frequent updates and new
