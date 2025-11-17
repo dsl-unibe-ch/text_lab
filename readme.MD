@@ -8,6 +8,8 @@ This repository contains the code for the **Text Lab** – an in-development sui
 
 - **Transcribe:** A tool for processing audio input and converting it to text.
 - **Chat:** An interactive chat interface powered by LLMs.
+- **OCR:** Prototype for OCR with OLMOCR.
+- **Data Visualisation:** Upload your data and get potential visualisation using LLMs.
 
 More NLP/text processing functionalities will be added over time.
 
