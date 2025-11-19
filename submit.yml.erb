@@ -11,6 +11,7 @@ script:
   
   
   native:
+    - "--account=<%= auto_accounts %>"
     - "--partition=<%= partition %>"
     - "--qos=<%= qos %>"
     - "--gres=<%= gpu %><%= gpu_number %>"

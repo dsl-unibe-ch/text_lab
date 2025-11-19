@@ -2,6 +2,7 @@
 cluster: "ubelix"
 
 form:
+  - auto_accounts
   - partition
   - qos
   - time
@@ -24,10 +25,12 @@ attributes:
     widget: "select"
     label: "Quality of Service (QoS)"
     options:
+      - ["job_gratis", "job_gratis"]
       - ["job_gpu", "job_gpu"]
       - ["job_gpu_preemptable", "job_gpu_preemptable"]
-    value: "job_gpu"
-    help: "Choose 'job_gpu_preemptable' for faster connection, but you might get disconnected at any time"
+    value: "job_gratis"
+    help: >
+      Choose a QoS that matches your account and partition
 
   time:
     widget: "number_field"
