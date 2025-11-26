@@ -79,7 +79,7 @@ From: nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
         --index-url https://download.pytorch.org/whl/cu121
 
     # Ollama CLI binary (+ its CUDA libs) so we can run `ollama serve`
-    OLM_VER="0.11.6"
+    OLM_VER="0.13.0"
     TMP=/tmp/ollama_pkgs && mkdir -p "$TMP" /usr/local/lib/ollama
     cd "$TMP"
     curl -fL "https://github.com/ollama/ollama/releases/download/v${OLM_VER}/ollama-linux-amd64.tgz" -o ollama.tgz
