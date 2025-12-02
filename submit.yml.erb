@@ -16,7 +16,7 @@ script:
     - "--qos=<%= qos %>"
     - "--gres=<%= gpu %><%= gpu_number %>"
     - "--time=<%= time %>:00:00"
-    - "--mem=60G"
+    - "--mem-per-cpu=15g"
     - "--cpus-per-task=4"
 <% unless reservation.blank? %>
     - "--reservation=<%= reservation %>"
