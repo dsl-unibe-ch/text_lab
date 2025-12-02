@@ -65,7 +65,7 @@ apptainer exec \
     --server.maxUploadSize 10000 \
     --browser.serverAddress ondemand.hpc.unibe.ch \
     --browser.gatherUsageStats false \
-    --logger.level error #set to debug for development debugging, other options: info, warning, error, critical
-    --client.showErrorDetails=false #for deployment, set to true for debugging
+    --logger.level error \
+    --client.showErrorDetails false 
 
 popd
