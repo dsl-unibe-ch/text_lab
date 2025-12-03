@@ -57,7 +57,7 @@ apptainer exec \
   --env OLLAMA_LLM_LIBRARY="cuda" \
   --env OLLAMA_FLASH_ATTENTION="true" \
   "$TL_CONTAINER" \
-  vllm serve \
+  /opt/conda/envs/olmocr311/bin/vllm serve \
     allenai/olmOCR-2-7B-1025-FP8 \
     --tensor-parallel-size 1 \
     --host 0.0.0.0 \
