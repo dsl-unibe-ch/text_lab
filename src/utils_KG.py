@@ -15,7 +15,7 @@ from openai import OpenAI
 GROBID_HOST = "127.0.0.1"
 GROBID_PORT = 8070  # Default Grobid port
 GROBID_URL = f"http://{GROBID_HOST}:{GROBID_PORT}/api/processFulltextDocument"
-GROBID_CONTAINER = os.getenv("GROBID_CONTAINER", "/storage/research/dsl_shared/solutions/ondemand/text_lab/container/grobid_0.8.2.sif")
+GROBID_CONTAINER = os.getenv("GROBID_CONTAINER", "/path/to/grobid_container.sif")
 GROBID_TMP = os.getenv("GROBID_TMP", os.path.join(os.getcwd(), "grobid-tmp"))
 
 # TEI namespace
