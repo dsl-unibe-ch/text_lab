@@ -97,6 +97,7 @@ if uploaded_file is not None:
             CONT_INPUT_DIR = "/inputs"
             CONT_WORKSPACE_DIR = "/workspace"
             CONT_INPUT_FILE = f"{CONT_INPUT_DIR}/{uploaded_file.name}"
+            SERVER_HOST = "localhost"
 
             cmd = [
                 "apptainer", "exec", "--nv",
@@ -107,7 +108,8 @@ if uploaded_file is not None:
                 OCR_SIF_PATH,
                 "python", "-m", "olmocr.pipeline",
                 CONT_WORKSPACE_DIR,
-                "--markdown", 
+                "--markdown",
+                "--server", f"http://{SERVER_HOST}:8000/v1",
                 "--pdfs", CONT_INPUT_FILE
             ]
 

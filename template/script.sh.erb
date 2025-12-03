@@ -57,6 +57,12 @@ apptainer exec \
   --env OLLAMA_LLM_LIBRARY="cuda" \
   --env OLLAMA_FLASH_ATTENTION="true" \
   "$TL_CONTAINER" \
+  vllm serve \
+    allenai/olmOCR-2-7B-1025-FP8 \
+    --tensor-parallel-size 1 \
+    --host 0.0.0.0 \
+    --port 8000 \
+    --max-model-len 16384 & \
   /usr/bin/python3 -m streamlit run "/storage/research/dsl_shared/solutions/ondemand/text_lab/src_main/src/Home.py" \
     --server.address 0.0.0.0 \
     --server.port "$TEXT_LAB_PORT" \
