@@ -12,6 +12,7 @@ script:
   
   native:
     - "--account=<%= auto_accounts %>"
+    - "--job-name=dsl_textlab"
     - "--partition=<%= partition %>"
     - "--qos=<%= qos %>"
     - "--gres=<%= gpu %><%= gpu_number %>"
