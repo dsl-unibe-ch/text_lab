@@ -322,13 +322,15 @@ if grobid_available:
                                     # Download button for topics file
                                     topics_file = selected_corpus / "corpus_table.with_topics.jsonl"
                                     if topics_file.exists():
-                                        with open(topics_file, "rb") as f:
-                                            st.download_button(
-                                                label="⬇️ Download Corpus with Topics (JSONL)",
-                                                data=f,
-                                                file_name="corpus_table.with_topics.jsonl",
-                                                mime="application/jsonlines"
-                                            )
+                                        with open(topics_file, "r", encoding="utf-8") as f:
+                                            topics_data = f.read()
+                                        
+                                        st.download_button(
+                                            label="⬇️ Download Corpus with Topics (JSONL)",
+                                            data=topics_data,
+                                            file_name="corpus_table.with_topics.jsonl",
+                                            mime="application/jsonlines"
+                                        )
                                 
                                 except Exception as e:
                                     st.error(f"❌ Topic extraction failed: {str(e)}")
