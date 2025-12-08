@@ -99,6 +99,8 @@ if uploaded_file is not None:
             CONT_INPUT_FILE = f"{CONT_INPUT_DIR}/{uploaded_file.name}"
             SERVER_HOST = "localhost"
 
+            OLM_OCR_PORT = os.environ.get("OLM_OCR_PORT")
+
             cmd = [
                 "apptainer", "exec", "--nv",
                 "--bind", f"{INPUT_DIR}:{CONT_INPUT_DIR}",
@@ -109,7 +111,7 @@ if uploaded_file is not None:
                 "python", "-m", "olmocr.pipeline",
                 CONT_WORKSPACE_DIR,
                 "--markdown",
-                "--server", f"http://{SERVER_HOST}:8000/v1",
+                "--server", f"http://{SERVER_HOST}:{OLM_OCR_PORT}/v1",
                 "--pdfs", CONT_INPUT_FILE
             ]
 

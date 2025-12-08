@@ -10,10 +10,12 @@ create_passwd() {
 [[ $(type -t module) == "function" ]] && export -f module
 
 port=$(find_port)
+ocr_port=$(find_port)
 
 password="$(create_passwd 16)"
 
 export SERVER_PORT="$port"
+export OLMOCR_PORT="$ocr_port"
 export SERVER_BASEURLPATH="/node/${host}/${port}/"
 export TOKEN="$password"
 

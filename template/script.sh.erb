@@ -13,11 +13,14 @@ TL_CONTAINER="$HOST_TEXT_LAB_DIR/container/text_lab_121125.sif"
 OCR_CONTAINER="$HOST_TEXT_LAB_DIR/container/olmocr_main.sif"
 
 #point to where the ollama models are stored on research storage
-HOST_OLLAMA_DIR="/storage/research/dsl_shared/solutions/ondemand/text_lab/container/models/ollama"
+HOST_OLLAMA_DIR="$HOST_TEXT_LAB_DIR/container/models/ollama"
 CONT_OLLAMA_DIR="/opt/ollama"
 
+HOST_HF_HOME="$HOST_TEXT_LAB_DIR/container/models/hf_cache"
+CONT_HF_HOME="${HF_HOME:-/workspace/hf_cache}"
+
 #point to where the whisper models are stored on research storage
-HOST_WHISPER_DIR="/storage/research/dsl_shared/solutions/ondemand/text_lab/container/models/whisper"
+HOST_WHISPER_DIR="$HOST_TEXT_LAB_DIR/container/models/whisper"
 CONT_WHISPER_DIR="/opt/whisper"
 
 export OCR_CONTAINER
@@ -27,6 +30,8 @@ export OLLAMA_MODELS="$CONT_OLLAMA_DIR/models"
 # Which ports should each service listen on?
 TEXT_LAB_PORT="${TEXT_LAB_PORT:-${SERVER_PORT:-8502}}"   # streamlit defaults to 8502 if not set
 OLM_OCR_PORT="${OLMOCR_PORT:-8503}"
+
+export OLM_OCR_PORT
 
 # Base URL path for reverse‑proxy setups (JupyterHub, etc.). Leave empty for /
 SERVER_BASEURLPATH="${SERVER_BASEURLPATH:-}"  # may already be exported by the hub
@@ -47,6 +52,14 @@ if [ -z "${CUDA_VISIBLE_DEVICES:-}" ]; then
   export CUDA_VISIBLE_DEVICES=0
 fi
 
+apptainer exec --nv \
+  --bind "$HOST_HF_HOME:$CONT_HF_HOME" \
+  "$OCR_CONTAINER" \
+  /opt/conda/envs/olmocr311/bin/vllm serve allenai/olmOCR-2-7B-1025-FP8 \
+    --tensor-parallel-size 1 \
+    --host 0.0.0.0 \
+    --port $OLM_OCR_PORT \
+    --max-model-len 16384 & \
 apptainer exec \
   --nv \
   --bind "$HOST_TEXT_LAB_DIR:$CONT_TEXT_LAB_DIR" \
@@ -57,13 +70,7 @@ apptainer exec \
   --env OLLAMA_LLM_LIBRARY="cuda" \
   --env OLLAMA_FLASH_ATTENTION="true" \
   "$TL_CONTAINER" \
-  /opt/conda/envs/olmocr311/bin/vllm serve \
-    allenai/olmOCR-2-7B-1025-FP8 \
-    --tensor-parallel-size 1 \
-    --host 0.0.0.0 \
-    --port 8000 \
-    --max-model-len 16384 & \
-  /usr/bin/python3 -m streamlit run "/storage/research/dsl_shared/solutions/ondemand/text_lab/src_main/src/Home.py" \
+  /usr/bin/python3 -m streamlit run "$HOST_TEXT_LAB_DIR/src_main/src/Home.py" \
     --server.address 0.0.0.0 \
     --server.port "$TEXT_LAB_PORT" \
     --server.baseUrlPath "$SERVER_BASEURLPATH" \
