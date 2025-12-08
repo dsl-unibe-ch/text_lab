@@ -119,11 +119,22 @@ if uploaded_file is not None:
             with st.spinner("Running OCR... This may take several minutes. Please wait."):
                 
                 result = subprocess.run(
-                    cmd, 
-                    capture_output=True, 
-                    text=True, 
-                    encoding='utf-8'
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
                 )
+
+                st.subheader("OCR command")
+                st.code(" ".join(cmd))
+
+                st.subheader("STDOUT")
+                st.text(result.stdout)
+
+                st.subheader("STDERR")
+                st.text(result.stderr)
+
+                st.write("Return code:", result.returncode)
 
             # --- 6. Process the result (Saving to Session State) ---
             
