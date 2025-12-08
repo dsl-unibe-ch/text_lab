@@ -98,8 +98,8 @@ if uploaded_file is not None:
             CONT_WORKSPACE_DIR = "/workspace"
             CONT_INPUT_FILE = f"{CONT_INPUT_DIR}/{uploaded_file.name}"
 
-            SERVER_HOST = os.environ.get("HOSTNAME")
-            OLM_OCR_PORT = os.environ.get("OLM_OCR_PORT")
+            SERVER_HOST = "localhost"
+            OLM_OCR_PORT = 8003
 
             cmd = [
                 "apptainer", "exec", "--nv",

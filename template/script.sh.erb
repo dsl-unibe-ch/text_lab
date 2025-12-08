@@ -30,7 +30,8 @@ export OLLAMA_MODELS="$CONT_OLLAMA_DIR/models"
 # ---------------------------- Runtime parameters ------------------------------
 # Which ports should each service listen on?
 TEXT_LAB_PORT="${TEXT_LAB_PORT:-${SERVER_PORT:-8502}}"   # streamlit defaults to 8502 if not set
-OLM_OCR_PORT="${OLMOCR_PORT:-8503}"
+# OLM_OCR_PORT="${OLMOCR_PORT:-8503}"
+OLM_OCR_PORT=8003
 
 export OLM_OCR_PORT
 
