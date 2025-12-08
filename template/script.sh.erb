@@ -53,7 +53,8 @@ if [ -z "${CUDA_VISIBLE_DEVICES:-}" ]; then
   export CUDA_VISIBLE_DEVICES=0
 fi
 
-apptainer exec --nv \
+apptainer exec \
+  --nv \
   --bind "$HOST_HF_HOME:$CONT_HF_HOME" \
   "$OCR_CONTAINER" \
   /opt/conda/envs/olmocr311/bin/vllm serve allenai/olmOCR-2-7B-1025-FP8 \
