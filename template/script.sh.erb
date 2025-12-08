@@ -4,6 +4,7 @@ set -euo pipefail
 
 # Allow callers to override base directories via environment variables.
 HOST_TEXT_LAB_DIR="${TEXT_LAB_DIR:-/storage/research/dsl_shared/solutions/ondemand/text_lab}"
+HOST_TEXT_LAB_SRC_DIR="${TEXT_LAB_SRC_DIR:-$HOST_TEXT_LAB_DIR/src}"
 
 CONT_TEXT_LAB_DIR="/text_lab"
 CONT_OLMOCR_DIR="/olmocr"
@@ -70,7 +71,7 @@ apptainer exec \
   --env OLLAMA_LLM_LIBRARY="cuda" \
   --env OLLAMA_FLASH_ATTENTION="true" \
   "$TL_CONTAINER" \
-  /usr/bin/python3 -m streamlit run "$HOST_TEXT_LAB_DIR/src_main/src/Home.py" \
+  /usr/bin/python3 -m streamlit run "$HOST_TEXT_LAB_SRC_DIR/Home.py" \
     --server.address 0.0.0.0 \
     --server.port "$TEXT_LAB_PORT" \
     --server.baseUrlPath "$SERVER_BASEURLPATH" \
