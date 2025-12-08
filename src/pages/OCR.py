@@ -97,7 +97,7 @@ if uploaded_file is not None:
             CONT_INPUT_DIR = "/inputs"
             CONT_WORKSPACE_DIR = "/workspace"
             CONT_INPUT_FILE = f"{CONT_INPUT_DIR}/{uploaded_file.name}"
-            SERVER_HOST = "localhost"
+            SERVER_HOST = "0.0.0.0"
 
             OLM_OCR_PORT = os.environ.get("OLM_OCR_PORT")
 
