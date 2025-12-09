@@ -1,3 +1,4 @@
+import st_autorefresh
 import streamlit as st
 import subprocess
 import os
@@ -5,7 +6,9 @@ import uuid
 import pathlib
 import shutil
 import sys 
-import json 
+import json
+import time
+import signal
 
 st.set_page_config(page_title="OLM OCR", layout="wide")
 
@@ -16,6 +19,162 @@ from auth import check_token
 
 check_token()
 
+MAX_OCR_RUNTIME = 3600  # seconds (1 hour)
+
+def start_ocr_job(input_file_path, ocr_sif_path, input_dir, workspace_dir, cont_input_dir, cont_workspace_dir, server_url=None):
+    """
+    Start olmocr.pipeline in the container using subprocess.Popen (non-blocking)
+    and store process + paths in session_state.
+    """
+    cont_input_file = f"{cont_input_dir}/{input_file_path.name}"
+
+    cmd = [
+        "apptainer", "exec", "--nv",
+        "--bind", f"{input_dir}:{cont_input_dir}",
+        "--bind", f"{workspace_dir}:{cont_workspace_dir}",
+        "--env", "HF_HOME=/workspace/hf_cache",
+        "--env", "TRANSFORMERS_CACHE=/workspace/hf_cache",
+        ocr_sif_path,
+        "python",
+        "-m", "olmocr.pipeline",
+        cont_workspace_dir,
+        "--markdown",
+    ]
+
+    # If you are using a persistent vLLM server:
+    if server_url:
+        cmd.extend(["--server", server_url])
+
+    cmd.extend(["--pdfs", cont_input_file])
+
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+    st.session_state.ocr_job = {
+        "pid": proc.pid,
+        "start_time": time.time(),
+        "job_dir": str(workspace_dir.parent),  # JOB_DIR
+        "input_dir": str(input_dir),
+        "workspace_dir": str(workspace_dir),
+        "input_file": str(input_file_path),
+        "cmd": cmd,
+    }
+    st.session_state.ocr_proc = proc  # keep the Popen object itself
+
+
+def check_ocr_job():
+    """
+    Check if the OCR job has produced results or exceeded timeout.
+    If results exist, load them into session_state and clean up.
+    """
+    job = st.session_state.get("ocr_job")
+    proc = st.session_state.get("ocr_proc")
+
+    if not job or proc is None:
+        return  # nothing to do
+
+    workspace_dir = pathlib.Path(job["workspace_dir"])
+    job_dir = pathlib.Path(job["job_dir"])
+    input_file_path = pathlib.Path(job["input_file"])
+
+    results_dir = workspace_dir / "results"
+    jsonl_files = list(results_dir.glob("*.jsonl"))
+
+    # If results exist, we consider the job successful regardless of proc state
+    if jsonl_files:
+        try:
+            output_file_path = jsonl_files[0]
+            json_file_name = output_file_path.name
+
+            with open(output_file_path, "r", encoding="utf-8") as f:
+                first_line = f.readline()
+                data = json.loads(first_line)
+
+            st.session_state.extracted_text = data.get("text")
+            st.session_state.json_content = first_line
+            st.session_state.txt_name = input_file_path.with_suffix(".txt").name
+            st.session_state.json_name = json_file_name
+            st.session_state.ocr_complete = True
+
+        except Exception as e:
+            st.session_state.ocr_error = f"Error parsing JSONL output: {e}"
+            if "first_line" in locals():
+                st.session_state.ocr_error_details = first_line
+
+        # Regardless of success/failure parsing, stop the process & cleanup
+        try:
+            if proc.poll() is None:  # still running
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+        except Exception:
+            pass
+
+        # Optional: capture final stdout/stderr for debugging
+        try:
+            out, err = proc.communicate(timeout=1)
+            st.session_state.ocr_debug = {
+                "cmd": " ".join(job["cmd"]),
+                "stdout": out,
+                "stderr": err,
+            }
+        except Exception:
+            pass
+
+        # Cleanup job dir
+        try:
+            if job_dir.exists():
+                shutil.rmtree(job_dir)
+        except Exception as e:
+            st.warning(f"Could not clean up {job_dir}. Error: {e}")
+
+        # Clear job state
+        st.session_state.pop("ocr_job", None)
+        st.session_state.pop("ocr_proc", None)
+
+        return
+
+    # No JSONL yet -> check timeout
+    elapsed = time.time() - job["start_time"]
+    if elapsed > MAX_OCR_RUNTIME:
+        st.session_state.ocr_error = (
+            f"OCR job exceeded maximum runtime of {MAX_OCR_RUNTIME} seconds "
+            "and was aborted."
+        )
+        # Try to kill the process
+        try:
+            if proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+        except Exception:
+            pass
+
+        # Capture whatever logs we can
+        try:
+            out, err = proc.communicate(timeout=1)
+        except Exception:
+            out, err = "", ""
+
+        st.session_state.ocr_error_details = (out, err)
+
+        # Cleanup
+        try:
+            if job_dir.exists():
+                shutil.rmtree(job_dir)
+        except Exception as e:
+            st.warning(f"Could not clean up {job_dir}. Error: {e}")
+
+        st.session_state.pop("ocr_job", None)
+        st.session_state.pop("ocr_proc", None)
 
 
 st.title("📄 Document OCR (using olmocr)")
@@ -100,77 +259,21 @@ if uploaded_file is not None:
 
             SERVER_HOST = "localhost"
             OLM_OCR_PORT = 8003
+            SERVER_URL = f"http://{SERVER_HOST}:{OLM_OCR_PORT}/v1"
 
-            cmd = [
-                "apptainer", "exec", "--nv",
-                "--bind", f"{INPUT_DIR}:{CONT_INPUT_DIR}",
-                "--bind", f"{WORKSPACE_DIR}:{CONT_WORKSPACE_DIR}",
-                "--env", "HF_HOME=/workspace/hf_cache",
-                "--env", "TRANSFORMERS_CACHE=/workspace/hf_cache",
-                OCR_SIF_PATH,
-                "python", "-m", "olmocr.pipeline",
-                CONT_WORKSPACE_DIR,
-                "--markdown",
-                "--server", f"http://{SERVER_HOST}:{OLM_OCR_PORT}/v1",
-                "--pdfs", CONT_INPUT_FILE
-            ]
+            # --- 5. Run the OCR process. Non blocking ---
 
-            # --- 5. Run the OCR process ---
-            with st.spinner("Running OCR... This may take several minutes. Please wait."):
-                
-                result = subprocess.run(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                )
+            start_ocr_job(
+                input_file_path=input_file_path,
+                ocr_sif_path=OCR_SIF_PATH,
+                input_dir=INPUT_DIR,
+                workspace_dir=WORKSPACE_DIR,
+                cont_input_dir=CONT_INPUT_DIR,
+                cont_workspace_dir=CONT_WORKSPACE_DIR,
+                server_url=SERVER_URL,
+            )
 
-                st.subheader("OCR command")
-                st.code(" ".join(cmd))
-
-                st.subheader("STDOUT")
-                st.text(result.stdout)
-
-                st.subheader("STDERR")
-                st.text(result.stderr)
-
-                st.write("Return code:", result.returncode)
-
-            # --- 6. Process the result (Saving to Session State) ---
-            
-            results_dir = WORKSPACE_DIR / "results"
-            
-            if result.returncode == 0 and results_dir.exists():
-                jsonl_files = list(results_dir.glob("*.jsonl"))
-                
-                if jsonl_files:
-                    try:
-                        output_file_path = jsonl_files[0]
-                        json_file_name = output_file_path.name
-                        
-                        with open(output_file_path, 'r', encoding='utf-8') as f:
-                            first_line = f.readline()
-                            data = json.loads(first_line)
-                        
-                        # --- SAVE TO SESSION STATE ---
-                        st.session_state.extracted_text = data.get("text")
-                        st.session_state.json_content = first_line
-                        st.session_state.txt_name = input_file_path.with_suffix(".txt").name
-                        st.session_state.json_name = json_file_name
-                        st.session_state.ocr_complete = True  # <-- Set success flag
-                        
-                    except Exception as e:
-                        st.session_state.ocr_error = f"Error parsing JSONL output: {e}"
-                        if 'first_line' in locals():
-                            st.session_state.ocr_error_details = first_line
-                else:
-                    st.session_state.ocr_error = f"Process ran, but no .jsonl output file was found in {results_dir}"
-                    st.session_state.ocr_error_details = (result.stdout, result.stderr)
-
-            else:
-                # Show error details if it failed
-                st.session_state.ocr_error = f"OCR process failed. Return code: {result.returncode}"
-                st.session_state.ocr_error_details = (result.stdout, result.stderr)
+            st.info("OCR job started. Results will appear once ready.")
 
         except Exception as e:
             st.session_state.ocr_error = f"An unexpected error occurred: {e}"
@@ -183,6 +286,10 @@ if uploaded_file is not None:
                     shutil.rmtree(JOB_DIR)
                 except Exception as e:
                     st.warning(f"Could not clean up {JOB_DIR}. Error: {e}")
+
+if "ocr_job" in st.session_state:
+    if st.button("🔄 Check OCR Status"):
+        check_ocr_job()
 
 # --- 7. DISPLAY RESULTS (Moved outside the button click) ---
 # This block now runs on *every* rerun, checking the session state.
