@@ -1,3 +1,5 @@
+import signal
+
 import streamlit as st
 import subprocess
 import os
@@ -22,7 +24,7 @@ MAX_OCR_RUNTIME = 3600  # seconds (1 hour)
 def start_ocr_job(input_file_path, ocr_sif_path, input_dir, workspace_dir, cont_input_dir, cont_workspace_dir, server_url=None):
     """
     Start olmocr.pipeline in the container using subprocess.Popen (non-blocking)
-    and store process + paths in session_state.
+    and store only metadata + PID in session_state.
     """
     cont_input_file = f"{cont_input_dir}/{input_file_path.name}"
 
@@ -61,7 +63,23 @@ def start_ocr_job(input_file_path, ocr_sif_path, input_dir, workspace_dir, cont_
         "input_file": str(input_file_path),
         "cmd": cmd,
     }
-    st.session_state.ocr_proc = proc  # keep the Popen object itself
+
+
+
+def _kill_pid(pid: int):
+    """Try to terminate a process by PID, ignoring errors."""
+    try:
+        os.kill(pid, signal.SIGTERM)
+        time.sleep(1)
+        # If still alive, SIGKILL
+        os.kill(pid, 0)  # will raise if dead
+        os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        # Already gone
+        pass
+    except Exception:
+        # Ignore all other kill errors
+        pass
 
 
 def check_ocr_job():
@@ -70,19 +88,23 @@ def check_ocr_job():
     If results exist, load them into session_state and clean up.
     """
     job = st.session_state.get("ocr_job")
-    proc = st.session_state.get("ocr_proc")
-
-    if not job or proc is None:
+    if not job:
         return  # nothing to do
 
     workspace_dir = pathlib.Path(job["workspace_dir"])
     job_dir = pathlib.Path(job["job_dir"])
     input_file_path = pathlib.Path(job["input_file"])
+    pid = job["pid"]
 
     results_dir = workspace_dir / "results"
     jsonl_files = list(results_dir.glob("*.jsonl"))
 
-    # If results exist, we consider the job successful regardless of proc state
+    # DEBUG: show that we're checking
+    # You can comment this out later
+    st.write("DEBUG: Checking OCR job in", str(results_dir))
+    st.write("DEBUG: Found JSONL files:", [p.name for p in jsonl_files])
+
+    # 1) Results present -> treat as success, parse, cleanup
     if jsonl_files:
         try:
             output_file_path = jsonl_files[0]
@@ -103,27 +125,12 @@ def check_ocr_job():
             if "first_line" in locals():
                 st.session_state.ocr_error_details = first_line
 
-        # Regardless of success/failure parsing, stop the process & cleanup
-        try:
-            if proc.poll() is None:  # still running
-                proc.terminate()
-                try:
-                    proc.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-        except Exception:
-            pass
+        # Try to kill the worker process (it’s stuck in metrics loop)
+        _kill_pid(pid)
 
-        # Optional: capture final stdout/stderr for debugging
-        try:
-            out, err = proc.communicate(timeout=1)
-            st.session_state.ocr_debug = {
-                "cmd": " ".join(job["cmd"]),
-                "stdout": out,
-                "stderr": err,
-            }
-        except Exception:
-            pass
+        # Optional: we no longer have stdout/stderr easily, because we didn't keep proc,
+        # but the important part is the parsed JSON. If you need logs, redirect inside
+        # the container or log to a file instead.
 
         # Cleanup job dir
         try:
@@ -134,35 +141,18 @@ def check_ocr_job():
 
         # Clear job state
         st.session_state.pop("ocr_job", None)
-        st.session_state.pop("ocr_proc", None)
-
         return
 
-    # No JSONL yet -> check timeout
+    # 2) No JSONL yet → check timeout
     elapsed = time.time() - job["start_time"]
     if elapsed > MAX_OCR_RUNTIME:
         st.session_state.ocr_error = (
             f"OCR job exceeded maximum runtime of {MAX_OCR_RUNTIME} seconds "
             "and was aborted."
         )
-        # Try to kill the process
-        try:
-            if proc.poll() is None:
-                proc.terminate()
-                try:
-                    proc.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-        except Exception:
-            pass
 
-        # Capture whatever logs we can
-        try:
-            out, err = proc.communicate(timeout=1)
-        except Exception:
-            out, err = "", ""
-
-        st.session_state.ocr_error_details = (out, err)
+        # Kill process
+        _kill_pid(pid)
 
         # Cleanup
         try:
@@ -172,7 +162,6 @@ def check_ocr_job():
             st.warning(f"Could not clean up {job_dir}. Error: {e}")
 
         st.session_state.pop("ocr_job", None)
-        st.session_state.pop("ocr_proc", None)
 
 
 st.title("📄 Document OCR (using olmocr)")
