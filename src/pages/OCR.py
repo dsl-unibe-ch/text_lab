@@ -1,4 +1,3 @@
-import st_autorefresh
 import streamlit as st
 import subprocess
 import os
@@ -8,7 +7,6 @@ import shutil
 import sys 
 import json
 import time
-import signal
 
 st.set_page_config(page_title="OLM OCR", layout="wide")
 
