@@ -1,54 +1,106 @@
 Bootstrap: docker
-From: nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
+From: nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
 
 %environment
     # External model locations (bind-mount at runtime)
-    export WHISPER_CACHE=/opt/whisper            # bind to shared whisper weights
-    export OLLAMA_MODELS=/opt/ollama/models      # bind to shared ollama models
+    export WHISPER_CACHE=/opt/whisper
+    export WHISPERX_CACHE=/opt/whisperx
+    
+    export TORCH_HOME=/opt/torch
+    
+    export HF_HOME=/opt/huggingface
+    export HUGGINGFACE_HUB_CACHE=/opt/huggingface/hub
+    export TRANSFORMERS_CACHE=/opt/huggingface/transformers
 
-    # Optional HF cache if needed later
-    export TRANSFORMERS_CACHE=/opt/huggingface
+    export EASYOCR_CACHE=/opt/easyocr
+    export PADDLEOCR_CACHE=/opt/paddleocr
+    export PADDLEX_HOME=/opt/paddlex
 
-    # Ollama runtime libs path (for the CLI binary we install below)
+    export OLLAMA_MODELS=/opt/ollama/models
+    
+    export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+    export SSL_CERT_DIR=/etc/ssl/certs
+    export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+
+    # Ollama runtime libs path
     export LD_LIBRARY_PATH=/usr/local/lib/ollama:$LD_LIBRARY_PATH
 
 %post
     set -e
     export DEBIAN_FRONTEND=noninteractive
 
-    # Create/cache dirs expected at runtime (will be empty in the image)
-    mkdir -p /opt/whisper /opt/ollama/models /opt/huggingface
-    chmod -R a+rX /opt/whisper /opt/ollama /opt/huggingface
+    # Shared model/cache dirs
+    mkdir -p \
+        /opt/whisper \
+        /opt/ollama/models \
+        /opt/whisperx \
+        /opt/torch \
+        /opt/huggingface \
+        /opt/huggingface/hub \
+        /opt/huggingface/transformers \
+        /opt/easyocr \
+        /opt/paddleocr \
+        /opt/paddlex
+    chmod -R a+rX /opt/whisper /opt/ollama /opt/whisperx /opt/torch /opt/huggingface /opt/easyocr /opt/paddleocr /opt/paddlex
 
-    # Accept MS fonts EULA
-    echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" | debconf-set-selections
+    apt-get update
+    apt-get install -y software-properties-common \
+        ca-certificates \
+        curl \
+        git \
+        build-essential \
+        pkg-config \
+        ffmpeg \
+        libsndfile1 \
+        zstd \
+        python3-apt
 
-    # OS packages + Python
-    apt update && \
-    apt upgrade -y && \
-    apt install -y --no-install-recommends \
-        build-essential curl ffmpeg git libsndfile1-dev \
-        pciutils lshw libpq-dev \
-        python3.10 python3-pip \
-        poppler-utils ttf-mscorefonts-installer msttcorefonts \
-        fonts-crosextra-caladea fonts-crosextra-carlito gsfonts \
-        lcdf-typetools libgl1 ca-certificates software-properties-common
 
-    # --- INSTALL APPTAINER to run other containers ---
+    ##### Apptainer #####
     add-apt-repository -y ppa:apptainer/ppa
-    apt update
-    apt install -y apptainer
-    
+    apt-get update
+    apt-get install -y apptainer
 
-    # Python bootstrap
-    python3 -m pip install --no-cache-dir --upgrade pip setuptools
-    # Some stacks ship blinker that can clash with streamlit on some images
-    apt remove -y python3-blinker || true
-    pip3 install --upgrade pip
-    pip3 uninstall -y blinker || true
 
-    # Core app + DS stack
-    python3 -m pip install --no-cache-dir \
+    ##### OlmOCR dependencies #####
+    apt-get update
+    apt-get install -y poppler-utils ttf-mscorefonts-installer msttcorefonts fonts-crosextra-caladea fonts-crosextra-carlito gsfonts lcdf-typetools
+
+
+    ##### Python 3.11 as default #####
+    add-apt-repository -y ppa:deadsnakes/ppa
+    apt-get update
+    apt-get install -y python3.11 python3.11-dev python3.11-venv python3.11-distutils
+    curl -sS https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py
+    python3.11 /tmp/get-pip.py
+    rm -f /tmp/get-pip.py
+
+    update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 20
+    update-alternatives --set python3 /usr/bin/python3.11
+    update-alternatives --install /usr/bin/python python /usr/bin/python3.11 20
+    update-alternatives --set python /usr/bin/python3.11
+
+
+    ### General dependencies ###
+    apt-get remove -y python3-blinker
+
+    python -m pip install --no-cache-dir --upgrade pip setuptools wheel
+
+    python -m pip install --no-cache-dir --upgrade \
+    torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 \
+    --index-url https://download.pytorch.org/whl/cu118
+
+    cat > /tmp/constraints.txt <<'EOF'
+torch==2.7.0+cu118
+torchvision==0.22.0+cu118
+torchaudio==2.7.0+cu118
+pyannote-audio>=3.3.2,<4.0.0
+huggingface_hub<1.0.0
+transformers<5
+ctranslate2<4.5.0
+EOF
+
+    python -m pip install --no-cache-dir --upgrade \
         streamlit \
         streamlit-cookies-manager \
         requests \
@@ -57,49 +109,51 @@ From: nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
         scikit-learn \
         umap-learn \
         matplotlib \
+        numpy \
         pandas \
         seaborn \
         plotly \
+        ipython \
+        jupyter \
+        jupyterlab \
+        ipykernel \
         polars \
         pyarrow \
         openpyxl \
-        mlflow \
         datasets \
         soundfile \
         opencv-python-headless \
         scikit-image \
-        ollama \
         mcp[cli] \
         openai \
-        tabulate
+        tabulate \
+        tqdm \
+        filelock \
+        --constraint /tmp/constraints.txt
 
-    # Torch (CUDA 12.1)
-    pip3 uninstall -y torch torchvision torchaudio || true
-    pip3 install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 \
-        --index-url https://download.pytorch.org/whl/cu121
 
-    # Ollama CLI binary (+ its CUDA libs) so we can run `ollama serve`
-    OLM_VER="0.13.0"
-    TMP=/tmp/ollama_pkgs && mkdir -p "$TMP" /usr/local/lib/ollama
-    cd "$TMP"
-    curl -fL "https://github.com/ollama/ollama/releases/download/v${OLM_VER}/ollama-linux-amd64.tgz" -o ollama.tgz
-    tar -xzf ollama.tgz
-    install -m 0755 bin/ollama /usr/local/bin/ollama
-    cp -r lib/ollama/* /usr/local/lib/ollama/ || true
-    echo "/usr/local/lib/ollama" > /etc/ld.so.conf.d/ollama.conf
-    ldconfig
-    rm -rf "$TMP"
+    ##### WhisperX dependencies #####
+    apt-get install libcudnn8 libcudnn8-dev -y
+    python -m pip install --no-cache-dir --upgrade whisperx==3.4.1 silero_vad --constraint /tmp/constraints.txt
 
-    # Clean-up
-    apt clean && rm -rf /var/lib/apt/lists/*
-    echo "Build finished – Text Lab runtime ready (models are external)."
+
+    ##### Ollama dependencies #####
+    curl -fsSL https://ollama.com/install.sh | sh
+    python -m pip install --no-cache-dir --upgrade ollama
+
+
+    ##### OCR dependencies #####
+    python -m pip install --no-cache-dir --upgrade \
+        "paddlepaddle-gpu==2.6.2" \
+        "paddleocr<3" "paddlex<3" \
+        easyocr \
+        --constraint /tmp/constraints.txt
+    python -m pip install --no-cache-dir --upgrade olmocr[gpu] --extra-index-url https://download.pytorch.org/whl/cu118 --constraint /tmp/constraints.txt
+
+
+    ##### Final cleaning #####
+    apt-get clean
+    rm -rf /var/lib/apt/lists/*
 
 %runscript
     exec "$@"
-
-%help
-External model binds required at runtime:
-  /storage/research/dsl_shared/solutions/ondemand/text_lab/container/models/whisper  -> /opt/whisper:ro
-  /storage/research/dsl_shared/solutions/ondemand/text_lab/container/models/ollama   -> /opt/ollama:ro
-(Optional)
-  /storage/research/dsl_shared/solutions/ondemand/text_lab/container/models/hf_cache -> /opt/huggingface:ro
