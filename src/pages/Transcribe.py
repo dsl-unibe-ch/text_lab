@@ -20,7 +20,7 @@ import streamlit as st
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from auth import check_token
-from utils_STT import generate_transcription_csv, generate_words_csv, get_vad_segments, read_hf_token
+from utils import generate_transcription_csv, generate_words_csv, get_vad_segments, read_hf_token
 
 # Language mapping from display names to codes
 LANGUAGE_MAPPING = {
@@ -787,4 +787,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
