@@ -1,184 +1,790 @@
-import streamlit as st
-import tempfile
-import json
-import zipfile
-import io
-import sys
 import os
-os.environ.setdefault("WHISPER_CACHE", "/opt/whisper")
+os.environ['TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD'] = '1'
 
-import whisper
+import base64
+import csv
+import html
+import io
+import json
+import mimetypes
+import sys
+import uuid
+import zipfile
+import whisperx
+import torch
+import subprocess
+import numpy as np
+import soundfile as sf
 
-st.set_page_config(page_title="Whisper Transcription", layout="wide")
+import streamlit as st
+
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
 from auth import check_token
+from utils_STT import generate_transcription_csv, generate_words_csv, get_vad_segments, read_hf_token
 
-check_token()
-
-def seconds_to_srt_time(seconds: float) -> str:
-    hours = int(seconds // 3600)
-    minutes = int((seconds % 3600) // 60)
-    secs = int(seconds % 60)
-    millis = int((seconds - int(seconds)) * 1000)
-    return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
-
-def identity(value: str) -> str:
-    return value
-
-def make_srt(segments) -> str:
-    srt_lines = []
-    for i, seg in enumerate(segments, start=1):
-        start_time = seconds_to_srt_time(seg["start"])
-        end_time = seconds_to_srt_time(seg["end"])
-        text = seg["text"].strip()
-
-        srt_lines.append(str(i))
-        srt_lines.append(f"{start_time} --> {end_time}")
-        srt_lines.append(text)
-        srt_lines.append("")  # blank line
-
-    return "\n".join(srt_lines)
-
-def make_csv(segments) -> str:
-    lines = ["start,end,text"]
-    for seg in segments:
-        start = seg["start"]
-        end = seg["end"]
-        text = seg["text"].strip().replace('"', '""')  # Escape double quotes
-        lines.append(f'{start},{end},"{text}"')
-    return "\n".join(lines)
-
-def make_json(result) -> str:
-    return json.dumps(result, ensure_ascii=False, indent=2)
-
-def create_all_formats_zip(text: str, segments, result_dict) -> bytes:
-    """
-    Create an in-memory ZIP containing all four output formats:
-    - transcription.txt
-    - transcription.srt
-    - transcription.csv
-    - transcription.json
-    Returns raw bytes of the ZIP for downloading.
-    """
-    srt_data = make_srt(segments)
-    csv_data = make_csv(segments)
-    json_data = make_json(result_dict)
-
-    # Create an in-memory buffer
-    zip_buffer = io.BytesIO()
-
-    # Build the ZIP
-    with zipfile.ZipFile(zip_buffer, "w") as zf:
-        zf.writestr("transcription.txt", text)
-        zf.writestr("transcription.srt", srt_data)
-        zf.writestr("transcription.csv", csv_data)
-        zf.writestr("transcription.json", json_data)
-
-    # Move back to start so we can read the data from the beginning
-    zip_buffer.seek(0)
-    return zip_buffer.read()
-
-FORMAT_OPTION_TO_EXTENSION = {"Plain text": ".txt", "SRT": ".srt", "CSV": ".csv", "JSON": ".json"}
-FORMAT_OPTION_TO_MIME = {"Plain text": "text/plain", "SRT": "text/plain", "CSV": "text/csv", "JSON": "application/json"}
-FORMAT_OPTION_TO_FUNC = {
-    "Plain text": lambda text, segments, result: text,
-    "SRT":        lambda text, segments, result: make_srt(segments),
-    "CSV":        lambda text, segments, result: make_csv(segments),
-    "JSON":       lambda text, segments, result: make_json(result),
+# Language mapping from display names to codes
+LANGUAGE_MAPPING = {
+    "English": "en",
+    "German": "de",
+    "French": "fr",
+    "Spanish": "es",
+    "Italian": "it",
+    "Swiss German": "ch_de",
+    "Japanese": "ja",
+    "Chinese": "zh",
+    "Dutch": "nl",
+    "Ukrainian": "uk",
+    "Portuguese": "pt",
+    "Arabic": "ar",
+    "Czech": "cs",
+    "Russian": "ru",
+    "Polish": "pl",
+    "Hungarian": "hu",
+    "Finnish": "fi",
+    "Persian": "fa",
+    "Greek": "el",
+    "Turkish": "tr",
+    "Danish": "da",
+    "Hebrew": "he",
+    "Vietnamese": "vi",
+    "Korean": "ko",
+    "Urdu": "ur",
+    "Telugu": "te",
+    "Hindi": "hi",
+    "Catalan": "ca",
+    "Malayalam": "ml",
+    "Norwegian Bokmål": "no",
+    "Norwegian Nynorsk": "nn",
+    "Slovak": "sk",
+    "Slovenian": "sl",
+    "Croatian": "hr",
+    "Romanian": "ro",
+    "Basque": "eu",
+    "Galician": "gl",
+    "Georgian": "ka",
+    "Latvian": "lv",
+    "Tagalog": "tl",
+    "Swedish": "sv"
 }
 
-
-def run_transcribe():
-    st.title("Whisper Transcription")
-
-    # Model selection
-    model_options = ["tiny", "small", "medium", "large-v2", "large-v3", "turbo"]
-    model_name = st.selectbox("Select Whisper Model:", model_options, index=4)
-
-    # Language selection
-    LANG_DICT = whisper.tokenizer.LANGUAGES              
-    language_codes = [None] + sorted(LANG_DICT.keys())     
-
-    def code_to_label(code):
-        if code is None:
-            return "Detect language automatically"
-        return LANG_DICT[code].title()                    
-
-    selected_code = st.selectbox(
-        "Select Language:",
-        language_codes,
-        index=0,
-        format_func=code_to_label
-    )
+WAVESURFER_MAX_BYTES = 75 * 1024 * 1024
+WAVESURFER_MAX_SECONDS = 30 * 60
 
 
-    # File uploader
-    audio_file = st.file_uploader(
-        "Upload an audio file",
-        type=["m4a","mp3","webm","mp4","mpga","wav","mpeg","ogg","flac"]
-    )
-
-    if audio_file is not None:
-        st.audio(audio_file, format="audio/*", start_time=0)
-
-    # Initialize storage for the last transcription result
-    if "whisper_result" not in st.session_state:
-        st.session_state["whisper_result"] = None
-
-    # Transcription button
-    if st.button("Transcribe"):
-        if audio_file is None:
-            st.warning("Please upload an audio file first.")
+def parse_timestamp(value):
+    if value is None:
+        return 0.0
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip()
+    if not text:
+        return 0.0
+    parts = text.split(":")
+    try:
+        if len(parts) == 3:
+            hours = float(parts[0])
+            minutes = float(parts[1])
+            seconds = float(parts[2])
+        elif len(parts) == 2:
+            hours = 0.0
+            minutes = float(parts[0])
+            seconds = float(parts[1])
         else:
-            with st.spinner("Loading Whisper model and transcribing. This might take a while depending on the audio length. Please don't close or reload this page."):
-                model = whisper.load_model(model_name, download_root="/opt/whisper")
-                #model = whisper.load_model(model_name)
-
-                transcribe_options = {}
-                if selected_code is not None:              
-                    transcribe_options["language"] = selected_code
+            return float(text)
+    except ValueError:
+        return 0.0
+    return hours * 3600.0 + minutes * 60.0 + seconds
 
 
-                # Write the uploaded file to a temp file for Whisper
-                audio_bytes = audio_file.read()
-                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-                    tmp.write(audio_bytes)
-                    tmp.flush()
-                    result = model.transcribe(tmp.name, **transcribe_options)
+def load_tsv_rows(text_data):
+    reader = csv.DictReader(io.StringIO(text_data), delimiter="\t")
+    return list(reader)
 
-            st.success("Transcription complete!")
-            st.session_state["whisper_result"] = result
 
-    # If we have a stored transcription, show download options
-    if st.session_state["whisper_result"] is not None:
-        result = st.session_state["whisper_result"]
-        text = result["text"]
-        segments = result.get("segments", [])
+def load_transcript_items(text_data, mode):
+    rows = load_tsv_rows(text_data)
+    items = []
+    
+    # Auto-detect if CSV has speaker information
+    has_speakers = False
+    if rows and ('Speaker' in rows[0] or 'speaker' in rows[0]):
+        speaker_value = rows[0].get('Speaker') or rows[0].get('speaker')
+        if speaker_value and speaker_value.strip():
+            has_speakers = True
+    
+    for row in rows:
+        start = parse_timestamp(row.get("Start"))
+        end = parse_timestamp(row.get("End"))
+        if mode == "words":
+            text = row.get("Word") or row.get("word") or row.get("Text") or ""
+            items.append({"start": start, "end": end, "text": text})
+        else:  # segments mode
+            text = row.get("Text") or row.get("text") or row.get("Word") or ""
+            if has_speakers:
+                speaker = row.get("Speaker") or row.get("speaker") or "UNKNOWN"
+                items.append({"start": start, "end": end, "text": text, "speaker": speaker})
+            else:
+                items.append({"start": start, "end": end, "text": text})
+    
+    return items, has_speakers
 
-        st.subheader("Download your transcription")
-        format_option = st.selectbox("Select a single format:", ["Plain text", "SRT", "CSV", "JSON"])
 
-        extension = FORMAT_OPTION_TO_EXTENSION[format_option]
-        st.download_button(
-            label=f"Download {extension}",
-                data=FORMAT_OPTION_TO_FUNC[format_option](text, segments, result),
-            file_name=f"transcription{extension}",
-            mime=FORMAT_OPTION_TO_MIME[format_option],
-        )
+def transcription_text_from_csv(transcription_csv):
+    rows = load_tsv_rows(transcription_csv)
+    lines = []
+    for row in rows:
+        text = row.get("Text") or row.get("text") or ""
+        text = str(text).strip()
+        if text:
+            lines.append(text)
+    return "\n".join(lines)
 
-        # Download ALL formats in one ZIP
-        if st.button("Download All Formats (ZIP)"):
-            zip_bytes = create_all_formats_zip(text, segments, result)
-            st.download_button(
-                label="Click to download ZIP",
-                data=zip_bytes,
-                file_name="transcription_outputs.zip",
-                mime="application/zip",
-            )
+
+def audio_bytes_from_path(path):
+    with open(path, "rb") as f:
+        return f.read()
+
+def format_duration(seconds):
+    total = int(round(seconds))
+    hours = total // 3600
+    minutes = (total % 3600) // 60
+    secs = total % 60
+    if hours:
+        return f"{hours}h {minutes}m"
+    if minutes:
+        return f"{minutes}m {secs}s"
+    return f"{secs}s"
+
+
+def decode_audio_bytes(audio_bytes, sr=16000):
+    """
+    Decode audio bytes to mono float32 waveform at the target sample rate.
+    Uses ffmpeg on stdin to avoid any disk I/O.
+    """
+    try:
+        cmd = [
+            "ffmpeg",
+            "-nostdin",
+            "-threads",
+            "0",
+            "-i",
+            "pipe:0",
+            "-f",
+            "s16le",
+            "-ac",
+            "1",
+            "-acodec",
+            "pcm_s16le",
+            "-ar",
+            str(sr),
+            "-",
+        ]
+        out = subprocess.run(
+            cmd,
+            input=audio_bytes,
+            capture_output=True,
+            check=True,
+        ).stdout
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(f"Failed to decode audio: {e.stderr.decode(errors='replace')}") from e
+
+    return np.frombuffer(out, np.int16).flatten().astype(np.float32) / 32768.0
+
+
+def convert_audio_to_wav_bytes(audio_bytes, original_filename, sr=16000):
+    """
+    Convert uploaded audio to WAV bytes to avoid MP3 encoder delay issues.
+    Uses 16kHz mono to keep size manageable for browser playback.
+    Returns WAV bytes, WAV filename, and decoded waveform for WhisperX.
+    """
+    audio = decode_audio_bytes(audio_bytes, sr=sr)
+    wav_buffer = io.BytesIO()
+    sf.write(wav_buffer, audio, sr, format="WAV", subtype="PCM_16")
+    wav_bytes = wav_buffer.getvalue()
+    wav_filename = os.path.splitext(original_filename)[0] + ".wav"
+    return wav_bytes, wav_filename, audio
+
+
+def create_wavesurfer_preview(wav_bytes, audio, sr):
+    duration_seconds = len(audio) / float(sr) if audio is not None else 0.0
+    needs_preview = False
+    if wav_bytes and len(wav_bytes) > WAVESURFER_MAX_BYTES:
+        needs_preview = True
+    if duration_seconds > WAVESURFER_MAX_SECONDS:
+        needs_preview = True
+
+    if not needs_preview or audio is None:
+        return wav_bytes, None
+
+    max_samples_by_seconds = int(WAVESURFER_MAX_SECONDS * sr)
+    max_samples_by_bytes = max(int((WAVESURFER_MAX_BYTES - 44) / 2), 1)
+    preview_samples = min(len(audio), max_samples_by_seconds, max_samples_by_bytes)
+
+    if preview_samples >= len(audio):
+        return wav_bytes, None
+
+    preview_audio = audio[:preview_samples]
+    wav_buffer = io.BytesIO()
+    sf.write(wav_buffer, preview_audio, sr, format="WAV", subtype="PCM_16")
+    preview_bytes = wav_buffer.getvalue()
+    return preview_bytes, preview_samples / float(sr)
+
+def audio_data_url(audio_path_or_bytes, path_hint):
+    """
+    Create data URL for audio. Handles both file paths (string) and bytes.
+    If a file path is provided, reads the file to avoid message size limits.
+    """
+    if isinstance(audio_path_or_bytes, str):
+        # It's a file path - read it
+        with open(audio_path_or_bytes, 'rb') as f:
+            audio_bytes = f.read()
+    else:
+        # It's already bytes
+        audio_bytes = audio_path_or_bytes
+    
+    mime_type, _ = mimetypes.guess_type(path_hint)
+    if not mime_type:
+        mime_type = "audio/wav"
+    b64 = base64.b64encode(audio_bytes).decode("ascii")
+    return f"data:{mime_type};base64,{b64}"
+
+
+def build_player_html(audio_url, items, mode):
+    component_id = f"ws_{uuid.uuid4().hex}"
+    items_json = json.dumps(items)
+    safe_audio_url = html.escape(audio_url, quote=True)
+    safe_mode = html.escape(mode, quote=True)
+
+    return f"""
+    <div class="ws-container" id="{component_id}_container">
+      <div id="{component_id}_waveform"></div>
+      <div class="ws-controls">
+        <button id="{component_id}_toggle">Play / Pause</button>
+        <span id="{component_id}_time" class="ws-time">00:00:000</span>
+      </div>
+      <div id="{component_id}_transcript" class="ws-transcript"></div>
+    </div>
+
+    <script src="https://unpkg.com/wavesurfer.js@7"></script>
+    <script>
+      const audioUrl = "{safe_audio_url}";
+      const items = {items_json};
+      const mode = "{safe_mode}";
+      const waveformId = "{component_id}_waveform";
+      const transcriptId = "{component_id}_transcript";
+      const toggleId = "{component_id}_toggle";
+      const timeId = "{component_id}_time";
+
+      const ws = WaveSurfer.create({{
+        container: "#" + waveformId,
+        waveColor: "#c9c9c9",
+        progressColor: "#2d2d2d",
+        cursorColor: "#e76f51",
+        height: 120,
+        barWidth: 2,
+        barGap: 2,
+        normalize: true
+      }});
+
+      const transcriptEl = document.getElementById(transcriptId);
+      const timeEl = document.getElementById(timeId);
+      const toggleEl = document.getElementById(toggleId);
+      let activeIndex = -1;
+
+      function formatTime(seconds) {{
+        const mins = Math.floor(seconds / 60);
+        const secs = Math.floor(seconds % 60);
+        const millis = Math.floor((seconds - Math.floor(seconds)) * 1000);
+        return (
+          String(mins).padStart(2, "0") +
+          ":" +
+          String(secs).padStart(2, "0") +
+          ":" +
+          String(millis).padStart(3, "0")
+        );
+      }}
+
+      function renderTranscript() {{
+        transcriptEl.innerHTML = "";
+        items.forEach((item, idx) => {{
+          const el = document.createElement(mode === "word" ? "span" : "div");
+          el.className = mode === "word" ? "ws-word" : "ws-seg";
+          el.dataset.start = item.start;
+          el.dataset.end = item.end;
+          if (mode === "word") {{
+            el.textContent = item.text + " ";
+          }} else {{
+            const header = document.createElement("div");
+            header.className = "ws-meta";
+            const label = item.speaker ? item.speaker + " " : "";
+            header.textContent = label + formatTime(item.start) + " - " + formatTime(item.end);
+            const text = document.createElement("div");
+            text.className = "ws-text";
+            text.textContent = item.text;
+            el.appendChild(header);
+            el.appendChild(text);
+          }}
+          el.addEventListener("click", () => {{
+            const duration = ws.getDuration() || 1;
+            ws.seekTo(item.start / duration);
+          }});
+          transcriptEl.appendChild(el);
+        }});
+      }}
+
+      function updateActive(currentTime) {{
+        if (!items.length) {{
+          return;
+        }}
+        let idx = -1;
+        for (let i = 0; i < items.length; i++) {{
+          if (currentTime >= items[i].start && currentTime <= items[i].end) {{
+            idx = i;
+            break;
+          }}
+        }}
+        if (idx === activeIndex) {{
+          return;
+        }}
+        if (activeIndex >= 0) {{
+          const prev = transcriptEl.children[activeIndex];
+          if (prev) {{
+            prev.classList.remove("ws-active");
+          }}
+        }}
+        if (idx >= 0) {{
+          const next = transcriptEl.children[idx];
+          if (next) {{
+            next.classList.add("ws-active");
+            next.scrollIntoView({{block: "nearest"}});
+          }}
+        }}
+        activeIndex = idx;
+      }}
+
+      function syncTime() {{
+        const t = ws.getCurrentTime();
+        timeEl.textContent = formatTime(t);
+        updateActive(t);
+      }}
+
+      ws.on("ready", () => {{
+        renderTranscript();
+        syncTime();
+      }});
+      ws.on("timeupdate", syncTime);
+      ws.on("audioprocess", syncTime);
+      ws.on("seek", syncTime);
+
+      toggleEl.addEventListener("click", () => {{
+        ws.playPause();
+      }});
+
+      ws.load(audioUrl);
+    </script>
+
+    <style>
+      .ws-container {{
+        font-family: Arial, sans-serif;
+      }}
+      .ws-controls {{
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin: 8px 0 16px 0;
+        color: #ffffff;
+      }}
+      .ws-time {{
+        font-variant-numeric: tabular-nums;
+        background: #1b1b1b;
+        border: 1px solid #3a3a3a;
+        padding: 4px 8px;
+        border-radius: 6px;
+      }}
+      .ws-transcript {{
+        border: 1px solid #e0e0e0;
+        padding: 12px;
+        max-height: 360px;
+        overflow-y: auto;
+        background: #fafafa;
+        line-height: 1.5;
+      }}
+      .ws-seg {{
+        padding: 6px 8px;
+        margin-bottom: 6px;
+        border-radius: 6px;
+        cursor: pointer;
+      }}
+      .ws-meta {{
+        font-size: 12px;
+        color: #666666;
+        margin-bottom: 4px;
+      }}
+      .ws-text {{
+        font-size: 14px;
+      }}
+      .ws-word {{
+        cursor: pointer;
+        padding: 2px 2px;
+        border-radius: 4px;
+      }}
+      .ws-active {{
+        background: #ffe8d6;
+      }}
+      button {{
+        border: 1px solid #333333;
+        background: #ffffff;
+        padding: 6px 10px;
+        cursor: pointer;
+      }}
+    </style>
+    """
+
 
 def main():
-    run_transcribe()
+    st.set_page_config(page_title="Transcribe", layout="wide")
+    check_token()
+    st.title("Transcribe")
+    
+    # Mode selection
+    workflow_mode = st.radio(
+        "Workflow",
+        ["Transcribe audio", "Upload existing transcription"],
+        index=0,
+        horizontal=True,
+        help="Choose to transcribe new audio or review existing transcription files"
+    )
+    
+    st.divider()
+    
+    if workflow_mode == "Upload existing transcription":
+        # Upload mode - load existing files
+        st.write("Load audio and a WhisperX CSV/TSV to review alignment with playback.")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            audio_path = st.text_input("Audio file path (server-side)", value="", key="upload_audio_path")
+            audio_upload = st.file_uploader("Or upload audio", type=["wav", "mp3", "flac", "m4a"], key="upload_audio")
+        with col2:
+            transcript_path = st.text_input("Transcript CSV/TSV path (server-side)", value="", key="upload_transcript_path")
+            transcript_upload = st.file_uploader("Or upload CSV/TSV", type=["csv", "tsv"], key="upload_transcript")
+
+        display_mode = st.radio(
+            "Display transcript as",
+            ["segments", "words"],
+            index=0,
+            horizontal=True,
+            help="Segments = sentence-level view, Words = word-by-word view",
+            key="upload_mode"
+        )
+
+        audio_bytes = None
+        audio_label = None
+        audio_wave = None
+        wav_bytes = None
+        wav_filename = None
+        if audio_upload is not None:
+            audio_bytes = audio_upload.read()
+            audio_label = audio_upload.name
+            # Convert to WAV to avoid MP3 encoder delay issues
+            with st.spinner("Converting audio to WAV..."):
+                wav_bytes, wav_filename, audio_wave = convert_audio_to_wav_bytes(audio_bytes, audio_upload.name)
+        elif audio_path:
+            if os.path.exists(audio_path):
+                audio_bytes = audio_bytes_from_path(audio_path)
+                audio_label = audio_path
+                # Convert to WAV to avoid MP3 encoder delay issues
+                with st.spinner("Converting audio to WAV..."):
+                    wav_bytes, wav_filename, audio_wave = convert_audio_to_wav_bytes(audio_bytes, os.path.basename(audio_path))
+            else:
+                st.error("Audio path does not exist.")
+
+        transcript_text = None
+        transcript_label = None
+        if transcript_upload is not None:
+            transcript_text = transcript_upload.read().decode("utf-8", errors="replace")
+            transcript_label = transcript_upload.name
+        elif transcript_path:
+            if os.path.exists(transcript_path):
+                with open(transcript_path, "r", encoding="utf-8", errors="replace") as f:
+                    transcript_text = f.read()
+                transcript_label = transcript_path
+            else:
+                st.error("Transcript path does not exist.")
+
+        if audio_bytes and transcript_text and wav_bytes and audio_wave is not None:
+            st.success(f"Loaded audio: {audio_label}")
+            st.success(f"Loaded transcript: {transcript_label}")
+            items, has_speakers = load_transcript_items(transcript_text, display_mode)
+            
+            # Determine the player mode based on display mode and speaker detection
+            if display_mode == "words":
+                player_mode = "word"
+            else:
+                player_mode = "diarization" if has_speakers else "segments"
+            
+            player_wav_bytes, preview_seconds = create_wavesurfer_preview(wav_bytes, audio_wave, sr=16000)
+            if preview_seconds is not None:
+                st.warning(
+                    f"Waveform preview limited to the first {format_duration(preview_seconds)} "
+                    f"to avoid large in-browser audio. Full audio is unchanged."
+                )
+
+            # Use WAV bytes for playback to avoid encoder delay issues
+            audio_url = audio_data_url(player_wav_bytes, wav_filename or audio_label)
+            st.components.v1.html(
+                build_player_html(audio_url, items, player_mode),
+                height=520,
+                scrolling=True,
+            )
+        # else:
+        #     st.info("Provide both audio and transcript to start.")
+    
+    else:
+        # Transcribe mode - full WhisperX pipeline
+        st.write("Upload an audio file to transcribe using WhisperX, then review the results.")
+        
+        # File upload and language selection
+        col1, col2 = st.columns(2)
+        # File upload and language selection
+        col1, col2 = st.columns(2)
+        with col1:
+            transcribe_audio = st.file_uploader("Upload audio file", type=["wav", "mp3", "flac", "m4a"], key="transcribe_audio")
+        with col2:
+            language_name = st.selectbox(
+                "Language",
+                list(LANGUAGE_MAPPING.keys()),
+                index=1,  # Default to German
+                help="Select language. Swiss German automatically uses the Swiss German model."
+            )
+            language = LANGUAGE_MAPPING[language_name]
+        
+        # Configuration sections
+        col_config1, col_config2 = st.columns(2)
+        
+        with col_config1:
+            st.write("**Model Configuration**")
+            
+            # Auto-select model based on language
+            if language == "ch_de":
+                default_model = "/storage/research/dsl_shared/solutions/swhisperx/swhisper-large-1.1"
+                st.info("ℹ️ Swiss German selected - using Swiss German Whisper model")
+            else:
+                default_model = "large-v3-turbo"
+            
+            use_custom_model = st.checkbox("Use custom model path", value=False)
+            if use_custom_model:
+                whisper_model = st.text_input("Custom model path", value=default_model, help="Enter model name or path")
+            else:
+                whisper_model = default_model
+                st.text(f"Using model: {whisper_model}")
+            
+            # VAD options
+            use_vad = st.checkbox("Use VAD pre-filtering", value=False, help="Use Silero VAD to filter speech segments before transcription")
+            if use_vad:
+                vad_max_pause = st.slider("VAD max pause (seconds)", min_value=0.1, max_value=1.0, value=0.25, step=0.05, help="Maximum pause duration to merge VAD segments")
+            else:
+                vad_max_pause = 0.5
+        
+        with col_config2:
+            st.write("**Speaker Diarization**")
+            # st.info("ℹ️ Diarization runs automatically if HuggingFace token is found")
+            
+            col_min, col_min_val = st.columns([1, 1])
+            with col_min:
+                use_min_speakers = st.checkbox("Set min speakers", value=False)
+            with col_min_val:
+                if use_min_speakers:
+                    min_speakers = st.number_input("Min", min_value=1, value=2, step=1, label_visibility="collapsed")
+                else:
+                    min_speakers = None
+            
+            col_max, col_max_val = st.columns([1, 1])
+            with col_max:
+                use_max_speakers = st.checkbox("Set max speakers", value=False)
+            with col_max_val:
+                if use_max_speakers:
+                    max_speakers = st.number_input("Max", min_value=1, value=4, step=1, label_visibility="collapsed")
+                else:
+                    max_speakers = None
+        
+        # Create a unique key for the current configuration to detect changes
+        current_config = f"{transcribe_audio.name if transcribe_audio else 'none'}_{language}_{whisper_model}_{use_vad}_{vad_max_pause}"
+        
+        # Clear results if configuration changed
+        if 'last_config' not in st.session_state:
+            st.session_state.last_config = None
+        if st.session_state.last_config != current_config:
+            st.session_state.transcription_results = None
+        
+        if st.button("Start Transcription", type="primary"):
+            if transcribe_audio is None:
+                st.error("Please upload an audio file first.")
+            else:
+                # Determine device
+                if torch.cuda.is_available():
+                    device = "cuda"
+                    compute_type = "float16"
+                else:
+                    device = "cpu"
+                    compute_type = "float32"
+                
+                with st.spinner(f"Transcribing audio..."):
+                    try:
+                        # Convert to WAV bytes to avoid MP3 encoder delay issues
+                        audio_bytes = transcribe_audio.getvalue()
+                        sampling_rate = 16000
+                        with st.spinner("Converting audio to WAV..."):
+                            wav_bytes, wav_filename, audio = convert_audio_to_wav_bytes(
+                                audio_bytes, transcribe_audio.name, sr=sampling_rate
+                            )
+                        player_wav_bytes, preview_seconds = create_wavesurfer_preview(wav_bytes, audio, sr=sampling_rate)
+                        
+                        # Handle Swiss German language code
+                        align_language = language
+                        if language == "ch_de":
+                            align_language = "de"  # Use German alignment for Swiss German
+                        
+                        # Load model
+                        with st.spinner("Loading Whisper model..."):
+                            model = whisperx.load_model(whisper_model, device=device, compute_type=compute_type, language=align_language)
+                        
+                        # Transcribe with optional VAD
+                        if use_vad:
+                            with st.spinner(f"Running VAD (max_pause={vad_max_pause}s)..."):
+                                vad_segments = get_vad_segments(audio, max_pause=vad_max_pause, return_seconds=False, sampling_rate=sampling_rate)
+                                # st.info(f"VAD detected {len(vad_segments)} speech segments")
+                            
+                            with st.spinner("Transcribing VAD segments..."):
+                                all_segments = []
+                                for idx, vad_seg in enumerate(vad_segments):
+                                    start_sample = int(vad_seg['start'])
+                                    end_sample = int(vad_seg['end'])
+                                    segment_audio = audio[start_sample:end_sample]
+                                    
+                                    seg_result = model.transcribe(segment_audio, batch_size=16)
+                                    
+                                    # Adjust timestamps
+                                    start_time_offset = start_sample / sampling_rate
+                                    for seg in seg_result.get('segments', []):
+                                        seg['start'] += start_time_offset
+                                        seg['end'] += start_time_offset
+                                        all_segments.append(seg)
+                                
+                                result = {'segments': all_segments, 'language': seg_result.get('language', align_language)}
+                        else:
+                            with st.spinner("Transcribing audio..."):
+                                result = model.transcribe(audio, batch_size=16)
+                        
+                        # Always do alignment
+                        with st.spinner("Aligning words..."):
+                            model_a, metadata = whisperx.load_align_model(language_code=align_language, device=device)
+                            aligned = whisperx.align(result["segments"], model_a, metadata, audio, device, return_char_alignments=False)
+                        
+                        # Automatic diarization if HF token is present
+                        has_speakers = False
+                        hf_token = read_hf_token('hf_token.txt')
+                        if hf_token:
+                            with st.spinner("Running speaker diarization..."):
+                                diarize_model = whisperx.diarize.DiarizationPipeline(use_auth_token=hf_token, device=device)
+                                diarize_segments = diarize_model(audio, min_speakers=min_speakers, max_speakers=max_speakers)
+                                aligned = whisperx.assign_word_speakers(diarize_segments, aligned)
+                                has_speakers = True
+                                # st.info("✅ Speaker diarization completed")
+                        else:
+                            st.info("ℹ️ HuggingFace token not found - skipping diarization")
+                        
+                        # Generate CSVs (in memory, not saved)
+                        transcription_csv = generate_transcription_csv(aligned, has_speakers=has_speakers)
+                        words_csv = generate_words_csv(aligned)
+                        
+                        # Store results in session state
+                        st.session_state.transcription_results = {
+                            'transcription_csv': transcription_csv,
+                            'words_csv': words_csv,
+                            'audio_bytes': audio_bytes,
+                            'wav_bytes': wav_bytes,
+                            'player_wav_bytes': player_wav_bytes,
+                            'preview_seconds': preview_seconds,
+                            'wav_filename': wav_filename,
+                            'audio_name': transcribe_audio.name,
+                            'has_speakers': has_speakers
+                        }
+                        st.session_state.last_config = current_config
+                        
+                        st.success("✅ Transcription completed!")
+                        
+                    except Exception as e:
+                        st.error(f"Transcription failed: {str(e)}")
+                        import traceback
+                        st.code(traceback.format_exc())
+        
+        # Display results if they exist in session state
+        if st.session_state.get('transcription_results'):
+            results = st.session_state.transcription_results
+            transcription_csv = results['transcription_csv']
+            words_csv = results['words_csv']
+            audio_bytes = results['audio_bytes']
+            wav_bytes = results.get('wav_bytes')
+            player_wav_bytes = results.get('player_wav_bytes')
+            preview_seconds = results.get('preview_seconds')
+            wav_filename = results.get('wav_filename')
+            audio_name = results['audio_name']
+            has_speakers = results['has_speakers']
+            
+            # Display mode selector (only shown when results exist)
+            display_mode = st.radio(
+                "Display transcript as",
+                ["segments", "words"],
+                index=0,
+                horizontal=True,
+                key="transcribe_mode",
+                help="Segments = sentence-level view, Words = word-by-word view"
+            )
+            
+            # Display results based on selected mode
+            if display_mode == "words":
+                items, _ = load_transcript_items(words_csv, "words")
+                player_mode = "word"
+            else:
+                items, _ = load_transcript_items(transcription_csv, "segments")
+                player_mode = "diarization" if has_speakers else "segments"
+            
+            if preview_seconds is not None:
+                st.warning(
+                    f"Waveform preview limited to the first {format_duration(preview_seconds)} "
+                    f"to avoid large in-browser audio. Transcription uses the full audio."
+                )
+
+            # Use WAV bytes for playback
+            audio_url = audio_data_url(player_wav_bytes or wav_bytes, wav_filename)
+            st.components.v1.html(
+                build_player_html(audio_url, items, player_mode),
+                height=520,
+                scrolling=True,
+            )
+            
+            # Download ZIP with all outputs
+            zip_buffer = io.BytesIO()
+            base_name = os.path.splitext(audio_name)[0]
+            text_output = transcription_text_from_csv(transcription_csv)
+            with zipfile.ZipFile(zip_buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr(f"{base_name}_transcription.csv", transcription_csv)
+                zf.writestr(f"{base_name}_words.csv", words_csv)
+                zf.writestr(f"{base_name}_text.txt", text_output)
+                if wav_bytes:
+                    zf.writestr(wav_filename or f"{base_name}.wav", wav_bytes)
+            zip_buffer.seek(0)
+
+            st.download_button(
+                "Download all outputs (ZIP)",
+                zip_buffer.getvalue(),
+                file_name=f"{base_name}_outputs.zip",
+                mime="application/zip",
+                key="download_outputs_zip"
+            )
+
 
 if __name__ == "__main__":
     main()
+
