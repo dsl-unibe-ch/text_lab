@@ -7,7 +7,7 @@ import shutil
 import sys 
 import json 
 
-st.set_page_config(page_title="OLM OCR", layout="wide")
+st.set_page_config(page_title="OCR", layout="wide")
 
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -18,22 +18,12 @@ check_token()
 
 
 
-st.title("📄 Document OCR (using olmocr)")
-st.markdown("Upload a PDF extract its text content.")
+st.title("📄 Document OCR")
+st.markdown("Upload a PDF and choose an OCR engine to extract its text content.")
 
 # --- 1. Get required paths from environment variables ---
-
-# Get the path to the OCR container SIF file, set in script.sh.erb
-OCR_SIF_PATH = os.environ.get("OCR_CONTAINER")
-
 # Get the user's home directory, which is persistent and accessible
 HOST_HOME = os.environ.get("HOME")
-
-if not OCR_SIF_PATH:
-    st.error(
-        "**Configuration Error:** `OCR_CONTAINER` environment variable is not set."
-    )
-    st.stop()
 
 if not HOST_HOME:
     st.error("**Configuration Error:** `HOME` environment variable is not set.")
@@ -52,9 +42,16 @@ def clear_results():
 # --- 2. Create File Uploader ---
 
 uploaded_file = st.file_uploader(
-    "Choose a PDF or image file", 
+    "Choose a PDF file",
     type=["pdf"],
     on_change=clear_results  # <-- This clears old results on new upload
+)
+
+ocr_engine = st.selectbox(
+    "OCR engine",
+    ["easyocr", "paddleocr", "olmocr"],
+    index=0,
+    help="easyocr is the default. olmocr uses the local pipeline inside this container.",
 )
 
 # --- 3. Show Button and Run Process ---
@@ -64,8 +61,8 @@ if uploaded_file is not None:
     st.info(f"File selected: **{uploaded_file.name}**")
     
     # Only show the warning if processing isn't already complete
-    if "ocr_complete" not in st.session_state:
-        st.warning("⚠️ **Heads up:** Processing can take 4-5 minutes per page. Please keep this tab open until the process is complete.")
+    # if "ocr_complete" not in st.session_state:
+    #     st.warning("⚠️ **Heads up:** Processing can take 4-5 minutes per page. Please keep this tab open until the process is complete.")
 
     # Create the button. The logic below will only run if it's clicked.
     if st.button("🚀 Run OCR"):
@@ -91,71 +88,108 @@ if uploaded_file is not None:
             with open(input_file_path, "wb") as f:
                 f.write(uploaded_file.getbuffer())
 
-            # --- 4. Construct the Apptainer command ---
-            
-            # Define container-internal paths
-            CONT_INPUT_DIR = "/inputs"
-            CONT_WORKSPACE_DIR = "/workspace"
-            CONT_INPUT_FILE = f"{CONT_INPUT_DIR}/{uploaded_file.name}"
-
-            cmd = [
-                "apptainer", "exec", "--nv",
-                "--bind", f"{INPUT_DIR}:{CONT_INPUT_DIR}",
-                "--bind", f"{WORKSPACE_DIR}:{CONT_WORKSPACE_DIR}",
-                "--env", "HF_HOME=/workspace/hf_cache",
-                "--env", "TRANSFORMERS_CACHE=/workspace/hf_cache",
-                OCR_SIF_PATH,
-                "python", "-m", "olmocr.pipeline",
-                CONT_WORKSPACE_DIR,
-                "--markdown", 
-                "--pdfs", CONT_INPUT_FILE
-            ]
-
-            # --- 5. Run the OCR process ---
-            with st.spinner("Running OCR... This may take several minutes. Please wait."):
-                
-                result = subprocess.run(
-                    cmd, 
-                    capture_output=True, 
-                    text=True, 
-                    encoding='utf-8'
-                )
-
-            # --- 6. Process the result (Saving to Session State) ---
-            
+            # --- 4. Run OCR depending on engine ---
             results_dir = WORKSPACE_DIR / "results"
-            
-            if result.returncode == 0 and results_dir.exists():
+            results_dir.mkdir(parents=True, exist_ok=True)
+
+            if ocr_engine == "olmocr":
+                CONT_INPUT_FILE = str(input_file_path)
+                CONT_WORKSPACE_DIR = str(WORKSPACE_DIR)
+                cmd = [
+                    sys.executable, "-m", "olmocr.pipeline",
+                    CONT_WORKSPACE_DIR,
+                    "--markdown",
+                    "--pdfs", CONT_INPUT_FILE
+                ]
+
+                with st.spinner("Running OlmOCR... This may take several minutes. Please wait."):
+                    result = subprocess.run(
+                        cmd,
+                        capture_output=True,
+                        text=True,
+                        encoding='utf-8'
+                    )
+
+                if result.returncode != 0:
+                    st.session_state.ocr_error = f"OCR process failed. Return code: {result.returncode}"
+                    st.session_state.ocr_error_details = (result.stdout, result.stderr)
+                    raise RuntimeError(st.session_state.ocr_error)
+
                 jsonl_files = list(results_dir.glob("*.jsonl"))
-                
-                if jsonl_files:
-                    try:
-                        output_file_path = jsonl_files[0]
-                        json_file_name = output_file_path.name
-                        
-                        with open(output_file_path, 'r', encoding='utf-8') as f:
-                            first_line = f.readline()
-                            data = json.loads(first_line)
-                        
-                        # --- SAVE TO SESSION STATE ---
-                        st.session_state.extracted_text = data.get("text")
-                        st.session_state.json_content = first_line
-                        st.session_state.txt_name = input_file_path.with_suffix(".txt").name
-                        st.session_state.json_name = json_file_name
-                        st.session_state.ocr_complete = True  # <-- Set success flag
-                        
-                    except Exception as e:
-                        st.session_state.ocr_error = f"Error parsing JSONL output: {e}"
-                        if 'first_line' in locals():
-                            st.session_state.ocr_error_details = first_line
-                else:
+                if not jsonl_files:
                     st.session_state.ocr_error = f"Process ran, but no .jsonl output file was found in {results_dir}"
                     st.session_state.ocr_error_details = (result.stdout, result.stderr)
+                    raise RuntimeError(st.session_state.ocr_error)
+
+                output_file_path = jsonl_files[0]
+                json_file_name = output_file_path.name
+                with open(output_file_path, 'r', encoding='utf-8') as f:
+                    first_line = f.readline()
+                    data = json.loads(first_line)
+
+                st.session_state.extracted_text = data.get("text")
+                st.session_state.json_content = first_line
+                st.session_state.txt_name = input_file_path.with_suffix(".txt").name
+                st.session_state.json_name = json_file_name
 
             else:
-                # Show error details if it failed
-                st.session_state.ocr_error = f"OCR process failed. Return code: {result.returncode}"
-                st.session_state.ocr_error_details = (result.stdout, result.stderr)
+                # easyocr / paddleocr
+                tmp_img_dir = WORKSPACE_DIR / "images"
+                tmp_img_dir.mkdir(parents=True, exist_ok=True)
+
+                # Convert PDF to PNG images using pdftoppm (poppler-utils)
+                prefix = tmp_img_dir / "page"
+                subprocess.run(
+                    ["pdftoppm", "-png", str(input_file_path), str(prefix)],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                )
+
+                image_paths = sorted(tmp_img_dir.glob("page-*.png"))
+                if not image_paths:
+                    raise RuntimeError("No images were generated from the PDF.")
+
+                if ocr_engine == "easyocr":
+                    import easyocr
+                    reader = easyocr.Reader(["en"], gpu=True)
+                    ocr_results = []
+                    for idx, img_path in enumerate(image_paths, start=1):
+                        page_res = reader.readtext(str(img_path), detail=1, paragraph=True)
+                        page_text = "\n".join([r[1] for r in page_res])
+                        ocr_results.append({"page": idx, "text": page_text, "raw": page_res})
+
+                else:
+                    from paddleocr import PaddleOCR
+                    ocr = PaddleOCR(use_angle_cls=True, lang="en")
+                    ocr_results = []
+                    for idx, img_path in enumerate(image_paths, start=1):
+                        page_res = ocr.ocr(str(img_path), cls=True)
+                        page_text = "\n".join([line[1][0] for line in page_res[0]])
+                        ocr_results.append({"page": idx, "text": page_text, "raw": page_res})
+
+                # Write per-page outputs + combined text
+                all_text = []
+                for item in ocr_results:
+                    page = item["page"]
+                    page_text = item["text"]
+                    all_text.append(page_text)
+                    (results_dir / f"page_{page:04d}.txt").write_text(page_text, encoding="utf-8")
+                    (results_dir / f"page_{page:04d}.json").write_text(
+                        json.dumps(item, ensure_ascii=False), encoding="utf-8"
+                    )
+
+                combined_text = "\n\n".join(all_text)
+                st.session_state.extracted_text = combined_text
+                st.session_state.json_content = json.dumps(ocr_results, ensure_ascii=False)
+                st.session_state.txt_name = input_file_path.with_suffix(".txt").name
+                st.session_state.json_name = input_file_path.with_suffix(".json").name
+
+            # Create ZIP of all outputs
+            zip_path = shutil.make_archive(str(WORKSPACE_DIR / "ocr_results"), "zip", results_dir)
+            st.session_state.ocr_zip_bytes = pathlib.Path(zip_path).read_bytes()
+            st.session_state.ocr_complete = True
 
         except Exception as e:
             st.session_state.ocr_error = f"An unexpected error occurred: {e}"
@@ -201,6 +235,13 @@ if "ocr_complete" in st.session_state:
             file_name=st.session_state.json_name,
             mime="application/json",
         )
+
+    st.download_button(
+        label="Download all outputs (.zip)",
+        data=st.session_state.ocr_zip_bytes,
+        file_name="ocr_outputs.zip",
+        mime="application/zip",
+    )
 
 # Display errors if they were saved to session state
 elif "ocr_error" in st.session_state:
