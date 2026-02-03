@@ -6,11 +6,9 @@ set -euo pipefail
 HOST_TEXT_LAB_DIR="${TEXT_LAB_DIR:-/storage/research/dsl_shared/solutions/ondemand/text_lab}"
 
 CONT_TEXT_LAB_DIR="/text_lab"
-CONT_OLMOCR_DIR="/olmocr"
 
 #point to the apptainer containers on research storage
-TL_CONTAINER="$HOST_TEXT_LAB_DIR/container/text_lab_121125.sif"
-OCR_CONTAINER="$HOST_TEXT_LAB_DIR/container/olmocr_main.sif"
+TL_CONTAINER="$HOST_TEXT_LAB_DIR/container/textlab_MB.sif"
 
 #point to where the ollama models are stored on research storage
 HOST_OLLAMA_DIR="/storage/research/dsl_shared/solutions/ondemand/text_lab/container/models/ollama"
@@ -20,7 +18,28 @@ CONT_OLLAMA_DIR="/opt/ollama"
 HOST_WHISPER_DIR="/storage/research/dsl_shared/solutions/ondemand/text_lab/container/models/whisper"
 CONT_WHISPER_DIR="/opt/whisper"
 
-export OCR_CONTAINER
+# point to where whisperx cache is stored on research storage
+HOST_WHISPERX_DIR="/storage/research/dsl_shared/solutions/ondemand/text_lab/container/models/whisperx"
+CONT_WHISPERX_DIR="/opt/whisperx"
+
+#point to where torch models are stored on research storage
+HOST_TORCH_DIR="/storage/research/dsl_shared/solutions/ondemand/text_lab/container/models/torch"
+CONT_TORCH_DIR="/opt/torch"
+
+# point to where huggingface models are stored on research storage
+HOST_HF_DIR="/storage/research/dsl_shared/solutions/ondemand/text_lab/container/models/huggingface"
+CONT_HF_DIR="/opt/huggingface"
+
+# point to where OCR caches are stored on research storage
+HOST_EASYOCR_DIR="/storage/research/dsl_shared/solutions/ondemand/text_lab/container/models/easyocr"
+CONT_EASYOCR_DIR="/opt/easyocr"
+
+# PaddleX/PaddleOCR ignore env vars in some versions and default to ~/.paddlex/.paddleocr
+HOST_PADDLEOCR_DIR="/storage/research/dsl_shared/solutions/ondemand/text_lab/container/models/paddleocr"
+HOST_PADDLEX_DIR="/storage/research/dsl_shared/solutions/ondemand/text_lab/container/models/paddlex"
+CONT_PADDLEOCR_DIR="$HOME/.paddleocr"
+CONT_PADDLEX_DIR="$HOME/.paddlex"
+
 export OLLAMA_MODELS="$CONT_OLLAMA_DIR/models"
 
 # ---------------------------- Runtime parameters ------------------------------
@@ -50,12 +69,23 @@ fi
 apptainer exec \
   --nv \
   --bind "$HOST_TEXT_LAB_DIR:$CONT_TEXT_LAB_DIR" \
-  --bind "$HOST_OLLAMA_DIR:$CONT_OLLAMA_DIR" \
+  --bind "$HOST_OLLAMA_DIR:$CONT_OLLAMA_DIR:rw" \
   --bind /storage:/storage \
-  --bind "$HOST_WHISPER_DIR:$CONT_WHISPER_DIR:ro" \
+  --bind "$HOST_WHISPER_DIR:$CONT_WHISPER_DIR:rw" \
+  --bind "$HOST_WHISPERX_DIR:$CONT_WHISPERX_DIR:rw" \
+  --bind "$HOST_TORCH_DIR:$CONT_TORCH_DIR:rw" \
+  --bind "$HOST_HF_DIR:$CONT_HF_DIR:rw" \
+  --bind "$HOST_EASYOCR_DIR:$CONT_EASYOCR_DIR:rw" \
+  --bind "$HOST_PADDLEOCR_DIR:$CONT_PADDLEOCR_DIR:rw" \
+  --bind "$HOST_PADDLEX_DIR:$CONT_PADDLEX_DIR:rw" \
+  --env HF_HOME=/opt/huggingface \
+  --env PADDLEX_HOME="$CONT_PADDLEX_DIR" \
+  --env PADDLEOCR_CACHE="$CONT_PADDLEOCR_DIR" \
+  --env VLLM_GPU_MEMORY_UTILIZATION=0.6 \
   --env OLLAMA_MODELS="$CONT_OLLAMA_DIR/models" \
   --env OLLAMA_LLM_LIBRARY="cuda" \
   --env OLLAMA_FLASH_ATTENTION="true" \
+  --env VLLM_GPU_MEMORY_UTILIZATION=0.6 \
   "$TL_CONTAINER" \
   /usr/bin/python3 -m streamlit run "/storage/research/dsl_shared/solutions/ondemand/text_lab/src_main/src/Home.py" \
     --server.address 0.0.0.0 \
