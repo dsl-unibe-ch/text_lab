@@ -165,7 +165,7 @@ if uploaded_file is not None:
                     ocr = PaddleOCR(use_angle_cls=True, lang="en")
                     ocr_results = []
                     for idx, img_path in enumerate(image_paths, start=1):
-                        page_res = ocr.ocr(str(img_path), cls=True)
+                        page_res = ocr.ocr(str(img_path))
                         page_text = "\n".join([line[1][0] for line in page_res[0]])
                         ocr_results.append({"page": idx, "text": page_text, "raw": page_res})
 
