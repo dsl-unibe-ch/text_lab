@@ -1,11 +1,13 @@
+import os
+os.environ["VLLM_GPU_MEMORY_UTILIZATION"] = "0.6"
+
 import streamlit as st
 import subprocess
-import os
 import uuid
 import pathlib
 import shutil
 import sys 
-import json 
+import json
 
 st.set_page_config(page_title="OCR", layout="wide")
 
