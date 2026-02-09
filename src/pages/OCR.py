@@ -11,18 +11,16 @@ import pathlib
 import shutil
 import sys 
 import json
+import io
 import numpy as np
+import cv2
 
 st.set_page_config(page_title="OCR", layout="wide")
-
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from auth import check_token
-
 check_token()
-
-
 
 st.title("📄 Document OCR")
 st.markdown("Upload a PDF and choose an OCR engine to extract its text content.")
@@ -128,6 +126,287 @@ def compact_paddle_prediction(pred):
     return compact
 
 
+def _poly_to_int_points(poly):
+    arr = np.array(poly)
+    if arr.size == 0:
+        return None
+    arr = arr.astype(np.float32).reshape(-1)
+    # Support bbox style [x1, y1, x2, y2]
+    if arr.size == 4:
+        x1, y1, x2, y2 = arr.tolist()
+        arr = np.array([x1, y1, x2, y1, x2, y2, x1, y2], dtype=np.float32)
+    if arr.size < 8:
+        return None
+    if arr.size % 2 != 0:
+        arr = arr[:-1]
+    pts = arr.reshape(-1, 2).astype(np.int32)
+    if pts.shape[0] < 3:
+        return None
+    return pts
+
+
+def _encode_png(image):
+    ok, encoded = cv2.imencode(".png", image)
+    return encoded.tobytes() if ok else None
+
+
+def _to_png_bytes(image_like):
+    if image_like is None:
+        return None
+    if isinstance(image_like, (bytes, bytearray)):
+        return bytes(image_like)
+    if isinstance(image_like, np.ndarray):
+        return _encode_png(image_like)
+    # PIL Image
+    if hasattr(image_like, "save"):
+        buf = io.BytesIO()
+        image_like.save(buf, format="PNG")
+        return buf.getvalue()
+    return None
+
+
+def _pick_paddle_vis_image(pred):
+    """
+    Extract Paddle's own visualization image (same basis as save_to_img).
+    """
+    if not hasattr(pred, "img"):
+        return None
+    payload = pred.img
+    if isinstance(payload, dict):
+        for key in ("ocr_res_img", "overall_ocr_res", "layout_det_res"):
+            if key in payload:
+                out = _to_png_bytes(payload[key])
+                if out is not None:
+                    return out
+        for val in payload.values():
+            out = _to_png_bytes(val)
+            if out is not None:
+                return out
+        return None
+    return _to_png_bytes(payload)
+
+
+def _extract_paddle_core(raw):
+    if isinstance(raw, dict) and isinstance(raw.get("res"), dict):
+        return raw["res"]
+    return raw if isinstance(raw, dict) else {}
+
+
+def _draw_text_canvas(image_shape, items):
+    """
+    Build a white canvas and place OCR text near each detected box.
+    items: list of (pts, text)
+    """
+    h, w = image_shape[:2]
+    canvas = np.full((h, w, 3), 255, dtype=np.uint8)
+    font = cv2.FONT_HERSHEY_SIMPLEX
+
+    def _wrap_line_to_width(text, max_width, font_scale, thickness):
+        words = text.split(" ")
+        if not words:
+            return [""]
+        lines = []
+        current = words[0]
+        for word in words[1:]:
+            candidate = f"{current} {word}"
+            candidate_w = cv2.getTextSize(candidate, font, font_scale, thickness)[0][0]
+            if candidate_w <= max_width:
+                current = candidate
+            else:
+                lines.append(current)
+                current = word
+        lines.append(current)
+        return lines
+
+    def _fit_text_to_box(text, bw, bh):
+        text = str(text).replace("\r\n", "\n").replace("\r", "\n")
+        if not text.strip():
+            return [], 0.4, 1, 12
+
+        # Try progressively smaller font scales until text fits box height.
+        for font_scale in (0.8, 0.7, 0.6, 0.5, 0.45, 0.4, 0.35):
+            thickness = 1
+            line_h = cv2.getTextSize("Ag", font, font_scale, thickness)[0][1] + 4
+            max_width = max(8, bw - 4)
+            max_lines = max(1, bh // max(1, line_h))
+
+            wrapped = []
+            for raw_line in text.split("\n"):
+                raw_line = raw_line.strip()
+                if not raw_line:
+                    wrapped.append("")
+                    continue
+                wrapped.extend(_wrap_line_to_width(raw_line, max_width, font_scale, thickness))
+
+            if len(wrapped) <= max_lines:
+                return wrapped, font_scale, thickness, line_h
+
+        # If still too long, truncate to max lines with ellipsis at smallest scale.
+        font_scale = 0.35
+        thickness = 1
+        line_h = cv2.getTextSize("Ag", font, font_scale, thickness)[0][1] + 4
+        max_width = max(8, bw - 4)
+        max_lines = max(1, bh // max(1, line_h))
+        wrapped = []
+        for raw_line in text.split("\n"):
+            raw_line = raw_line.strip()
+            if not raw_line:
+                wrapped.append("")
+                continue
+            wrapped.extend(_wrap_line_to_width(raw_line, max_width, font_scale, thickness))
+        wrapped = wrapped[:max_lines]
+        if wrapped:
+            last = wrapped[-1]
+            while last and cv2.getTextSize(last + "...", font, font_scale, thickness)[0][0] > max_width:
+                last = last[:-1]
+            wrapped[-1] = (last + "...") if last else "..."
+        return wrapped, font_scale, thickness, line_h
+
+    for pts, text in items:
+        if pts is None:
+            continue
+        cv2.polylines(canvas, [pts], isClosed=True, color=(210, 210, 210), thickness=1)
+        if not text:
+            continue
+        x, y, bw, bh = cv2.boundingRect(pts)
+        lines, font_scale, thickness, line_h = _fit_text_to_box(text, bw, bh)
+        if not lines:
+            continue
+        y_cursor = max(12, y + line_h)
+        y_limit = min(h - 2, y + bh - 2)
+        for line in lines:
+            if y_cursor > y_limit:
+                break
+            cv2.putText(
+                canvas,
+                line,
+                (max(0, x + 2), min(h - 4, y_cursor)),
+                font,
+                font_scale,
+                (0, 0, 0),
+                thickness,
+                cv2.LINE_AA,
+            )
+            y_cursor += line_h
+    return canvas
+
+
+def _is_number_list(seq):
+    if not isinstance(seq, (list, tuple)) or not seq:
+        return False
+    return all(isinstance(v, (int, float, np.integer, np.floating)) for v in seq)
+
+
+def _extract_polys_from_ocr_payload(payload):
+    """Recursively extract polygon-like structures from OCR payloads."""
+    polys = []
+    poly_keys = {"rec_polys", "dt_polys", "polys", "boxes", "rec_boxes"}
+
+    if isinstance(payload, dict):
+        for key, val in payload.items():
+            key_l = str(key).lower()
+            if key_l in poly_keys:
+                polys.extend(_extract_polys_from_ocr_payload(val))
+                continue
+            polys.extend(_extract_polys_from_ocr_payload(val))
+        return polys
+
+    if isinstance(payload, (list, tuple)):
+        # A single polygon or bbox vector
+        if _is_number_list(payload):
+            pts = _poly_to_int_points(payload)
+            if pts is not None:
+                polys.append(pts)
+            return polys
+
+        # Could be list of points [[x,y], ...] or list of polygons
+        if payload and isinstance(payload[0], (list, tuple)):
+            # Point list for a single polygon
+            if all(
+                isinstance(p, (list, tuple)) and len(p) >= 2 and
+                isinstance(p[0], (int, float, np.integer, np.floating)) and
+                isinstance(p[1], (int, float, np.integer, np.floating))
+                for p in payload
+            ):
+                pts = _poly_to_int_points(payload)
+                if pts is not None:
+                    polys.append(pts)
+                return polys
+
+        for item in payload:
+            polys.extend(_extract_polys_from_ocr_payload(item))
+        return polys
+
+    return polys
+
+
+def render_easyocr_preview(image_path, page_res):
+    image = cv2.imread(str(image_path))
+    if image is None:
+        return None, None
+    text_items = []
+    for item in page_res:
+        if not isinstance(item, (list, tuple)) or len(item) < 2:
+            continue
+        pts = _poly_to_int_points(item[0])
+        if pts is None:
+            continue
+        text = str(item[1]).strip()
+        text_items.append((pts, text))
+        cv2.polylines(image, [pts], isClosed=True, color=(0, 200, 0), thickness=2)
+    text_canvas = _draw_text_canvas(image.shape, text_items)
+    return _encode_png(image), _encode_png(text_canvas)
+
+
+def render_paddle_preview(image_path, page_preds):
+    image = cv2.imread(str(image_path))
+    if image is None:
+        return None, None
+    left_png = None
+    text_items = []
+    for pred in page_preds:
+        if left_png is None:
+            left_png = _pick_paddle_vis_image(pred)
+        if hasattr(pred, "json"):
+            raw = pred.json
+        elif hasattr(pred, "to_dict"):
+            raw = pred.to_dict()
+        else:
+            raw = pred
+        raw = make_json_serializable(raw)
+        core = _extract_paddle_core(raw)
+
+        texts = core.get("rec_texts")
+        if not isinstance(texts, list):
+            texts = extract_texts_from_ocr_payload(core)
+
+        polys_src = (
+            core.get("rec_polys")
+            or core.get("dt_polys")
+            or core.get("rec_boxes")
+            or core.get("boxes")
+        )
+        if polys_src is None:
+            polys = _extract_polys_from_ocr_payload(core)
+        else:
+            polys = _extract_polys_from_ocr_payload(polys_src)
+
+        for i, poly in enumerate(polys):
+            pts = _poly_to_int_points(poly)
+            if pts is None:
+                continue
+            text = str(texts[i]).strip() if i < len(texts) else ""
+            # keep OCR text for right-side white canvas
+            text_items.append((pts, text))
+    text_canvas = _draw_text_canvas(image.shape, text_items)
+    if left_png is None:
+        # Fallback if Paddle visualization image is unavailable
+        for pts, _ in text_items:
+            cv2.polylines(image, [pts], isClosed=True, color=(0, 200, 0), thickness=2)
+        left_png = _encode_png(image)
+    return left_png, _encode_png(text_canvas)
+
+
 @st.cache_resource(show_spinner=False)
 def get_easyocr_reader():
     import easyocr
@@ -150,6 +429,8 @@ def clear_results(reset_running=False):
         "json_name",
         "ocr_error",
         "ocr_error_details",
+        "ocr_preview_images",
+        "ocr_preview_page",
     ]:
         if key in st.session_state:
             del st.session_state[key]
@@ -171,11 +452,11 @@ if "ocr_running" not in st.session_state:
 
 ocr_engine = st.selectbox(
     "OCR engine",
-    ["easyocr", "paddleocr", "olmocr"],
+    ["EasyOCR", "PaddleOCR", "OlmOCR"],
     index=0,
     on_change=clear_results,
     args=(True,),
-    help="easyocr is the default. olmocr uses the local pipeline inside this container.",
+    help="EasyOCR is the default. OlmOCR uses the local pipeline inside this container.",
 )
 
 # --- 3. Show Button and Run Process ---
@@ -214,6 +495,7 @@ if uploaded_file is not None:
         try:
             INPUT_DIR.mkdir(parents=True, exist_ok=True)
             WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
+            preview_images = []
 
             # Save the uploaded file to the input directory
             input_file_path = INPUT_DIR / uploaded_file.name
@@ -224,7 +506,7 @@ if uploaded_file is not None:
             results_dir = WORKSPACE_DIR / "results"
             results_dir.mkdir(parents=True, exist_ok=True)
 
-            if ocr_engine == "olmocr":
+            if ocr_engine == "OlmOCR":
                 CONT_INPUT_FILE = str(input_file_path)
                 CONT_WORKSPACE_DIR = str(WORKSPACE_DIR)
                 cmd = [
@@ -266,6 +548,9 @@ if uploaded_file is not None:
                 st.session_state.json_content = first_line
                 st.session_state.txt_name = input_file_path.with_suffix(".txt").name
                 st.session_state.json_name = json_file_name
+                st.session_state.ocr_preview_engine = "OlmOCR"
+                st.session_state.ocr_preview_images = []
+                st.session_state.ocr_preview_page = 0
 
             else:
                 # easyocr / paddleocr
@@ -286,7 +571,7 @@ if uploaded_file is not None:
                 if not image_paths:
                     raise RuntimeError("No images were generated from the PDF.")
 
-                if ocr_engine == "easyocr":
+                if ocr_engine == "EasyOCR":
                     with st.spinner("Loading model..."):
                         reader = get_easyocr_reader()
                     progress = st.progress(0.0, text="Running EasyOCR...")
@@ -295,6 +580,9 @@ if uploaded_file is not None:
                         page_res = reader.readtext(str(img_path), detail=1, paragraph=True)
                         page_text = "\n".join([r[1] for r in page_res])
                         ocr_results.append({"page": idx, "text": page_text, "raw": page_res})
+                        preview_left, preview_right = render_easyocr_preview(img_path, page_res)
+                        if preview_left is not None and preview_right is not None:
+                            preview_images.append((preview_left, preview_right))
                         progress.progress(idx / len(image_paths), text=f"Running EasyOCR... page {idx}/{len(image_paths)}")
                     progress.empty()
 
@@ -311,6 +599,9 @@ if uploaded_file is not None:
                             page_text_lines.extend(pred.get("rec_texts", []))
                         page_text = "\n".join([line for line in page_text_lines if line])
                         ocr_results.append({"page": idx, "text": page_text, "raw": compact_preds})
+                        preview_left, preview_right = render_paddle_preview(img_path, page_preds)
+                        if preview_left is not None and preview_right is not None:
+                            preview_images.append((preview_left, preview_right))
                         progress.progress(idx / len(image_paths), text=f"Running PaddleOCR... page {idx}/{len(image_paths)}")
                     progress.empty()
 
@@ -336,6 +627,9 @@ if uploaded_file is not None:
                 st.session_state.json_content = json.dumps(make_json_serializable(ocr_results), ensure_ascii=False)
                 st.session_state.txt_name = input_file_path.with_suffix(".txt").name
                 st.session_state.json_name = input_file_path.with_suffix(".json").name
+                st.session_state.ocr_preview_engine = ocr_engine
+                st.session_state.ocr_preview_images = preview_images
+                st.session_state.ocr_preview_page = 0
 
             # Create ZIP of all outputs
             # st.info("Packaging outputs...")
@@ -376,7 +670,7 @@ if "ocr_complete" in st.session_state:
     )
     
     # --- Create columns for download buttons ---
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     
     with col1:
         st.download_button(
@@ -394,12 +688,48 @@ if "ocr_complete" in st.session_state:
             mime="application/json",
         )
 
-    st.download_button(
-        label="Download all outputs (.zip)",
-        data=st.session_state.ocr_zip_bytes,
-        file_name="ocr_outputs.zip",
-        mime="application/zip",
-    )
+    with col3:
+        st.download_button(
+            label="Download all outputs (.zip)",
+            data=st.session_state.ocr_zip_bytes,
+            file_name="ocr_outputs.zip",
+            mime="application/zip",
+        )
+
+    preview_images = st.session_state.get("ocr_preview_images", [])
+    if preview_images:
+        st.markdown("### OCR Preview")
+        preview_engine = st.session_state.get("ocr_preview_engine", "")
+        current_page = st.session_state.get("ocr_preview_page", 0)
+        current_page = max(0, min(current_page, len(preview_images) - 1))
+        st.session_state.ocr_preview_page = current_page
+
+        nav_prev, nav_info, nav_next = st.columns([1, 2, 1])
+        with nav_prev:
+            if st.button("⬅ Previous", disabled=current_page <= 0, key="ocr_preview_prev"):
+                st.session_state.ocr_preview_page = max(0, current_page - 1)
+                st.rerun()
+        with nav_info:
+            st.caption(f"Page {st.session_state.ocr_preview_page + 1} of {len(preview_images)}")
+        with nav_next:
+            if st.button("Next ➡", disabled=current_page >= len(preview_images) - 1, key="ocr_preview_next"):
+                st.session_state.ocr_preview_page = min(len(preview_images) - 1, current_page + 1)
+                st.rerun()
+
+        current_preview = preview_images[st.session_state.ocr_preview_page]
+        if preview_engine == "EasyOCR" and isinstance(current_preview, (list, tuple)) and len(current_preview) >= 2:
+            left_img, right_img = current_preview[0], current_preview[1]
+            col_left, col_right = st.columns(2)
+            with col_left:
+                st.caption("Detected boxes on original page")
+                st.image(left_img, use_container_width=True)
+            with col_right:
+                st.caption("OCR text layout (white canvas)")
+                st.image(right_img, use_container_width=True)
+        else:
+            left_img = current_preview[0] if isinstance(current_preview, (list, tuple)) else current_preview
+            st.caption("OCR visualization")
+            st.image(left_img, use_container_width=True)
 
 # Display errors if they were saved to session state
 elif "ocr_error" in st.session_state:
