@@ -1,6 +1,9 @@
 import os
 os.environ["VLLM_GPU_MEMORY_UTILIZATION"] = "0.6"
 os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
+# PaddleX uses PADDLE_PDX_CACHE_HOME and otherwise falls back to ~/.paddlex.
+# Keep this as a defensive default if launcher env is missing.
+os.environ.setdefault("PADDLE_PDX_CACHE_HOME", os.environ.get("PADDLEX_HOME", os.path.expanduser("~/.paddlex")))
 os.environ.setdefault("STREAMLIT_SERVER_FILE_WATCHER_TYPE", "none")
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 

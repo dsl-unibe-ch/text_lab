@@ -39,6 +39,7 @@ HOST_PADDLEOCR_DIR="/storage/research/dsl_shared/solutions/ondemand/text_lab/con
 HOST_PADDLEX_DIR="/storage/research/dsl_shared/solutions/ondemand/text_lab/container/models/paddlex"
 CONT_PADDLEOCR_DIR="$HOME/.paddleocr"
 CONT_PADDLEX_DIR="$HOME/.paddlex"
+PADDLE_PDX_CACHE_HOME="${PADDLE_PDX_CACHE_HOME:-$HOST_PADDLEX_DIR}"
 
 export OLLAMA_MODELS="$CONT_OLLAMA_DIR/models"
 
@@ -82,6 +83,7 @@ apptainer exec \
   --env HF_HOME=/opt/huggingface \
   --env PADDLEX_HOME="$CONT_PADDLEX_DIR" \
   --env PADDLEOCR_CACHE="$CONT_PADDLEOCR_DIR" \
+  --env PADDLE_PDX_CACHE_HOME="$PADDLE_PDX_CACHE_HOME" \
   --env VLLM_GPU_MEMORY_UTILIZATION="$OLMOCR_GPU_MEMORY_UTILIZATION" \
   --env OLMOCR_GPU_MEMORY_UTILIZATION="$OLMOCR_GPU_MEMORY_UTILIZATION" \
   --env OLLAMA_MODELS="$CONT_OLLAMA_DIR/models" \
