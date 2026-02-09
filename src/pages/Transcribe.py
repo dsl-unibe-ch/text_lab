@@ -67,6 +67,7 @@ LANGUAGE_MAPPING = {
     "Tagalog": "tl",
     "Swedish": "sv"
 }
+LANGUAGE_CODE_TO_NAME = {code: name for name, code in LANGUAGE_MAPPING.items()}
 
 WAVESURFER_MAX_BYTES = 75 * 1024 * 1024
 WAVESURFER_MAX_SECONDS = 30 * 60
@@ -231,6 +232,37 @@ def convert_audio_to_wav_bytes(audio_bytes, original_filename, sr=16000):
     wav_bytes = wav_buffer.getvalue()
     wav_filename = os.path.splitext(original_filename)[0] + ".wav"
     return wav_bytes, wav_filename, audio
+
+
+@st.cache_resource(show_spinner=False)
+def get_language_detector():
+    from faster_whisper import WhisperModel
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    compute_type = "float16" if device == "cuda" else "int8"
+    model = WhisperModel("tiny", device=device, compute_type=compute_type)
+    return model
+
+
+def detect_language_from_audio_bytes(audio_bytes, sr=16000):
+    audio = decode_audio_bytes(audio_bytes, sr=sr)
+    if audio is None or audio.size == 0:
+        raise ValueError("Decoded waveform is empty.")
+
+    max_seconds = 30
+    snippet = audio[: int(sr * max_seconds)]
+    detector = get_language_detector()
+    _, info = detector.transcribe(
+        snippet,
+        beam_size=1,
+        language=None,
+        task="transcribe",
+        vad_filter=False,
+        without_timestamps=True,
+    )
+    language_code = getattr(info, "language", None)
+    language_prob = float(getattr(info, "language_probability", 0.0) or 0.0)
+    return language_code, language_prob
 
 
 def create_wavesurfer_preview(wav_bytes, audio, sr):
@@ -571,21 +603,64 @@ def main():
     else:
         # Transcribe mode - full WhisperX pipeline
         st.write("Upload an audio file to transcribe using WhisperX, then review the results.")
-        
-        # File upload and language selection
-        col1, col2 = st.columns(2)
+
+        if "transcribe_language_name" not in st.session_state:
+            st.session_state.transcribe_language_name = "German"
+
         # File upload and language selection
         col1, col2 = st.columns(2)
         with col1:
             transcribe_audio = st.file_uploader("Upload audio file", type=["wav", "mp3", "flac", "m4a"], key="transcribe_audio")
+
+        if transcribe_audio is not None:
+            upload_size = getattr(transcribe_audio, "size", "unknown")
+            upload_signature = f"{transcribe_audio.name}:{upload_size}"
+            if st.session_state.get("transcribe_lang_detect_sig") != upload_signature:
+                with st.spinner("Detecting language..."):
+                    try:
+                        upload_bytes = transcribe_audio.getvalue()
+                        detected_code, detected_prob = detect_language_from_audio_bytes(upload_bytes, sr=16000)
+                        st.session_state.transcribe_lang_detect_sig = upload_signature
+                        st.session_state.transcribe_lang_detect_code = detected_code
+                        st.session_state.transcribe_lang_detect_prob = detected_prob
+                        if detected_code in LANGUAGE_CODE_TO_NAME:
+                            st.session_state.transcribe_language_name = LANGUAGE_CODE_TO_NAME[detected_code]
+                            st.session_state.transcribe_lang_detect_msg = (
+                                f"Auto-detected language: {LANGUAGE_CODE_TO_NAME[detected_code]} "
+                                f"({detected_code}, confidence {detected_prob:.0%}). "
+                                "You can still change it manually."
+                            )
+                            st.session_state.transcribe_lang_detect_level = "info"
+                        else:
+                            st.session_state.transcribe_lang_detect_msg = (
+                                f"Detected language code '{detected_code}' is not in the selectable list. "
+                                "Please select language manually."
+                            )
+                            st.session_state.transcribe_lang_detect_level = "warning"
+                    except Exception as e:
+                        st.session_state.transcribe_lang_detect_sig = upload_signature
+                        st.session_state.transcribe_lang_detect_code = None
+                        st.session_state.transcribe_lang_detect_prob = 0.0
+                        st.session_state.transcribe_lang_detect_msg = (
+                            f"Could not auto-detect language ({str(e)}). Please set it manually."
+                        )
+                        st.session_state.transcribe_lang_detect_level = "warning"
+
         with col2:
             language_name = st.selectbox(
                 "Language",
                 list(LANGUAGE_MAPPING.keys()),
-                index=1,  # Default to German
+                key="transcribe_language_name",
                 help="Select language. Swiss German automatically uses the Swiss German model."
             )
             language = LANGUAGE_MAPPING[language_name]
+            detect_msg = st.session_state.get("transcribe_lang_detect_msg")
+            detect_level = st.session_state.get("transcribe_lang_detect_level", "info")
+            if transcribe_audio is not None and detect_msg:
+                if detect_level == "warning":
+                    st.warning(detect_msg)
+                else:
+                    st.info(detect_msg)
         
         # Configuration sections
         col_config1, col_config2 = st.columns(2)
@@ -595,17 +670,18 @@ def main():
             
             # Auto-select model based on language
             if language == "ch_de":
-                default_model = "/storage/research/dsl_shared/solutions/swhisperx/swhisper-large-1.1"
-                st.info("ℹ️ Swiss German selected - using Swiss German Whisper model")
+                default_model = "/storage/research/dsl_shared/solutions/whisperx/cache/whisper/swhisper-large-1.1"
+                st.info("ℹ️ Using Swiss German Whisper model")
             else:
                 default_model = "large-v3-turbo"
+                st.info(f"ℹ️ Using default Large v3 Turbo whisper model")
             
             use_custom_model = st.checkbox("Use custom model path", value=False)
             if use_custom_model:
                 whisper_model = st.text_input("Custom model path", value=default_model, help="Enter model name or path")
             else:
                 whisper_model = default_model
-                st.text(f"Using model: {whisper_model}")
+                # st.text(f"Using model: {whisper_model}")
             
             # VAD options
             use_vad = st.checkbox("Use VAD pre-filtering", value=False, help="Use Silero VAD to filter speech segments before transcription")
@@ -666,7 +742,7 @@ def main():
                             wav_bytes, wav_filename, audio = convert_audio_to_wav_bytes(
                                 audio_bytes, transcribe_audio.name, sr=sampling_rate
                             )
-                        st.caption(f"Audio debug (full): {audio_debug_stats(audio)}")
+                        # st.caption(f"Audio debug (full): {audio_debug_stats(audio)}")
                         if audio is None or audio.size == 0:
                             raise ValueError(
                                 "Decoded waveform is empty. This file likely failed ffmpeg decoding "
@@ -695,11 +771,11 @@ def main():
                                     start_sample = int(vad_seg['start'])
                                     end_sample = int(vad_seg['end'])
                                     segment_audio = audio[start_sample:end_sample]
-                                    st.caption(
-                                        f"Audio debug (VAD segment {idx}): "
-                                        f"{audio_debug_stats(segment_audio)} "
-                                        f"[samples {start_sample}:{end_sample}]"
-                                    )
+                                    # st.caption(
+                                    #     f"Audio debug (VAD segment {idx}): "
+                                    #     f"{audio_debug_stats(segment_audio)} "
+                                    #     f"[samples {start_sample}:{end_sample}]"
+                                    # )
                                     if segment_audio.size == 0:
                                         st.warning(
                                             f"Skipping empty VAD segment {idx} "
@@ -719,7 +795,7 @@ def main():
                                 result = {'segments': all_segments, 'language': seg_result.get('language', align_language)}
                         else:
                             with st.spinner("Transcribing audio..."):
-                                st.caption(f"Audio debug (pre-transcribe): {audio_debug_stats(audio)}")
+                                # st.caption(f"Audio debug (pre-transcribe): {audio_debug_stats(audio)}")
                                 result = model.transcribe(audio, batch_size=16)
                         
                         # Always do alignment
@@ -822,13 +898,25 @@ def main():
                     zf.writestr(wav_filename or f"{base_name}.wav", wav_bytes)
             zip_buffer.seek(0)
 
-            st.download_button(
-                "Download all outputs (ZIP)",
-                zip_buffer.getvalue(),
-                file_name=f"{base_name}_outputs.zip",
-                mime="application/zip",
-                key="download_outputs_zip"
-            )
+            col_text, col_zip = st.columns(2)
+            with col_text:
+                st.download_button(
+                    "Download text (.txt)",
+                    text_output,
+                    file_name=f"{base_name}_text.txt",
+                    mime="text/plain",
+                    key="download_text_txt",
+                    use_container_width=True,
+                )
+            with col_zip:
+                st.download_button(
+                    "Download all outputs (ZIP)",
+                    zip_buffer.getvalue(),
+                    file_name=f"{base_name}_outputs.zip",
+                    mime="application/zip",
+                    key="download_outputs_zip",
+                    use_container_width=True,
+                )
 
 
 if __name__ == "__main__":
