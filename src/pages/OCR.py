@@ -1,5 +1,8 @@
 import os
 os.environ["VLLM_GPU_MEMORY_UTILIZATION"] = "0.6"
+os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
+os.environ.setdefault("STREAMLIT_SERVER_FILE_WATCHER_TYPE", "none")
+os.environ.setdefault("OMP_NUM_THREADS", "1")
 
 import streamlit as st
 import subprocess
@@ -8,6 +11,7 @@ import pathlib
 import shutil
 import sys 
 import json
+import numpy as np
 
 st.set_page_config(page_title="OCR", layout="wide")
 
@@ -33,26 +37,144 @@ if not HOST_HOME:
 
 # Define a base directory for all OCR jobs
 OCR_JOBS_BASE_DIR = pathlib.Path(HOST_HOME) / "ondemand_text_lab_ocr_jobs"
+OLMOCR_GPU_MEMORY_UTILIZATION = os.environ.get("OLMOCR_GPU_MEMORY_UTILIZATION", "0.6")
+
+
+def make_json_serializable(value):
+    """Recursively convert numpy types to standard Python JSON-safe types."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, dict):
+        return {k: make_json_serializable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [make_json_serializable(v) for v in value]
+    if hasattr(value, "tolist"):
+        try:
+            return make_json_serializable(value.tolist())
+        except Exception:
+            pass
+    if hasattr(value, "__dict__"):
+        try:
+            return {k: make_json_serializable(v) for k, v in vars(value).items()}
+        except Exception:
+            pass
+    return str(value)
+
+
+def extract_texts_from_ocr_payload(payload):
+    """Recursively extract OCR text strings from nested dict/list payloads."""
+    texts = []
+
+    if isinstance(payload, str):
+        # Only collect strings when they are attached to explicit text keys.
+        return texts
+
+    if isinstance(payload, dict):
+        for key, val in payload.items():
+            key_l = str(key).lower()
+            if key_l in {"rec_texts", "texts"}:
+                if isinstance(val, list):
+                    texts.extend([str(x).strip() for x in val if str(x).strip()])
+                elif isinstance(val, str) and val.strip():
+                    texts.append(val.strip())
+                else:
+                    texts.extend(extract_texts_from_ocr_payload(val))
+            elif key_l == "text":
+                if isinstance(val, str) and val.strip():
+                    texts.append(val.strip())
+                else:
+                    texts.extend(extract_texts_from_ocr_payload(val))
+            else:
+                # Traverse nested containers but ignore plain strings from metadata fields.
+                texts.extend(extract_texts_from_ocr_payload(val))
+        return texts
+
+    if isinstance(payload, (list, tuple)):
+        for item in payload:
+            texts.extend(extract_texts_from_ocr_payload(item))
+        return texts
+
+    return texts
+
+
+def compact_paddle_prediction(pred):
+    """
+    Convert PaddleOCR prediction to a compact JSON-safe dict.
+    Keeps core text-related fields and avoids serializing heavyweight objects.
+    """
+    if hasattr(pred, "json"):
+        raw = pred.json
+    elif hasattr(pred, "to_dict"):
+        raw = pred.to_dict()
+    else:
+        raw = pred
+
+    raw = make_json_serializable(raw)
+    compact = {}
+    if isinstance(raw, dict):
+        for key in ("input_path", "page_index", "model_settings", "rec_texts", "rec_scores", "rec_polys", "dt_polys"):
+            if key in raw:
+                compact[key] = raw[key]
+    else:
+        compact["raw"] = raw
+
+    rec_texts = extract_texts_from_ocr_payload(compact if compact else raw)
+    # de-duplicate while preserving order
+    compact["rec_texts"] = list(dict.fromkeys(rec_texts))
+    return compact
+
+
+@st.cache_resource(show_spinner=False)
+def get_easyocr_reader():
+    import easyocr
+    return easyocr.Reader(["en"], gpu=True)
+
+
+@st.cache_resource(show_spinner=False)
+def get_paddleocr_engine():
+    from paddleocr import PaddleOCR
+    return PaddleOCR(use_textline_orientation=True, lang="en")
 
 # --- NEW: Function to clear results when a new file is uploaded ---
-def clear_results():
+def clear_results(reset_running=False):
     """Clears all OCR results from the session state."""
-    for key in ["ocr_complete", "extracted_text", "json_content", "txt_name", "json_name", "ocr_error", "ocr_error_details"]:
+    for key in [
+        "ocr_complete",
+        "extracted_text",
+        "json_content",
+        "txt_name",
+        "json_name",
+        "ocr_error",
+        "ocr_error_details",
+    ]:
         if key in st.session_state:
             del st.session_state[key]
+    # Only unlock explicitly on config/file changes (not when a run starts).
+    if reset_running:
+        st.session_state.ocr_running = False
 
 # --- 2. Create File Uploader ---
 
 uploaded_file = st.file_uploader(
     "Choose a PDF file",
     type=["pdf"],
-    on_change=clear_results  # <-- This clears old results on new upload
+    on_change=clear_results,  # <-- This clears old results on new upload
+    args=(True,),
 )
+
+if "ocr_running" not in st.session_state:
+    st.session_state.ocr_running = False
 
 ocr_engine = st.selectbox(
     "OCR engine",
     ["easyocr", "paddleocr", "olmocr"],
     index=0,
+    on_change=clear_results,
+    args=(True,),
     help="easyocr is the default. olmocr uses the local pipeline inside this container.",
 )
 
@@ -60,17 +182,25 @@ ocr_engine = st.selectbox(
 # Only show the button and warning AFTER a file has been uploaded
 if uploaded_file is not None:
     
-    st.info(f"File selected: **{uploaded_file.name}**")
+    # st.info(f"File selected: **{uploaded_file.name}**")
     
     # Only show the warning if processing isn't already complete
     # if "ocr_complete" not in st.session_state:
     #     st.warning("⚠️ **Heads up:** Processing can take 4-5 minutes per page. Please keep this tab open until the process is complete.")
 
+    if st.session_state.ocr_running:
+        st.warning("⏳ OCR is currently running. The button is disabled until completion.")
+
     # Create the button. The logic below will only run if it's clicked.
-    if st.button("🚀 Run OCR"):
-    
+    if st.button("Run OCR", disabled=st.session_state.ocr_running):
+        if st.session_state.ocr_running:
+            st.warning("OCR is already running. Please wait for the current job to finish.")
+            st.stop()
         # Clear any previous state before starting
-        clear_results()
+        clear_results(reset_running=False)
+        st.session_state.ocr_running = True
+        run_notice = st.empty()
+        run_notice.info("⏳ OCR has started.")
     
         # --- 3. Set up temporary job directories ---
         JOB_ID = str(uuid.uuid4())
@@ -101,10 +231,13 @@ if uploaded_file is not None:
                     sys.executable, "-m", "olmocr.pipeline",
                     CONT_WORKSPACE_DIR,
                     "--markdown",
-                    "--pdfs", CONT_INPUT_FILE
+                    "--pdfs", CONT_INPUT_FILE,
+                    "--gpu-memory-utilization", OLMOCR_GPU_MEMORY_UTILIZATION,
                 ]
 
-                with st.spinner("Running OlmOCR... This may take several minutes. Please wait."):
+                with st.spinner(
+                    f"Running OlmOCR..."
+                ):
                     result = subprocess.run(
                         cmd,
                         capture_output=True,
@@ -154,41 +287,58 @@ if uploaded_file is not None:
                     raise RuntimeError("No images were generated from the PDF.")
 
                 if ocr_engine == "easyocr":
-                    import easyocr
-                    reader = easyocr.Reader(["en"], gpu=True)
+                    with st.spinner("Loading model..."):
+                        reader = get_easyocr_reader()
+                    progress = st.progress(0.0, text="Running EasyOCR...")
                     ocr_results = []
                     for idx, img_path in enumerate(image_paths, start=1):
                         page_res = reader.readtext(str(img_path), detail=1, paragraph=True)
                         page_text = "\n".join([r[1] for r in page_res])
                         ocr_results.append({"page": idx, "text": page_text, "raw": page_res})
+                        progress.progress(idx / len(image_paths), text=f"Running EasyOCR... page {idx}/{len(image_paths)}")
+                    progress.empty()
 
                 else:
-                    from paddleocr import PaddleOCR
-                    ocr = PaddleOCR(use_angle_cls=True, lang="en")
+                    with st.spinner("Loading model..."):
+                        ocr = get_paddleocr_engine()
+                    progress = st.progress(0.0, text="Running PaddleOCR...")
                     ocr_results = []
                     for idx, img_path in enumerate(image_paths, start=1):
-                        page_res = ocr.ocr(str(img_path))
-                        page_text = "\n".join([line[1][0] for line in page_res[0]])
-                        ocr_results.append({"page": idx, "text": page_text, "raw": page_res})
+                        page_preds = ocr.predict(str(img_path))
+                        compact_preds = [compact_paddle_prediction(pred) for pred in page_preds]
+                        page_text_lines = []
+                        for pred in compact_preds:
+                            page_text_lines.extend(pred.get("rec_texts", []))
+                        page_text = "\n".join([line for line in page_text_lines if line])
+                        ocr_results.append({"page": idx, "text": page_text, "raw": compact_preds})
+                        progress.progress(idx / len(image_paths), text=f"Running PaddleOCR... page {idx}/{len(image_paths)}")
+                    progress.empty()
 
                 # Write per-page outputs + combined text
                 all_text = []
+                write_progress = st.progress(0.0, text="Writing OCR outputs...")
                 for item in ocr_results:
                     page = item["page"]
                     page_text = item["text"]
                     all_text.append(page_text)
                     (results_dir / f"page_{page:04d}.txt").write_text(page_text, encoding="utf-8")
                     (results_dir / f"page_{page:04d}.json").write_text(
-                        json.dumps(item, ensure_ascii=False), encoding="utf-8"
+                        json.dumps(make_json_serializable(item), ensure_ascii=False), encoding="utf-8"
                     )
+                    write_progress.progress(
+                        page / len(ocr_results),
+                        text=f"Writing OCR outputs... page {page}/{len(ocr_results)}"
+                    )
+                write_progress.empty()
 
                 combined_text = "\n\n".join(all_text)
                 st.session_state.extracted_text = combined_text
-                st.session_state.json_content = json.dumps(ocr_results, ensure_ascii=False)
+                st.session_state.json_content = json.dumps(make_json_serializable(ocr_results), ensure_ascii=False)
                 st.session_state.txt_name = input_file_path.with_suffix(".txt").name
                 st.session_state.json_name = input_file_path.with_suffix(".json").name
 
             # Create ZIP of all outputs
+            # st.info("Packaging outputs...")
             zip_path = shutil.make_archive(str(WORKSPACE_DIR / "ocr_results"), "zip", results_dir)
             st.session_state.ocr_zip_bytes = pathlib.Path(zip_path).read_bytes()
             st.session_state.ocr_complete = True
@@ -198,10 +348,16 @@ if uploaded_file is not None:
             st.exception(e)
         
         finally:
+            run_notice.empty()
+            st.session_state.ocr_running = False
             # --- 7. Clean up the temporary job directory ---
             if JOB_DIR.exists():
                 try:
-                    shutil.rmtree(JOB_DIR)
+                    subprocess.Popen(
+                        ["rm", "-rf", str(JOB_DIR)],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
                 except Exception as e:
                     st.warning(f"Could not clean up {JOB_DIR}. Error: {e}")
 
@@ -257,3 +413,5 @@ elif "ocr_error" in st.session_state:
             st.text_area("stderr", details[1], height=150, key="stderr_err")
         else:
             st.text_area("Error Details", str(details), height=100)
+elif st.session_state.get("ocr_running"):
+    st.info("OCR is running. Please wait...")
