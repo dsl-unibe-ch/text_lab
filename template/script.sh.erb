@@ -8,7 +8,7 @@ HOST_TEXT_LAB_DIR="${TEXT_LAB_DIR:-/storage/research/dsl_shared/solutions/ondema
 CONT_TEXT_LAB_DIR="/text_lab"
 
 #point to the apptainer containers on research storage
-TL_CONTAINER="$HOST_TEXT_LAB_DIR/container/textlab_MB.sif"
+TL_CONTAINER="$HOST_TEXT_LAB_DIR/container/text_lab_060226.sif"
 
 #point to where the ollama models are stored on research storage
 HOST_OLLAMA_DIR="/storage/research/dsl_shared/solutions/ondemand/text_lab/container/models/ollama"
@@ -46,6 +46,7 @@ export OLLAMA_MODELS="$CONT_OLLAMA_DIR/models"
 # Which ports should each service listen on?
 TEXT_LAB_PORT="${TEXT_LAB_PORT:-${SERVER_PORT:-8502}}"   # streamlit defaults to 8502 if not set
 OLM_OCR_PORT="${OLMOCR_PORT:-8503}"
+OLMOCR_GPU_MEMORY_UTILIZATION="${OLMOCR_GPU_MEMORY_UTILIZATION:-0.6}"
 
 # Base URL path for reverse‑proxy setups (JupyterHub, etc.). Leave empty for /
 SERVER_BASEURLPATH="${SERVER_BASEURLPATH:-}"  # may already be exported by the hub
@@ -81,13 +82,13 @@ apptainer exec \
   --env HF_HOME=/opt/huggingface \
   --env PADDLEX_HOME="$CONT_PADDLEX_DIR" \
   --env PADDLEOCR_CACHE="$CONT_PADDLEOCR_DIR" \
-  --env VLLM_GPU_MEMORY_UTILIZATION=0.6 \
+  --env VLLM_GPU_MEMORY_UTILIZATION="$OLMOCR_GPU_MEMORY_UTILIZATION" \
+  --env OLMOCR_GPU_MEMORY_UTILIZATION="$OLMOCR_GPU_MEMORY_UTILIZATION" \
   --env OLLAMA_MODELS="$CONT_OLLAMA_DIR/models" \
   --env OLLAMA_LLM_LIBRARY="cuda" \
   --env OLLAMA_FLASH_ATTENTION="true" \
-  --env VLLM_GPU_MEMORY_UTILIZATION=0.6 \
   "$TL_CONTAINER" \
-  /usr/bin/python3 -m streamlit run "/storage/research/dsl_shared/solutions/ondemand/text_lab/src_main/src/Home.py" \
+  /usr/bin/python3 -m streamlit run "/storage/homefs/mb24e866/ondemand/dev/text_lab/src/Home.py" \
     --server.address 0.0.0.0 \
     --server.port "$TEXT_LAB_PORT" \
     --server.baseUrlPath "$SERVER_BASEURLPATH" \
