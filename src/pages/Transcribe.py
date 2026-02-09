@@ -8,6 +8,7 @@ import io
 import json
 import mimetypes
 import sys
+import tempfile
 import uuid
 import zipfile
 import whisperx
@@ -159,36 +160,63 @@ def format_duration(seconds):
 def decode_audio_bytes(audio_bytes, sr=16000):
     """
     Decode audio bytes to mono float32 waveform at the target sample rate.
-    Uses ffmpeg on stdin to avoid any disk I/O.
+    Uses ffmpeg on stdin first, then falls back to a temp file when
+    container demuxing from pipe returns empty audio (common with some M4A/MP4 files).
     """
-    try:
-        cmd = [
-            "ffmpeg",
-            "-nostdin",
-            "-threads",
-            "0",
-            "-i",
-            "pipe:0",
-            "-f",
-            "s16le",
-            "-ac",
-            "1",
-            "-acodec",
-            "pcm_s16le",
-            "-ar",
-            str(sr),
-            "-",
-        ]
-        out = subprocess.run(
-            cmd,
-            input=audio_bytes,
-            capture_output=True,
-            check=True,
-        ).stdout
-    except subprocess.CalledProcessError as e:
-        raise RuntimeError(f"Failed to decode audio: {e.stderr.decode(errors='replace')}") from e
+    output_args = [
+        "-f",
+        "s16le",
+        "-ac",
+        "1",
+        "-acodec",
+        "pcm_s16le",
+        "-ar",
+        str(sr),
+        "pipe:1",
+    ]
 
-    return np.frombuffer(out, np.int16).flatten().astype(np.float32) / 32768.0
+    cmd_pipe = ["ffmpeg", "-nostdin", "-threads", "0", "-i", "pipe:0", *output_args]
+    pipe_proc = subprocess.run(cmd_pipe, input=audio_bytes, capture_output=True, check=False)
+    audio = np.frombuffer(pipe_proc.stdout, np.int16).flatten().astype(np.float32) / 32768.0
+    if pipe_proc.returncode == 0 and audio.size > 0:
+        return audio
+
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".audio", delete=False) as tmp:
+            tmp.write(audio_bytes)
+            tmp_path = tmp.name
+
+        cmd_file = ["ffmpeg", "-nostdin", "-threads", "0", "-i", tmp_path, *output_args]
+        file_proc = subprocess.run(cmd_file, capture_output=True, check=False)
+        audio = np.frombuffer(file_proc.stdout, np.int16).flatten().astype(np.float32) / 32768.0
+        if file_proc.returncode == 0 and audio.size > 0:
+            return audio
+
+        pipe_stderr = pipe_proc.stderr.decode(errors="replace")
+        file_stderr = file_proc.stderr.decode(errors="replace")
+        raise RuntimeError(
+            "Failed to decode audio from both stdin and temp file.\n"
+            f"stdin rc={pipe_proc.returncode}, samples={int(np.frombuffer(pipe_proc.stdout, np.int16).size)}\n"
+            f"file rc={file_proc.returncode}, samples={int(np.frombuffer(file_proc.stdout, np.int16).size)}\n"
+            f"stdin stderr:\n{pipe_stderr}\n\nfile stderr:\n{file_stderr}"
+        )
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+
+
+def audio_debug_stats(waveform):
+    if waveform is None:
+        return "waveform=None"
+    shape = getattr(waveform, "shape", None)
+    dtype = getattr(waveform, "dtype", None)
+    size = int(getattr(waveform, "size", 0))
+    if size > 0:
+        min_val = float(np.min(waveform))
+        max_val = float(np.max(waveform))
+        return f"shape={shape}, size={size}, dtype={dtype}, min={min_val:.6f}, max={max_val:.6f}"
+    return f"shape={shape}, size={size}, dtype={dtype}, min=NA, max=NA"
 
 
 def convert_audio_to_wav_bytes(audio_bytes, original_filename, sr=16000):
@@ -638,6 +666,12 @@ def main():
                             wav_bytes, wav_filename, audio = convert_audio_to_wav_bytes(
                                 audio_bytes, transcribe_audio.name, sr=sampling_rate
                             )
+                        st.caption(f"Audio debug (full): {audio_debug_stats(audio)}")
+                        if audio is None or audio.size == 0:
+                            raise ValueError(
+                                "Decoded waveform is empty. This file likely failed ffmpeg decoding "
+                                "or contains no valid audio samples."
+                            )
                         player_wav_bytes, preview_seconds = create_wavesurfer_preview(wav_bytes, audio, sr=sampling_rate)
                         
                         # Handle Swiss German language code
@@ -661,6 +695,17 @@ def main():
                                     start_sample = int(vad_seg['start'])
                                     end_sample = int(vad_seg['end'])
                                     segment_audio = audio[start_sample:end_sample]
+                                    st.caption(
+                                        f"Audio debug (VAD segment {idx}): "
+                                        f"{audio_debug_stats(segment_audio)} "
+                                        f"[samples {start_sample}:{end_sample}]"
+                                    )
+                                    if segment_audio.size == 0:
+                                        st.warning(
+                                            f"Skipping empty VAD segment {idx} "
+                                            f"({start_sample}:{end_sample})."
+                                        )
+                                        continue
                                     
                                     seg_result = model.transcribe(segment_audio, batch_size=16)
                                     
@@ -674,6 +719,7 @@ def main():
                                 result = {'segments': all_segments, 'language': seg_result.get('language', align_language)}
                         else:
                             with st.spinner("Transcribing audio..."):
+                                st.caption(f"Audio debug (pre-transcribe): {audio_debug_stats(audio)}")
                                 result = model.transcribe(audio, batch_size=16)
                         
                         # Always do alignment
@@ -787,5 +833,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 
