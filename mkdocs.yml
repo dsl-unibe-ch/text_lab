@@ -1,0 +1,50 @@
+site_name: Text Lab
+site_url: https://dsl-unibe-ch.github.io/text_lab/
+site_description: Documentation for the Text Lab NLP Service at University of Bern
+
+# This mimics the HPC Theme
+theme:
+  name: material
+  palette:
+    # Light mode
+    - scheme: default
+      primary: red
+      accent: red 
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    # Dark mode configuration
+    - scheme: slate
+      primary: red
+      accent: red
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs        # Top level tabs like HPC
+    - navigation.sections    # Grouped sections in sidebar
+    - navigation.expand      # Open folders by default
+    - navigation.top         # Back to top button
+    - search.suggest         # Intelligent search
+    - search.highlight       # Highlight search results
+    - content.code.copy      # Copy button for code blocks
+  logo: assets/text_lab_logo.png
+  favicon: assets/favicon.png
+
+# Navigation Structure
+nav:
+  - Home: index.md
+  - Launching Text Lab: launch.md
+  - Features:
+    - Transcription: transcription.md
+    - OCR: ocr.md
+    - Chat & Viz: other_tools.md
+
+# Extensions to make Markdown look better
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - attr_list
