@@ -29,7 +29,7 @@ theme:
     - search.highlight       # Highlight search results
     - content.code.copy      # Copy button for code blocks
   logo: assets/text_lab_logo.png
-  favicon: assets/favicon.png
+  favicon: assets/icon.png
 
 # Navigation Structure
 nav:
