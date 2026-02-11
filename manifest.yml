@@ -1,5 +1,5 @@
 ---
 name: "Text Lab"
 category: "Data Science Lab Services"
-description: "Run different NLP tools in an interactive mode including transcription, text summarization, Chatbot, etc.\n The service is provided by DSL and funded by DigiK. For help, contact DSL (support.dsl@unibe.ch)"
+description: "Run different NLP tools in an interactive mode including transcription, OCR, Chatbot, etc.\n The service is provided by DSL and funded by DigiK. For help, contact DSL (support.dsl@unibe.ch). For more info on using Text Lab visit: https://dsl-unibe-ch.github.io/text_lab/"
 role: batch_connect
