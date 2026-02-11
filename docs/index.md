@@ -9,6 +9,7 @@ Developed by the **Data Science Lab (DSL)**, Text Lab allows you to process docu
 **Why use Text Lab?**
 
 One of the primary advantages of Text Lab is **data sovereignty**
+
 * **Internal Processing:** All processing happens entirely within the University of Bern's network infrastructure (UBELIX).
 * **No Third Parties:** Unlike commercial cloud services (like ChatGPT or Google Cloud), your data is **never** sent to external servers.
 * **Sensitive Data:** This makes Text Lab the ideal choice for working with sensitive research data, interviews, or confidential documents.
