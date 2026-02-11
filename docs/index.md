@@ -2,7 +2,7 @@
 
 **Text Lab** is an interactive platform designed to make advanced Natural Language Processing (NLP) tools accessible to researchers and students at the University of Bern.
 
-Developed by the **Data Science Lab (DSL)** and funded by the **Digitalisation Commission (DigiK)**, Text Lab allows you to process documents, audio, and data without needing to write code.
+Developed by the **Data Science Lab (DSL)**, Text Lab allows you to process documents, audio, and data without needing to write code.
 
 ## 🔒 Data Privacy & Security
 
@@ -19,6 +19,8 @@ One of the primary advantages of Text Lab is **data sovereignty**.
 * **OCR (Optical Character Recognition):** Extract text from scanned PDFs using state-of-the-art AI models.
 * **Chat:** Interact with local Large Language Models (LLMs) securely.
 * **Data Visualization:** Generate insights and plots from your data.
+
+For processing large amount of data, please contact DSL.
 
 ## Getting Support
 
