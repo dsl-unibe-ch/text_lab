@@ -12,7 +12,7 @@ One of the primary advantages of Text Lab is **data sovereignty**
 
 * **Internal Processing:** All processing happens entirely within the University of Bern's network infrastructure (UBELIX).
 * **No Third Parties:** Unlike commercial cloud services (like ChatGPT or Google Cloud), your data is **never** sent to external servers.
-* **Sensitive Data:** This makes Text Lab the ideal choice for working with sensitive research data, interviews, or confidential documents.
+* **Sensitive Data:** Text Lab is the better choice for working with potentially sensitive research data (e.g., for interviews and/or non-public documents).
 
 ## Available Tools
 
@@ -25,5 +25,5 @@ For processing large amount of data, please contact DSL.
 
 ## Getting Support
 
-If you encounter issues or have questions about using Text Lab, please contact the Data Science Lab:
+If you encounter issues, need any data science, research IT support, or have questions about using Text Lab, please contact the Data Science Lab:
 📧 [support.dsl@unibe.ch](mailto:support.dsl@unibe.ch)
