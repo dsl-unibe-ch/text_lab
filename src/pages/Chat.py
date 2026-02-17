@@ -3,7 +3,7 @@ import ollama
 import sys
 import os
 import subprocess
-#import fitz  # PyMuPDF
+import fitz  
 import pandas as pd
 from io import BytesIO
 from ollama import ResponseError
@@ -48,6 +48,25 @@ def get_gpu_name():
         return result.strip()
     except Exception:
         return "Unknown/CPU"
+    
+def is_model_loaded(model_name):
+    """
+    Checks if the specific model is already loaded in Ollama's VRAM.
+    """
+    try:
+        # ollama.ps() returns a list of currently running models
+        running_models = ollama.ps()
+        
+        # Check if our model is in that list
+        # We check 'name' and allow for tag variations (e.g., 'gemma3:27b' vs 'gemma3:27b:latest')
+        for model in running_models.get('models', []):
+            running_name = model.get('name', '')
+            if running_name == model_name or running_name.startswith(model_name + ":"):
+                return True
+        return False
+    except Exception:
+        # If the API fails, we assume it's NOT loaded to be safe
+        return False
 
 # ------------------------------
 # 2. File Processing Functions
@@ -260,8 +279,6 @@ def main():
                 context_text = process_uploaded_files(uploaded_files)
         
         # 2. Construct final message content
-        # If files are present, we prepend them to the user's message invisibly to the UI history
-        # but visibly to the model.
         if context_text:
             full_prompt = f"{context_text}\n\nUser Question: {user_text}"
             display_text = f"**[Uploaded {len(uploaded_files)} file(s)]**\n\n{user_text}"
@@ -274,19 +291,22 @@ def main():
         with st.chat_message("user"):
             st.markdown(display_text)
 
-        # 4. Generate response using the FULL prompt (with context)
-        # Note: We pass the 'messages' list to generate_response, but we need to trick it 
-        # to use our 'full_prompt' for the LAST message.
-        
-        # Temporary swap for generation
+        # 4. Generate response
         last_msg_obj = st.session_state["messages"][-1]
         original_content = last_msg_obj["content"]
         last_msg_obj["content"] = full_prompt
         
-        with st.spinner("Thinking..."):
+        # --- DYNAMIC SPINNER LOGIC ---
+        # Check if model is already in VRAM to give the user a heads-up
+        if is_model_loaded(model_name):
+            spinner_text = "Thinking..."
+        else:
+            spinner_text = f"🚀 Loading **{model_name}** into GPU memory... This first run may take 1-2 minutes."
+
+        with st.spinner(spinner_text):
             assistant_reply = generate_response(st.session_state["messages"], model_name)
         
-        # Restore original content for display history so we don't clog the UI with 50 pages of text
+        # Restore original content for display history
         last_msg_obj["content"] = original_content
 
         st.session_state["messages"].append({"role": "assistant", "content": assistant_reply})
