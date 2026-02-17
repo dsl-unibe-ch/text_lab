@@ -129,6 +129,7 @@ EOF
         filelock \
         evaluate \
         librosa \
+        pymupdf \
         --constraint /tmp/constraints.txt
 
 
