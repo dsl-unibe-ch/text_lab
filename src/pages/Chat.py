@@ -2,7 +2,10 @@ import streamlit as st
 import ollama
 import sys
 import os
-import subprocess  # <--- Added to run nvidia-smi
+import subprocess
+#import fitz  # PyMuPDF
+import pandas as pd
+from io import BytesIO
 from ollama import ResponseError
 
 st.set_page_config(
@@ -33,26 +36,95 @@ def extract_model_name(entry):
     else:
         return str(entry)
 
-# --- NEW FUNCTION: Detect GPU Name ---
 def get_gpu_name():
     """
     Returns the name of the GPU (e.g., 'NVIDIA A100-SXM4-80GB', 'NVIDIA GeForce RTX 4090')
     """
     try:
-        # Run nvidia-smi to query the GPU name
         result = subprocess.check_output(
             ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"], 
             encoding="utf-8"
         )
         return result.strip()
     except Exception:
-        # Fallback if nvidia-smi fails or no GPU found
         return "Unknown/CPU"
 
 # ------------------------------
-# 2. Generating responses
+# 2. File Processing Functions
 # ------------------------------
-# ... (No changes to response_generator or generate_response functions) ...
+
+def read_pdf(file_bytes):
+    """Extract text from a PDF file using PyMuPDF (fitz)."""
+    try:
+        doc = fitz.open(stream=file_bytes, filetype="pdf")
+        text = []
+        for page in doc:
+            text.append(page.get_text())
+        return "\n".join(text)
+    except Exception as e:
+        return f"[Error reading PDF: {str(e)}]"
+
+def read_txt(file_bytes):
+    """Extract text from a plain text file."""
+    try:
+        return file_bytes.decode("utf-8")
+    except Exception as e:
+        return f"[Error reading TXT: {str(e)}]"
+
+def read_tabular(file_bytes, file_name):
+    """Read CSV or Excel and return a markdown string representation."""
+    try:
+        if file_name.endswith('.csv'):
+            df = pd.read_csv(BytesIO(file_bytes))
+        else:
+            df = pd.read_excel(BytesIO(file_bytes))
+        
+        # Limit to first 100 rows to avoid token explosion
+        if len(df) > 100:
+            return f"[Dataset truncated. First 100 of {len(df)} rows]:\n" + df.head(100).to_markdown()
+        return df.to_markdown()
+    except Exception as e:
+        return f"[Error reading Table: {str(e)}]"
+
+def process_uploaded_files(uploaded_files):
+    """
+    Process list of uploaded files and return a single context string.
+    Enforces size and count limits.
+    """
+    if not uploaded_files:
+        return ""
+
+    file_context = "### User Uploaded File Content:\n"
+    total_size_mb = 0
+    
+    for uploaded_file in uploaded_files:
+        # 1. Size Check (Limit to 10MB per file to be safe)
+        file_size_mb = uploaded_file.size / (1024 * 1024)
+        if file_size_mb > 10:
+            st.warning(f"File '{uploaded_file.name}' is too large ({file_size_mb:.1f}MB). Skipped (Max 10MB).")
+            continue
+        
+        file_bytes = uploaded_file.getvalue()
+        file_name = uploaded_file.name.lower()
+        
+        extracted_text = ""
+        if file_name.endswith('.pdf'):
+            extracted_text = read_pdf(file_bytes)
+        elif file_name.endswith('.txt'):
+            extracted_text = read_txt(file_bytes)
+        elif file_name.endswith(('.csv', '.xlsx', '.xls')):
+            extracted_text = read_tabular(file_bytes, file_name)
+        
+        if extracted_text:
+            file_context += f"\n--- Start of file: {uploaded_file.name} ---\n"
+            file_context += extracted_text
+            file_context += f"\n--- End of file: {uploaded_file.name} ---\n"
+
+    return file_context
+
+# ------------------------------
+# 3. Generating responses
+# ------------------------------
 
 def get_response_generator(model_name, messages):
     def response_generator():
@@ -67,16 +139,14 @@ def get_response_generator(model_name, messages):
             st.code(msg)
     return response_generator
 
-
 def generate_response(messages, model_name):
     response_generator = get_response_generator(model_name, messages)
     with st.chat_message("assistant"):
         final_response = st.write_stream(response_generator)
     return final_response.strip()
 
-
 # ------------------------------
-# 3. Main UI
+# 4. Main UI
 # ------------------------------
 def main():
     st.markdown(
@@ -94,41 +164,26 @@ def main():
 
     ensure_ollama_server()
 
-    # --- NEW LOGIC: GPU Detection & Model Filtering ---
+    # --- GPU Detection & Model Filtering ---
     current_gpu = get_gpu_name()
-    
-    # Define models categorized by capability requirements
-    small_models = [
-        "gemma3:27b",
-        "ministral-3:14b"
-    ]
-    large_models = [
-        "qwen3-next:80b",
-        "qwen3-coder-next:latest"
-    ]
+    small_models = ["gemma3:27b", "ministral-3:14b"]
+    large_models = ["qwen3-next:80b", "qwen3-coder-next:latest"]
 
-    # Check if we are on a powerful GPU (A100, H100, H200)
     is_high_memory_gpu = any(x in current_gpu for x in ["A100", "H100", "H200"])
 
     if is_high_memory_gpu:
-        # High-end GPU: Show everything
         available_models_in_ui = small_models + large_models
         gpu_badge = f"🚀 **High-Performance Mode** detected ({current_gpu})"
     else:
-        # Consumer GPU (RTX) or unknown: Show only small models
         available_models_in_ui = small_models
-        gpu_badge = f"⚠️ **Standard Mode** detected ({current_gpu}). Large models are hidden. Use other GPUs for full access."
+        gpu_badge = f"⚠️ **Standard Mode** detected ({current_gpu}). Large models are hidden."
 
     # Sidebar
     st.sidebar.title("Model Selection")
-    
-    # Show the user which hardware is detected
     st.sidebar.info(gpu_badge)
 
     if "selected_model" not in st.session_state:
         st.session_state["selected_model"] = available_models_in_ui[0]
-
-    # Safety check: if session state has a model that is no longer available (e.g. from a previous run), reset it
     if st.session_state["selected_model"] not in available_models_in_ui:
         st.session_state["selected_model"] = available_models_in_ui[0]
 
@@ -137,26 +192,38 @@ def main():
         options=available_models_in_ui,
         index=available_models_in_ui.index(st.session_state["selected_model"])
     )
+
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("📂 Upload Context")
     
-    # ... (Rest of your UI code remains exactly the same) ...
+    # --- File Uploader Widget ---
+    uploaded_files = st.sidebar.file_uploader(
+        "Attach files (Max 4)", 
+        type=["pdf", "txt", "csv", "xlsx"], 
+        accept_multiple_files=True
+    )
+    
+    # Enforce file count limit
+    if uploaded_files and len(uploaded_files) > 4:
+        st.sidebar.error("Maximum 4 files allowed. Please remove some.")
+        uploaded_files = uploaded_files[:4]
 
     if st.sidebar.button("🗑️ Start New Chat"):
         st.session_state["messages"] = []
         st.rerun()
-    
-    # ... (Disclaimer and rest of main function) ...
+
     st.sidebar.markdown(
         """
         ---
         ⚠️ **Disclaimer**
-        The selected AI models may produce inaccurate, misleading, or inappropriate responses...
+        The selected AI models may produce inaccurate, misleading, or inappropriate responses.
         """,
         unsafe_allow_html=True
     )
-    
+
     model_name = st.session_state["selected_model"]
-    
-    # ... (Pull logic and Chat Interface loop) ...
+
+    # Pull logic...
     try:
         models_dict = ollama.list()
         local_models = models_dict["models"]
@@ -186,12 +253,41 @@ def main():
     user_text = st.chat_input("Type your message...")
 
     if user_text:
-        st.session_state["messages"].append({"role": "user", "content": user_text})
-        with st.chat_message("user"):
-            st.markdown(user_text)
+        # 1. Process files if they exist
+        context_text = ""
+        if uploaded_files:
+            with st.spinner("Processing files..."):
+                context_text = process_uploaded_files(uploaded_files)
+        
+        # 2. Construct final message content
+        # If files are present, we prepend them to the user's message invisibly to the UI history
+        # but visibly to the model.
+        if context_text:
+            full_prompt = f"{context_text}\n\nUser Question: {user_text}"
+            display_text = f"**[Uploaded {len(uploaded_files)} file(s)]**\n\n{user_text}"
+        else:
+            full_prompt = user_text
+            display_text = user_text
 
+        # 3. Add user message to history
+        st.session_state["messages"].append({"role": "user", "content": display_text})
+        with st.chat_message("user"):
+            st.markdown(display_text)
+
+        # 4. Generate response using the FULL prompt (with context)
+        # Note: We pass the 'messages' list to generate_response, but we need to trick it 
+        # to use our 'full_prompt' for the LAST message.
+        
+        # Temporary swap for generation
+        last_msg_obj = st.session_state["messages"][-1]
+        original_content = last_msg_obj["content"]
+        last_msg_obj["content"] = full_prompt
+        
         with st.spinner("Thinking..."):
             assistant_reply = generate_response(st.session_state["messages"], model_name)
+        
+        # Restore original content for display history so we don't clog the UI with 50 pages of text
+        last_msg_obj["content"] = original_content
 
         st.session_state["messages"].append({"role": "assistant", "content": assistant_reply})
 
