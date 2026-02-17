@@ -8,7 +8,7 @@ HOST_TEXT_LAB_DIR="${TEXT_LAB_DIR:-/storage/research/dsl_shared/solutions/ondema
 CONT_TEXT_LAB_DIR="/text_lab"
 
 #point to the apptainer containers on research storage
-TL_CONTAINER="$HOST_TEXT_LAB_DIR/container/text_lab_060226.sif"
+TL_CONTAINER="$HOST_TEXT_LAB_DIR/container/text_lab_170226.sif"
 
 #point to where the ollama models are stored on research storage
 HOST_OLLAMA_DIR="/storage/research/dsl_shared/solutions/ondemand/text_lab/container/models/ollama"
@@ -68,6 +68,16 @@ if [ -z "${CUDA_VISIBLE_DEVICES:-}" ]; then
   export CUDA_VISIBLE_DEVICES=0
 fi
 
+# ... previous exports and logic ...
+
+# Use bash -c to run multiple commands: 
+# 1. Start ollama serve in the background (&)
+# 2. Wait 5-10 seconds for it to initialize
+# 3. Run streamlit
+# ... (Keep all your previous variable definitions up to the pushd/popd) ...
+
+mkdir -p "$HOST_TEXT_LAB_DIR/ollama_tmp"
+
 apptainer exec \
   --nv \
   --bind "$HOST_TEXT_LAB_DIR:$CONT_TEXT_LAB_DIR" \
@@ -87,18 +97,21 @@ apptainer exec \
   --env VLLM_GPU_MEMORY_UTILIZATION="$OLMOCR_GPU_MEMORY_UTILIZATION" \
   --env OLMOCR_GPU_MEMORY_UTILIZATION="$OLMOCR_GPU_MEMORY_UTILIZATION" \
   --env OLLAMA_MODELS="$CONT_OLLAMA_DIR/models" \
-  --env OLLAMA_LLM_LIBRARY="cuda" \
   --env OLLAMA_FLASH_ATTENTION="true" \
   "$TL_CONTAINER" \
-  /usr/bin/python3 -m streamlit run "/storage/homefs/mb24e866/ondemand/dev/text_lab/src/Home.py" \
-    --server.address 0.0.0.0 \
-    --server.port "$TEXT_LAB_PORT" \
-    --server.baseUrlPath "$SERVER_BASEURLPATH" \
-    --server.headless true \
-    --server.maxUploadSize 10000 \
-    --browser.serverAddress ondemand.hpc.unibe.ch \
-    --browser.gatherUsageStats false \
-    --logger.level error \
-    --client.showErrorDetails false 
+  bash -c "export OLLAMA_TMPDIR=$CONT_TEXT_LAB_DIR/ollama_tmp && \
+           export TMPDIR=$CONT_TEXT_LAB_DIR/ollama_tmp && \
+           ollama serve > $CONT_TEXT_LAB_DIR/ollama_server.log 2>&1 & \
+           sleep 5 && \
+           /usr/bin/python3 -m streamlit run '/storage/research/dsl_shared/solutions/ondemand/text_lab/src_main/src/Home.py' \
+             --server.address 0.0.0.0 \
+             --server.port '$TEXT_LAB_PORT' \
+             --server.baseUrlPath '$SERVER_BASEURLPATH' \
+             --server.headless true \
+             --server.maxUploadSize 10000 \
+             --browser.serverAddress ondemand.hpc.unibe.ch \
+             --browser.gatherUsageStats false \
+             --logger.level error \
+             --client.showErrorDetails false"
 
 popd
