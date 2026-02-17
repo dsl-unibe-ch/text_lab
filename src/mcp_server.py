@@ -31,12 +31,10 @@ def _load_data(file_path: str) -> pd.DataFrame:
 
 def _get_plot_path(data_file_path: str, plot_name: str) -> str:
     """Internal helper to create a unique plot path."""
-    # Assumes data_file_path is like ".../ds-xxxxxxxx/uploaded_data.csv"
     run_dir = os.path.dirname(data_file_path)
     plot_dir = os.path.join(run_dir, "plots")
     os.makedirs(plot_dir, exist_ok=True)
     
-    # Clean the plot_name to be a valid filename
     safe_plot_name = "".join(c for c in plot_name if c.isalnum() or c in ('_', '-')).rstrip()
     if not safe_plot_name:
         safe_plot_name = "plot"
@@ -44,30 +42,22 @@ def _get_plot_path(data_file_path: str, plot_name: str) -> str:
     plot_path = os.path.join(plot_dir, f"{safe_plot_name}.png")
     return plot_path
 
+# --- Helper to format code for the user ---
+def _generate_code_snippet(import_lines, load_line, plot_lines):
+    return f"""{import_lines}
+
+# Load Data
+{load_line}
+
+# Generate Plot
+{plot_lines}
+plt.show()"""
+
 # --- 2. Define Plotting Tools ---
 
 @mcp.tool()
 def plot_histogram(data_file_path: str, column: str, title: str, x_label: str) -> str:
-    """
-    Generates and saves a histogram for a single numerical column.
-    Use this to show the distribution of a variable.
-    
-    Parameters
-    ----------
-    data_file_path : str
-        The path to the data file (this is injected by the client).
-    column : str
-        The name of the numerical column to plot.
-    title : str
-        The title for the plot (e.g., "Distribution of Age").
-    x_label : str
-        The label for the x-axis (e.g., "Age").
-    
-    Returns
-    -------
-    str
-        The file path to the saved plot image.
-    """
+    """Generates and saves a histogram."""
     try:
         df = _load_data(data_file_path)
         if column not in df.columns:
@@ -82,45 +72,27 @@ def plot_histogram(data_file_path: str, column: str, title: str, x_label: str) -
         plot_path = _get_plot_path(data_file_path, f"hist_{column}")
         plt.savefig(plot_path)
         plt.close()
-        return plot_path
+
+        # Generate Code Snippet
+        code = _generate_code_snippet(
+            "import pandas as pd\nimport seaborn as sns\nimport matplotlib.pyplot as plt",
+            f"df = pd.read_csv('your_data.csv') # Replaced temp path",
+            f"plt.figure(figsize=(10, 6))\nsns.histplot(df['{column}'], kde=True)\nplt.title('{title}')\nplt.xlabel('{x_label}')\nplt.ylabel('Frequency')"
+        )
+        return f"{plot_path}|||{code}"
     except Exception as e:
         return f"Error plotting histogram: {str(e)}"
 
 @mcp.tool()
 def plot_scatterplot(data_file_path: str, x_column: str, y_column: str, title: str, x_label: str, y_label: str, hue_column: str = None) -> str:
-    """
-    Generates and saves a scatter plot for two numerical columns.
-    Use this to show the relationship between two variables.
-    
-    Parameters
-    ----------
-    data_file_path : str
-        The path to the data file (this is injected by the client).
-    x_column : str
-        The name of the column for the x-axis.
-    y_column : str
-        The name of the column for the y-axis.
-    title : str
-        The title for the plot (e.g., "Salary vs. Experience").
-    x_label : str
-        The label for the x-axis (e.g., "Years of Experience").
-    y_label : str
-        The label for the y-axis (e.g., "Salary").
-    hue_column : str, optional
-        A categorical column to use for coloring the points.
-    
-    Returns
-    -------
-    str
-        The file path to the saved plot image.
-    """
+    """Generates and saves a scatter plot."""
     try:
         df = _load_data(data_file_path)
         if x_column not in df.columns or y_column not in df.columns:
             return f"Error: Columns '{x_column}' or '{y_column}' not found."
         
         if hue_column and hue_column not in df.columns:
-            hue_column = None # Ignore if bad column name
+            hue_column = None 
             
         plt.figure(figsize=(10, 6))
         sns.scatterplot(data=df, x=x_column, y=y_column, hue=hue_column)
@@ -131,37 +103,21 @@ def plot_scatterplot(data_file_path: str, x_column: str, y_column: str, title: s
         plot_path = _get_plot_path(data_file_path, f"scatter_{x_column}_vs_{y_column}")
         plt.savefig(plot_path)
         plt.close()
-        return plot_path
+
+        # Code
+        hue_arg = f", hue='{hue_column}'" if hue_column else ""
+        code = _generate_code_snippet(
+            "import pandas as pd\nimport seaborn as sns\nimport matplotlib.pyplot as plt",
+            f"df = pd.read_csv('your_data.csv')",
+            f"plt.figure(figsize=(10, 6))\nsns.scatterplot(data=df, x='{x_column}', y='{y_column}'{hue_arg})\nplt.title('{title}')\nplt.xlabel('{x_label}')\nplt.ylabel('{y_label}')"
+        )
+        return f"{plot_path}|||{code}"
     except Exception as e:
         return f"Error plotting scatterplot: {str(e)}"
 
 @mcp.tool()
 def plot_boxplot(data_file_path: str, x_column: str, y_column: str, title: str, x_label: str, y_label: str) -> str:
-    """
-    Generates and saves a box plot.
-    Use this to show the distribution of a numerical column (y_column) across different
-    categories (x_column).
-    
-    Parameters
-    ----------
-    data_file_path : str
-        The path to the data file (this is injected by the client).
-    x_column : str
-        The categorical column for the x-axis (e.g., "Department").
-    y_column : str
-        The numerical column for the y-axis (e.g., "Salary").
-    title : str
-        The title for the plot (e.g., "Salary Distribution by Department").
-    x_label : str
-        The label for the x-axis.
-    y_label : str
-        The label for the y-axis.
-    
-    Returns
-    -------
-    str
-        The file path to the saved plot image.
-    """
+    """Generates and saves a box plot."""
     try:
         df = _load_data(data_file_path)
         if x_column not in df.columns or y_column not in df.columns:
@@ -177,33 +133,20 @@ def plot_boxplot(data_file_path: str, x_column: str, y_column: str, title: str, 
         plot_path = _get_plot_path(data_file_path, f"boxplot_{y_column}_by_{x_column}")
         plt.savefig(plot_path)
         plt.close()
-        return plot_path
+
+        code = _generate_code_snippet(
+            "import pandas as pd\nimport seaborn as sns\nimport matplotlib.pyplot as plt",
+            f"df = pd.read_csv('your_data.csv')",
+            f"plt.figure(figsize=(12, 7))\nsns.boxplot(data=df, x='{x_column}', y='{y_column}')\nplt.title('{title}')\nplt.xlabel('{x_label}')\nplt.ylabel('{y_label}')\nplt.xticks(rotation=45)"
+        )
+        return f"{plot_path}|||{code}"
     except Exception as e:
         return f"Error plotting boxplot: {str(e)}"
     
 
 @mcp.tool()
 def plot_countplot(data_file_path: str, x_column: str, title: str, x_label: str) -> str:
-    """
-    Generates and saves a count plot (bar chart) for a single categorical column.
-    Use this to show the frequency (count) of each category.
-    
-    Parameters
-    ----------
-    data_file_path : str
-        The path to the data file (this is injected by the client).
-    x_column : str
-        The name of the categorical column to plot.
-    title : str
-        The title for the plot (e.g., "Count of Employees by Department").
-    x_label : str
-        The label for the x-axis (e.g., "Department").
-    
-    Returns
-    -------
-    str
-        The file path to the saved plot image.
-    """
+    """Generates and saves a count plot."""
     try:
         df = _load_data(data_file_path)
         if x_column not in df.columns:
@@ -219,46 +162,26 @@ def plot_countplot(data_file_path: str, x_column: str, title: str, x_label: str)
         plot_path = _get_plot_path(data_file_path, f"count_{x_column}")
         plt.savefig(plot_path, bbox_inches='tight')
         plt.close()
-        return plot_path
+
+        code = _generate_code_snippet(
+            "import pandas as pd\nimport seaborn as sns\nimport matplotlib.pyplot as plt",
+            f"df = pd.read_csv('your_data.csv')",
+            f"plt.figure(figsize=(12, 7))\nsns.countplot(data=df, x='{x_column}')\nplt.title('{title}')\nplt.xlabel('{x_label}')\nplt.ylabel('Count')\nplt.xticks(rotation=45)"
+        )
+        return f"{plot_path}|||{code}"
     except Exception as e:
         return f"Error plotting countplot: {str(e)}"
 
 @mcp.tool()
 def plot_lineplot(data_file_path: str, x_column: str, y_column: str, title: str, x_label: str, y_label: str, hue_column: str = None) -> str:
-    """
-    Generates and saves a line plot.
-    Use this to show the trend of a numerical variable (y_column) over a
-    continuous or ordered variable (x_column, like time or sequence).
-    
-    Parameters
-    ----------
-    data_file_path : str
-        The path to the data file (this is injected by the client).
-    x_column : str
-        The column for the x-axis (e.g., "Date", "Year", "Timestamp").
-    y_column : str
-        The numerical column for the y-axis (e.g., "Stock Price", "Temperature").
-    title : str
-        The title for the plot (e.g., "Stock Price Over Time").
-    x_label : str
-        The label for the x-axis.
-    y_label : str
-        The label for the y-axis.
-    hue_column : str, optional
-        A categorical column to use for coloring, creating multiple lines (e.g., "Stock_Symbol").
-    
-    Returns
-    -------
-    str
-        The file path to the saved plot image.
-    """
+    """Generates and saves a line plot."""
     try:
         df = _load_data(data_file_path)
         if x_column not in df.columns or y_column not in df.columns:
             return f"Error: Columns '{x_column}' or '{y_column}' not found."
         
         if hue_column and hue_column not in df.columns:
-            hue_column = None # Ignore if bad column name
+            hue_column = None
             
         plt.figure(figsize=(12, 7))
         sns.lineplot(data=df, x=x_column, y=y_column, hue=hue_column)
@@ -270,35 +193,25 @@ def plot_lineplot(data_file_path: str, x_column: str, y_column: str, title: str,
         plot_path = _get_plot_path(data_file_path, f"lineplot_{y_column}_over_{x_column}")
         plt.savefig(plot_path, bbox_inches='tight')
         plt.close()
-        return plot_path
+
+        hue_arg = f", hue='{hue_column}'" if hue_column else ""
+        code = _generate_code_snippet(
+            "import pandas as pd\nimport seaborn as sns\nimport matplotlib.pyplot as plt",
+            f"df = pd.read_csv('your_data.csv')",
+            f"plt.figure(figsize=(12, 7))\nsns.lineplot(data=df, x='{x_column}', y='{y_column}'{hue_arg})\nplt.title('{title}')\nplt.xlabel('{x_label}')\nplt.ylabel('{y_label}')\nplt.xticks(rotation=45)"
+        )
+        return f"{plot_path}|||{code}"
     except Exception as e:
         return f"Error plotting lineplot: {str(e)}"
 
 @mcp.tool()
 def plot_correlation_heatmap(data_file_path: str, title: str = "Correlation Heatmap") -> str:
-    """
-    Generates and saves a heatmap of the correlation matrix for all numerical columns.
-    Use this to get a quick overview of the linear relationships between all numerical variables.
-    
-    Parameters
-    ----------
-    data_file_path : str
-        The path to the data file (this is injected by the client).
-    title : str, optional
-        The title for the plot.
-    
-    Returns
-    -------
-    str
-        The file path to the saved plot image.
-    """
+    """Generates and saves a correlation heatmap."""
     try:
         df = _load_data(data_file_path)
-        
-        # Select only numerical columns for correlation
         numeric_df = df.select_dtypes(include='number')
         if numeric_df.shape[1] < 2:
-            return "Error: Need at least two numerical columns to plot a correlation heatmap."
+            return "Error: Need at least two numerical columns."
             
         corr_matrix = numeric_df.corr()
         
@@ -311,37 +224,19 @@ def plot_correlation_heatmap(data_file_path: str, title: str = "Correlation Heat
         plot_path = _get_plot_path(data_file_path, "correlation_heatmap")
         plt.savefig(plot_path, bbox_inches='tight')
         plt.close()
-        return plot_path
+
+        code = _generate_code_snippet(
+            "import pandas as pd\nimport seaborn as sns\nimport matplotlib.pyplot as plt",
+            f"df = pd.read_csv('your_data.csv')\nnumeric_df = df.select_dtypes(include='number')\ncorr_matrix = numeric_df.corr()",
+            f"plt.figure(figsize=(12, 10))\nsns.heatmap(corr_matrix, annot=True, cmap='coolwarm', fmt='.2f', linewidths=0.5)\nplt.title('{title}')\nplt.xticks(rotation=45)\nplt.yticks(rotation=0)"
+        )
+        return f"{plot_path}|||{code}"
     except Exception as e:
         return f"Error plotting correlation heatmap: {str(e)}"
 
 @mcp.tool()
 def plot_violinplot(data_file_path: str, x_column: str, y_column: str, title: str, x_label: str, y_label: str) -> str:
-    """
-    Generates and saves a violin plot.
-    Use this as an alternative to a boxplot. It combines a boxplot with a
-    kernel density plot (histogram) to show the distribution shape of the data.
-    
-    Parameters
-    ----------
-    data_file_path : str
-        The path to the data file (this is injected by the client).
-    x_column : str
-        The categorical column for the x-axis (e.g., "Department").
-    y_column : str
-        The numerical column for the y-axis (e.g., "Salary").
-    title : str
-        The title for the plot (e.g., "Salary Distribution by Department").
-    x_label : str
-        The label for the x-axis.
-    y_label : str
-        The label for the y-axis.
-    
-    Returns
-    -------
-    str
-        The file path to the saved plot image.
-    """
+    """Generates and saves a violin plot."""
     try:
         df = _load_data(data_file_path)
         if x_column not in df.columns or y_column not in df.columns:
@@ -357,34 +252,19 @@ def plot_violinplot(data_file_path: str, x_column: str, y_column: str, title: st
         plot_path = _get_plot_path(data_file_path, f"violinplot_{y_column}_by_{x_column}")
         plt.savefig(plot_path, bbox_inches='tight')
         plt.close()
-        return plot_path
+
+        code = _generate_code_snippet(
+            "import pandas as pd\nimport seaborn as sns\nimport matplotlib.pyplot as plt",
+            f"df = pd.read_csv('your_data.csv')",
+            f"plt.figure(figsize=(12, 7))\nsns.violinplot(data=df, x='{x_column}', y='{y_column}')\nplt.title('{title}')\nplt.xlabel('{x_label}')\nplt.ylabel('{y_label}')\nplt.xticks(rotation=45)"
+        )
+        return f"{plot_path}|||{code}"
     except Exception as e:
         return f"Error plotting violinplot: {str(e)}"
 
 @mcp.tool()
 def plot_pairplot(data_file_path: str, columns: list[str] = None, hue_column: str = None, title: str = "Pairwise Relationships") -> str:
-    """
-    Generates and saves a grid of scatterplots for pairs of numerical columns.
-    The diagonal shows histograms or KDEs for each variable.
-    Use this for a comprehensive initial exploration of numerical variables.
-    
-    Parameters
-    ----------
-    data_file_path : str
-        The path to the data file (this is injected by the client).
-    columns : list[str], optional
-        A list of numerical column names to include. If None, all numerical
-        columns will be used.
-    hue_column : str, optional
-        A categorical column to use for coloring the points.
-    title : str, optional
-        The main title for the entire plot grid.
-    
-    Returns
-    -------
-    str
-        The file path to the saved plot image.
-    """
+    """Generates and saves a pairplot."""
     try:
         df = _load_data(data_file_path)
         
@@ -401,18 +281,23 @@ def plot_pairplot(data_file_path: str, columns: list[str] = None, hue_column: st
         if hue_column and hue_column not in df.columns:
             return f"Error: Hue column '{hue_column}' not found."
         
-        # Pairplot creates its own Figure/Grid, so we don't use plt.figure()
         g = sns.pairplot(data=df, vars=plot_vars, hue=hue_column)
-        g.fig.suptitle(title, y=1.02) # Adjust title position
+        g.fig.suptitle(title, y=1.02)
         
         plot_path = _get_plot_path(data_file_path, f"pairplot")
         g.savefig(plot_path)
         plt.close(g.fig)
-        return plot_path
+
+        hue_arg = f", hue='{hue_column}'" if hue_column else ""
+        vars_arg = f", vars={plot_vars}" if columns else ""
+        code = _generate_code_snippet(
+            "import pandas as pd\nimport seaborn as sns\nimport matplotlib.pyplot as plt",
+            f"df = pd.read_csv('your_data.csv')",
+            f"g = sns.pairplot(data=df{vars_arg}{hue_arg})\ng.fig.suptitle('{title}', y=1.02)"
+        )
+        return f"{plot_path}|||{code}"
     except Exception as e:
         return f"Error plotting pairplot: {str(e)}"
 
-# 3. Main entry point to run the server
 if __name__ == "__main__":
-    # This runs the server over standard input/output
     mcp.run(transport="stdio")
