@@ -24,42 +24,20 @@ def _port_open():
         return s.connect_ex((OLLAMA_HOST, OLLAMA_PORT)) == 0
 
 def ensure_ollama_server():
-    # 0. Fast path ─ already up?
-    if _port_open():
-        return
-
-    # 1. Make sure we have a writable models dir
-    os.makedirs(OLLAMA_MODELS, exist_ok=True)
-    env = os.environ.copy()
-    # Always use the unified models path
-    env["OLLAMA_LLM_LIBRARY"] = "cuda"
-    # If CUDA_VISIBLE_DEVICES is missing or empty, expose GPU 0
-    cvd = os.environ.get("CUDA_VISIBLE_DEVICES")
-    env["CUDA_VISIBLE_DEVICES"] = (cvd if cvd else "0")
-    # Let the daemon find both the backend and CUDA runtime
-    env["LD_LIBRARY_PATH"] = (
-        f'{env.get("LD_LIBRARY_PATH", "")}'
-        f':/usr/local/lib/ollama'
-        f':/usr/local/cuda/lib64'
-        f':/usr/local/cuda/targets/x86_64-linux/lib'
-    )
-
-    # 2. Spawn the daemon *once*
-    if shutil.which("ollama") is None:
-        st.error("`ollama` binary not found in the container.")
-        st.stop()
-
-    subprocess.Popen(["ollama", "serve"],
-                     stdout=sys.stdout, stderr=sys.stderr,
-                     env=env)
-
-    # 3. Wait (max 30 s) until the TCP port answers
-    for _ in range(60):
+    """
+    Checks if the Ollama server is reachable.
+    Since the server is started by the Apptainer script, we just wait for it.
+    """
+    
+    # Try to connect for up to 10 seconds
+    for i in range(20):
         if _port_open():
             return
         time.sleep(0.5)
 
-    st.error("Ollama daemon failed to start - check model path and logs.")
+    # If we get here, the server defined in script.sh failed to start
+    st.error("Could not connect to Ollama server.")
+    st.info("Please check the log file: text_lab/ollama_server.log")
     st.stop()
 
 

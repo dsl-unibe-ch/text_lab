@@ -8,6 +8,7 @@ import ollama
 import sys
 import tempfile
 import zipfile
+import subprocess 
 from io import BytesIO
 
 from mcp import ClientSession, StdioServerParameters, types
@@ -22,10 +23,7 @@ from auth import check_token
 check_token()
 ensure_ollama_server()
 
-# --- Configuration ---
-MODEL = "qwen3:32b"
-
-# Dynamic Path Configuration
+# --- Dynamic Path Configuration ---
 _CURRENT_SCRIPT_DIR = pathlib.Path(__file__).parent       # src/pages/
 _SRC_DIR = _CURRENT_SCRIPT_DIR.parent                     # src/
 MCP_SERVER_SCRIPT = str(_SRC_DIR / "mcp_server.py")
@@ -43,30 +41,42 @@ You are an expert data analyst. Your task is to generate visualisations based on
     * `plot_countplot` (for categorical distributions/counts)
     * `plot_scatterplot` (for relationships between two numerical variables)
     * `plot_boxplot` (for numerical-by-categorical distributions)
-    * `plot_violinplot` (an alternative to boxplot, showing distribution shape)
-    * `plot_lineplot` (for trends, often over time or a sequence)
-    * `plot_correlation_heatmap` (for a single overview of all numerical relationships)
-    * `plot_pairplot` (for a detailed grid of all pairwise numerical relationships)
+    * `plot_violinplot` (for distribution shape)
+    * `plot_lineplot` (for trends)
+    * `plot_correlation_heatmap` (for numerical overview)
+    * `plot_pairplot` (for pairwise relationships)
 
 2.  The user will provide a prompt and the `head()` of their data.
 
-3.  Based on the prompt and the data columns (names and types), you must decide which plotting tools to call. Choose the most appropriate tools for the user's request and the data provided.
+3.  Based on the prompt and the data columns (names and types), choose the most appropriate plotting tools.
 
 4.  **CRITICAL:** Your tools require a `data_file_path` argument. You DO NOT need to provide this. It will be injected for you. You only need to provide the *other* arguments (like `column`, `x_column`, `y_column`, `title`, etc.) based on the data head.
 
-5.  Call multiple tools if it makes sense. For example, if the user asks for a general analysis, you could call `plot_correlation_heatmap` for a numerical overview, `plot_countplot` for key categorical columns, and `plot_histogram` for key numerical columns.
+5.  Call multiple tools if it makes sense.
 
-6.  After you call the tools, you will receive their output (which are file paths).
-
-7.  You must then provide a final, single response to the user. This response should be a brief, non-technical summary in Markdown, describing what you did (e.g., "I generated a histogram for the 'Age' column, a count plot for 'Department', and a scatter plot to explore 'Age' vs. 'Salary'.").
-
-8.  Do not just list the tool names. Provide a helpful, narrative summary. Do not mention file paths or errors.
+6.  After you call the tools, you will receive their output (file paths). Provide a final, single response summarizing what you did in Markdown. Do not mention file paths or errors.
 """
 
 DEFAULT_PROMPT = "Please perform a basic exploratory data analysis. Generate a few useful plots to understand the data's distribution and relationships."
 
 
 # --- Helper Functions ---
+
+# NEW: GPU Detection Function
+def get_gpu_name():
+    """
+    Returns the name of the GPU (e.g., 'NVIDIA A100-SXM4-80GB', 'NVIDIA GeForce RTX 4090')
+    """
+    try:
+        # Run nvidia-smi to query the GPU name
+        result = subprocess.check_output(
+            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"], 
+            encoding="utf-8"
+        )
+        return result.strip()
+    except Exception:
+        # Fallback if nvidia-smi fails or no GPU found
+        return "Unknown/CPU"
 
 @st.cache_data
 def load_dataframe(uploaded_file):
@@ -117,7 +127,8 @@ async def get_mcp_tools(session: ClientSession) -> list:
     return ollama_tools
 
 
-async def run_analysis(messages, data_file_path):
+# UPDATED: Added 'model_name' parameter so we don't rely on a global constant
+async def run_analysis(messages, data_file_path, model_name):
     """
     Main async logic to connect to MCP, call Ollama, and execute tools.
     """
@@ -137,7 +148,7 @@ async def run_analysis(messages, data_file_path):
             # 1. First call to Ollama to get tool calls
             try:
                 response = ollama.chat(
-                    model=MODEL,
+                    model=model_name,  # <--- Uses selected model
                     messages=messages,
                     tools=tools,
                 )
@@ -203,7 +214,7 @@ async def run_analysis(messages, data_file_path):
                 # 4. Send tool results back to Ollama for final summary
                 messages.extend(tool_results)
                 try:
-                    final_response = ollama.chat(model=MODEL, messages=messages)
+                    final_response = ollama.chat(model=model_name, messages=messages) # <--- Uses selected model
                     summary = final_response["message"]["content"]
                 except Exception as e:
                     st.error(f"Error getting final summary from Ollama: {e}")
@@ -219,9 +230,53 @@ async def run_analysis(messages, data_file_path):
 # --- Streamlit Page UI ---
 
 st.set_page_config(layout="wide")
-st.title("🤖 AI Data Visualiser")
 
-st.info(f"Using Model: **{MODEL}**")
+# --- NEW: Sidebar Model Selection Logic ---
+st.sidebar.title("Model Selection")
+
+# 1. Detect GPU
+current_gpu = get_gpu_name()
+is_high_memory_gpu = any(x in current_gpu for x in ["A100", "H100", "H200"])
+
+# 2. Define Lists
+small_models = [
+    "ministral-3:14b"
+]
+large_models = [
+    "qwen3-next:80b",
+    "qwen3-coder-next:latest"
+]
+
+# 3. Filter Options
+if is_high_memory_gpu:
+    available_models = small_models + large_models
+    gpu_badge = f"🚀 **High-Performance Mode** ({current_gpu})"
+else:
+    available_models = small_models
+    gpu_badge = f"⚠️ **Standard Mode** ({current_gpu})"
+
+st.sidebar.markdown(gpu_badge)
+
+# 4. Selector
+selected_model = st.sidebar.selectbox(
+    "Select Analysis Model:",
+    options=available_models,
+    index=0
+)
+
+# 5. Pull Model if needed (auto-pull logic)
+try:
+    # Quick check if model exists locally to avoid UI lag on every reload
+    # This is a lightweight check; 'ollama.pull' handles the heavy lifting safely
+    current_models = [m.get('model') for m in ollama.list().get('models', [])]
+    # Handle cleaning of model names (sometimes they come with :latest, sometimes not)
+    # Ideally, we just trust ollama.pull to skip if already present
+    pass 
+except:
+    pass
+
+st.title("🤖 AI Data Visualiser")
+st.info(f"Using Model: **{selected_model}**")
 
 uploaded_file = st.file_uploader(
     "Upload your data file (CSV, TSV, Excel, JSON)",
@@ -236,6 +291,13 @@ user_prompt = st.text_area(
 if st.button("Generate Visualisations", type="primary", disabled=(not uploaded_file)):
     with st.spinner("AI is analyzing your data and generating plots..."):
         run_id = f"ds-{uuid.uuid4().hex[:8]}"
+        
+        # Ensure model is ready before running heavy async tasks
+        try:
+            ollama.pull(selected_model)
+        except Exception as e:
+            st.error(f"Failed to pull model {selected_model}: {e}")
+            st.stop()
 
         try:
             # 1. Create a truly temporary directory (auto-deleted)
@@ -270,9 +332,9 @@ if st.button("Generate Visualisations", type="primary", disabled=(not uploaded_f
                     },
                 ]
 
-                # 4. Run the full async analysis
+                # 4. Run the full async analysis - PASSING THE SELECTED MODEL
                 summary, plot_paths = asyncio.run(
-                    run_analysis(messages, data_file_path)
+                    run_analysis(messages, data_file_path, selected_model)
                 )
 
                 # 5. Load all plots into memory BEFORE the temp dir is deleted
