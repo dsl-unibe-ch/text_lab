@@ -86,14 +86,12 @@ From: nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
 
     python -m pip install --no-cache-dir --upgrade pip setuptools wheel
 
-    python -m pip install --no-cache-dir --upgrade \
-    torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 \
-    --index-url https://download.pytorch.org/whl/cu118
+    pip install torch==2.7.1 torchvision==0.22.1 torchaudio==2.7.1 --index-url https://download.pytorch.org/whl/cu118
 
     cat > /tmp/constraints.txt <<'EOF'
-torch==2.7.0+cu118
-torchvision==0.22.0+cu118
-torchaudio==2.7.0+cu118
+torch==2.7.1+cu118
+torchvision==0.22.1+cu118
+torchaudio==2.7.1+cu118
 pyannote-audio>=3.3.2,<4.0.0
 huggingface_hub<1.0.0
 transformers<5
@@ -129,6 +127,8 @@ EOF
         tabulate \
         tqdm \
         filelock \
+        evaluate \
+        librosa \
         --constraint /tmp/constraints.txt
 
 
@@ -143,12 +143,16 @@ EOF
 
 
     ##### OCR dependencies #####
+    python -m pip install --no-cache-dir --upgrade paddlepaddle-gpu==3.3.0 -i https://www.paddlepaddle.org.cn/packages/stable/cu118/
+    python -m pip install --no-cache-dir --upgrade paddleocr paddlex easyocr
+    # python -m pip install --no-cache-dir --upgrade olmocr[gpu] --extra-index-url https://download.pytorch.org/whl/cu118 --constraint /tmp/constraints.txt
+
     python -m pip install --no-cache-dir --upgrade \
-        "paddlepaddle-gpu==2.6.2" \
-        "paddleocr<3" "paddlex<3" \
-        easyocr \
+        "vllm==0.10.0" \
+        "olmocr[gpu]" \
+        --extra-index-url https://download.pytorch.org/whl/cu118 \
         --constraint /tmp/constraints.txt
-    python -m pip install --no-cache-dir --upgrade olmocr[gpu] --extra-index-url https://download.pytorch.org/whl/cu118 --constraint /tmp/constraints.txt
+
 
 
     ##### Final cleaning #####
