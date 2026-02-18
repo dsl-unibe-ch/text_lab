@@ -38,6 +38,7 @@ nav:
   - Features:
     - Transcription: transcription.md
     - OCR: ocr.md
+    - Knowledge Graph: knowledge_graph.md
     - Chat & Viz: other_tools.md
 
 # Extensions to make Markdown look better
