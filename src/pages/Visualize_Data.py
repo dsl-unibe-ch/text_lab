@@ -15,6 +15,8 @@ from mcp import ClientSession, StdioServerParameters, types
 from mcp.client.stdio import stdio_client
 from utils import ensure_ollama_server
 
+st.set_page_config(page_title="Visualise Data", layout="wide")
+
 # Make sure we can import auth from parent dir
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from auth import check_token
@@ -36,21 +38,18 @@ os.makedirs(ARTIFACTS_DIR, exist_ok=True)
 SYSTEM_PROMPT = """
 You are an expert data analyst. Your task is to generate visualisations based on a user's request and the first 5 rows of their dataset.
 
-1.  You have access to a suite of plotting tools:
-    * `plot_histogram` (for numerical distributions)
-    * `plot_countplot` (for categorical distributions/counts)
-    * `plot_scatterplot` (for relationships between two numerical variables)
-    * `plot_boxplot` (for numerical-by-categorical distributions)
-    * `plot_violinplot` (for distribution shape)
-    * `plot_lineplot` (for trends)
-    * `plot_correlation_heatmap` (for numerical overview)
-    * `plot_pairplot` (for pairwise relationships)
+1.  **Standard Tools:** You have access to a suite of specific plotting tools... (keep as is)
 
-2.  The user will provide a prompt and the `head()` of their data.
+2.  **Custom Code Tool (`generate_custom_plot`):** * Use this tool for complex requests.
+    * **CRITICAL DATA TYPE RULE:** The data is loaded from CSV/Excel. Columns that look like dates or numbers might be loaded as Strings (Objects).
+    * **YOU MUST CONVERT DATA TYPES EXPLICITLY.** * If you need to plot a date, running `df['date'] = pd.to_datetime(df['date'], errors='coerce')` is MANDATORY before using `.dt` accessors.
+      * If you need to plot a number, run `pd.to_numeric(..., errors='coerce')` first.
+    * Do NOT rely on pandas auto-detection.
+    * The data is already loaded into `df`. Do NOT write code to load the file.
 
-3.  Based on the prompt and the data columns (names and types), choose the most appropriate plotting tools.
+3.  The user will provide a prompt and the `head()` of their data.
 
-4.  **CRITICAL:** Your tools require a `data_file_path` argument. You DO NOT need to provide this. It will be injected for you. You only need to provide the *other* arguments.
+4.  **CRITICAL:** All tools require a `data_file_path` argument. You DO NOT need to provide this. It will be injected for you.
 
 5.  Call multiple tools if it makes sense.
 
