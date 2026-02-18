@@ -22,12 +22,14 @@ import numpy as np
 import cv2
 import ollama
 import pandas as pd  # Added for table parsing
+from PIL import Image, ImageDraw, ImageFont
 
 st.set_page_config(page_title="OCR", layout="wide")
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from auth import check_token
+from language_mappings import EASYOCR_LANGUAGE_MAPPING, PADDLEOCR_LANGUAGE_MAPPING
 check_token()
 
 st.title("📄 Document OCR")
@@ -161,6 +163,42 @@ def _draw_text_canvas(image_shape, items):
     h, w = image_shape[:2]
     canvas = np.full((h, w, 3), 255, dtype=np.uint8)
     font = cv2.FONT_HERSHEY_SIMPLEX
+    pil_img = None
+    pil_draw = None
+    pil_font_cache = {}
+    pil_font_paths = []
+    pil_font_candidates = [
+        # Broad Unicode families (best effort across containers).
+        "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf",
+        "/usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/opentype/noto/NotoNaskhArabic-Regular.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+    ]
+    for fp in pil_font_candidates:
+        if os.path.exists(fp):
+            pil_font_paths.append(fp)
+
+    def _has_non_ascii(text):
+        return any(ord(ch) > 127 for ch in str(text))
+
+    def _get_pil_font(px_size):
+        px_size = max(12, int(px_size))
+        if px_size in pil_font_cache:
+            return pil_font_cache[px_size]
+        for path in pil_font_paths:
+            try:
+                fnt = ImageFont.truetype(path, px_size)
+                pil_font_cache[px_size] = fnt
+                return fnt
+            except Exception:
+                pass
+        fnt = ImageFont.load_default()
+        pil_font_cache[px_size] = fnt
+        return fnt
 
     def _wrap_line_to_width(text, max_width, font_scale, thickness):
         words = text.split(" ")
@@ -226,8 +264,19 @@ def _draw_text_canvas(image_shape, items):
         y_limit = min(h - 2, y + bh - 2)
         for line in lines:
             if y_cursor > y_limit: break
-            cv2.putText(canvas, line, (max(0, x + 2), min(h - 4, y_cursor)), font, font_scale, (0, 0, 0), thickness, cv2.LINE_AA)
+            px = max(0, x + 2)
+            py = min(h - 4, y_cursor)
+            if _has_non_ascii(line):
+                if pil_img is None:
+                    pil_img = Image.fromarray(cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB))
+                    pil_draw = ImageDraw.Draw(pil_img)
+                pil_font = _get_pil_font(26 * font_scale)
+                pil_draw.text((px, max(0, py - line_h + 4)), line, fill=(0, 0, 0), font=pil_font)
+            else:
+                cv2.putText(canvas, line, (px, py), font, font_scale, (0, 0, 0), thickness, cv2.LINE_AA)
             y_cursor += line_h
+    if pil_img is not None:
+        canvas = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
     return canvas
 
 def _is_number_list(seq):
@@ -304,14 +353,14 @@ def render_paddle_preview(image_path, page_preds):
     return left_png, _encode_png(text_canvas)
 
 @st.cache_resource(show_spinner=False)
-def get_easyocr_reader():
+def get_easyocr_reader(lang_code="en"):
     import easyocr
-    return easyocr.Reader(["en"], gpu=True)
+    return easyocr.Reader([lang_code], gpu=True)
 
 @st.cache_resource(show_spinner=False)
-def get_paddleocr_engine():
+def get_paddleocr_engine(lang_code="en"):
     from paddleocr import PaddleOCR
-    return PaddleOCR(use_textline_orientation=True, lang="en")
+    return PaddleOCR(use_textline_orientation=True, lang=lang_code)
 
 def clear_results(reset_running=False):
     for key in ["ocr_complete", "extracted_text", "json_content", "txt_name", "json_name", "ocr_error", "ocr_error_details", "ocr_preview_images", "ocr_preview_page", "ocr_preview_engine", "ocr_zip_bytes"]:
@@ -342,8 +391,9 @@ with col_eng:
         help="Select the OCR backend. GLM-OCR is best for complex layouts and tables.",
     )
 
-# Show Mode selector only for GLM-OCR
+# Show GLM mode selector or OCR language selector in the second column
 glm_mode = "Text Recognition"
+ocr_language = "en"
 if ocr_engine == "GLM-OCR":
     with col_mode:
         glm_mode = st.selectbox(
@@ -351,6 +401,36 @@ if ocr_engine == "GLM-OCR":
             ["Text Recognition", "Table Recognition", "Figure Recognition"],
             help="Choose what specific aspect of the document you want to extract."
         )
+elif ocr_engine == "EasyOCR":
+    easyocr_language_labels = list(EASYOCR_LANGUAGE_MAPPING.keys())
+    easyocr_default_index = (
+        easyocr_language_labels.index("English")
+        if "English" in easyocr_language_labels
+        else 0
+    )
+    with col_mode:
+        easyocr_lang_label = st.selectbox(
+            "Document Language",
+            easyocr_language_labels,
+            index=easyocr_default_index,
+            on_change=clear_results,
+            args=(True,),
+            key="easyocr_language_select",
+            help="Select the text language for EasyOCR.",
+        )
+    ocr_language = EASYOCR_LANGUAGE_MAPPING[easyocr_lang_label]
+elif ocr_engine == "PaddleOCR":
+    with col_mode:
+        paddle_lang_label = st.selectbox(
+            "Document Language",
+            list(PADDLEOCR_LANGUAGE_MAPPING.keys()),
+            index=0,
+            on_change=clear_results,
+            args=(True,),
+            key="paddle_language_select",
+            help="Select the text language for PaddleOCR.",
+        )
+    ocr_language = PADDLEOCR_LANGUAGE_MAPPING[paddle_lang_label]
 
 # --- Button Logic ---
 if uploaded_file is not None:
@@ -466,7 +546,7 @@ if uploaded_file is not None:
 
                 # --- 1. EasyOCR ---
                 if ocr_engine == "EasyOCR":
-                    reader = get_easyocr_reader()
+                    reader = get_easyocr_reader(ocr_language)
                     for idx, img_path in enumerate(image_paths, start=1):
                         page_res = reader.readtext(str(img_path), detail=1, paragraph=True)
                         page_text = "\n".join([r[1] for r in page_res])
@@ -474,11 +554,11 @@ if uploaded_file is not None:
                         
                         pl, pr = render_easyocr_preview(img_path, page_res)
                         if pl and pr: preview_images.append((pl, pr))
-                        progress_bar.progress(idx / len(image_paths))
+                        progress_bar.progress(idx / len(image_paths), text=f"Running EasyOCR... page {idx}/{len(image_paths)}")
 
                 # --- 2. PaddleOCR ---
                 elif ocr_engine == "PaddleOCR":
-                    ocr = get_paddleocr_engine()
+                    ocr = get_paddleocr_engine(ocr_language)
                     for idx, img_path in enumerate(image_paths, start=1):
                         page_preds = ocr.predict(str(img_path))
                         compact_preds = [compact_paddle_prediction(pred) for pred in page_preds]
@@ -492,7 +572,7 @@ if uploaded_file is not None:
                         
                         pl, pr = render_paddle_preview(img_path, page_preds)
                         if pl and pr: preview_images.append((pl, pr))
-                        progress_bar.progress(idx / len(image_paths))
+                        progress_bar.progress(idx / len(image_paths), text=f"Running PaddleOCR... page {idx}/{len(image_paths)}")
 
                 # --- 3. GLM-OCR (Updated with fixes) ---
                 elif ocr_engine == "GLM-OCR":
@@ -541,7 +621,7 @@ if uploaded_file is not None:
                         # Fix: Store pure bytes for Streamlit display (not numpy array)
                         preview_images.append(img_bytes) 
                         
-                        progress_bar.progress(idx / len(image_paths))
+                        progress_bar.progress(idx / len(image_paths), text=f"Running GLM-OCR... page {idx}/{len(image_paths)}")
 
                 progress_bar.empty()
 
@@ -624,7 +704,7 @@ if "ocr_complete" in st.session_state:
     preview_images = st.session_state.get("ocr_preview_images", [])
     if preview_images:
         st.markdown("---")
-        st.markdown("### 👁️ Document Preview")
+        st.markdown("### Document Preview")
         preview_engine = st.session_state.get("ocr_preview_engine", "")
         
         # Pagination
@@ -644,19 +724,20 @@ if "ocr_complete" in st.session_state:
 
         current_preview = preview_images[current_page]
 
-        # Logic for GLM (Single Image) vs Easy/Paddle (Side-by-Side)
-        if isinstance(current_preview, (list, tuple)) and len(current_preview) >= 2:
+        # Logic for GLM/Paddle (Single Image) vs Easy (Side-by-Side)
+        if preview_engine == "EasyOCR" and isinstance(current_preview, (list, tuple)) and len(current_preview) >= 2:
             left_img, right_img = current_preview[0], current_preview[1]
-            cl, cr = st.columns(2)
-            with cl:
-                st.caption("Detected boxes")
+            col_left, col_right = st.columns(2)
+            with col_left:
+                st.caption("Detected boxes on original page")
                 st.image(left_img, use_container_width=True)
-            with cr:
-                st.caption("OCR Layout")
+            with col_right:
+                st.caption("OCR text layout (white canvas)")
                 st.image(right_img, use_container_width=True)
         else:
-            # Single image path (GLM-OCR)
-            st.image(current_preview, caption="Original Document", use_container_width=True)
+            # Single image path (GLM-OCR/PaddleOCR)
+            left_img = current_preview[0] if isinstance(current_preview, (list, tuple)) else current_preview
+            st.image(left_img, caption="Original Document", use_container_width=True)
 
 elif "ocr_error" in st.session_state:
     st.error(st.session_state.ocr_error)

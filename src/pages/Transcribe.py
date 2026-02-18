@@ -21,53 +21,11 @@ import streamlit as st
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from auth import check_token
+from language_mappings import (
+    TRANSCRIBE_LANGUAGE_CODE_TO_NAME as LANGUAGE_CODE_TO_NAME,
+    TRANSCRIBE_LANGUAGE_MAPPING as LANGUAGE_MAPPING,
+)
 from utils import generate_transcription_csv, generate_words_csv, get_vad_segments, read_hf_token
-
-# Language mapping from display names to codes
-LANGUAGE_MAPPING = {
-    "English": "en",
-    "German": "de",
-    "French": "fr",
-    "Spanish": "es",
-    "Italian": "it",
-    "Swiss German": "ch_de",
-    "Japanese": "ja",
-    "Chinese": "zh",
-    "Dutch": "nl",
-    "Ukrainian": "uk",
-    "Portuguese": "pt",
-    "Arabic": "ar",
-    "Czech": "cs",
-    "Russian": "ru",
-    "Polish": "pl",
-    "Hungarian": "hu",
-    "Finnish": "fi",
-    "Persian": "fa",
-    "Greek": "el",
-    "Turkish": "tr",
-    "Danish": "da",
-    "Hebrew": "he",
-    "Vietnamese": "vi",
-    "Korean": "ko",
-    "Urdu": "ur",
-    "Telugu": "te",
-    "Hindi": "hi",
-    "Catalan": "ca",
-    "Malayalam": "ml",
-    "Norwegian Bokmål": "no",
-    "Norwegian Nynorsk": "nn",
-    "Slovak": "sk",
-    "Slovenian": "sl",
-    "Croatian": "hr",
-    "Romanian": "ro",
-    "Basque": "eu",
-    "Galician": "gl",
-    "Georgian": "ka",
-    "Latvian": "lv",
-    "Tagalog": "tl",
-    "Swedish": "sv"
-}
-LANGUAGE_CODE_TO_NAME = {code: name for name, code in LANGUAGE_MAPPING.items()}
 
 WAVESURFER_MAX_BYTES = 75 * 1024 * 1024
 WAVESURFER_MAX_SECONDS = 30 * 60
