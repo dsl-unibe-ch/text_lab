@@ -1,8 +1,10 @@
-site_name: Text Lab
+site_name: Text Lab Guide
 site_url: https://dsl-unibe-ch.github.io/text_lab/
 site_description: Documentation for the Text Lab NLP Service at University of Bern
 
-# This mimics the HPC Theme
+repo_name: dsl-unibe-ch/text_lab
+repo_url: https://github.com/dsl-unibe-ch/text_lab
+
 theme:
   name: material
   palette:
@@ -21,13 +23,13 @@ theme:
         icon: material/brightness-4
         name: Switch to light mode
   features:
-    - navigation.tabs        # Top level tabs like HPC
-    - navigation.sections    # Grouped sections in sidebar
-    - navigation.expand      # Open folders by default
-    - navigation.top         # Back to top button
-    - search.suggest         # Intelligent search
-    - search.highlight       # Highlight search results
-    - content.code.copy      # Copy button for code blocks
+    - navigation.tabs        
+    - navigation.sections    
+    - navigation.expand      
+    - navigation.top         
+    - search.suggest         
+    - search.highlight       
+    - content.code.copy      
   logo: assets/text_lab_logo.png
   favicon: assets/icon.png
 
