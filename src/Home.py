@@ -23,6 +23,7 @@ def main():
     check_token()
 
     st.title("TEXT LAB")
+    ensure_ollama_server()
 
     # Custom CSS for styling the logos.
     css = """
@@ -76,10 +77,11 @@ def main():
         """
         **Welcome to Text Lab** – an interactive application that provides a range of
         Natural Language Processing (NLP) tools. Currently, you can:
-        - **Transcribe** audio files using Whisper.
-        - **Chat** with a basic AI chatbot.
-        - **OCR**: Extract text from images using OLMOCR.
+        - **Transcribe** audio files using Whisper (Including support for Swiss-german).
+        - **Chat** with a basic AI chatbot and upload documents to interact with them.
+        - **OCR**: Extract text from images using OLMOCR, easyOCR and other models.
         - **Visualize Data**: Create plots from data using LLMs.
+        - **Knowledge Graph**: Extract topics from reseatch papers using LLMs.
 
         More NLP features and enhancements are on the way. This project is
         still under active development, so expect frequent updates and new
@@ -90,7 +92,7 @@ def main():
 
         **Project details**:
         - **Maintained by**: The Data Science Lab (DSL)
-        - **Funded by**: The Digitalisation Commission
+        - **Funded by**: The Digitalisation Commission & the Data Science Lab at the University of Bern
         - **For questions or issues**: [support.dsl@unibe.ch](mailto:support.dsl@unibe.ch)
 
         **Documentation**:
@@ -106,7 +108,7 @@ def main():
     </div>
     """, unsafe_allow_html=True)
 
-    ensure_ollama_server()
+    
 
 if __name__ == "__main__":
     main()
