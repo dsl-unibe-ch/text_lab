@@ -4,7 +4,7 @@ Text Lab runs as an interactive app on the University's High Performance Computi
 
 ## Step-by-Step Guide
 
-1.  Log in to the **UBELIX Open OnDemand Portal**.
+1.  Log in to the **[UBELIX Open OnDemand Portal](https://ondemand.hpc.unibe.ch)**.
 2.  Navigate to **Interactive Apps** or **Data Science Lab Services** and select **Text Lab**.
 3.  You will see a configuration form. Configure the resource requirements as follows:
 
