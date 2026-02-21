@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <url>
+         <loc>https://text-lab.dsl.unibe.ch/</loc>
+         <lastmod>2026-02-21</lastmod>
+    </url>
+    <url>
+         <loc>https://text-lab.dsl.unibe.ch/knowledge_graph/</loc>
+         <lastmod>2026-02-21</lastmod>
+    </url>
+    <url>
+         <loc>https://text-lab.dsl.unibe.ch/launch/</loc>
+         <lastmod>2026-02-21</lastmod>
+    </url>
+    <url>
+         <loc>https://text-lab.dsl.unibe.ch/ocr/</loc>
+         <lastmod>2026-02-21</lastmod>
+    </url>
+    <url>
+         <loc>https://text-lab.dsl.unibe.ch/other_tools/</loc>
+         <lastmod>2026-02-21</lastmod>
+    </url>
+    <url>
+         <loc>https://text-lab.dsl.unibe.ch/transcription/</loc>
+         <lastmod>2026-02-21</lastmod>
+    </url>
+</urlset>
