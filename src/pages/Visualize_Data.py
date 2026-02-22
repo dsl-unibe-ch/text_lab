@@ -1,5 +1,4 @@
 import streamlit as st
-import pandas as pd
 import os
 import uuid
 import asyncio
@@ -8,18 +7,23 @@ import ollama
 import sys
 import tempfile
 import zipfile
-import subprocess 
 from io import BytesIO
-
-from mcp import ClientSession, StdioServerParameters, types
-from mcp.client.stdio import stdio_client
-from core.chat_engine import check_ollama_server
 
 st.set_page_config(page_title="Visualise Data", layout="wide")
 
 # Make sure we can import auth from parent dir
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from auth import check_token
+
+# Import core engine logic (No duplicated backend logic here!)
+from core.chat_engine import check_ollama_server, get_gpu_name
+from core.viz_engine import (
+    SYSTEM_PROMPT, 
+    DEFAULT_PROMPT, 
+    parse_dataframe, 
+    save_data_file, 
+    run_analysis
+)
 
 # --- Auth & Ollama ---
 check_token()
@@ -31,198 +35,26 @@ if not check_ollama_server():
 # --- Dynamic Path Configuration ---
 _CURRENT_SCRIPT_DIR = pathlib.Path(__file__).parent       # src/pages/
 _SRC_DIR = _CURRENT_SCRIPT_DIR.parent                     # src/
-MCP_SERVER_SCRIPT = str(_SRC_DIR / "mcp_server.py")
+MCP_SERVER_SCRIPT = str(_SRC_DIR / "core" / "mcp_server.py")  # <-- Points to new location
 ARTIFACTS_DIR = str(_SRC_DIR / "mcp_artifacts")
 
-# Ensure artifacts base dir exists
+# Ensure artifacts base dir exists and is restricted to the owner for privacy
 os.makedirs(ARTIFACTS_DIR, exist_ok=True)
+try:
+    os.chmod(ARTIFACTS_DIR, 0o700) 
+except Exception:
+    pass
 
-# --- System & Default Prompts ---
-SYSTEM_PROMPT = """
-You are an expert data analyst. Your task is to generate visualisations based on a user's request and the first 5 rows of their dataset.
-
-1.  **Standard Tools:** You have access to a suite of specific plotting tools... (keep as is)
-
-2.  **Custom Code Tool (`generate_custom_plot`):** * Use this tool for complex requests.
-    * **CRITICAL DATA TYPE RULE:** The data is loaded from CSV/Excel. Columns that look like dates or numbers might be loaded as Strings (Objects).
-    * **YOU MUST CONVERT DATA TYPES EXPLICITLY.** * If you need to plot a date, running `df['date'] = pd.to_datetime(df['date'], errors='coerce')` is MANDATORY before using `.dt` accessors.
-      * If you need to plot a number, run `pd.to_numeric(..., errors='coerce')` first.
-    * Do NOT rely on pandas auto-detection.
-    * The data is already loaded into `df`. Do NOT write code to load the file.
-
-3.  The user will provide a prompt and the `head()` of their data.
-
-4.  **CRITICAL:** All tools require a `data_file_path` argument. You DO NOT need to provide this. It will be injected for you.
-
-5.  Call multiple tools if it makes sense.
-
-6.  After you call the tools, you will receive their output. Provide a final, single response summarizing what you did in Markdown.
-"""
-
-DEFAULT_PROMPT = "Please perform a basic exploratory data analysis. Generate a few useful plots to understand the data's distribution and relationships."
-
-
-# --- Helper Functions ---
-
-def get_gpu_name():
+# --- Streamlit Caching ---
+@st.cache_data(show_spinner=False)
+def load_dataframe_cached(file_name, file_bytes):
     try:
-        result = subprocess.check_output(
-            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"], 
-            encoding="utf-8"
-        )
-        return result.strip()
-    except Exception:
-        return "Unknown/CPU"
-
-@st.cache_data
-def load_dataframe(uploaded_file):
-    try:
-        if uploaded_file.name.endswith(".csv"):
-            return pd.read_csv(uploaded_file, encoding="latin1")
-        elif uploaded_file.name.endswith(".tsv"):
-            return pd.read_csv(uploaded_file, sep="\t", encoding="latin1")
-        elif uploaded_file.name.endswith((".xls", ".xlsx")):
-            uploaded_file.seek(0)
-            return pd.read_excel(uploaded_file)
-        elif uploaded_file.name.endswith(".json"):
-            return pd.read_json(uploaded_file)
-        else:
-            st.error(f"Unsupported file type: {uploaded_file.name}")
-            return None
+        return parse_dataframe(file_name, file_bytes)
     except Exception as e:
-        st.error(f"Error reading file: {e}")
+        st.error(str(e))
         return None
 
-
-def save_uploaded_file(uploaded_file, run_dir):
-    file_extension = os.path.splitext(uploaded_file.name)[1]
-    data_file_path = os.path.join(run_dir, f"uploaded_data{file_extension}")
-    with open(data_file_path, "wb") as f:
-        f.write(uploaded_file.getbuffer())
-    return data_file_path
-
-
-async def get_mcp_tools(session: ClientSession) -> list:
-    tool_list_response = await session.list_tools()
-    ollama_tools = []
-    for tool in tool_list_response.tools:
-        ollama_tools.append(
-            {
-                "type": "function",
-                "function": {
-                    "name": tool.name,
-                    "description": tool.description,
-                    "parameters": tool.inputSchema,
-                },
-            }
-        )
-    return ollama_tools
-
-
-async def run_analysis(messages, data_file_path, model_name):
-    server_params = StdioServerParameters(
-        command="python3",
-        args=[MCP_SERVER_SCRIPT],
-    )
-
-    # plot_results will store dicts: {'path': str, 'code': str}
-    plot_results = []
-    summary = ""
-
-    async with stdio_client(server_params) as (read, write):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            tools = await get_mcp_tools(session)
-
-            # 1. First call to Ollama
-            try:
-                response = ollama.chat(
-                    model=model_name,
-                    messages=messages,
-                    tools=tools,
-                )
-                messages.append(response["message"])
-            except Exception as e:
-                st.error(f"Error calling Ollama: {e}")
-                return "Failed to get analysis from LLM.", []
-
-            # 2. Check for and execute tool calls
-            if response["message"].get("tool_calls"):
-                tool_calls = response["message"]["tool_calls"]
-                mcp_tool_results = []
-
-                for tool_call in tool_calls:
-                    tool_name = tool_call["function"]["name"]
-                    tool_args = tool_call["function"]["arguments"]
-                    tool_args["data_file_path"] = data_file_path
-
-                    try:
-                        # 3. Execute tool
-                        result = await session.call_tool(tool_name, arguments=tool_args)
-
-                        tool_output_raw = ""
-                        if result.content and isinstance(result.content[0], types.TextContent):
-                            tool_output_raw = result.content[0].text
-
-                        if "Error:" in tool_output_raw:
-                            st.warning(f"Tool '{tool_name}' failed: {tool_output_raw}")
-                            mcp_tool_results.append({
-                                "role": "tool",
-                                "content": f"Tool Error: {tool_output_raw}",
-                            })
-                        else:
-                            # -----------------------------------------------------
-                            # PARSE RESULT: Check for "|||" delimiter (Path ||| Code)
-                            # -----------------------------------------------------
-                            if "|||" in tool_output_raw:
-                                path_part, code_part = tool_output_raw.split("|||", 1)
-                                plot_results.append({
-                                    "path": path_part.strip(),
-                                    "code": code_part.strip(),
-                                    "name": tool_name
-                                })
-                                # Return only the path to the LLM so it doesn't get confused
-                                mcp_tool_results.append({
-                                    "role": "tool",
-                                    "content": f"Successfully generated plot at {path_part.strip()}",
-                                })
-                            else:
-                                # Fallback for old style
-                                plot_results.append({
-                                    "path": tool_output_raw.strip(),
-                                    "code": "# Code transparency not available for this plot.",
-                                    "name": tool_name
-                                })
-                                mcp_tool_results.append({
-                                    "role": "tool",
-                                    "content": f"Successfully generated plot at {tool_output_raw}",
-                                })
-
-                    except Exception as e:
-                        st.error(f"Failed to execute tool '{tool_name}': {e}")
-                        mcp_tool_results.append({
-                            "role": "tool",
-                            "content": f"Failed to execute tool: {str(e)}",
-                        })
-
-                # 4. Send results back to Ollama
-                messages.extend(mcp_tool_results)
-                try:
-                    final_response = ollama.chat(model=model_name, messages=messages)
-                    summary = final_response["message"]["content"]
-                except Exception as e:
-                    st.error(f"Error getting final summary: {e}")
-                    summary = "Failed to generate summary, but plots were created."
-
-            else:
-                summary = response["message"]["content"]
-
-    return summary, plot_results
-
-
 # --- Streamlit Page UI ---
-
-st.set_page_config(layout="wide")
 
 st.sidebar.title("Model Selection")
 current_gpu = get_gpu_name()
@@ -245,12 +77,6 @@ selected_model = st.sidebar.selectbox(
     options=available_models,
     index=0
 )
-
-# Auto-pull logic
-try:
-    current_models = [m.get('model') for m in ollama.list().get('models', [])]
-except:
-    pass
 
 st.title("🤖 AI Data Visualiser")
 st.info(f"Using Model: **{selected_model}**")
@@ -280,16 +106,16 @@ if st.button("Generate Visualisations", type="primary", disabled=(not uploaded_f
                 plot_dir = os.path.join(run_dir, "plots")
                 os.makedirs(plot_dir, exist_ok=True)
 
-                data_file_path = save_uploaded_file(uploaded_file, run_dir)
-                df = load_dataframe(uploaded_file)
+                # Use Core Engine to process files
+                file_bytes = uploaded_file.getvalue()
+                data_file_path = save_data_file(file_bytes, uploaded_file.name, run_dir)
+                
+                df = load_dataframe_cached(uploaded_file.name, file_bytes)
                 if df is None:
                     st.stop()
 
                 data_head = df.head().to_string()
-
-                final_user_prompt = (
-                    user_prompt if user_prompt.strip() else DEFAULT_PROMPT
-                )
+                final_user_prompt = user_prompt if user_prompt.strip() else DEFAULT_PROMPT
 
                 messages = [
                     {"role": "system", "content": SYSTEM_PROMPT},
@@ -302,13 +128,20 @@ if st.button("Generate Visualisations", type="primary", disabled=(not uploaded_f
                     },
                 ]
 
-                # Run Analysis
-                summary, plot_results = asyncio.run(
-                    run_analysis(messages, data_file_path, selected_model)
+                # Run Analysis via Core Engine
+                summary, plot_results, logs = asyncio.run(
+                    run_analysis(messages, data_file_path, selected_model, MCP_SERVER_SCRIPT)
                 )
 
+                # Output any engine warnings/errors to UI
+                for log_type, msg in logs:
+                    if log_type == "error":
+                        st.error(msg)
+                    else:
+                        st.warning(msg)
+
                 # Load results into memory
-                final_artifacts = [] # list of dicts: {filename, bytes, code}
+                final_artifacts = []
                 for item in plot_results:
                     path = item['path']
                     code = item['code']
@@ -339,10 +172,8 @@ if st.button("Generate Visualisations", type="primary", disabled=(not uploaded_f
         else:
             # Display Loop
             for artifact in final_artifacts:
-                # Use a container for better grouping
                 with st.container():
                     st.image(artifact['bytes'], caption=artifact['filename'])
-                    # --- CODE TRANSPARENCY BLOCK ---
                     with st.expander(f"🐍 View Source Code: {artifact['filename']}"):
                         st.code(artifact['code'], language="python")
                     st.divider()
@@ -352,7 +183,6 @@ if st.button("Generate Visualisations", type="primary", disabled=(not uploaded_f
             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
                 for artifact in final_artifacts:
                     zf.writestr(artifact['filename'], artifact['bytes'])
-                    # Also save the code as a separate .py file in the zip
                     code_filename = artifact['filename'].replace('.png', '.py')
                     zf.writestr(code_filename, artifact['code'])
 
