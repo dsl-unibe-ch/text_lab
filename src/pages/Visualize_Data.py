@@ -13,7 +13,7 @@ from io import BytesIO
 
 from mcp import ClientSession, StdioServerParameters, types
 from mcp.client.stdio import stdio_client
-from utils import ensure_ollama_server
+from core.chat_engine import check_ollama_server
 
 st.set_page_config(page_title="Visualise Data", layout="wide")
 
@@ -23,7 +23,10 @@ from auth import check_token
 
 # --- Auth & Ollama ---
 check_token()
-ensure_ollama_server()
+if not check_ollama_server():
+    st.error("Could not connect to Ollama server.")
+    st.info("Please check the log file: text_lab/ollama_server.log")
+    st.stop()
 
 # --- Dynamic Path Configuration ---
 _CURRENT_SCRIPT_DIR = pathlib.Path(__file__).parent       # src/pages/

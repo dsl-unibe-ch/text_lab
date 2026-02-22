@@ -6,7 +6,7 @@ from ollama import chat
 st.set_page_config(page_title="TEXT LAB", layout="wide")
 
 from auth import check_token
-from utils import ensure_ollama_server
+from core.chat_engine import check_ollama_server
 
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "127.0.0.1")
 OLLAMA_PORT = int(os.getenv("OLLAMA_PORT", 11434))
@@ -23,7 +23,11 @@ def main():
     check_token()
 
     st.title("TEXT LAB")
-    ensure_ollama_server()
+    
+    if not check_ollama_server():
+        st.error("Could not connect to Ollama server.")
+        st.info("Please check the log file: text_lab/ollama_server.log")
+        st.stop()
 
     # Custom CSS for styling the logos.
     css = """
