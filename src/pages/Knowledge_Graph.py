@@ -13,7 +13,9 @@ st.set_page_config(page_title="Knowledge Graph", layout="wide")
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from auth import check_token
-from utils_KG import (
+
+# --- Import from new Core Engine ---
+from core.kg_engine import (
     ensure_grobid_server, 
     GrobidError,
     grobid_process_pdf_to_xml,
@@ -343,7 +345,6 @@ if grobid_available:
 
                                     # Iterate safely to find names
                                     for m in raw_models:
-                                        # Try .model attribute (new lib), .name attribute, or dict key
                                         name = getattr(m, 'model', getattr(m, 'name', None))
                                         if not name and isinstance(m, dict):
                                             name = m.get('model') or m.get('name')
@@ -381,7 +382,6 @@ if grobid_available:
                                 try:
                                     # Initialize appropriate client
                                     if llm_backend == "Ollama (Local)":
-                                        # Use OpenAI client wrapper for Ollama to ensure compatibility with utils_KG
                                         active_client = OpenAI(
                                             base_url="http://localhost:11434/v1",
                                             api_key="ollama" 
@@ -480,7 +480,6 @@ if grobid_available:
                             
                             # Load corpus data
                             topics_file = selected_kg_corpus / "corpus_table.with_topics.jsonl"
-                            import json
                             
                             # Load all records
                             all_records = []
@@ -489,12 +488,10 @@ if grobid_available:
                                     all_records.append(json.loads(line))
                             
                             # Let user select which paper to visualize
-                            # Create display labels with paper_id and filename only
                             paper_display_options = {}
                             for rec in all_records:
                                 paper_id = rec.get("paper_id", "unknown")
                                 filename = rec.get("pdf_filename", "unknown.pdf")
-                                # Format: "P0001 - filename.pdf"
                                 display_label = f"{paper_id} - {filename}"
                                 paper_display_options[display_label] = rec
                             
@@ -524,7 +521,6 @@ if grobid_available:
                             if st.button("Generate Ego Graph", type="primary"):
                                 try:
                                     with st.spinner("Building ego graph..."):
-                                        # Build ego graph
                                         nx_graph, pyvis_net = build_paper_ego_graph(
                                             selected_paper,
                                             all_records=all_records,
@@ -534,21 +530,17 @@ if grobid_available:
                                             include_cited_authors=include_cited_authors
                                         )
                                         
-                                        # Save HTML to temp file
                                         html_file = selected_kg_corpus / f"{selected_paper_id}_ego_graph.html"
                                         pyvis_net.save_graph(str(html_file))
                                         
-                                        # Read and display HTML
                                         with open(html_file, 'r', encoding='utf-8') as f:
                                             html_content = f.read()
                                         
                                         st.success("✅ Ego graph generated!")
                                         
-                                        # Display the graph
                                         import streamlit.components.v1 as components
                                         components.html(html_content, height=650, scrolling=True)
                                         
-                                        # Show graph statistics
                                         st.markdown("**Graph Statistics:**")
                                         col1, col2, col3 = st.columns(3)
                                         with col1:
@@ -558,7 +550,6 @@ if grobid_available:
                                         with col3:
                                             st.metric("Authors", len([n for n in nx_graph.nodes if str(n).startswith("author:")]))
                                         
-                                        # Download button
                                         st.download_button(
                                             label="💾 Download HTML",
                                             data=html_content,
@@ -578,28 +569,23 @@ if grobid_available:
                             st.markdown("#### Full Corpus Graph")
                             st.markdown("Visualize all papers, authors, and topics together to see collaboration patterns and topic clusters.")
                             
-                            # Advanced: Paper selection
                             with st.expander("🔍 Advanced: Select Specific Papers (Optional)", expanded=False):
                                 st.markdown("By default, all papers are included. Check boxes below to select specific papers only.")
                                 
-                                # Select all / deselect all buttons
                                 col_a, col_b = st.columns(2)
                                 with col_a:
                                     select_all = st.button("✅ Select All", key="select_all_papers")
                                 with col_b:
                                     deselect_all = st.button("❌ Deselect All", key="deselect_all_papers")
                                 
-                                # Initialize session state for paper selection if not exists
                                 if "selected_papers" not in st.session_state:
                                     st.session_state.selected_papers = {rec.get("paper_id"): True for rec in all_records}
                                 
-                                # Handle select/deselect all
                                 if select_all:
                                     st.session_state.selected_papers = {rec.get("paper_id"): True for rec in all_records}
                                 if deselect_all:
                                     st.session_state.selected_papers = {rec.get("paper_id"): False for rec in all_records}
                                 
-                                # Show checkboxes in columns for better layout
                                 st.markdown("**Select papers to include:**")
                                 num_cols = 3
                                 cols = st.columns(num_cols)
@@ -607,13 +593,9 @@ if grobid_available:
                                 for idx, rec in enumerate(all_records):
                                     paper_id = rec.get("paper_id", "unknown")
                                     title = rec.get("title", "Untitled")
-                                    filename = rec.get("pdf_filename", "unknown.pdf")
                                     
-                                    # Display in rotating columns
                                     with cols[idx % num_cols]:
-                                        # Checkbox with paper_id and truncated title
                                         display_text = f"{paper_id} - {title[:40]}..." if len(title) > 40 else f"{paper_id} - {title}"
-                                        
                                         is_selected = st.checkbox(
                                             display_text,
                                             value=st.session_state.selected_papers.get(paper_id, True),
@@ -621,11 +603,9 @@ if grobid_available:
                                         )
                                         st.session_state.selected_papers[paper_id] = is_selected
                                 
-                                # Show count of selected papers
                                 selected_count = sum(st.session_state.selected_papers.values())
                                 st.info(f"Selected: {selected_count} / {len(all_records)} papers")
                             
-                            # Options for full corpus graph
                             col1, col2, col3, col4, col5 = st.columns(5)
                             with col1:
                                 include_authors_full = st.checkbox("Authors", value=True, key="full_authors")
@@ -641,7 +621,6 @@ if grobid_available:
                             if st.button("🌐 Generate Full Corpus Graph", type="secondary"):
                                 try:
                                     with st.spinner("Building full corpus graph..."):
-                                        # Filter records based on selection
                                         if "selected_papers" in st.session_state:
                                             filtered_records = [
                                                 rec for rec in all_records 
@@ -653,7 +632,6 @@ if grobid_available:
                                         if not filtered_records:
                                             st.warning("⚠️ No papers selected. Please select at least one paper.")
                                         else:
-                                            # Build full corpus graph with filtered records
                                             nx_graph_full, pyvis_net_full = build_full_corpus_graph(
                                                 filtered_records,
                                                 include_topics=include_topics_full,
@@ -663,21 +641,17 @@ if grobid_available:
                                                 min_topic_confidence=min_confidence
                                             )
                                             
-                                            # Save HTML to temp file
                                             html_file_full = selected_kg_corpus / "full_corpus_graph.html"
                                             pyvis_net_full.save_graph(str(html_file_full))
                                             
-                                            # Read and display HTML
                                             with open(html_file_full, 'r', encoding='utf-8') as f:
                                                 html_content_full = f.read()
                                             
                                             st.success(f"✅ Full corpus graph generated with {len(filtered_records)} papers!")
                                             
-                                            # Display the graph
                                             import streamlit.components.v1 as components
                                             components.html(html_content_full, height=850, scrolling=True)
                                             
-                                            # Show graph statistics
                                             st.markdown("**Graph Statistics:**")
                                             col1, col2, col3, col4 = st.columns(4)
                                             with col1:
@@ -689,7 +663,6 @@ if grobid_available:
                                             with col4:
                                                 st.metric("Authors", len([n for n in nx_graph_full.nodes if str(n).startswith("author:")]))
                                             
-                                            # Download button
                                             st.download_button(
                                                 label="💾 Download Full Graph HTML",
                                                 data=html_content_full,
