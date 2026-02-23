@@ -1,68 +1,65 @@
 # Text Lab
 
 <p align="center">
-  <img src="src/text_lab_logo.png" alt="Text Lab Logo" width="200"/>
+  <img src="src/assets/text_lab_logo.png" alt="Text Lab Logo" width="200"/>
 </p>
 
-This repository contains the code for the **Text Lab** – an in-development suite of NLP and text processing tools. Currently, the app includes:
-
-- **Transcribe:** A tool for processing audio input and converting it to text.
-- **Chat:** An interactive chat interface powered by LLMs.
-- **OCR:** Prototype for OCR with OLMOCR.
-- **Data Visualisation:** Upload your data and get potential visualisation using LLMs.
-
-More NLP/text processing functionalities will be added over time.
+**Text Lab** is a secure, interactive suite of advanced Artificial Intelligence and Natural Language Processing (NLP) tools designed to run directly on the University of Bern's High-Performance Computing cluster (UBELIX).
 
 ---
 
-## Overview
+## 📚 Documentation & User Guide
 
-The Text Lab Interactive App is designed to be an **interactive app**, meaning that:
-- Users interact with the app via a web interface.
-- The app provides real-time responses, such as streaming outputs.
-- All tasks (transcription, chatting, etc.) occur within a unified, user-friendly interface.
-
-> **Note:** This app is still under active development and may have some issues or incomplete features.
+For comprehensive instructions, tutorials, capabilities, and best practices, please visit the official User Guide:
+👉 **[https://text-lab.dsl.unibe.ch/](https://text-lab.dsl.unibe.ch/)**
 
 ---
 
-## Launching the App
+## ✨ Features 
 
-When launching the app, you can specify several parameters to tailor its execution:
+The application features a modular, secure architecture offering the following tools:
 
-### Job Time (hours)
-- **Job Time (hours):** Specify the maximum duration for which the app will be active. After this time, the app will automatically stop. This parameter helps ensure fair allocation of compute resources.
-
-### GPU Type
-- **GPU Type:** You can request a specific GPU type for running your job.
-- **Preemptable Option in Quality of Service (QoS):** For example, if you request an **A100 GPU**, note that it is available as a **preemptable** resource.  
-  - A **preemptable** GPU resource can be reclaimed by the system if needed, which might result in interruptions.
-  - This option allows efficient sharing of high-end GPUs among many users.
-
-For more detailed guidelines on job submission and GPU options, please refer to the [HPC Documentation](https://hpc-unibe-ch.github.io/).
+- **🎙️ Audio Transcription:** Highly accurate multi-lingual transcription using Whisper. Includes **Speaker Diarization**, VAD pre-filtering, and dedicated support for Swiss German.
+- **💬 AI Chat:** A private AI assistant (powered by Ollama) that allows you to upload and interact directly with your own documents (PDFs, text, datasets).
+- **📄 Advanced OCR:** Extract text, complex tables, and layouts from images and PDFs using a choice of state-of-the-art vision models (GLM-OCR, olmOCR, PaddleOCR, EasyOCR).
+- **📊 AI Data Visualiser:** Upload your tabular data and instruct an AI agent (via an internal MCP server) to automatically write Python code and generate interactive plots.
+- **🕸️ Knowledge Graph Generator:** Process collections of scientific papers using Grobid to automatically extract metadata, citations, and research topics via LLMs, visualizing them as an interactive network graph.
 
 ---
 
-## How to Launch the App
+## 🔒 Privacy & Security
 
-To launch the app, you typically submit a job with parameters such as:
-- **Job Time (hours):** How long the app should remain active.
-- **GPU Selection:** Which GPU to use.
-- **SLURM Partition:** GPU or GPU-invest 
-- **Number of GPU(s) requested:** If you plan to use the chat option with a very larg model, then you might need to request more than 1 GPU.please refer to the [HPC Documentation](https://hpc-unibe-ch.github.io/).
-
-The app runs only for the specified duration, ensuring effective resource usage on the HPC system.
-
-The app is accessible via [OnDemand HPC](https://ondemand.hpc.unibe.ch/) and is available **only within the Unibe internal network**.
+Because all models run on university hardware via the Open OnDemand platform, your sensitive research data **never leaves the university network**. The application utilizes zero-footprint, ephemeral session states to ensure maximum security on shared infrastructure.
 
 ---
 
-## Support & Further Information
+## 🚀 Launching the App
 
-For support with the app or related NLP services, please contact:  
-**dsl.support@unibe.ch**
+The app is accessible via [UBELIX Open OnDemand](https://ondemand.hpc.unibe.ch/) and is available **only within the Unibe internal network (or via VPN)**.
 
-For additional details on job submissions and HPC resource usage, check the [HPC Documentation](https://hpc-unibe-ch.github.io/).
+When launching the app from the *Data Science Lab Services* menu, you can specify several parameters to tailor its execution:
+
+- **Job Time (hours):** Specify the maximum duration for the app to be active. It will automatically terminate after this time to ensure fair resource allocation.
+- **GPU Type:** Request a specific GPU (e.g., RTX 4090, A100).
+- **SLURM Partition:** Select the `gpu` partition.
+- **Quality of Service (QoS):** Use `job_gpu_preemptable` for quick tasks. Note that preemptable resources can be reclaimed by the system if needed. Use `job_gpu` if you have a specific allocation.
+- **Number of GPUs:** Typically `1` is sufficient, but more can be requested if running very large LLMs in the Chat tool.
+
+For more detailed guidelines on job submission, please refer to the [HPC Documentation](https://hpc-unibe-ch.github.io/).
 
 ---
 
+## 🛠️ Repository Structure
+
+- `src/pages/`: Streamlit UI frontend interface files.
+- `src/core/`: Backend business logic, LLM interaction, MCP server, and data processing engines.
+- `src/assets/`: Application icons and logos.
+- `docs/`: MkDocs documentation site source code.
+- `template/` & `form.yml`: Open OnDemand deployment configurations.
+
+---
+
+## ✉️ Support & Further Information
+
+Maintained by the Data Science Lab (DSL) at the University of Bern.  
+For support with the app, bug reports, or related NLP services, please contact: **[support.dsl@unibe.ch](mailto:support.dsl@unibe.ch)**
