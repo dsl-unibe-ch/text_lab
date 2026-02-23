@@ -61,9 +61,9 @@ def main():
 
     # Get absolute paths
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    main_logo_path = os.path.join(current_dir, "text_lab_logo.png")
-    dsl_icon_path = os.path.join(current_dir, "dsl_icon.png")
-    digiki_icon_path = os.path.join(current_dir, "digiki_icon.png")
+    main_logo_path = os.path.join(current_dir,"assets", "text_lab_logo.png")
+    dsl_icon_path = os.path.join(current_dir, "assets", "dsl_icon.png")
+    digiki_icon_path = os.path.join(current_dir, "assets", "digiki_icon.png")
 
     # Convert images to base64
     main_logo_base64 = get_img_as_base64(main_logo_path)
