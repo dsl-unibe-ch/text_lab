@@ -15,7 +15,7 @@ from language_mappings import (
     TRANSCRIBE_LANGUAGE_MAPPING as LANGUAGE_MAPPING,
 )
 
-# Import everything from our new core engine
+
 from core.transcribe_engine import (
     load_transcript_items,
     transcription_text_from_csv,

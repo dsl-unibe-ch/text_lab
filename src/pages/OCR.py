@@ -20,7 +20,14 @@ import cv2
 import ollama
 from PIL import Image
 
-st.set_page_config(page_title="OCR", layout="wide")
+current_dir = os.path.dirname(os.path.abspath(__file__))
+src_dir = os.path.dirname(current_dir)
+favicon_path = os.path.join(src_dir, "assets", "text_lab_logo.png")
+
+
+favicon = Image.open(favicon_path)
+
+st.set_page_config(page_title="OCR",page_icon=favicon, layout="wide")
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 

@@ -8,8 +8,16 @@ import sys
 import tempfile
 import zipfile
 from io import BytesIO
+from PIL import Image
 
-st.set_page_config(page_title="Visualise Data", layout="wide")
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
+src_dir = os.path.dirname(current_dir)
+favicon_path = os.path.join(src_dir, "assets", "text_lab_logo.png")
+
+favicon = Image.open(favicon_path)
+
+st.set_page_config(page_title="Visualise Data",page_icon=favicon, layout="wide")
 
 # Make sure we can import auth from parent dir
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))

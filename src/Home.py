@@ -1,10 +1,19 @@
 import streamlit as st
 import os
 import base64
+from PIL import Image
 from ollama import chat
 
-st.set_page_config(page_title="TEXT LAB", layout="wide")
+current_dir = os.path.dirname(os.path.abspath(__file__))
+favicon_path = os.path.join(current_dir, "assets", "text_lab_logo.png")
 
+favicon = Image.open(favicon_path)
+
+st.set_page_config(
+    page_title="TEXT LAB", 
+    page_icon=favicon, 
+    layout="wide"
+)
 from auth import check_token
 from core.chat_engine import check_ollama_server
 

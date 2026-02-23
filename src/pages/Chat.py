@@ -3,9 +3,17 @@ import ollama
 import sys
 import os
 from ollama import ResponseError
+from PIL import Image
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
+src_dir = os.path.dirname(current_dir)
+favicon_path = os.path.join(src_dir, "assets", "text_lab_logo.png")
+
+favicon = Image.open(favicon_path)
 
 st.set_page_config(
     page_title="Ollama Chat Interface",
+    page_icon=favicon,
     layout="centered",
     initial_sidebar_state="expanded"
 )
