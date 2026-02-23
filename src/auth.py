@@ -1,40 +1,48 @@
 import streamlit as st
 import os
-from streamlit_cookies_manager import EncryptedCookieManager
-
-cookies = EncryptedCookieManager(
-    prefix="textlab_",
-    password=os.environ.get("TOKEN", "fallback_password_for_dev"),
-)
-if not cookies.ready():
-    st.stop()
-
+import hmac  # <-- Added for secure string comparison
 
 def check_token():
+    """
+    Validates the user's session. 
+    If not authenticated, displays a secure login form and halts execution.
+    """
     expected_token = os.environ.get("TOKEN")
-    if expected_token is None:
-        raise ValueError("TOKEN environment variable not set.")
-
-    # Automatically store token from URL into cookies
-    token_from_url = st.query_params.get("token")
-    if token_from_url:
-        cookies["auth_token"] = token_from_url
-        cookies.save()
-
-    # Check token in cookies
-    user_token = cookies.get("auth_token")
-
-    if user_token is None:
-        st.warning("This app requires authentication.")
-        token_input = st.text_input("Enter access token", type="password")
-        if token_input:
-            cookies["auth_token"] = token_input
-            cookies.save()
-            st.rerun()
+    
+    if not expected_token:
+        st.error("⚠️ Security Error: TOKEN environment variable is not set. Please contact support.")
         st.stop()
 
-    if user_token != expected_token:
-        st.error("❌ Invalid token.")
-        cookies["auth_token"] = ""
-        cookies.save()
-        st.stop()
+    # If the user is already authenticated in this specific browser session, let them pass
+    if st.session_state.get("authenticated", False):
+        return
+
+    # --- Secure Login UI ---
+    _, col, _ = st.columns([1, 2, 1])
+    
+    with col:
+        st.markdown("<h2 style='text-align: center;'>🔒 Access Restricted</h2>", unsafe_allow_html=True)
+        st.markdown(
+            "<p style='text-align: center;'>Please enter the secure password for this session.<br>"
+            "<span style='font-size: 0.8em; color: gray;'>You can find this password on your Open OnDemand dashboard.</span></p>", 
+            unsafe_allow_html=True
+        )
+        
+        with st.form("login_form"):
+            password_input = st.text_input(
+                "Session Password", 
+                type="password", 
+                placeholder="Paste password here..."
+            )
+            submit_button = st.form_submit_button("Login", use_container_width=True)
+            
+            if submit_button:
+                # SECURE FIX: hmac.compare_digest prevents timing attacks
+                if hmac.compare_digest(password_input, expected_token):
+                    st.session_state["authenticated"] = True
+                    st.rerun()  # Reload the page as authenticated
+                else:
+                    st.error("❌ Invalid password. Please try again.")
+    
+    # Halt all further execution of the app
+    st.stop()
