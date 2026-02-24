@@ -377,8 +377,31 @@ if uploaded_file is not None:
         finally:
             run_notice.empty()
             st.session_state.ocr_running = False
+            
+            # Robust, aggressive cleanup
             if JOB_DIR.exists():
-                subprocess.Popen(["rm", "-rf", str(JOB_DIR)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                import time
+                import stat
+                
+                # 1. Brief pause to let OlmOCR worker locks release
+                time.sleep(1) 
+                
+                # 2. Aggressive remove tree function (Updated for modern Python)
+                def handle_remove_readonly(func, path, exc):
+                    try:
+                        # If it's a read-only file (like HF cache files), 
+                        # change permission and try deleting again.
+                        os.chmod(path, stat.S_IWRITE)
+                        func(path)
+                    except Exception:
+                        pass
+                
+                try:
+                    # Use the modern 'onexc' parameter instead of 'onerror'
+                    shutil.rmtree(JOB_DIR, onexc=handle_remove_readonly)
+                except Exception as e:
+                    # Fallback to aggressive shell command if Python fails
+                    subprocess.run(["rm", "-rf", str(JOB_DIR)], check=False)
 
 # --- RESULTS DISPLAY ---
 if "ocr_complete" in st.session_state:
