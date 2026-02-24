@@ -4,6 +4,7 @@ The Transcription tool uses **WhisperX** to convert spoken audio into written te
 
 ## Supported Formats
 You can upload audio files in the following formats:
+
 * `.wav`
 * `.mp3`
 * `.flac`
@@ -17,7 +18,9 @@ You can upload audio files in the following formats:
     * **Important:** You must verify or manually select the correct language from the dropdown.
 
 ### 🇨🇭 Swiss German Support
-Text Lab includes a specialized fine-tuned model for **Swiss German**. 
+
+Text Lab includes a specialized fine-tuned model for **Swiss German**.
+
 * Select **Swiss German** from the language list.
 * This uses the `swhisper-large-1.1` model, which achieves a Word Error Rate (WER) of approximately **18**, significantly outperforming standard models on Swiss German dialects. More info about the fine-tuned whisper will be published soon.
 
@@ -31,6 +34,7 @@ Text Lab includes a specialized fine-tuned model for **Swiss German**.
 ## Results & Export
 
 Once the transcription is complete, you can:
+
 * **Preview:** Listen to the audio with a synchronized interactive text player.
 * **Edit View:** Toggle between "Segments" (sentences) and "Words" view.
 * **Download:** * **Text (.txt):** Plain text transcript.
