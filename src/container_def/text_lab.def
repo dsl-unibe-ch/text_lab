@@ -129,7 +129,8 @@ EOF
         filelock \
         evaluate \
         librosa \
-        pymupdf \
+        networkx pyvis \
+        pymupdf pymupdf4llm "unstructured[all-docs]" \
         --constraint /tmp/constraints.txt
 
 
@@ -153,8 +154,6 @@ EOF
         "olmocr[gpu]" \
         --extra-index-url https://download.pytorch.org/whl/cu118 \
         --constraint /tmp/constraints.txt
-
-
 
     ##### Final cleaning #####
     apt-get clean

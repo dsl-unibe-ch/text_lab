@@ -1,6 +1,48 @@
 <form action="/node/<%= host %>/<%= port %>/" method="get" target="_blank">
-  <input type="hidden" name="token" value="<%= password %>">
+  <p>Your session is ready. Copy the session password and connect to Texr Lab</p>
+
+  <p><strong>Your Session Password:</strong></p>
+  
+  <div class="input-group" style="max-width: 300px; margin-bottom: 20px;">
+    <input type="password" id="sessionPassword" class="form-control" value="<%= password %>" readonly style="background-color: #fff; cursor: text;">
+    <span class="input-group-btn">
+      <button class="btn btn-default" type="button" onclick="copyPassword()" id="copyBtn" title="Copy to clipboard">
+        <i class="fa fa-clipboard"></i> Copy
+      </button>
+    </span>
+  </div>
+
   <button class="btn btn-primary" type="submit">
-    <i class="fa fa-headphones"></i> Connect to Text Lab
+    <i class="fa fa-cogs"></i> Connect to Text Lab
   </button>
 </form>
+
+<script>
+function copyPassword() {
+  var pwdInput = document.getElementById("sessionPassword");
+  
+  // Copy text to clipboard
+  if (navigator.clipboard && window.isSecureContext) {
+    // Modern secure browsers
+    navigator.clipboard.writeText(pwdInput.value);
+  } else {
+    // Fallback for older browsers
+    var tempInput = document.createElement("input");
+    tempInput.value = pwdInput.value;
+    document.body.appendChild(tempInput);
+    tempInput.select();
+    document.execCommand("copy");
+    document.body.removeChild(tempInput);
+  }
+  
+  // Provide visual feedback on the button
+  var btn = document.getElementById("copyBtn");
+  var originalHtml = btn.innerHTML;
+  btn.innerHTML = '<i class="fa fa-check" style="color: green;"></i> Copied!';
+  
+  // Revert button text after 2 seconds
+  setTimeout(function() {
+    btn.innerHTML = originalHtml;
+  }, 2000);
+}
+</script>

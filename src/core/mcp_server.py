@@ -12,22 +12,39 @@ logging.getLogger("mcp").setLevel(logging.ERROR)
 # 1. Create an MCP server instance
 mcp = FastMCP("Data Visualisation MCP Server")
 
+MAX_ROWS = 300000
+
 # --- Helper Function to Load Data ---
 def _load_data(file_path: str) -> pd.DataFrame:
-    """Internal helper to load data from various file formats."""
+    """
+    Internal helper to load data. 
+    Includes safety sampling for huge files to prevent OOM crashes.
+    """
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"Data file not found at: {file_path}")
         
-    if file_path.endswith('.csv'):
-        return pd.read_csv(file_path)
-    elif file_path.endswith('.tsv'):
-        return pd.read_csv(file_path, sep='\t')
-    elif file_path.endswith(('.xls', '.xlsx')):
-        return pd.read_excel(file_path)
-    elif file_path.endswith('.json'):
-        return pd.read_json(file_path)
-    else:
-        raise ValueError(f"Unsupported file type: {os.path.basename(file_path)}")
+    # Helper to check file size (optional logging)
+    file_size = os.path.getsize(file_path) / (1024 * 1024) # in MB
+    
+    try:
+        if file_path.endswith('.csv'):
+            # Read only first N rows to ensure memory safety
+            df = pd.read_csv(file_path, nrows=MAX_ROWS, encoding="latin1")
+        elif file_path.endswith('.tsv'):
+            df = pd.read_csv(file_path, sep='\t', nrows=MAX_ROWS, encoding="latin1")
+        elif file_path.endswith(('.xls', '.xlsx')):
+            # Excel doesn't support 'nrows' efficiently like CSV, but we can try
+            df = pd.read_excel(file_path, nrows=MAX_ROWS)
+        elif file_path.endswith('.json'):
+            # JSON is harder to partial read, load normally (risky for huge JSON)
+            df = pd.read_json(file_path)
+        else:
+            raise ValueError(f"Unsupported file type: {os.path.basename(file_path)}")
+            
+        return df
+    except Exception as e:
+        # Fallback: if loading fails, try standard load (or reraise)
+        raise RuntimeError(f"Failed to load data (size {file_size:.2f}MB): {str(e)}")
 
 def _get_plot_path(data_file_path: str, plot_name: str) -> str:
     """Internal helper to create a unique plot path."""
@@ -53,7 +70,7 @@ def _generate_code_snippet(import_lines, load_line, plot_lines):
 {plot_lines}
 plt.show()"""
 
-# --- 2. Define Plotting Tools ---
+# --- 2. Define Standard Plotting Tools ---
 
 @mcp.tool()
 def plot_histogram(data_file_path: str, column: str, title: str, x_label: str) -> str:
@@ -298,6 +315,72 @@ def plot_pairplot(data_file_path: str, columns: list[str] = None, hue_column: st
         return f"{plot_path}|||{code}"
     except Exception as e:
         return f"Error plotting pairplot: {str(e)}"
+
+# --- 3. Advanced Custom Plot Tool ---
+
+@mcp.tool()
+def generate_custom_plot(data_file_path: str, python_code: str, plot_filename_keyword: str) -> str:
+    """
+    Executes custom Python plotting code using matplotlib/seaborn.
+    Use this when the user requests a specific visualization that is not covered
+    by the standard tools (e.g., specific colors, complex subplots, regression lines).
+
+    Parameters
+    ----------
+    data_file_path : str
+        The path to the data file (injected).
+    python_code : str
+        The valid python code to execute.
+        - You have access to pandas as `pd`, seaborn as `sns`, and matplotlib.pyplot as `plt`.
+        - The data is ALREADY loaded into a variable named `df`. DO NOT reload it.
+        - DO NOT call `plt.show()`. Just create the plot.
+        - The code will be executed in a restricted scope.
+    plot_filename_keyword : str
+        A short string to use in the filename (e.g., "age_regression").
+
+    Returns
+    -------
+    str
+        The file path ||| the code used.
+    """
+    try:
+        # 1. Load Data
+        df = _load_data(data_file_path)
+
+        # 2. Prepare Sandbox Scope
+        local_scope = {
+            "pd": pd,
+            "sns": sns,
+            "plt": plt,
+            "df": df
+        }
+
+        # 3. Clean up the code (remove markdown backticks if LLM provides them)
+        clean_code = python_code.replace("```python", "").replace("```", "").strip()
+
+        # 4. Reset Figure (Important to not draw over previous plots)
+        plt.clf()
+        plt.figure(figsize=(10, 6)) # Default size, user code can override this
+
+        # 5. Execute Code
+        exec(clean_code, {}, local_scope)
+
+        # 6. Save Result
+        plot_path = _get_plot_path(data_file_path, f"custom_{plot_filename_keyword}")
+        plt.savefig(plot_path, bbox_inches='tight')
+        plt.close()
+
+        # 7. Return Code Snippet (including the implicit imports/loading for the user)
+        full_user_code = _generate_code_snippet(
+            "import pandas as pd\nimport seaborn as sns\nimport matplotlib.pyplot as plt",
+            f"df = pd.read_csv('your_data.csv')",
+            clean_code
+        )
+
+        return f"{plot_path}|||{full_user_code}"
+
+    except Exception as e:
+        return f"Error executing custom plot code: {str(e)}"
 
 if __name__ == "__main__":
     mcp.run(transport="stdio")

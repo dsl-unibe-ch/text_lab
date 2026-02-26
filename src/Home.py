@@ -2,12 +2,21 @@ import streamlit as st
 import os
 import base64
 import streamlit.components.v1 as components
+from PIL import Image
 from ollama import chat
 
-st.set_page_config(page_title="TEXT LAB", layout="wide")
+current_dir = os.path.dirname(os.path.abspath(__file__))
+favicon_path = os.path.join(current_dir, "assets", "text_lab_logo.png")
 
+favicon = Image.open(favicon_path)
+
+st.set_page_config(
+    page_title="TEXT LAB", 
+    page_icon=favicon, 
+    layout="wide"
+)
 from auth import check_token
-from utils import ensure_ollama_server
+from core.chat_engine import check_ollama_server
 
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "127.0.0.1")
 OLLAMA_PORT = int(os.getenv("OLLAMA_PORT", 11434))
@@ -22,6 +31,11 @@ def get_img_as_base64(file_path):
 
 def main():
     st.title("TEXT LAB")
+    
+    if not check_ollama_server():
+        st.error("Could not connect to Ollama server.")
+        st.info("Please check the log file: text_lab/ollama_server.log")
+        st.stop()
 
     user_token = st.context.cookies.get("textlab_auth_token", "")
     expected_token = os.environ.get("TOKEN")
@@ -71,9 +85,9 @@ def main():
 
     # Get absolute paths
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    main_logo_path = os.path.join(current_dir, "text_lab_logo.png")
-    dsl_icon_path = os.path.join(current_dir, "dsl_icon.png")
-    digiki_icon_path = os.path.join(current_dir, "digiki_icon.png")
+    main_logo_path = os.path.join(current_dir,"assets", "text_lab_logo.png")
+    dsl_icon_path = os.path.join(current_dir, "assets", "dsl_icon.png")
+    digiki_icon_path = os.path.join(current_dir, "assets", "digiki_icon.png")
 
     # Convert images to base64
     main_logo_base64 = get_img_as_base64(main_logo_path)
@@ -91,10 +105,11 @@ def main():
         """
         **Welcome to Text Lab** – an interactive application that provides a range of
         Natural Language Processing (NLP) tools. Currently, you can:
-        - **Transcribe** audio files using Whisper.
-        - **Chat** with a basic AI chatbot.
-        - **OCR**: Extract text from images using OLMOCR.
+        - **Transcribe** audio files using Whisper (Including support for Swiss-german).
+        - **Chat** with a basic AI chatbot and upload documents to interact with them.
+        - **OCR**: Extract text from images using OLMOCR, easyOCR and other models.
         - **Visualize Data**: Create plots from data using LLMs.
+        - **Knowledge Graph**: Extract topics from reseatch papers using LLMs.
 
         More NLP features and enhancements are on the way. This project is
         still under active development, so expect frequent updates and new
@@ -105,7 +120,7 @@ def main():
 
         **Project details**:
         - **Maintained by**: The Data Science Lab (DSL)
-        - **Funded by**: The Digitalisation Commission
+        - **Funded by**: The Digitalisation Commission & the Data Science Lab at the University of Bern
         - **For questions or issues**: [support.dsl@unibe.ch](mailto:support.dsl@unibe.ch)
 
         **Documentation**:
@@ -121,7 +136,7 @@ def main():
     </div>
     """, unsafe_allow_html=True)
 
-    ensure_ollama_server()
+    
 
 if __name__ == "__main__":
     main()
