@@ -332,6 +332,62 @@ def generate_words_csv(result):
         segment_id += 1
     return output.getvalue()
 
+
+# --- SUBTITLE GENERATORS ---
+
+def _format_timestamp(seconds: float, separator: str = ",") -> str:
+    """Formats seconds into SRT/VTT timestamp format: HH:MM:SS,mmm or HH:MM:SS.mmm"""
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    millis = int((seconds - int(seconds)) * 1000)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}{separator}{millis:03d}"
+
+def generate_srt(result) -> str:
+    """Generates standard SubRip (.srt) format subtitle string."""
+    output = io.StringIO()
+    segment_id = 1
+    
+    for segment in result.get('segments', []):
+        start_time = segment.get("start", 0)
+        end_time = segment.get("end", 0)
+        text = segment.get("text", "").strip()
+        
+        if not text:
+            continue
+            
+        start_str = _format_timestamp(start_time, separator=",")
+        end_str = _format_timestamp(end_time, separator=",")
+        
+        output.write(f"{segment_id}\n")
+        output.write(f"{start_str} --> {end_str}\n")
+        output.write(f"{text}\n\n")
+        
+        segment_id += 1
+        
+    return output.getvalue()
+
+def generate_vtt(result) -> str:
+    """Generates standard WebVTT (.vtt) format subtitle string."""
+    output = io.StringIO()
+    output.write("WEBVTT\n\n")
+    
+    for segment in result.get('segments', []):
+        start_time = segment.get("start", 0)
+        end_time = segment.get("end", 0)
+        text = segment.get("text", "").strip()
+        
+        if not text:
+            continue
+            
+        start_str = _format_timestamp(start_time, separator=".")
+        end_str = _format_timestamp(end_time, separator=".")
+        
+        output.write(f"{start_str} --> {end_str}\n")
+        output.write(f"{text}\n\n")
+        
+    return output.getvalue()
+
 # ==========================================
 #        WAVESURFER HTML GENERATOR
 # ==========================================

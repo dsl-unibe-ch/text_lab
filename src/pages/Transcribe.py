@@ -28,7 +28,9 @@ from core.transcribe_engine import (
     get_vad_segments,
     generate_transcription_csv,
     generate_words_csv,
-    read_hf_token
+    read_hf_token,
+    generate_srt,
+    generate_vtt
 )
 
 HF_TOKEN_PATH = "/storage/research/dsl_shared/solutions/whisperx/cache/whisperx/cache/hf/hf_token.txt"
@@ -323,11 +325,15 @@ def main():
                                     transcription_csv = generate_transcription_csv(aligned, has_speakers=file_has_speakers)
                                     words_csv = generate_words_csv(aligned)
                                     text_output = transcription_text_from_csv(transcription_csv)
+                                    srt_output = generate_srt(aligned)
+                                    vtt_output = generate_vtt(aligned)
                                     
                                     # Write to output zip (Organized in folders per audio file)
                                     out_zip.writestr(f"{base_name}/{base_name}_transcription.csv", transcription_csv)
                                     out_zip.writestr(f"{base_name}/{base_name}_words.csv", words_csv)
                                     out_zip.writestr(f"{base_name}/{base_name}_text.txt", text_output)
+                                    out_zip.writestr(f"{base_name}/{base_name}.srt", srt_output)
+                                    out_zip.writestr(f"{base_name}/{base_name}.vtt", vtt_output)
                                     
                                     progress_bar.progress((idx + 1) / len(audio_files))
                         
@@ -551,10 +557,14 @@ def main():
                         
                         transcription_csv = generate_transcription_csv(aligned, has_speakers=has_speakers)
                         words_csv = generate_words_csv(aligned)
+                        srt_output = generate_srt(aligned)
+                        vtt_output = generate_vtt(aligned)
                         
                         st.session_state.transcription_results = {
                             'transcription_csv': transcription_csv,
                             'words_csv': words_csv,
+                            'srt_output': srt_output,
+                            'vtt_output': vtt_output,
                             'audio_bytes': audio_bytes,
                             'wav_bytes': wav_bytes,
                             'player_wav_bytes': player_wav_bytes,
@@ -619,6 +629,8 @@ def main():
                 zf.writestr(f"{base_name}_transcription.csv", transcription_csv)
                 zf.writestr(f"{base_name}_words.csv", words_csv)
                 zf.writestr(f"{base_name}_text.txt", text_output)
+                zf.writestr(f"{base_name}.srt", results.get('srt_output', ''))
+                zf.writestr(f"{base_name}.vtt", results.get('vtt_output', ''))
                 if wav_bytes:
                     zf.writestr(wav_filename or f"{base_name}.wav", wav_bytes)
             zip_buffer.seek(0)
