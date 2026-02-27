@@ -1,7 +1,6 @@
 import streamlit as st
 import os
 import base64
-import streamlit.components.v1 as components
 from PIL import Image
 from ollama import chat
 
@@ -30,6 +29,8 @@ def get_img_as_base64(file_path):
     return base64.b64encode(data).decode()
 
 def main():
+    
+    check_token()
     st.title("TEXT LAB")
     
     if not check_ollama_server():
@@ -37,21 +38,6 @@ def main():
         st.info("Please check the log file: text_lab/ollama_server.log")
         st.stop()
 
-    user_token = st.context.cookies.get("textlab_auth_token", "")
-    expected_token = os.environ.get("TOKEN")
-
-    if expected_token != user_token:
-      components.html("""
-          <script>
-              var token = new URLSearchParams(window.parent.location.search).get('token');
-              if (token && !document.cookie.includes(token)) {
-                  window.parent.document.cookie = 'textlab_auth_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/';
-                  var expires = new Date(Date.now() + 30*864e5).toUTCString();
-                  window.parent.document.cookie = 'textlab_auth_token=' + token + '; expires=' + expires + '; path=/; secure; samesite=strict';
-                  window.parent.location.reload();
-              }
-          </script>
-      """, height=0)
 
     # Custom CSS for styling the logos.
     css = """
