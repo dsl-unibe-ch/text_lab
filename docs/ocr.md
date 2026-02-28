@@ -3,6 +3,7 @@
 The OCR tool allows you to extract editable text, tables, and structured data from scanned PDF documents or raw images.
 
 ## Supported Input
+
 * **Documents:** PDF (`.pdf`). *Note: If your PDF has multiple pages, the process may take several minutes per page depending on the density of the text.*
 * **Images:** PNG, JPG, JPEG, BMP, TIFF
 * **Archives:** ZIP (`.zip`) *(for batch processing multiple documents or images at once).*
@@ -11,32 +12,36 @@ The OCR tool allows you to extract editable text, tables, and structured data fr
 
 Text Lab provides four different AI engines for text extraction, each with its own strengths:
 
-1.  **EasyOCR:** Good for general-purpose text and supports a wide variety of languages.
-2.  **PaddleOCR:** Often performs better on documents with complex layouts or multi-column text.
-3.  **OlmOCR:** A specialized pipeline optimized for converting scientific PDFs into clean Markdown.
-4.  **GLM-OCR:** A state-of-the-art large vision model. It is exceptional for highly complex layouts and allows you to specifically target what to extract (e.g., General Text, specific Tables, or Figures).
+1. **EasyOCR:** Good for general-purpose text and supports a wide variety of languages.
+2. **PaddleOCR:** Often performs better on documents with complex layouts or multi-column text.
+3. **OlmOCR:** A specialized pipeline optimized for converting scientific PDFs into clean Markdown.
+4. **GLM-OCR:** A state-of-the-art large vision model. It is exceptional for highly complex layouts and allows you to specifically target what to extract (e.g., General Text, specific Tables, or Figures).
 
 ## How to Use
 
 ### 📄 Single Document OCR
-1.  **Select Workflow:** Choose "Single Document OCR".
-2.  **Upload File:** Select your PDF or image.
-3.  **Select Engine:** Choose one of the engines listed above.
-    * *If using EasyOCR/PaddleOCR:* Select the language of the document.
-    * *If using GLM-OCR:* Select the extraction mode (Text, Table, or Figure).
-4.  **Run OCR:** Click the button to start processing.
-    * *Warning:* Do not close the tab while the "Running" indicator is active.
+
+1. **Select Workflow:** Choose "Single Document OCR".
+2. **Upload File:** Select your PDF or image.
+3. **Select Engine:** Choose one of the engines listed above.
+   * *If using EasyOCR/PaddleOCR:* Select the language of the document.
+   * *If using GLM-OCR:* Select the extraction mode (Text, Table, or Figure).
+4. **Run OCR:** Click the button to start processing.
+   * *Warning:* Do not close the tab while the "Running" indicator is active.
 
 ### 📦 Batch Processing (Multiple Files)
+
 If you have a large dataset of documents or images (e.g., a folder of 50 scanned PDFs), you can process them all in one go:
-1.  **Select Workflow:** Choose "Batch OCR (ZIP)".
-2.  **Upload File:** Compress all your PDFs or images into a single `.zip` archive on your computer and upload it.
-3.  **Select Engine:** Choose the OCR engine (and language/mode if applicable). These settings will be applied to all files in the ZIP.
-4.  **Run Batch OCR:** Click Start. The AI models are loaded into the GPU only once, and the system loops through your entire archive at maximum speed.
+
+1. **Select Workflow:** Choose "Batch OCR (ZIP)".
+2. **Upload File:** Compress all your PDFs or images into a single `.zip` archive on your computer and upload it.
+3. **Select Engine:** Choose the OCR engine (and language/mode if applicable). These settings will be applied to all files in the ZIP.
+4. **Run Batch OCR:** Click Start. The AI models are loaded into the GPU only once, and the system loops through your entire archive at maximum speed.
 
 ## Outputs
 
 For single documents, you will see a side-by-side preview of the document and the extracted content. You can download:
+
 * **Extracted Text (.txt):** The raw text or Markdown.
 * **Table Data (.csv):** If the AI detects a structured table, you can download it directly as a CSV for Excel/Python.
 * **Structured Data (.jsonl):** Useful for developers or bulk data analysis.
