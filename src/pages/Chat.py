@@ -54,7 +54,7 @@ def main():
     # --- GPU Detection & Model Filtering ---
     current_gpu = get_gpu_name()
     small_models = ["gemma3:27b", "ministral-3:14b"]
-    large_models = ["qwen3-next:80b", "qwen3-coder-next:latest"]
+    large_models = ["qwen3-coder-next:latest"]
 
     is_high_memory_gpu = any(x in current_gpu for x in ["A100", "H100", "H200"])
 
