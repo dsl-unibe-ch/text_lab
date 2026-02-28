@@ -22,6 +22,7 @@ You can upload audio files in the following formats:
 
 ### 📦 Batch Processing (Multiple Files)
 If you have multiple audio recordings (e.g., a folder of 10 interviews), you can transcribe them all in one go without clicking through them individually:
+
 1. **Select Workflow:** Choose "Batch transcribe (ZIP)".
 2. **Upload File:** Compress all your audio files into a single `.zip` archive on your computer and upload it.
 3. **Language Selection:** * You can choose a specific language to force the AI to use that language for *all* files.
