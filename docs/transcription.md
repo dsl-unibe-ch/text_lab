@@ -9,14 +9,24 @@ You can upload audio files in the following formats:
 * `.mp3`
 * `.flac`
 * `.m4a`
+* `.zip` *(for batch processing multiple audio files at once)*
 
 ## How to Use
 
-1. **Select Workflow:** Choose "Transcribe audio" to process a new file.
-2. **Upload File:** Drag and drop your audio file or upload it.
+### 🎙️ Single Audio Transcription
+1. **Select Workflow:** Choose "Transcribe audio".
+2. **Upload File:** Drag and drop your audio file.
 3. **Language Selection:**
    * The system will attempt to auto-detect the language.
    * **Important:** You must verify or manually select the correct language from the dropdown.
+
+### 📦 Batch Processing (Multiple Files)
+If you have multiple audio recordings (e.g., a folder of 10 interviews), you can transcribe them all in one go without clicking through them individually:
+1. **Select Workflow:** Choose "Batch transcribe (ZIP)".
+2. **Upload File:** Compress all your audio files into a single `.zip` archive on your computer and upload it.
+3. **Language Selection:** * You can choose a specific language to force the AI to use that language for *all* files.
+   * Alternatively, select **Auto-detect**. The AI will dynamically analyze and figure out the correct language for each file individually before transcribing it.
+4. **Process:** Click Start. The AI will load the models once and loop through your entire ZIP file at maximum speed. 
 
 ### 🇨🇭 Swiss German Support
 
@@ -37,12 +47,13 @@ Text Lab includes a specialized fine-tuned model for **Swiss German**.
 
 Once the transcription is complete, you can:
 
-* **Preview:** Listen to the audio with a synchronized interactive text player.
+* **Preview (Single Files Only):** Listen to the audio with a synchronized interactive text player.
 * **Edit View:** Toggle between "Segments" (sentences) and "Words" view.
 * **Download:**
   * **Text (.txt):** Plain text transcript.
   * **CSV:** Contains timestamps and speaker labels.
-  * **ZIP:** Download all formats and the processed WAV file in one package.
+  * **Subtitles (.srt & .vtt):** Ready-to-use subtitle files that can be imported directly into video editing software (Premiere Pro, DaVinci Resolve), VLC media player, or YouTube.
+  * **ZIP Package:** Downloads all the formats above in one convenient package. *(For batch processing, this ZIP will automatically organize your transcripts into individual, neatly named folders for each audio file!)*
 
 ---
 
