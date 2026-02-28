@@ -69,7 +69,7 @@ current_gpu = get_gpu_name()
 is_high_memory_gpu = any(x in current_gpu for x in ["A100", "H100", "H200"])
 
 small_models = ["ministral-3:14b"]
-large_models = ["qwen3-next:80b", "qwen3-coder-next:latest"]
+large_models = ["qwen3-coder-next:latest"]
 
 if is_high_memory_gpu:
     available_models = small_models + large_models
