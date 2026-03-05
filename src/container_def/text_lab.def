@@ -100,7 +100,6 @@ EOF
 
     python -m pip install --no-cache-dir --upgrade \
         streamlit \
-        streamlit-cookies-manager \
         requests \
         openai-whisper \
         sentence-transformers \
