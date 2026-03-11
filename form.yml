@@ -3,16 +3,38 @@ cluster: "ubelix"
 
 form:
   - auto_accounts
+  - time
+  - advanced_mode
   - partition
   - qos
-  - time
   - gpu
   - gpu_number
-  - advanced_mode
-  - reservation
   - wckey
+  - reservation
 
 attributes:
+  time:
+    widget: "number_field"
+    label: "Job Time (hours)"
+    min: 1
+    max: 24
+    step: 1
+    value: "1"
+    help: "Total walltime in hours. e.g. 1 means 1:00:00 hour."
+
+  advanced_mode:
+    widget: "check_box"
+    label: "Advanced Slurm Options"
+    help: "Check this box to manually select the GPU type, partition, QoS, and other advanced Slurm parameters."
+    html_options:
+      data:
+        hide-partition-when-un-checked: true
+        hide-qos-when-un-checked: true
+        hide-gpu-when-un-checked: true
+        hide-gpu-number-when-un-checked: true
+        hide-wckey-when-un-checked: true
+        hide-reservation-when-un-checked: true
+
   partition:
     widget: "select"
     label: "SLURM Partition"
@@ -28,18 +50,9 @@ attributes:
       - ["job_gratis", "job_gratis"]
       - ["job_gpu", "job_gpu"]
       - ["job_gpu_preemptable", "job_gpu_preemptable"]
-    value: "job_gratis"
+    value: "job_gpu"
     help: >
       Choose a QoS that matches your account and partition
-
-  time:
-    widget: "number_field"
-    label: "Job Time (hours)"
-    min: 1
-    max: 24
-    step: 1
-    value: "1"
-    help: "Total walltime in hours. e.g. 1 means 1:00:00 hour."
 
   gpu:
     widget: "select"
@@ -49,7 +62,7 @@ attributes:
       - ["A100", "gpu:a100:"]
       - ["H100", "gpu:h100:"]
       - ["H200", "gpu:h200:"]
-    value: "rtx4090"
+    value: "gpu:h100:"
     help: "Use A100 or H100 with 'job_gpu_preemptable' option from the 'qos'"
 
   gpu_number:
@@ -59,20 +72,12 @@ attributes:
      max: 6
      step: 1
      value: "1"
-     help: "Number of GPUs. Ask for more than 1 in case you plan to run large LLM. You might not be able to request more than 1"
+     help: "Number of GPUs. Ask for more than 1 in case you plan to run large LLMs."
 
   wckey:
     widget: "text_field"
     label: "wckey"
     help: 'Provide a valid project identifier ("wckey") for accounting. (Optional when using the gratis account.)'
-
-  advanced_mode:
-    widget: "check_box"
-    label: "Advanced Mode"
-    help: "Show advanced Slurm options (e.g. reservation)"
-    html_options:
-      data:
-        hide-reservation-when-un-checked: true
 
   reservation:
     widget: "text_field"
