@@ -20,7 +20,7 @@ attributes:
     max: 24
     step: 1
     value: "1"
-    help: "Total walltime in hours. e.g. 1 means 1:00:00 hour."
+    help: "Total run time in hours. e.g. 1 means 1:00:00 hour."
 
   advanced_mode:
     widget: "check_box"
