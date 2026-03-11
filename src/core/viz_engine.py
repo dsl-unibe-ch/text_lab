@@ -166,7 +166,7 @@ async def run_analysis(messages, data_file_path, model_name, mcp_server_script):
                 # 4. Send results back to Ollama
                 messages.extend(mcp_tool_results)
                 try:
-                    final_response = ollama.chat(model=model_name, messages=messages)
+                    final_response = ollama.chat(model=model_name, messages=messages, tools=tools)
                     summary = final_response["message"]["content"]
                 except Exception as e:
                     logs.append(("error", f"Error getting final summary: {e}"))

@@ -352,7 +352,8 @@ def generate_custom_plot(data_file_path: str, python_code: str, plot_filename_ke
             "pd": pd,
             "sns": sns,
             "plt": plt,
-            "df": df
+            "df": df,
+            "data_file_path": data_file_path
         }
 
         # 3. Clean up the code (remove markdown backticks if LLM provides them)

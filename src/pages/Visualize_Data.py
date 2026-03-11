@@ -9,6 +9,7 @@ import tempfile
 import zipfile
 from io import BytesIO
 from PIL import Image
+import pandas as pd
 
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -53,13 +54,20 @@ try:
 except Exception:
     pass
 
-# --- Streamlit Caching ---
-@st.cache_data(show_spinner=False)
-def load_dataframe_cached(file_name, file_bytes):
+def get_fast_data_head(file_path, file_name):
+    """Reads ONLY the first 5 rows directly from disk to save massive amounts of RAM."""
     try:
-        return parse_dataframe(file_name, file_bytes)
+        if file_name.endswith('.csv'):
+            return pd.read_csv(file_path, nrows=5, encoding="latin1")
+        elif file_name.endswith('.tsv'):
+            return pd.read_csv(file_path, sep='\t', nrows=5, encoding="latin1")
+        elif file_name.endswith(('.xls', '.xlsx')):
+            return pd.read_excel(file_path, nrows=5)
+        elif file_name.endswith('.json'):
+            return pd.read_json(file_path).head()
+        return None
     except Exception as e:
-        st.error(str(e))
+        st.error(f"Error reading preview: {e}")
         return None
 
 # --- Streamlit Page UI ---
@@ -118,11 +126,13 @@ if st.button("Generate Visualisations", type="primary", disabled=(not uploaded_f
                 file_bytes = uploaded_file.getvalue()
                 data_file_path = save_data_file(file_bytes, uploaded_file.name, run_dir)
                 
-                df = load_dataframe_cached(uploaded_file.name, file_bytes)
+                # Fetch only the first 5 rows instantly from the saved file
+                df = get_fast_data_head(data_file_path, uploaded_file.name)
+                
                 if df is None:
                     st.stop()
 
-                data_head = df.head().to_string()
+                data_head = df.to_string()
                 final_user_prompt = user_prompt if user_prompt.strip() else DEFAULT_PROMPT
 
                 messages = [
