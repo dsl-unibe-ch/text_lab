@@ -2,6 +2,7 @@ import streamlit as st
 import ollama
 import sys
 import os
+import datetime
 from ollama import ResponseError
 from PIL import Image
 
@@ -26,12 +27,15 @@ from core.chat_engine import (
     is_model_loaded,
     extract_model_name,
     process_uploaded_files,
-    get_response_generator
+    get_response_generator,
+    format_chat_history
 )
 
 check_token()
 
 def main():
+    if "messages" not in st.session_state:
+        st.session_state["messages"] = []
     st.markdown(
         """
         <style>
@@ -98,6 +102,7 @@ def main():
     if st.sidebar.button("🗑️ Start New Chat"):
         st.session_state["messages"] = []
         st.rerun()
+
 
     st.sidebar.markdown(
         """
@@ -186,5 +191,16 @@ def main():
         # Restore original content for display history
         last_msg_obj["content"] = original_content
 
+    if len(st.session_state["messages"]) > 0:
+        chat_export = format_chat_history(st.session_state["messages"])
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        
+        st.sidebar.markdown("---")
+        st.sidebar.download_button(
+            label="📥 Download Conversation",
+            data=chat_export,
+            file_name=f"text_lab_chat_{timestamp}.md",
+            mime="text/markdown"
+        )
 if __name__ == "__main__":
     main()

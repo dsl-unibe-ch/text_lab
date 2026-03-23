@@ -140,3 +140,14 @@ def get_response_generator(model_name, messages):
     stream = ollama.chat(model=model_name, messages=messages, stream=True)
     for chunk in stream:
         yield chunk["message"]["content"]
+
+
+def format_chat_history(messages):
+    """Converts the session state messages into a readable Markdown string."""
+    formatted_text = "# Text Lab Chat Export\n\n"
+    for msg in messages:
+        if msg["role"] == "user":
+            formatted_text += f"### 👤 User\n{msg['content']}\n\n---\n\n"
+        elif msg["role"] == "assistant":
+            formatted_text += f"### 🤖 Assistant\n{msg['content']}\n\n---\n\n"
+    return formatted_text
