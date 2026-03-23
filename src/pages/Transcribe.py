@@ -6,6 +6,7 @@ import zipfile
 import io
 import torch
 import whisperx
+from whisperx import alignment
 import streamlit as st
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -34,6 +35,7 @@ from core.transcribe_engine import (
 )
 
 HF_TOKEN_PATH = "/storage/research/dsl_shared/solutions/whisperx/cache/whisperx/cache/hf/hf_token.txt"
+alignment.DEFAULT_ALIGN_MODELS_HF["uk"] = "Yehor/w2v-xls-r-uk"
 
 def main():
     st.set_page_config(page_title="Transcribe", layout="wide")
