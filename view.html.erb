@@ -21,7 +21,7 @@
 function copyPassword(btn, passwordText) {
   // Copy text to clipboard
   if (navigator.clipboard && window.isSecureContext) {
-    // Modern secure browsers
+    // logic for modern browsers
     navigator.clipboard.writeText(passwordText);
   } else {
     // Fallback for older browsers
