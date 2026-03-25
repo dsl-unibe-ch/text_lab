@@ -1,7 +1,10 @@
 # How to Launch Text Lab
 
 Text Lab runs as an interactive app on the University's High Performance Computing cluster (UBELIX) via the Open OnDemand portal.
-NOTE: You MUST activate your UBELIX account before being able to use Text Lab. More info can be found in this **[link](https://hpc-unibe-ch.github.io/firststeps/accessUBELIX/)**
+
+**IMPORTANT:**  
+**You must activate your UBELIX account before you can use Text Lab.**  
+See the **[UBELIX account activation guide](https://hpc-unibe-ch.github.io/firststeps/accessUBELIX/)** for details.
 
 ## Step-by-Step Guide
 
