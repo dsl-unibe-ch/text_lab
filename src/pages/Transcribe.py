@@ -31,7 +31,8 @@ from core.transcribe_engine import (
     generate_words_csv,
     read_hf_token,
     generate_srt,
-    generate_vtt
+    generate_vtt,
+    generate_elan_csv
 )
 
 HF_TOKEN_PATH = "/storage/research/dsl_shared/solutions/whisperx/cache/whisperx/cache/hf/hf_token.txt"
@@ -325,6 +326,7 @@ def main():
                                         
                                     # Generate outputs
                                     transcription_csv = generate_transcription_csv(aligned, has_speakers=file_has_speakers)
+                                    elan_csv = generate_elan_csv(aligned, has_speakers=file_has_speakers)
                                     words_csv = generate_words_csv(aligned)
                                     text_output = transcription_text_from_csv(transcription_csv)
                                     srt_output = generate_srt(aligned)
@@ -332,6 +334,7 @@ def main():
                                     
                                     # Write to output zip (Organized in folders per audio file)
                                     out_zip.writestr(f"{base_name}/{base_name}_transcription.csv", transcription_csv)
+                                    out_zip.writestr(f"{base_name}/{base_name}_ELAN_compatible.tsv", elan_csv)
                                     out_zip.writestr(f"{base_name}/{base_name}_words.csv", words_csv)
                                     out_zip.writestr(f"{base_name}/{base_name}_text.txt", text_output)
                                     out_zip.writestr(f"{base_name}/{base_name}.srt", srt_output)
@@ -558,12 +561,14 @@ def main():
                             st.info("ℹ️ HuggingFace token not found - skipping diarization")
                         
                         transcription_csv = generate_transcription_csv(aligned, has_speakers=has_speakers)
+                        elan_csv = generate_elan_csv(aligned, has_speakers=has_speakers)
                         words_csv = generate_words_csv(aligned)
                         srt_output = generate_srt(aligned)
                         vtt_output = generate_vtt(aligned)
                         
                         st.session_state.transcription_results = {
                             'transcription_csv': transcription_csv,
+                            'elan_csv': elan_csv,
                             'words_csv': words_csv,
                             'srt_output': srt_output,
                             'vtt_output': vtt_output,
@@ -629,6 +634,7 @@ def main():
             text_output = transcription_text_from_csv(transcription_csv)
             with zipfile.ZipFile(zip_buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
                 zf.writestr(f"{base_name}_transcription.csv", transcription_csv)
+                zf.writestr(f"{base_name}_ELAN_compatible.tsv", results.get('elan_csv', ''))
                 zf.writestr(f"{base_name}_words.csv", words_csv)
                 zf.writestr(f"{base_name}_text.txt", text_output)
                 zf.writestr(f"{base_name}.srt", results.get('srt_output', ''))

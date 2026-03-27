@@ -570,3 +570,45 @@ def build_player_html(audio_url, items, mode):
       button {{ border: 1px solid #333333; background: #ffffff; padding: 6px 10px; cursor: pointer; color: #000;}}
     </style>
     """
+
+def generate_elan_csv(result, has_speakers=False):
+    """Generates a strictly 4-column TSV optimized for ELAN import."""
+    output = io.StringIO()
+    # ELAN prefers tab-delimited files
+    writer = csv.writer(output, delimiter='\t')
+    
+    if has_speakers:
+        writer.writerow(["Start", "End", "Speaker", "Text"])
+    else:
+        writer.writerow(["Start", "End", "Text"])
+    
+    if has_speakers:
+        for segment in result.get('segments', []):
+            words = segment.get('words', [])
+            if not words: continue
+            
+            current_speaker = words[0].get('speaker') or "UNKNOWN"
+            current_text = words[0]['word']
+            start_time = words[0]['start']
+            end_time = words[0]['end']
+            
+            for w in words[1:]:
+                speaker = w.get('speaker') or "UNKNOWN"
+                if speaker != current_speaker:
+                    writer.writerow([format_time(start_time), format_time(end_time), current_speaker, current_text.strip()])
+                    current_speaker = speaker
+                    current_text = w['word']
+                    start_time = w['start']
+                else:
+                    current_text += " " + w['word']
+                end_time = w['end']
+            
+            writer.writerow([format_time(start_time), format_time(end_time), current_speaker, current_text.strip()])
+    else:
+        for segment in result.get("segments", []):
+            start_time = segment.get("start", 0)
+            end_time = segment.get("end", 0)
+            text = segment.get("text", "").strip()
+            writer.writerow([format_time(start_time), format_time(end_time), text])
+            
+    return output.getvalue()
