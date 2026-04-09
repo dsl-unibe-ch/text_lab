@@ -12,7 +12,7 @@ import pandas as pd
 from openai import OpenAI
 
 GROBID_HOST = "127.0.0.1"
-GROBID_PORT = 8070 
+GROBID_PORT = int(os.environ.get("GROBID_PORT", 8070))
 GROBID_URL = f"http://{GROBID_HOST}:{GROBID_PORT}/api/processFulltextDocument"
 
 # --- CHANGE 1: Update path to match the bound storage path ---
@@ -117,17 +117,25 @@ def ensure_grobid_server():
         raise GrobidError(f"Grobid container SIF not found at: {GROBID_CONTAINER}")
 
     # 4. Build command (using the bound paths)
+    #  Dynamically copy, rewrite, and load a custom YAML config! ---
+    bash_cmd = (
+        "cd /opt/grobid && "
+        "cp grobid-home/config/grobid.yaml grobid-home/tmp/custom_grobid.yaml && "
+        f"sed -i 's/port: 8070/port: {GROBID_PORT}/g' grobid-home/tmp/custom_grobid.yaml && "
+        f"sed -i 's/port: 8071/port: {GROBID_PORT + 1}/g' grobid-home/tmp/custom_grobid.yaml && "
+        "./grobid-service/bin/grobid-service server grobid-home/tmp/custom_grobid.yaml"
+    )
+
     grobid_command = [
         apptainer_cmd, "exec",
         # We need to bind the temp directory from the host (inner container view)
         "-B", f"{GROBID_TMP}:/opt/grobid/grobid-home/tmp",
-        # Pass storage bind through if necessary, though usually inherited if configured on host
         "--env", "GROBID_HOME=/opt/grobid/grobid-home",
         GROBID_CONTAINER,
-        "bash", "-c", "cd /opt/grobid && ./grobid-service/bin/grobid-service"
+        "bash", "-c", bash_cmd
     ]
 
-    print(f"🚀 Attempting to start Grobid: {' '.join(grobid_command)}")
+    print(f"Attempting to start Grobid: {' '.join(grobid_command)}")
 
     # 5. Spawn the Grobid service
     try:

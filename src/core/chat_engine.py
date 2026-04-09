@@ -1,4 +1,5 @@
 import os
+import os
 import subprocess
 import socket
 import time
@@ -8,8 +9,16 @@ from io import BytesIO
 import ollama
 
 # --- Server Settings ---
-OLLAMA_HOST = "127.0.0.1"
-OLLAMA_PORT = 11434
+env_host = os.environ.get("OLLAMA_HOST", "127.0.0.1:11434")
+
+if ":" in env_host:
+    clean_host = env_host.replace("http://", "").replace("https://", "")
+    OLLAMA_HOST = clean_host.split(":")[0]
+    OLLAMA_PORT = int(clean_host.split(":")[1])
+else:
+    OLLAMA_HOST = env_host.replace("http://", "").replace("https://", "")
+    OLLAMA_PORT = 11434
+
 OLLAMA_MODELS = os.getenv("OLLAMA_MODELS", "/opt/ollama/models")
 
 def _port_open():

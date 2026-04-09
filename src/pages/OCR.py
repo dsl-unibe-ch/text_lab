@@ -242,15 +242,23 @@ if workflow_mode == "Single Document OCR":
                             raise RuntimeError(f"Failed to convert image to PDF for OlmOCR: {e}")
 
                     CONT_WORKSPACE_DIR = str(WORKSPACE_DIR)
+                    # Point explicitly to the isolated OlmOCR conda environment
+                    # Explicitly inject the Conda Environment variables into the subprocess
+                    olmocr_env = os.environ.copy()
+                    olmocr_env["PATH"] = f"/opt/conda/envs/olmocr_backend/bin:{olmocr_env.get('PATH', '')}"
+                    olmocr_env["LD_LIBRARY_PATH"] = f"/opt/conda/envs/olmocr_backend/lib:{olmocr_env.get('LD_LIBRARY_PATH', '')}"
+
                     cmd = [
-                        sys.executable, "-m", "olmocr.pipeline",
+                        "/opt/conda/envs/olmocr_backend/bin/python", "-m", "olmocr.pipeline",
                         CONT_WORKSPACE_DIR,
                         "--markdown",
                         "--pdfs", CONT_INPUT_FILE,
                         "--gpu-memory-utilization", OLMOCR_GPU_MEMORY_UTILIZATION,
                     ]
+                    
                     with st.spinner("Running OlmOCR..."):
-                        result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8')
+                        # Pass the custom env dictionary here!
+                        result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', env=olmocr_env)
 
                     if result.returncode != 0:
                         st.session_state.ocr_error = f"OCR process failed. Code: {result.returncode}"
@@ -597,12 +605,18 @@ elif workflow_mode == "Batch OCR (ZIP)":
                             img.save(pdf_path, "PDF", resolution=100.0)
                             CONT_INPUT_FILE = str(pdf_path)
                         
+                        olmocr_env = os.environ.copy()
+                        olmocr_env["PATH"] = f"/opt/conda/envs/olmocr_backend/bin:{olmocr_env.get('PATH', '')}"
+                        olmocr_env["LD_LIBRARY_PATH"] = f"/opt/conda/envs/olmocr_backend/lib:{olmocr_env.get('LD_LIBRARY_PATH', '')}"
+
                         cmd = [
-                            sys.executable, "-m", "olmocr.pipeline",
+                            "/opt/conda/envs/olmocr_backend/bin/python", "-m", "olmocr.pipeline",
                             str(file_output_dir), "--markdown", "--pdfs", CONT_INPUT_FILE,
                             "--gpu-memory-utilization", OLMOCR_GPU_MEMORY_UTILIZATION
                         ]
-                        result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8')
+                        
+                        # Pass the custom env dictionary here!
+                        result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', env=olmocr_env)
                         
                         if result.returncode == 0:
                             jsonl_files = list(file_output_dir.glob("*.jsonl"))

@@ -389,8 +389,18 @@ if grobid_available:
                                 try:
                                     # Initialize appropriate client
                                     if llm_backend == "Ollama (Local)":
+                                        #: DYNAMIC OLLAMA PORT FOR OPENAI CLIENT ---
+                                        env_host = os.environ.get("OLLAMA_HOST", "127.0.0.1:11434")
+                                        if ":" in env_host:
+                                            clean_host = env_host.replace("http://", "").replace("https://", "")
+                                            o_host = clean_host.split(":")[0]
+                                            o_port = clean_host.split(":")[1]
+                                        else:
+                                            o_host = env_host.replace("http://", "").replace("https://", "")
+                                            o_port = "11434"
+                                            
                                         active_client = OpenAI(
-                                            base_url="http://localhost:11434/v1",
+                                            base_url=f"http://{o_host}:{o_port}/v1",
                                             api_key="ollama" 
                                         )
                                     else:

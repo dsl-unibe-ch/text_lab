@@ -8,7 +8,7 @@ HOST_TEXT_LAB_DIR="${TEXT_LAB_DIR:-/storage/research/dsl_shared/solutions/ondema
 CONT_TEXT_LAB_DIR="/text_lab"
 
 #point to the apptainer containers on research storage
-TL_CONTAINER="$HOST_TEXT_LAB_DIR/container/text_lab_180226.sif"
+TL_CONTAINER="$HOST_TEXT_LAB_DIR/container/text_lab_270326.sif"
 
 #point to where the ollama models are stored on research storage
 HOST_OLLAMA_DIR="/storage/research/dsl_shared/solutions/ondemand/text_lab/container/models/ollama"
@@ -44,39 +44,42 @@ PADDLE_PDX_CACHE_HOME="${PADDLE_PDX_CACHE_HOME:-$HOST_PADDLEX_DIR}"
 export OLLAMA_MODELS="$CONT_OLLAMA_DIR/models"
 
 # ---------------------------- Runtime parameters ------------------------------
-# Which ports should each service listen on?
-TEXT_LAB_PORT="${TEXT_LAB_PORT:-${SERVER_PORT:-8502}}"   # streamlit defaults to 8502 if not set
+TEXT_LAB_PORT="${TEXT_LAB_PORT:-${SERVER_PORT:-8502}}"   
 OLM_OCR_PORT="${OLMOCR_PORT:-8503}"
 OLMOCR_GPU_MEMORY_UTILIZATION="${OLMOCR_GPU_MEMORY_UTILIZATION:-0.6}"
 
-# Base URL path for reverse‑proxy setups (JupyterHub, etc.). Leave empty for /
-SERVER_BASEURLPATH="${SERVER_BASEURLPATH:-}"  # may already be exported by the hub
+#  RANDOMIZED OLLAMA PORT to avoid conflicts. 
+export OLLAMA_PORT=$(( (RANDOM % 10000) + 10000 ))
+export OLLAMA_HOST="127.0.0.1:$OLLAMA_PORT"
+echo "Ollama Port is: $OLLAMA_PORT"
+
+SERVER_BASEURLPATH="${SERVER_BASEURLPATH:-}"
+
+# Randomaize the GROBID port for knowledge graph
+export GROBID_PORT=$(( (RANDOM % 1000) + 8000 ))
+echo "GROBID Port is: $GROBID_PORT"
 
 # --- Clean the Python environment ---
 unset PYTHONPATH PYTHONHOME
 export PYTHONNOUSERSITE=1
 
-# Explicitly set HOME and USER for environment isolation
 export HOME="$HOME"
 export USER="$USER"
 
 pushd "${PWD}"
 
-
-# If CUDA_VISIBLE_DEVICES is empty, unmask GPU 0 
 if [ -z "${CUDA_VISIBLE_DEVICES:-}" ]; then
   export CUDA_VISIBLE_DEVICES=0
 fi
 
-# ... previous exports and logic ...
 
-# Use bash -c to run multiple commands: 
-# 1. Start ollama serve in the background (&)
-# 2. Wait 5-10 seconds for it to initialize
-# 3. Run streamlit
-# ... (Keep all your previous variable definitions up to the pushd/popd) ...
 
-mkdir -p "$HOST_TEXT_LAB_DIR/ollama_tmp"
+echo "=========================================================="
+echo "Starting Text Lab Session for User: $USER"
+echo "Slurm Job ID: ${SLURM_JOB_ID:-unknown}"
+echo "Assigned Ollama Host/Port: $OLLAMA_HOST"
+echo "Assigned GPU(s): $CUDA_VISIBLE_DEVICES"
+echo "=========================================================="
 
 apptainer exec \
   --nv \
@@ -98,12 +101,15 @@ apptainer exec \
   --env OLMOCR_GPU_MEMORY_UTILIZATION="$OLMOCR_GPU_MEMORY_UTILIZATION" \
   --env OLLAMA_MODELS="$CONT_OLLAMA_DIR/models" \
   --env OLLAMA_FLASH_ATTENTION="true" \
+  --env OLLAMA_HOST="$OLLAMA_HOST" \
+  --env GROBID_PORT="$GROBID_PORT" \
   "$TL_CONTAINER" \
-  bash -c "export OLLAMA_TMPDIR=$CONT_TEXT_LAB_DIR/ollama_tmp && \
-           export TMPDIR=$CONT_TEXT_LAB_DIR/ollama_tmp && \
-           ollama serve > $CONT_TEXT_LAB_DIR/ollama_server.log 2>&1 & \
-           sleep 5 && \
-           /usr/bin/python3 -m streamlit run '/storage/research/dsl_shared/solutions/ondemand/text_lab/src_main230226/src/Home.py' \
+  bash -c "export OLLAMA_TMPDIR=/tmp/ollama_${USER}_${SLURM_JOB_ID:-unknown} && \
+           export TMPDIR=/tmp/ollama_${USER}_${SLURM_JOB_ID:-unknown} && \
+           mkdir -p \$OLLAMA_TMPDIR && \
+           ollama serve > $CONT_TEXT_LAB_DIR/logs/ollama_server_${SLURM_JOB_ID:-unknown}.log 2>&1 & \ #this directory must have write permissions for all users
+           sleep 10 && \
+           /opt/conda/envs/text_lab_main/bin/python -u -m streamlit run '/storage/research/dsl_shared/solutions/ondemand/text_lab/src_main090426/src/Home.py' \
              --server.address 0.0.0.0 \
              --server.port '$TEXT_LAB_PORT' \
              --server.baseUrlPath '$SERVER_BASEURLPATH' \
@@ -111,7 +117,7 @@ apptainer exec \
              --server.maxUploadSize 10000 \
              --browser.serverAddress ondemand.hpc.unibe.ch \
              --browser.gatherUsageStats false \
-             --logger.level error \
-             --client.showErrorDetails false"
+             --logger.level info \
+             --client.showErrorDetails true"
 
 popd
