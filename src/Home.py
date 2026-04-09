@@ -2,7 +2,6 @@ import streamlit as st
 import os
 import base64
 from PIL import Image
-from ollama import chat
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 favicon_path = os.path.join(current_dir, "assets", "text_lab_logo.png")
@@ -14,13 +13,8 @@ st.set_page_config(
     page_icon=favicon, 
     layout="wide"
 )
-from auth import check_token
-from core.chat_engine import check_ollama_server
 
-OLLAMA_HOST = os.getenv("OLLAMA_HOST", "127.0.0.1")
-OLLAMA_PORT = int(os.getenv("OLLAMA_PORT", 11434))
-OLLAMA_MODELS = os.getenv("OLLAMA_MODELS", "/opt/ollama/models")
-OLLAMA_ADDR = f"{OLLAMA_HOST}:{OLLAMA_PORT}"
+from auth import check_token
 
 def get_img_as_base64(file_path):
     """Read an image file and return its base64 encoded string."""
@@ -33,12 +27,6 @@ def main():
     check_token()
     st.title("TEXT LAB")
     
-    if not check_ollama_server():
-        st.error("Could not connect to Ollama server.")
-        st.info("Please check the log file: text_lab/ollama_server.log")
-        st.stop()
-
-
     # Custom CSS for styling the logos.
     css = """
     <style>
@@ -95,14 +83,15 @@ def main():
         - **Chat** with a basic AI chatbot and upload documents to interact with them.
         - **OCR**: Extract text from images using OLMOCR, easyOCR and other models.
         - **Visualize Data**: Create plots from data using LLMs.
-        - **Knowledge Graph**: Extract topics from reseatch papers using LLMs.
+        - **Knowledge Graph**: Extract topics from research papers using LLMs.
+        - **Topic Modeling**: Discover hidden themes in large text datasets using LDA.
 
         More NLP features and enhancements are on the way. This project is
         still under active development, so expect frequent updates and new
         capabilities soon!
 
         **Why Use Text Lab?**
-        Using the tools in Text lab insure that your data is only processed privately within the University Network and infrastructure. This may be a privacy requirement in many cases.
+        Using the tools in Text lab ensures that your data is only processed privately within the University Network and infrastructure. This may be a privacy requirement in many cases.
 
         **Project details**:
         - **Maintained by**: The Data Science Lab (DSL)
@@ -110,7 +99,7 @@ def main():
         - **For questions or issues**: [support.dsl@unibe.ch](mailto:support.dsl@unibe.ch)
 
         **Documentation**:
-        For more details on how to use Text Lab, check out our [Documentaion](https://text-lab.dsl.unibe.ch/).
+        For more details on how to use Text Lab, check out our [Documentation](https://text-lab.dsl.unibe.ch/).
         """
     )
 
@@ -121,8 +110,6 @@ def main():
       <img src="data:image/png;base64,{digiki_base64}" alt="Digiki Icon">
     </div>
     """, unsafe_allow_html=True)
-
-    
 
 if __name__ == "__main__":
     main()
