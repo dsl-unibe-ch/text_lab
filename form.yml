@@ -50,7 +50,7 @@ attributes:
       - ["job_gratis", "job_gratis"]
       - ["job_gpu", "job_gpu"]
       - ["job_gpu_preemptable", "job_gpu_preemptable"]
-    value: "job_gpu"
+    value: "job_gratis"
     help: >
       Choose a QoS that matches your account and partition
 
