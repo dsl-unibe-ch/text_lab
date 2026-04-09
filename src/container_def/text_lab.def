@@ -16,6 +16,9 @@ From: nvidia/cuda:12.5.0-devel-ubuntu22.04
     export PADDLEX_HOME=/opt/paddlex
     export OLLAMA_MODELS=/opt/ollama/models
     
+    # --- NEW: NLTK Data Path for offline Topic Modeling ---
+    export NLTK_DATA=/opt/nltk_data
+    
     # Certs & Libs
     export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
     export SSL_CERT_DIR=/etc/ssl/certs
@@ -50,7 +53,7 @@ From: nvidia/cuda:12.5.0-devel-ubuntu22.04
     apt-get update
     apt-get install -y apptainer
 
-    # 3. Install Ollama Backend
+    # 3. Install Ollama Backend (This automatically pulls the newest version!)
     curl -fsSL https://ollama.com/install.sh | sh
 
     # 4. Install Miniconda (The Environment Manager)
@@ -60,7 +63,7 @@ From: nvidia/cuda:12.5.0-devel-ubuntu22.04
     rm -f /tmp/miniconda.sh
     export PATH="/opt/conda/bin:$PATH"
     
-    # --- NEW: Accept Anaconda ToS for non-interactive builds ---
+    # --- Accept Anaconda ToS for non-interactive builds ---
     conda config --set auto_update_conda false
     conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main
     conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
@@ -105,14 +108,20 @@ EOF
     $MAIN_PIP install --no-cache-dir --upgrade paddlepaddle-gpu==3.3.0 -i https://www.paddlepaddle.org.cn/packages/stable/cu118/
     $MAIN_PIP install --no-cache-dir --upgrade paddleocr paddlex easyocr
 
-    # *** TOPIC MODELING (LDA) DEPENDENCIES ***
-    $MAIN_PIP install --no-cache-dir gensim pyLDAvis spacy nltk wordcloud
+    # *** TOPIC MODELING & NLP DEPENDENCIES ***
+    # Added bertopic, top2vec, keybert, and stopwordsiso for future capabilities
+    $MAIN_PIP install --no-cache-dir gensim pyLDAvis spacy nltk wordcloud \
+        bertopic top2vec keybert stopwordsiso
     
     # Download Spacy Language Models (For stopword filtering in Topic Modeling)
     /opt/conda/envs/text_lab_main/bin/python -m spacy download en_core_web_sm
     /opt/conda/envs/text_lab_main/bin/python -m spacy download de_core_news_sm
     /opt/conda/envs/text_lab_main/bin/python -m spacy download fr_core_news_sm
 
+    # Download NLTK data to an internal shared folder so it works offline
+    mkdir -p /opt/nltk_data
+    chmod -R a+rX /opt/nltk_data
+    /opt/conda/envs/text_lab_main/bin/python -m nltk.downloader -d /opt/nltk_data stopwords punkt punkt_tab
 
     # ===================================================================
     # ENVIRONMENT 2: OLMOCR BACKEND (vLLM, PyTorch 2.4.0, Numpy < 2)
