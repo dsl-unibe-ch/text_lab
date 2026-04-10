@@ -1,10 +1,10 @@
 # Other Features
 
-## 💬 AI Chat
+##  AI Chat
 
 Text Lab provides a secure Chat interface allowing you to interact with Large Language Models (LLMs) running locally on the University cluster. You can also upload documents (PDF, TXT, CSV, XLSX) with a limited size and token count to summarize, translate, and interact with them.
 
-### 🔒 Data Privacy & Security (Zero-Footprint Architecture)
+###  Data Privacy & Security (Zero-Footprint Architecture)
 
 We understand that you may be uploading sensitive, unpublished, or proprietary research data to the Chat tool. Text Lab is designed with a **"Zero-Footprint"** architecture to ensure your data remains strictly confidential.
 
@@ -16,7 +16,7 @@ Here is exactly what happens to your data when you use the Chat feature, and the
 * **No AI Training:** The AI models run locally on the UBELIX compute nodes via Ollama. They only read your data to answer your current question (inference). **The models do not learn from your data**, and your data is never used to train or improve the AI.
 * **Network Isolation:** All data transfers happen internally within the University of Bern's secure HPC network. No data is ever sent to external APIs like OpenAI, Google, or Anthropic.
 
-> **⚠️ Note on Large File Uploads and Temporary Storage:** > To protect the AI's context window, the Chat interface specifically restricts individual document uploads to **10MB**. However, the underlying Text Lab server is configured to accept much larger files (up to 10GB) to support the Data Visualisation and Knowledge Graph tools. 
+> ** Note on Large File Uploads and Temporary Storage:** > To protect the AI's context window, the Chat interface specifically restricts individual document uploads to **10MB**. However, the underlying Text Lab server is configured to accept much larger files (up to 10GB) to support the Data Visualisation and Knowledge Graph tools. 
 > 
 > If you attempt to upload an extremely large file to the Chat, the underlying web framework (Streamlit) may temporarily spool the file to the operating system's temporary directory (`$TMPDIR`) to prevent RAM overflow *before* the Chat logic rejects it. For the strictest data privacy, please adhere to the 10MB limit.
 
@@ -25,7 +25,7 @@ Use this for summarizing sensitive text, brainstorming research ideas, querying 
 
 ---
 
-## 📊 Visualize Data
+##  Visualize Data
 
 This tool allows you to upload datasets (CSV/Excel) and use LLMs to generate Python code for visualization.
 

@@ -4,7 +4,7 @@
 
 Developed by the **Data Science Lab (DSL)**, Text Lab allows you to process documents, audio, and data without needing to write code.
 
-## 🔒 Data Privacy & Security
+## Data Privacy & Security
 
 **Why use Text Lab?**
 
@@ -26,4 +26,4 @@ For processing large amount of data, please contact DSL.
 ## Getting Support
 
 If you encounter issues, need any data science, research IT support, or have questions about using Text Lab, please contact the Data Science Lab:
-📧 [support.dsl@unibe.ch](mailto:support.dsl@unibe.ch)
+ [support.dsl@unibe.ch](mailto:support.dsl@unibe.ch)

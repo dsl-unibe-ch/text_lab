@@ -13,14 +13,14 @@ You can upload audio files in the following formats:
 
 ## How to Use
 
-### 🎙️ Single Audio Transcription
+###  Single Audio Transcription
 1. **Select Workflow:** Choose "Transcribe audio".
 2. **Upload File:** Drag and drop your audio file.
 3. **Language Selection:**
    * The system will attempt to auto-detect the language.
    * **Important:** You must verify or manually select the correct language from the dropdown.
 
-### 📦 Batch Processing (Multiple Files)
+###  Batch Processing (Multiple Files)
 If you have multiple audio recordings (e.g., a folder of 10 interviews), you can transcribe them all in one go without clicking through them individually:
 
 1. **Select Workflow:** Choose "Batch transcribe (ZIP)".
@@ -58,7 +58,7 @@ Once the transcription is complete, you can:
 
 ---
 
-## 🔒 Data Privacy & Security
+##  Data Privacy & Security
 
 Audio recordings (such as interviews, meetings, or field notes) often contain highly sensitive personal data. Text Lab processes all audio using a strict **"Zero-Footprint"** architecture to ensure absolute confidentiality.
 

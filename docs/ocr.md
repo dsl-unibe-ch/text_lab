@@ -19,7 +19,7 @@ Text Lab provides four different AI engines for text extraction, each with its o
 
 ## How to Use
 
-### 📄 Single Document OCR
+###  Single Document OCR
 
 1. **Select Workflow:** Choose "Single Document OCR".
 2. **Upload File:** Select your PDF or image.
@@ -29,7 +29,7 @@ Text Lab provides four different AI engines for text extraction, each with its o
 4. **Run OCR:** Click the button to start processing.
    * *Warning:* Do not close the tab while the "Running" indicator is active.
 
-### 📦 Batch Processing (Multiple Files)
+###  Batch Processing (Multiple Files)
 
 If you have a large dataset of documents or images (e.g., a folder of 50 scanned PDFs), you can process them all in one go:
 
@@ -51,7 +51,7 @@ For single documents, you will see a side-by-side preview of the document and th
 
 ---
 
-## 🔒 Data Privacy & Security
+##  Data Privacy & Security
 
 Text Lab is designed to handle highly sensitive, confidential, and proprietary documents (including unredacted PDFs, medical records, or unpublished manuscripts). We utilize a strict **"Local-Only, Self-Cleaning"** architecture to ensure your documents remain secure.
 
