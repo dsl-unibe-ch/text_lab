@@ -7,7 +7,6 @@ import traceback
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
-from PIL import Image
 
 # Ensure absolute imports resolve correctly
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -47,6 +46,7 @@ SUPPORTED_LANGUAGES = [
 
 def main() -> None:
     st.set_page_config(page_title="Topic Modeling", layout="wide")
+    st.title("Topic Modeling")
     st.markdown(
         "Discover hidden themes in large text datasets automatically. "
         "Upload your data to generate an interactive topic distribution map."
@@ -115,43 +115,77 @@ def main() -> None:
         [
             "BERTopic (Transformer Embeddings)", 
             "Top2Vec (Joint Semantic Embeddings)", 
-            "Latent Dirichlet Allocation (Statistical)"
+            "Latent Dirichlet Allocation (LDA)"
         ],
         help="BERTopic and Top2Vec use modern AI semantic models. LDA uses traditional statistical term frequencies."
     )
     
     col_basic, col_adv = st.columns(2)
     
+    # CRITICAL FIX: Initialize all variables with safe defaults to prevent UnboundLocalError
+    clustering_params = {}
+    bertopic_nr_topics = None
+    clustering_algo_clean = "HDBSCAN"
+    ngram_range = (1, 1)
+    
+    backend_clean = "doc2vec"
+    top2vec_speed = "learn"
+    
+    use_bigrams = False
+    passes = 10
+    
+    custom_stopwords = ""
+    num_topics = 10
+
     with col_basic:
         st.subheader("Core Settings")
         
-        if "LDA" not in algorithm:
-            auto_topics = st.checkbox("Auto-detect optimal number of topics", value=True)
-            if auto_topics:
-                num_topics = "auto"
-                st.info("The algorithm will dynamically determine the best number of topics using density-based clustering.")
-            else:
-                num_topics = st.slider("Target Number of Topics", min_value=2, max_value=100, value=10, step=1)
-        else:
-            num_topics = st.slider("Number of Topics", min_value=2, max_value=50, value=10, step=1)
-            
         language = st.selectbox(
             "Primary Language", 
             SUPPORTED_LANGUAGES, 
             help="Determines the underlying embedding model used for the analysis."
         )
 
+        if "BERTopic" in algorithm:
+            clustering_algo = st.radio(
+                "Clustering Engine",
+                ["HDBSCAN (Density-based, handles noise)", "KMeans (Centroid-based, strict groups)"],
+                help="HDBSCAN dynamically finds clusters and isolates outliers. KMeans forces every document into a strict number of topics."
+            )
+            
+            if "KMeans" in clustering_algo:
+                n_clusters = st.slider("Exact Number of Clusters (K)", min_value=2, max_value=100, value=10, step=1)
+                clustering_params["n_clusters"] = n_clusters
+                clustering_algo_clean = "KMeans"
+                bertopic_nr_topics = None # KMeans handles the exact topic count naturally
+            else:
+                auto_topics = st.checkbox("Auto-detect optimal number of topics", value=True)
+                bertopic_nr_topics = "auto" if auto_topics else st.slider("Target Number of Topics", min_value=2, max_value=100, value=10, step=1)
+                min_cluster_size = st.number_input("Minimum Documents per Topic", min_value=3, max_value=500, value=10, step=1)
+                clustering_params["min_cluster_size"] = min_cluster_size
+                clustering_algo_clean = "HDBSCAN"
+
+        elif "Top2Vec" in algorithm:
+            auto_topics = st.checkbox("Auto-detect optimal number of topics", value=True)
+            if auto_topics:
+                num_topics = "auto"
+                st.info("The algorithm will dynamically determine the best number of topics using density-based clustering.")
+            else:
+                num_topics = st.slider("Target Number of Topics", min_value=2, max_value=100, value=10, step=1)
+        
+        else: # LDA
+            num_topics = st.slider("Number of Topics", min_value=2, max_value=50, value=10, step=1)
+
     with col_adv:
         st.subheader("Advanced Processing")
         
-        # Top2Vec strictly advises against removing stopwords
         if "Top2Vec" in algorithm:
             st.info("Top2Vec relies on the natural, raw structure of sentences to generate joint embeddings. Custom stopwords are disabled for this algorithm.")
             
             top2vec_backend = st.radio(
                 "Embedding Backend",
                 ["Transformer (Pre-trained)", "Doc2Vec (Train from scratch)"],
-                help="Transformers are faster and understand general language. Doc2Vec trains specifically on your data (best for highly specialized, massive datasets)."
+                help="Transformers are faster and understand general language. Doc2Vec trains specifically on your data."
             )
             backend_clean = "transformer" if "Transformer" in top2vec_backend else "doc2vec"
             
@@ -169,9 +203,9 @@ def main() -> None:
             )
             
             if "BERTopic" in algorithm:
-                min_topic_size = st.number_input("Minimum Topic Size", min_value=3, max_value=500, value=10, step=1)
                 extract_phrases = st.checkbox("Extract Phrases (N-grams)", value=False)
                 ngram_range = (1, 2) if extract_phrases else (1, 1)
+                
             elif "LDA" in algorithm:
                 use_bigrams = st.checkbox("Extract Phrases (Bigrams)", value=False)
                 passes = st.slider("Training Passes (Iterations)", min_value=5, max_value=50, value=10, step=5)
@@ -219,7 +253,7 @@ def main() -> None:
                 try:
                     topic_df = generate_lda_keywords_df(lda_model, num_topics)
                     docs_df = generate_lda_document_topics_df(lda_model, corpus, df)
-                    html_string = generate_pyldavis_html(lda_model, corpus, id2word)
+                    html_string = generate_lda_html(lda_model, corpus, id2word)
                     dashboard_assets["lda_dashboard.html"] = html_string
                 except Exception as e:
                     st.error("Failed to generate dashboard artifacts. See technical details below:")
@@ -270,10 +304,10 @@ def main() -> None:
                     topic_model, topics = train_bertopic_model(
                         texts=raw_texts, 
                         language=language, 
-                        num_topics=num_topics, 
+                        num_topics=bertopic_nr_topics, 
                         stop_words_set=stop_set,
-                        clustering_algo="HDBSCAN",
-                        min_topic_size=min_topic_size,
+                        clustering_algo=clustering_algo_clean,
+                        clustering_params=clustering_params,
                         ngram_range=ngram_range
                     )
                 except Exception as e:
@@ -316,7 +350,7 @@ def main() -> None:
         
         st.subheader("Topic Dictionary")
         if "BERTopic" in algorithm or "Top2Vec" in algorithm:
-            st.caption("Note: HDBSCAN automatically classifies outlier documents into an 'Outlier' category.")
+            st.caption("Note: Density-based algorithms automatically classify outlier documents into an 'Outlier' category.")
         st.dataframe(topic_df, use_container_width=True, hide_index=True)
 
         if "LDA" in algorithm:
