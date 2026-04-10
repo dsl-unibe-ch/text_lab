@@ -1,177 +1,227 @@
 import sys
 import traceback
-from typing import List, Tuple, Set, Union, Dict, Any
+from typing import Any
 
 import pandas as pd
 from bertopic import BERTopic
+from bertopic.dimensionality import BaseDimensionalityReduction
+from bertopic.vectorizers import ClassTfidfTransformer
 from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.decomposition import PCA, TruncatedSVD
 from sklearn.cluster import KMeans
 from hdbscan import HDBSCAN
+from umap import UMAP
+
+
+def _notice_html(message: str) -> str:
+    return (
+        "<div style='padding: 30px; font-family: sans-serif; color: #555; "
+        "background: #f9f9f9; border-radius: 8px;'>"
+        "<h3>Visualization Notice</h3>"
+        f"<p>{message}</p>"
+        "</div>"
+    )
 
 
 def train_bertopic_model(
-    texts: List[str], 
-    language: str, 
-    num_topics: Union[int, str, None], 
-    stop_words_set: Set[str],
+    texts: list[str],
+    language: str,
+    num_topics: int | str | None,
+    stop_words_set: set[str],
+    dim_reduction_algo: str = "UMAP",
+    dim_params: dict[str, Any] | None = None,
     clustering_algo: str = "HDBSCAN",
-    clustering_params: Dict[str, Any] = None,
-    ngram_range: Tuple[int, int] = (1, 1)
-) -> Tuple[BERTopic, List[int]]:
-    """
-    Train a BERTopic model using Transformer embeddings and customizable clustering sub-models.
+    clustering_params: dict[str, Any] | None = None,
+    ngram_range: tuple[int, int] = (1, 1),
+    min_df: int = 1,
+    reduce_outliers: bool = False,
+    reduce_frequent_words: bool = True
+) -> tuple[BERTopic, list[int]]:
     
-    Args:
-        texts: List of raw text documents.
-        language: UI language selection to determine the embedding model.
-        num_topics: Target number of topics (int, "auto", or None).
-        stop_words_set: Stopwords to ignore in the representation phase.
-        clustering_algo: The clustering algorithm to use ("HDBSCAN" or "KMeans").
-        clustering_params: Dictionary of parameters specific to the chosen clustering algorithm.
-        ngram_range: Tuple indicating whether to extract unigrams, bigrams, etc.
-        
-    Returns:
-        tuple: (Trained BERTopic model, List of topic assignments per document)
-    """
     if clustering_params is None:
         clustering_params = {}
+    if dim_params is None:
+        dim_params = {}
 
-    embedding_model = "english" if language == "English" else "multilingual"
-    
+    if not texts:
+        raise ValueError("No texts were provided to BERTopic.")
+    if ngram_range[0] > ngram_range[1]:
+        raise ValueError("Invalid ngram_range: lower bound cannot be greater than upper bound.")
+
+    embedding_model = "english" if language == "English" else "paraphrase-multilingual-MiniLM-L12-v2"
+
+    tokenizer = None
+    if language == "Chinese":
+        try:
+            import jieba
+            def tokenize_zh(text: str) -> list[str]:
+                return jieba.lcut(text)
+            tokenizer = tokenize_zh
+        except ImportError:
+            print(
+                "Warning: 'jieba' library is missing. Default tokenization "
+                "will be used for Chinese.", file=sys.stderr
+            )
+
     vectorizer_model = CountVectorizer(
-        stop_words=list(stop_words_set) if stop_words_set else None,
-        ngram_range=ngram_range
+        stop_words=sorted(stop_words_set) if stop_words_set and language != "Chinese" else None,
+        ngram_range=ngram_range,
+        min_df=min_df,
+        tokenizer=tokenizer
     )
-    
-    # Configure the chosen clustering sub-model
+
+    ctfidf_model = ClassTfidfTransformer(reduce_frequent_words=reduce_frequent_words)
+
+    # Configure Dimensionality Reduction Step
+    n_components = int(dim_params.get("n_components", 5))
+    random_state = dim_params.get("random_state", 42)
+
+    if dim_reduction_algo == "PCA":
+        dim_model = PCA(n_components=n_components, random_state=random_state)
+    elif dim_reduction_algo == "Truncated SVD":
+        dim_model = TruncatedSVD(n_components=n_components, random_state=random_state)
+    elif dim_reduction_algo == "None":
+        dim_model = BaseDimensionalityReduction()
+    else: # Default UMAP
+        n_neighbors = int(dim_params.get("n_neighbors", 15))
+        min_dist = float(dim_params.get("min_dist", 0.0))
+        dim_model = UMAP(
+            n_neighbors=n_neighbors,
+            n_components=n_components,
+            min_dist=min_dist,
+            metric="cosine",
+            random_state=random_state
+        )
+
+    # Configure Clustering Step
     if clustering_algo == "KMeans":
-        n_clusters = clustering_params.get("n_clusters", 10)
-        cluster_model = KMeans(n_clusters=n_clusters, random_state=42)
-        # KMeans strictly dictates topic count; disable BERTopic's secondary reduction
+        n_clusters = int(clustering_params.get("n_clusters", 10))
+        cluster_model = KMeans(n_clusters=n_clusters, random_state=42, n_init="auto")
         bertopic_nr_topics = None
     else:
-        min_cluster_size = clustering_params.get("min_cluster_size", 10)
-        # HDBSCAN requires prediction_data=True for BERTopic compatibility
+        min_cluster_size = int(clustering_params.get("min_cluster_size", 10))
+        min_samples = clustering_params.get("min_samples")
+        if min_samples is not None:
+            min_samples = int(min_samples)
+            
         cluster_model = HDBSCAN(
-            min_cluster_size=min_cluster_size, 
-            metric='euclidean', 
-            cluster_selection_method='eom', 
+            min_cluster_size=min_cluster_size,
+            min_samples=min_samples,
+            metric="euclidean",
+            cluster_selection_method="eom",
             prediction_data=True
         )
         bertopic_nr_topics = num_topics
-    
+
     topic_model = BERTopic(
         language=embedding_model,
         vectorizer_model=vectorizer_model,
+        umap_model=dim_model,
         hdbscan_model=cluster_model,
+        ctfidf_model=ctfidf_model,
         nr_topics=bertopic_nr_topics,
         calculate_probabilities=False
     )
-    
+
     topics, _ = topic_model.fit_transform(texts)
+
+    if reduce_outliers and clustering_algo == "HDBSCAN":
+        topics = topic_model.reduce_outliers(texts, topics, strategy="c-tf-idf")
+
     return topic_model, topics
 
 
 def generate_bertopic_keywords_df(topic_model: BERTopic) -> pd.DataFrame:
-    """
-    Extract the top keywords for each BERTopic topic into a clean DataFrame.
-    """
     topic_info = topic_model.get_topic_info()
     topic_data = []
-    
+
     for _, row in topic_info.iterrows():
-        topic_id = int(row['Topic'])
-        
+        topic_id = int(row["Topic"])
         if topic_id == -1:
-            continue  
-            
+            continue
+
         words = topic_model.get_topic(topic_id)
         if words:
-            topic_keywords = ", ".join([word for word, score in words[:10]])
+            topic_keywords = ", ".join(word for word, _ in words[:10])
             topic_data.append({
-                "Topic": topic_id + 1, 
-                "Count": int(row['Count']), 
+                "Topic": topic_id + 1,
+                "Count": int(row["Count"]),
                 "Keywords": topic_keywords
             })
-            
+
     return pd.DataFrame(topic_data)
 
 
 def generate_bertopic_document_topics_df(
-    topics: List[int], 
+    topics: list[int],
     original_df: pd.DataFrame
 ) -> pd.DataFrame:
-    """
-    Append dominant BERTopic classifications to the original dataset.
-    """
-    result_df = original_df.copy()
-    
-    # Map outlier topics (-1) to a readable string, shift others by +1
+    if len(topics) != len(original_df):
+        raise ValueError(
+            f"Topic assignment length ({len(topics)}) does not match "
+            f"dataframe length ({len(original_df)})."
+        )
+
     formatted_topics = [t + 1 if t != -1 else "Outlier" for t in topics]
-    result_df['Dominant_Topic'] = formatted_topics
-    
+    result_df = original_df.assign(Dominant_Topic=formatted_topics)
+
     cols = result_df.columns.tolist()
     cols = [cols[-1]] + cols[:-1]
     return result_df[cols]
 
 
-def generate_bertopic_visualizations(topic_model: BERTopic) -> Dict[str, str]:
-    """
-    Generate a suite of interactive Plotly HTML dashboards for BERTopic.
-    
-    Returns:
-        Dict[str, str]: A dictionary containing HTML strings for various plots.
-    """
-    visualizations = {}
+def generate_bertopic_visualizations(topic_model: BERTopic) -> dict[str, str]:
+    visualizations: dict[str, str] = {}
     topic_info = topic_model.get_topic_info()
-    valid_topics = topic_info[topic_info['Topic'] != -1]
-    
+    valid_topics = topic_info[topic_info["Topic"] != -1]
+
     if len(valid_topics) < 2:
-        error_html = (
-            "<div style='padding: 30px; font-family: sans-serif; color: #555; background: #f9f9f9; border-radius: 8px;'>"
-            "<h3>Visualization Notice</h3>"
-            "<p>The visual maps require at least <strong>2 distinct topics</strong>. "
-            f"The model only identified {len(valid_topics)} valid topic in this dataset.</p>"
-            "</div>"
+        error_html = _notice_html(
+            "The visual maps require at least <strong>2 distinct topics</strong>. "
+            f"The model only identified {len(valid_topics)} valid topic(s) in this dataset."
         )
-        visualizations["distance_map"] = error_html
-        visualizations["barchart"] = error_html
-        visualizations["heatmap"] = error_html
-        return visualizations
-        
+        return {
+            "distance_map": error_html,
+            "barchart": error_html,
+            "heatmap": error_html,
+        }
+
     try:
         fig_distance = topic_model.visualize_topics()
-        visualizations["distance_map"] = fig_distance.to_html(full_html=False, include_plotlyjs='cdn')
+        visualizations["distance_map"] = fig_distance.to_html(full_html=False, include_plotlyjs="cdn")
     except Exception:
-        pass
+        visualizations["distance_map"] = _notice_html("Could not generate the intertopic distance map.")
 
     try:
         fig_barchart = topic_model.visualize_barchart(top_n_topics=12)
-        visualizations["barchart"] = fig_barchart.to_html(full_html=False, include_plotlyjs='cdn')
+        visualizations["barchart"] = fig_barchart.to_html(full_html=False, include_plotlyjs="cdn")
     except Exception:
-        pass
+        visualizations["barchart"] = _notice_html("Could not generate the topic word-score chart.")
 
     try:
         fig_heatmap = topic_model.visualize_heatmap()
-        visualizations["heatmap"] = fig_heatmap.to_html(full_html=False, include_plotlyjs='cdn')
+        visualizations["heatmap"] = fig_heatmap.to_html(full_html=False, include_plotlyjs="cdn")
     except Exception:
-        pass
+        visualizations["heatmap"] = _notice_html("Could not generate the topic similarity heatmap.")
 
     return visualizations
 
 
 def generate_topics_over_time_html(
-    topic_model: BERTopic, 
-    texts: List[str], 
-    timestamps: List[Any]
+    topic_model: BERTopic,
+    texts: list[str],
+    timestamps: list[Any]
 ) -> str:
-    """
-    Perform Dynamic Topic Modeling to visualize how topics evolve over time.
-    """
+    if len(texts) != len(timestamps):
+        raise ValueError(
+            f"Text count ({len(texts)}) does not match "
+            f"timestamp count ({len(timestamps)})."
+        )
+
     try:
         topics_over_time = topic_model.topics_over_time(texts, timestamps)
         fig = topic_model.visualize_topics_over_time(topics_over_time)
-        return fig.to_html(full_html=False, include_plotlyjs='cdn')
+        return fig.to_html(full_html=False, include_plotlyjs="cdn")
     except Exception as e:
         print(f"--- Topics Over Time Error ---\n{traceback.format_exc()}", file=sys.stderr)
         return f"<div style='padding:20px; color:red;'>Failed to generate topics over time: {str(e)}</div>"
