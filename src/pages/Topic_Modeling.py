@@ -56,7 +56,7 @@ def _read_uploaded_table(uploaded_file: UploadedFile) -> pd.DataFrame:
 
 
 def _prepare_timestamps(df: pd.DataFrame, date_column: str) -> tuple[pd.DataFrame, list]:
-    parsed = pd.to_datetime(df[date_column], errors="coerce")
+    parsed = pd.to_datetime(df[date_column], errors="coerce", utc=True).dt.tz_localize(None)
     valid_mask = parsed.notna()
 
     dropped = int((~valid_mask).sum())
@@ -71,6 +71,7 @@ def _prepare_timestamps(df: pd.DataFrame, date_column: str) -> tuple[pd.DataFram
         raise ValueError("No valid timestamps remained after parsing the selected timestamp column.")
 
     return df, df[date_column].tolist()
+
 
 
 def _generate_metadata_report(
