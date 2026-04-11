@@ -13,6 +13,7 @@ One of the primary advantages of Text Lab is **data sovereignty**
 * **Internal Processing:** All processing happens entirely within the University of Bern's network infrastructure (UBELIX).
 * **No Third Parties:** Unlike commercial cloud services (like ChatGPT or Google Cloud), your data is **never** sent to external servers.
 * **Sensitive Data:** Text Lab is the better choice for working with potentially sensitive research data (e.g., for interviews and/or non-public documents).
+* **No coding required** Text lab offers advanced NLP models and tools without having to write code.
 
 ## Available Tools
 
@@ -20,8 +21,10 @@ One of the primary advantages of Text Lab is **data sovereignty**
 * **OCR (Optical Character Recognition):** Extract text from scanned PDFs using state-of-the-art AI models.
 * **Chat:** Interact with local Large Language Models (LLMs) securely.
 * **Data Visualization:** Generate insights and plots from your data.
+* **Knowledge Graphs:** Extract metadata from research papers and visulise the data with knowledge graphs.
+* **Topic Modeling:** Apply unsupervised algorithem to raw text data to discover topics and trends.
 
-For processing large amount of data, please contact DSL.
+For processing large amount of data, please contact the Data Science Lab.
 
 ## Getting Support
 
