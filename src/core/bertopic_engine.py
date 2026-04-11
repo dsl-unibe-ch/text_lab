@@ -208,6 +208,22 @@ def train_bertopic_model(
 
 
 def generate_bertopic_keywords_df(topic_model: BERTopic) -> pd.DataFrame:
+    """
+    Generate a DataFrame containing BERTopic topic keywords and counts.
+
+    This function extracts topic information from a fitted BERTopic model,
+    skips the outlier topic (-1), and creates a DataFrame with the topic
+    number, document count, and top keywords for each topic.
+
+    Args:
+        topic_model: A fitted BERTopic model.
+
+    Returns:
+        A pandas DataFrame with the columns:
+            - "Topic"
+            - "Count"
+            - "Keywords"
+    """
     topic_info = topic_model.get_topic_info()
     topic_data = []
 
@@ -219,11 +235,13 @@ def generate_bertopic_keywords_df(topic_model: BERTopic) -> pd.DataFrame:
         words = topic_model.get_topic(topic_id)
         if words:
             topic_keywords = ", ".join(word for word, _ in words[:10])
-            topic_data.append({
-                "Topic": topic_id + 1,
-                "Count": int(row["Count"]),
-                "Keywords": topic_keywords
-            })
+            topic_data.append(
+                {
+                    "Topic": topic_id + 1,
+                    "Count": int(row["Count"]),
+                    "Keywords": topic_keywords,
+                }
+            )
 
     return pd.DataFrame(topic_data)
 
