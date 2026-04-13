@@ -10,6 +10,7 @@ def train_lda_model(
     processed_texts: List[List[str]],
     num_topics: int,
     passes: int,
+    random_state: int | None = 42,
 ) -> Tuple[gensim.models.LdaModel, List[List[Tuple[int, int]]], corpora.Dictionary]:
     """
     Train an LDA model from preprocessed tokenized texts.
@@ -64,7 +65,7 @@ def train_lda_model(
         corpus=corpus,
         id2word=id2word,
         num_topics=num_topics,
-        random_state=42,
+        random_state=random_state,
         update_every=1,
         passes=passes,
         alpha="auto",

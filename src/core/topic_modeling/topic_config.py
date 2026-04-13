@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Any, TypedDict
+from typing import Any, TypedDict, NotRequired
 
 import pandas as pd
 
@@ -31,6 +31,7 @@ class TopicModelingConfig:
     top2vec_speed: str = "learn"
     use_bigrams: bool = False
     passes: int = 10
+    random_state: int | None = 42
 
 
 class TopicModelingRunResult(TypedDict):
@@ -41,3 +42,7 @@ class TopicModelingRunResult(TypedDict):
     topic_df: pd.DataFrame
     docs_df: pd.DataFrame
     dashboard_assets: dict[str, str]
+    
+    # Optional keys returned only by the LDA pipeline for Perplexity evaluation
+    lda_model: NotRequired[Any]
+    corpus: NotRequired[Any]

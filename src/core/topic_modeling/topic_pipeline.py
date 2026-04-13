@@ -45,7 +45,7 @@ def run_topic_modeling_pipeline(
 
     Returns:
         A dictionary containing the generated topic table, document table,
-        and dashboard assets.
+        and dashboard assets. (Also returns raw models for LDA evaluation).
     """
     raw_texts = df[config.text_column].astype(str).tolist()
     validate_minimum_documents(raw_texts)
@@ -77,6 +77,7 @@ def _run_lda_pipeline(
         processed_texts,
         config.num_topics,
         config.passes,
+        random_state=config.random_state
     )
 
     topic_df = generate_lda_keywords_df(lda_model, config.num_topics)
@@ -89,6 +90,8 @@ def _run_lda_pipeline(
         "dashboard_assets": {
             "lda_dashboard.html": html_string,
         },
+        "lda_model": lda_model,  # Added for Perplexity Calculation
+        "corpus": corpus,        # Added for Perplexity Calculation
     }
 
 
@@ -145,6 +148,7 @@ def _run_bertopic_pipeline(
         min_df=config.min_df,
         reduce_outliers=config.reduce_outliers,
         reduce_frequent_words=config.reduce_frequent,
+        random_state=config.random_state
     )
 
     topic_df = generate_bertopic_keywords_df(topic_model)

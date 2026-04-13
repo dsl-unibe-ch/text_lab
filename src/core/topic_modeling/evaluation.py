@@ -1,6 +1,8 @@
 import sys
 import traceback
+from typing import Any
 
+import numpy as np
 from gensim.corpora import Dictionary
 from gensim.models.coherencemodel import CoherenceModel
 
@@ -88,3 +90,69 @@ def evaluate_topic_quality(
         print(f"--- U_mass Coherence Error ---\n{traceback.format_exc()}", file=sys.stderr)
 
     return metrics
+
+
+def calculate_lda_perplexity(lda_model: Any, corpus: list[list[tuple[int, int]]]) -> float:
+    """
+    Calculate the perplexity of a trained Gensim LDA model.
+    
+    Perplexity is a statistical measure of how well a probability model predicts 
+    a sample. Lower perplexity indicates better generalization performance.
+
+    Args:
+        lda_model: A trained gensim.models.LdaModel instance.
+        corpus: The bag-of-words corpus used to train or evaluate the model.
+
+    Returns:
+        The calculated perplexity score as a float, rounded to 4 decimal places.
+        Returns 0.0 if an error occurs during calculation.
+    """
+    try:
+        # Gensim returns the bound (log perplexity). We exponentiate it for the standard metric.
+        log_perplexity = lda_model.log_perplexity(corpus)
+        perplexity = np.exp2(-log_perplexity)
+        return round(float(perplexity), 4)
+    except Exception as e:
+        print(f"--- LDA Perplexity Error ---\n{e}", file=sys.stderr)
+        return 0.0
+
+
+def calculate_jaccard_stability(
+    run_1_topics: list[list[str]], 
+    run_2_topics: list[list[str]]
+) -> float:
+    """
+    Calculate the Topic Stability between two independent model runs.
+    
+    This function uses Jaccard Similarity to compare topic keywords. It finds 
+    the best-matching topic in Run 2 for every topic in Run 1 and averages 
+    the maximum similarity scores. A score of 1.0 means perfectly identical 
+    topics; 0.0 means completely different.
+
+    Args:
+        run_1_topics: A list of topics from the first run (each topic is a list of words).
+        run_2_topics: A list of topics from the second run (each topic is a list of words).
+
+    Returns:
+        The average Jaccard stability score across all topics as a float, 
+        rounded to 4 decimal places.
+    """
+    if not run_1_topics or not run_2_topics:
+        return 0.0
+
+    total_similarity = 0.0
+    for topic1 in run_1_topics:
+        set1 = set(topic1)
+        max_sim = 0.0
+        
+        for topic2 in run_2_topics:
+            set2 = set(topic2)
+            intersection = len(set1.intersection(set2))
+            union = len(set1.union(set2))
+            sim = float(intersection / union) if union > 0 else 0.0
+            if sim > max_sim:
+                max_sim = sim
+                
+        total_similarity += max_sim
+
+    return round(total_similarity / len(run_1_topics), 4)

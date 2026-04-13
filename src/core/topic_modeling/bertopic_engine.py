@@ -45,6 +45,7 @@ def train_bertopic_model(
     min_df: int = 1,
     reduce_outliers: bool = False,
     reduce_frequent_words: bool = True,
+    random_state: int | None = 42,
 ) -> tuple[BERTopic, list[int]]:
     """
     Train a BERTopic model with configurable dimensionality reduction and
@@ -102,7 +103,7 @@ def train_bertopic_model(
     embedding_model = (
         "english"
         if language == "English"
-        else "paraphrase-multilingual-MiniLM-L12-v2"
+        else "multilingual"
     )
 
     tokenizer = None
@@ -166,7 +167,7 @@ def train_bertopic_model(
         n_clusters = int(clustering_params.get("n_clusters", 10))
         cluster_model = KMeans(
             n_clusters=n_clusters,
-            random_state=42,
+            random_state=random_state,
             n_init="auto",
         )
         bertopic_nr_topics = None

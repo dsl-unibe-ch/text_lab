@@ -1,6 +1,7 @@
 import os
 import sys
 import traceback
+import copy
 from typing import Any
 
 import pandas as pd
@@ -17,7 +18,11 @@ if project_root not in sys.path:
 from auth import check_token
 from core.topic_modeling.topic_config import TopicModelingConfig
 from core.topic_modeling.topic_pipeline import run_topic_modeling_pipeline
-from core.topic_modeling.evaluation import evaluate_topic_quality
+from core.topic_modeling.evaluation import (
+    evaluate_topic_quality,
+    calculate_lda_perplexity,
+    calculate_jaccard_stability
+)
 from core.topic_modeling.topic_utils import (
     SUPPORTED_LANGUAGES,
     build_results_zip,
@@ -30,8 +35,7 @@ from core.topic_modeling.topic_utils import (
 )
 
 
-def _render_data_source_section(
-) -> tuple[UploadedFile | None, pd.DataFrame | None, str | None, str | None, bool]:
+def _render_data_source_section() -> tuple[UploadedFile | None, pd.DataFrame | None, str | None, str | None, bool]:
     """
     Render the data source section and load the uploaded data.
 
@@ -123,7 +127,7 @@ def _render_model_configuration(
     text_column: str | None,
     date_column: str | None,
     enable_dtm: bool,
-) -> TopicModelingConfig:
+) -> tuple[TopicModelingConfig, bool]:
     """
     Render the model configuration section and collect user selections.
 
@@ -133,7 +137,9 @@ def _render_model_configuration(
         enable_dtm: Whether dynamic topic modeling is enabled.
 
     Returns:
-        A TopicModelingConfig instance containing the selected options.
+        A tuple containing:
+            - TopicModelingConfig instance with the selected options.
+            - Boolean indicating if Topic Stability execution is requested.
     """
     st.header("2. Model Configuration", divider="gray")
 
@@ -267,6 +273,13 @@ def _render_model_configuration(
 
     with col_adv:
         st.subheader("Advanced Processing")
+
+        with st.expander("Academic Evaluation Metrics", expanded=False):
+            run_stability = st.checkbox(
+                "Evaluate Topic Stability / Reproducibility", 
+                value=False,
+                help="Runs the model 3 times and calculates Jaccard Similarity to prove stability. WARNING: Triples execution time."
+            )
 
         if "Top2Vec" in algorithm:
             st.info(
@@ -408,7 +421,7 @@ def _render_model_configuration(
                     step=5,
                 )
 
-    return TopicModelingConfig(
+    config = TopicModelingConfig(
         algorithm=algorithm,
         language=language,
         text_column=text_column or "",
@@ -431,6 +444,8 @@ def _render_model_configuration(
         use_bigrams=use_bigrams,
         passes=passes,
     )
+    
+    return config, run_stability
 
 
 def _render_results(res: dict[str, Any]) -> None:
@@ -445,12 +460,24 @@ def _render_results(res: dict[str, Any]) -> None:
         st.caption("Quantitative metrics to compare hyperparameter performance.")
         
         metrics = res["evaluation_metrics"]
+        
+        # Base Coherence Metrics
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("Topic Diversity", f"{metrics.get('Topic Diversity', 0.0):.2%}", help="Percentage of unique words across all topics (Higher is better).")
         col2.metric("Coherence (C_v)", metrics.get("Coherence (C_v)", 0.0), help="Highly correlated with human interpretability. Range 0 to 1 (Higher is better).")
         col3.metric("Coherence (C_npmi)", metrics.get("Coherence (C_npmi)", 0.0), help="Normalized Pointwise Mutual Information. Typically -1 to 1 (Higher is better).")
         col4.metric("Coherence (U_mass)", metrics.get("Coherence (U_mass)", 0.0), help="Measures word co-occurrence within the corpus. Typically negative (Closer to 0 is better).")
         
+        # Dynamic Extra Metrics (Perplexity / Stability)
+        extra_keys = [k for k in metrics.keys() if k not in ["Topic Diversity", "Coherence (C_v)", "Coherence (C_npmi)", "Coherence (U_mass)"]]
+        if extra_keys:
+            extra_cols = st.columns(len(extra_keys))
+            for col, key in zip(extra_cols, extra_keys):
+                if "Stability" in key:
+                    col.metric(key, f"{metrics[key]:.2%}", help="Jaccard Similarity across 3 runs. 100% means perfectly reproducible.")
+                else:
+                    col.metric(key, metrics[key], help="Statistical measure of prediction accuracy. Lower is better.")
+                    
         st.divider()
 
     st.subheader("Topic Dictionary")
@@ -571,10 +598,8 @@ def main() -> None:
         "Upload your data to generate an interactive topic distribution map."
     )
 
-    uploaded_file, df, text_column, date_column, enable_dtm = (
-        _render_data_source_section()
-    )
-    config = _render_model_configuration(text_column, date_column, enable_dtm)
+    uploaded_file, df, text_column, date_column, enable_dtm = _render_data_source_section()
+    config, run_stability = _render_model_configuration(text_column, date_column, enable_dtm)
 
     st.header("3. Execution", divider="gray")
 
@@ -597,16 +622,17 @@ def main() -> None:
             raw_texts = prepared_df[config.text_column].astype(str).tolist()
             embedding_model_name = get_embedding_model_name(config)
 
-            with st.spinner("Running topic extraction..."):
+            # Phase 1: Base Extraction
+            spinner_msg = "Running topic extraction (Run 1/3)..." if run_stability else "Running topic extraction..."
+            with st.spinner(spinner_msg):
                 run_result = run_topic_modeling_pipeline(
                     prepared_df,
                     config,
                     timestamps=timestamps,
                 )
 
-            # Run Mathematical Evaluation
+            # Phase 2: Base Mathematical Evaluation
             with st.spinner("Calculating Topic Coherence and Diversity..."):
-                # Extract comma-separated keywords back into lists for evaluation
                 topic_keywords = [
                     [word.strip() for word in keywords.split(",")] 
                     for keywords in run_result["topic_df"]["Keywords"].tolist()
@@ -618,6 +644,46 @@ def main() -> None:
                     language=config.language,
                     custom_stopwords_str=config.custom_stopwords
                 )
+
+                # Append LDA Perplexity if applicable
+                if "LDA" in config.algorithm and "lda_model" in run_result and "corpus" in run_result:
+                    perplexity = calculate_lda_perplexity(run_result["lda_model"], run_result["corpus"])
+                    evaluation_metrics["LDA Perplexity"] = perplexity
+
+            # Phase 3: Stability Check (If requested)
+            if run_stability:
+                
+                # Create copies of the config with un-locked (random) seeds for pure variance testing
+                config_run2 = copy.deepcopy(config)
+                config_run3 = copy.deepcopy(config)
+                
+                config_run2.random_state = None
+                config_run3.random_state = None
+                if config_run2.dim_params.get("random_state") is not None:
+                    config_run2.dim_params["random_state"] = None
+                    config_run3.dim_params["random_state"] = None
+
+                with st.spinner("Running Stability Iteration 2/3 (Unlocked Seed)..."):
+                    run_2_result = run_topic_modeling_pipeline(prepared_df, config_run2, timestamps=timestamps)
+                    run_2_keywords = [
+                        [word.strip() for word in keywords.split(",")]
+                        for keywords in run_2_result["topic_df"]["Keywords"].tolist()
+                    ]
+                
+                with st.spinner("Running Stability Iteration 3/3 (Unlocked Seed)..."):
+                    run_3_result = run_topic_modeling_pipeline(prepared_df, config_run3, timestamps=timestamps)
+                    run_3_keywords = [
+                        [word.strip() for word in keywords.split(",")]
+                        for keywords in run_3_result["topic_df"]["Keywords"].tolist()
+                    ]
+                
+                with st.spinner("Calculating Jaccard Stability across runs..."):
+                    stab_1_2 = calculate_jaccard_stability(topic_keywords, run_2_keywords)
+                    stab_2_3 = calculate_jaccard_stability(run_2_keywords, run_3_keywords)
+                    stab_1_3 = calculate_jaccard_stability(topic_keywords, run_3_keywords)
+                    
+                    avg_stability = (stab_1_2 + stab_2_3 + stab_1_3) / 3.0
+                    evaluation_metrics["Topic Stability"] = round(avg_stability, 4)
 
             # Generate Metadata Report with metrics appended
             metadata_report = generate_metadata_report(
