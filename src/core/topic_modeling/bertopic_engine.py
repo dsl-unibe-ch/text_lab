@@ -3,6 +3,7 @@ import traceback
 from typing import Any
 
 import pandas as pd
+import numpy as np
 from bertopic import BERTopic
 from bertopic.dimensionality import BaseDimensionalityReduction
 from bertopic.vectorizers import ClassTfidfTransformer
@@ -197,10 +198,10 @@ def train_bertopic_model(
         hdbscan_model=cluster_model,
         ctfidf_model=ctfidf_model,
         nr_topics=bertopic_nr_topics,
-        calculate_probabilities=False,
+        calculate_probabilities=True,
     )
 
-    topics, _ = topic_model.fit_transform(texts)
+    topics, probabilities = topic_model.fit_transform(texts)
 
     if reduce_outliers and clustering_algo == "HDBSCAN":
         topics = topic_model.reduce_outliers(
@@ -209,7 +210,7 @@ def train_bertopic_model(
             strategy="c-tf-idf",
         )
 
-    return topic_model, topics
+    return topic_model, topics, probabilities
 
 
 def generate_bertopic_keywords_df(topic_model: BERTopic) -> pd.DataFrame:
@@ -253,6 +254,7 @@ def generate_bertopic_keywords_df(topic_model: BERTopic) -> pd.DataFrame:
 
 def generate_bertopic_document_topics_df(
     topics: list[int],
+    probabilities: np.ndarray | None,
     original_df: pd.DataFrame
 ) -> pd.DataFrame:
     if len(topics) != len(original_df):
@@ -264,8 +266,22 @@ def generate_bertopic_document_topics_df(
     formatted_topics = [t + 1 if t != -1 else "Outlier" for t in topics]
     result_df = original_df.assign(Dominant_Topic=formatted_topics)
 
+    #  Process and append probabilities ---
+    if probabilities is not None:
+        # If 2D matrix, get the max probability per document. If 1D, use as-is.
+        if isinstance(probabilities, np.ndarray) and probabilities.ndim == 2:
+            confidence = np.max(probabilities, axis=1)
+        else:
+            confidence = probabilities
+            
+        result_df["Topic_Confidence"] = [round(float(p), 4) for p in confidence]
+    else:
+        result_df["Topic_Confidence"] = None
+
+    # Reorder columns to bring Dominant_Topic and Topic_Confidence to the front
     cols = result_df.columns.tolist()
-    cols = [cols[-1]] + cols[:-1]
+    # Move the last 2 columns to the front
+    cols = cols[-2:] + cols[:-2] 
     return result_df[cols]
 
 

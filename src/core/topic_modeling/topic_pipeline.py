@@ -135,7 +135,7 @@ def _run_bertopic_pipeline(
     """
     stop_set = get_stopword_set(config.language, config.custom_stopwords)
 
-    topic_model, topics = train_bertopic_model(
+    topic_model, topics, probabilities = train_bertopic_model(
         texts=raw_texts,
         language=config.language,
         num_topics=config.bertopic_nr_topics,
@@ -152,7 +152,7 @@ def _run_bertopic_pipeline(
     )
 
     topic_df = generate_bertopic_keywords_df(topic_model)
-    docs_df = generate_bertopic_document_topics_df(topics, df)
+    docs_df = generate_bertopic_document_topics_df(topics, probabilities, df)
 
     visualizations = generate_bertopic_visualizations(topic_model)
     dashboard_assets = {
