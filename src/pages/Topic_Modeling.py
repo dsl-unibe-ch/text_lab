@@ -17,6 +17,7 @@ if project_root not in sys.path:
 from auth import check_token
 from core.topic_modeling.topic_config import TopicModelingConfig
 from core.topic_modeling.topic_pipeline import run_topic_modeling_pipeline
+from core.topic_modeling.evaluation import evaluate_topic_quality
 from core.topic_modeling.topic_utils import (
     SUPPORTED_LANGUAGES,
     build_results_zip,
@@ -435,11 +436,22 @@ def _render_model_configuration(
 def _render_results(res: dict[str, Any]) -> None:
     """
     Render the results section from session state.
-
-    Args:
-        res: The stored run result dictionary.
     """
     st.header("Results Analysis", divider="gray")
+
+    # Render Evaluation Metrics
+    if "evaluation_metrics" in res and res["evaluation_metrics"]:
+        st.subheader("Model Evaluation Metrics")
+        st.caption("Quantitative metrics to compare hyperparameter performance.")
+        
+        metrics = res["evaluation_metrics"]
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Topic Diversity", f"{metrics.get('Topic Diversity', 0.0):.2%}", help="Percentage of unique words across all topics (Higher is better).")
+        col2.metric("Coherence (C_v)", metrics.get("Coherence (C_v)", 0.0), help="Highly correlated with human interpretability. Range 0 to 1 (Higher is better).")
+        col3.metric("Coherence (C_npmi)", metrics.get("Coherence (C_npmi)", 0.0), help="Normalized Pointwise Mutual Information. Typically -1 to 1 (Higher is better).")
+        col4.metric("Coherence (U_mass)", metrics.get("Coherence (U_mass)", 0.0), help="Measures word co-occurrence within the corpus. Typically negative (Closer to 0 is better).")
+        
+        st.divider()
 
     st.subheader("Topic Dictionary")
     if "BERTopic" in res["algorithm"] or "Top2Vec" in res["algorithm"]:
@@ -582,12 +594,8 @@ def main() -> None:
                         f"'{config.date_column}' could not be parsed as a date/time."
                     )
 
+            raw_texts = prepared_df[config.text_column].astype(str).tolist()
             embedding_model_name = get_embedding_model_name(config)
-            metadata_report = generate_metadata_report(
-                filename=uploaded_file.name,
-                config=config,
-                embedding_model_name=embedding_model_name,
-            )
 
             with st.spinner("Running topic extraction..."):
                 run_result = run_topic_modeling_pipeline(
@@ -596,11 +604,35 @@ def main() -> None:
                     timestamps=timestamps,
                 )
 
+            # Run Mathematical Evaluation
+            with st.spinner("Calculating Topic Coherence and Diversity..."):
+                # Extract comma-separated keywords back into lists for evaluation
+                topic_keywords = [
+                    [word.strip() for word in keywords.split(",")] 
+                    for keywords in run_result["topic_df"]["Keywords"].tolist()
+                ]
+                
+                evaluation_metrics = evaluate_topic_quality(
+                    topic_keywords=topic_keywords,
+                    raw_texts=raw_texts,
+                    language=config.language,
+                    custom_stopwords_str=config.custom_stopwords
+                )
+
+            # Generate Metadata Report with metrics appended
+            metadata_report = generate_metadata_report(
+                filename=uploaded_file.name,
+                config=config,
+                embedding_model_name=embedding_model_name,
+                evaluation_metrics=evaluation_metrics
+            )
+
             st.session_state.topic_results = {
                 "topic_df": run_result["topic_df"],
                 "docs_df": run_result["docs_df"],
                 "dashboard_assets": run_result["dashboard_assets"],
                 "metadata_report": metadata_report,
+                "evaluation_metrics": evaluation_metrics,
                 "algorithm": config.algorithm,
                 "enable_dtm": config.enable_dtm,
             }

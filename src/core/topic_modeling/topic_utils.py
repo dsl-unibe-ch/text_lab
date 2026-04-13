@@ -224,6 +224,7 @@ def generate_metadata_report(
     filename: str,
     config: TopicModelingConfig,
     embedding_model_name: str,
+    evaluation_metrics: dict[str, float] | None = None
 ) -> str:
     """
     Compile a formatted metadata report for reproducibility.
@@ -232,6 +233,7 @@ def generate_metadata_report(
         filename: The source file name.
         config: The topic modeling configuration.
         embedding_model_name: The resolved embedding model name.
+        evaluation_metrics: Optional dictionary of calculated performance metrics.
 
     Returns:
         A formatted metadata report string.
@@ -332,6 +334,16 @@ def generate_metadata_report(
                     f"Force-reduce Outliers: {config.reduce_outliers}",
                 ]
             )
+
+    if evaluation_metrics:
+        report.extend([
+            "",
+            "=========================================",
+            " MODEL EVALUATION METRICS                ",
+            "========================================="
+        ])
+        for metric_name, score in evaluation_metrics.items():
+            report.append(f"{metric_name}: {score}")
 
     return "\n".join(report)
 
