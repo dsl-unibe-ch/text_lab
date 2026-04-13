@@ -17,21 +17,21 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 from auth import check_token
-from core.topic_utils import load_zip_texts, preprocess_texts_for_lda, get_stopword_set
-from core.lda_engine import (
+from core.topic_modeling.topic_utils import load_zip_texts, preprocess_texts_for_lda, get_stopword_set
+from core.topic_modeling.lda_engine import (
     train_lda_model,
     generate_lda_keywords_df,
     generate_lda_document_topics_df,
     generate_lda_html
 )
-from core.bertopic_engine import (
+from core.topic_modeling.bertopic_engine import (
     train_bertopic_model,
     generate_bertopic_keywords_df,
     generate_bertopic_document_topics_df,
     generate_bertopic_visualizations,
     generate_topics_over_time_html
 )
-from core.top2vec_engine import (
+from core.topic_modeling.top2vec_engine import (
     train_top2vec_model,
     generate_top2vec_keywords_df,
     generate_top2vec_document_topics_df,
