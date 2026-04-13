@@ -1,6 +1,7 @@
 import datetime
 import io
 import os
+import sys
 import re
 import zipfile
 from functools import lru_cache
@@ -63,6 +64,12 @@ def _load_spacy_model(language: str) -> Optional[spacy.language.Language]:
     try:
         return spacy.load(model_name, disable=["parser", "ner"])
     except OSError:
+        print(
+            f"WARNING (Text Lab): spaCy model '{model_name}' for {language} is not installed! "
+            f"Please run 'python -m spacy download {model_name}' in the host environment. "
+            f"Falling back to basic regex tokenization for this job.",
+            file=sys.stderr
+        )
         return None
 
 
