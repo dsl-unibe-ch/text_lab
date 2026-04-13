@@ -63,8 +63,10 @@ def train_top2vec_model(
             else "paraphrase-multilingual-MiniLM-L12-v2"
         )
 
-    # allows Gensim to utilize every single CPU core allocated to your Slurm job.
-    workers = os.cpu_count() or 1
+    # allows Gensim to utilize every single CPU core allocated 
+    # workers = os.cpu_count() or 1
+    # this allowers to use only the CLU cores requested by slurm job and not all in node
+    workers = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)
 
     topic_model = Top2Vec(
         documents=texts,
