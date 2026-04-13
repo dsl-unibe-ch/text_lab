@@ -112,7 +112,11 @@ def train_bertopic_model(
             import jieba
 
             def tokenize_zh(text: str) -> list[str]:
-                return jieba.lcut(text)
+                tokens = jieba.lcut(text)
+                if stop_words_set:
+                    return [t for t in tokens if t not in stop_words_set]
+                return tokens
+        
 
             tokenizer = tokenize_zh
         except ImportError:
