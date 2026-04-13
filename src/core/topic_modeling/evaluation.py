@@ -56,7 +56,7 @@ def evaluate_topic_quality(
     safe_topics = []
     for topic in topic_keywords:
         safe_topic = [w for w in topic if w in dictionary.token2id]
-        if safe_topic:
+        if len(safe_topic) >= 2: # Need at least 2 words to measure co-occurrence
             safe_topics.append(safe_topic)
 
     if not safe_topics:
