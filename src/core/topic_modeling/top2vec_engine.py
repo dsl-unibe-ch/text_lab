@@ -68,13 +68,23 @@ def train_top2vec_model(
     # this allowers to use only the CLU cores requested by slurm job and not all in node
     workers = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)
 
-    topic_model = Top2Vec(
-        documents=texts,
-        speed=speed,
-        min_count=min_count,
-        embedding_model=embed_model,
-        workers=workers,
-    )
+
+    try:
+        topic_model = Top2Vec(
+            documents=texts,
+            speed=speed,
+            min_count=min_count,
+            embedding_model=embed_model,
+            workers=workers,
+            )
+    except ValueError as e:
+        if "need at least one array to concatenate" in str(e):
+            raise ValueError(
+                "The uploaded dataset is too small or its vocabulary is too fragmented "
+                "for Top2Vec. Please switch your algorithm to **Latent Dirichlet Allocation (LDA)**, "
+                "which is better suited for small datasets."
+            ) from e
+        raise e
 
     if target_topics != "auto" and isinstance(target_topics, int):
         num_found = topic_model.get_num_topics()
