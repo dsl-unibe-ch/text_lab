@@ -100,6 +100,9 @@ def main():
 
         **Documentation**:
         For more details on how to use Text Lab, check out our [Documentation](https://text-lab.dsl.unibe.ch/).
+
+        If you'd like to be informed about updates and changes to Text Lab, please subscribe to the following mailing list: https://listserv.unibe.ch/mailman/listinfo/text-lab-announcement.dsl
+
         """
     )
 
