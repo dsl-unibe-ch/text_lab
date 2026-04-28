@@ -64,4 +64,4 @@ For more detailed guidelines on job submission, please refer to the [HPC Documen
 Maintained by the Data Science Lab (DSL) at the University of Bern.  
 For support with the app, bug reports, or related NLP services, please contact: **[support.dsl@unibe.ch](mailto:support.dsl@unibe.ch)**
 
-If you'd like to be informed about updates and changes to Text Lab, please subscribe to the following mailing list: https://listserv.unibe.ch/mailman/listinfo/text-lab-announcement.dsl
+If you'd like to be informed about updates and changes to Text Lab, please subscribe to the following [Mailing List](https://listserv.unibe.ch/mailman/listinfo/text-lab-announcement.dsl)

@@ -31,5 +31,5 @@ For processing large amount of data, please contact the Data Science Lab.
 If you encounter issues, need any data science, research IT support, or have questions about using Text Lab, please contact the Data Science Lab:
  [support.dsl@unibe.ch](mailto:support.dsl@unibe.ch)
 
-If you'd like to be informed about updates and changes to Text Lab, please subscribe to the following mailing list: https://listserv.unibe.ch/mailman/listinfo/text-lab-announcement.dsl
+If you'd like to be informed about updates and changes to Text Lab, please subscribe to the following [Mailing List](https://listserv.unibe.ch/mailman/listinfo/text-lab-announcement.dsl)
 
