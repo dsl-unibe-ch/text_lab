@@ -31,6 +31,7 @@ from core.visualization.plot_static import (
     plot_static_histogram_impl,
     plot_static_lineplot_impl,
     plot_static_scatterplot_impl,
+    plot_static_wordcloud_impl,
 )
 
 # Configure strict logging to prevent interference with stdout/stderr JSON-RPC
@@ -122,6 +123,17 @@ def generate_custom_static_plot(
 ) -> str:
     """Executes custom Python code (plt, sns, pd) to generate complex static charts."""
     return generate_custom_static_plot_impl(data_file_path, python_code, plot_filename_keyword)
+
+
+@mcp.tool()
+def plot_static_wordcloud(
+    data_file_path: str, text_column: str, title: str = "Word Cloud"
+) -> str:
+    """
+    Generates a static Word Cloud image from a column containing text data.
+    Use this when the user wants to visualize the most frequent terms in a dataset.
+    """
+    return plot_static_wordcloud_impl(data_file_path, text_column, title)
 
 
 if __name__ == "__main__":

@@ -6,6 +6,7 @@ Generates publication-ready Matplotlib and Seaborn charts (.png).
 import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
+from wordcloud import WordCloud
 
 from core.visualization.viz_utils import get_plot_path, load_data_safely
 
@@ -233,3 +234,53 @@ def plot_static_lineplot_impl(
         return f"{plot_path}|||{code}"
     except Exception as e:
         return f"Error plotting static lineplot: {str(e)}"
+    
+
+def plot_static_wordcloud_impl(
+    data_file_path: str, text_column: str, title: str = "Word Cloud"
+) -> str:
+    """
+    Generates and saves a static Word Cloud from a text column.
+    """
+    try:
+        df = load_data_safely(data_file_path)
+        if text_column not in df.columns:
+            return f"Error: Column '{text_column}' not found in data."
+
+        # Combine all text in the column into a single string, dropping nulls
+        text_data = " ".join(df[text_column].dropna().astype(str))
+        
+        if not text_data.strip():
+            return "Error: The specified text column is empty or contains only null values."
+
+        # Generate the word cloud
+        wordcloud = WordCloud(
+            width=1200, 
+            height=600, 
+            background_color="white", 
+            colormap="viridis",
+            max_words=200
+        ).generate(text_data)
+
+        plt.figure(figsize=(12, 6))
+        plt.imshow(wordcloud, interpolation="bilinear")
+        plt.title(title, fontsize=16, pad=20)
+        plt.axis("off")
+
+        plot_path = get_plot_path(
+            data_file_path, f"wordcloud_{text_column}", ext=".png"
+        )
+        plt.savefig(plot_path, bbox_inches="tight", dpi=300)
+        plt.close()
+
+        code = _generate_static_code_snippet(
+            "from wordcloud import WordCloud\n\n"
+            f"text_data = ' '.join(df['{text_column}'].dropna().astype(str))\n"
+            "wordcloud = WordCloud(width=1200, height=600, background_color='white', colormap='viridis').generate(text_data)\n"
+            "plt.imshow(wordcloud, interpolation='bilinear')\n"
+            f"plt.title('{title}', fontsize=16, pad=20)\n"
+            "plt.axis('off')"
+        )
+        return f"{plot_path}|||{code}"
+    except Exception as e:
+        return f"Error plotting word cloud: {str(e)}"
