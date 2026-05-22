@@ -132,7 +132,7 @@ async def _run_worker_agent(
                     tool_output_raw = result.content[0].text
                 
                 # Handle Data Summaries & Stats
-                if tool_name in ["get_column_summary", "run_correlation", "run_group_comparison", "run_linear_regression"]:
+                if tool_name in ["get_column_summary", "run_correlation", "run_group_comparison", "run_linear_regression", "rank_target_correlations"]:
                     if "Error" in tool_output_raw:
                         _log("warning", f"Worker '{agent_role}' stat tool '{tool_name}' failed. Retrying...")
                         mcp_tool_results.append({

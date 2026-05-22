@@ -129,3 +129,64 @@ def run_linear_regression_impl(
         )
     except Exception as e:
         return f"Error computing linear regression: {str(e)}"
+
+
+def rank_target_correlations_impl(
+    data_file_path: str, target_col: str, method: str = "pearson"
+) -> str:
+    """
+    Calculates the correlation between a target column and all other numeric features,
+    sorting them by absolute correlation strength. Automatically encodes binary text.
+
+    Args:
+        data_file_path: The absolute path to the data file.
+        target_col: The column to correlate all other features against.
+        method: The correlation method ('pearson' or 'spearman').
+
+    Returns:
+        A markdown table ranking the features, or an error message.
+    """
+    try:
+        df = load_data_safely(data_file_path)
+        if target_col not in df.columns:
+            return f"Error: Target column '{target_col}' not found in the dataset."
+
+        # Work on a copy to avoid mutating cache
+        working_df = df.copy()
+
+        # Handle text-based binary columns (e.g., Malignant/Benign or M/B)
+        if not pd.api.types.is_numeric_dtype(working_df[target_col]):
+            unique_vals = working_df[target_col].dropna().unique()
+            if len(unique_vals) == 2:
+                val_map = {unique_vals[0]: 1, unique_vals[1]: 0}
+                working_df[target_col] = working_df[target_col].map(val_map)
+            else:
+                return (
+                    f"Error: Target column '{target_col}' is non-numeric and contains "
+                    f"{len(unique_vals)} unique values. It must be strictly binary to auto-encode."
+                )
+
+        # Isolate numeric metrics
+        numeric_df = working_df.select_dtypes(include=["number"])
+        if target_col not in numeric_df.columns:
+            return f"Error: Target column '{target_col}' could not be evaluated numerically."
+
+        # Compute correlations and drop self-correlation entry
+        correlations = numeric_df.corr(method=method)[target_col].drop(target_col)
+        
+        if correlations.empty:
+            return "Error: No other numeric columns found to correlate against."
+
+        # Construct and sort ranking frame
+        ranking_df = pd.DataFrame({
+            "Feature": correlations.index,
+            "Correlation Coefficient": correlations.values,
+            "Absolute Strength": correlations.abs().values
+        }).sort_values(by="Absolute Strength", ascending=False).drop(columns=["Absolute Strength"])
+
+        return (
+            f"Correlation Ranking with respect to target column '{target_col}' ({method}):\n\n"
+            f"{ranking_df.to_markdown(index=False)}"
+        )
+    except Exception as e:
+        return f"Error ranking correlations: {str(e)}"

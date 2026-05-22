@@ -38,6 +38,7 @@ from core.visualization.stats_analysis import (
     run_correlation_impl,
     run_group_comparison_impl,
     run_linear_regression_impl,
+    rank_target_correlations_impl,
 )
 
 # Configure strict logging to prevent interference with stdout/stderr JSON-RPC
@@ -182,10 +183,22 @@ def run_linear_regression(
 ) -> str:
     """
     Runs an OLS Linear Regression. 
-    target_col is the dependent variable (Y) you want to predict.
-    predictor_cols is a list of independent variables (X).
+    target_col is the dependent variable (Y).
+    predictor_cols is a list of independent variables (X). 
+    CRITICAL: predictor_cols MUST be a valid JSON array of strings, e.g., ["col1", "col2"].
     """
     return run_linear_regression_impl(data_file_path, target_col, predictor_cols)
+
+@mcp.tool()
+def rank_target_correlations(
+    data_file_path: str, target_col: str, method: str = "pearson"
+) -> str:
+    """
+    Calculates and ranks the correlation between a single target column and all other 
+    numeric columns in the dataset at once. Use this tool when the user wants to rank, 
+    sort, or find top features related to a specific outcome column like diagnosis.
+    """
+    return rank_target_correlations_impl(data_file_path, target_col, method)
 
 
 if __name__ == "__main__":

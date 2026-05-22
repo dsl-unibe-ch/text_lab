@@ -13,6 +13,7 @@ import plotly.io as pio
 import streamlit as st
 from PIL import Image
 
+# Import Streamlit's context manager to fix missing async logs
 from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
 
 # Ensure absolute imports resolve correctly
@@ -146,6 +147,20 @@ def main() -> None:
     st.title("AI Data Visualiser")
     st.info(f"Using Model: **{selected_model}**")
 
+    # --- NEW CAPABILITIES EXPANDER ---
+    with st.expander("View Available AI Capabilities"):
+        st.markdown("""
+        This tool uses a **Multi-Agent System** to analyze your data. A Supervisor AI reads your prompt and delegates tasks to three specialist agents:
+        
+        * **Interactive Agent (Default):** Generates web-ready, interactive Plotly charts (Scatter, Bar, Line, Box, etc.). Best for exploring data on this page.
+        * **Static Agent:** Generates publication-ready Matplotlib/Seaborn charts and Word Clouds. (Triggered when you explicitly ask for "static", "images", or "publication figures").
+        * **Statistical Agent:** Runs rigorous mathematical tests including Correlations, T-tests, ANOVA, and OLS Linear Regression.
+        
+        **Prompting Tip:** Be specific about what you want! 
+        *(e.g., "Run a linear regression on column X and Y, then plot an interactive scatter plot.")*
+        """)
+    # ---------------------------------
+
     uploaded_file = st.file_uploader(
         "Upload your data file (CSV, TSV, Excel, JSON)",
         type=["csv", "tsv", "xls", "xlsx", "json"],
@@ -215,6 +230,7 @@ def main() -> None:
                         )
                     )
 
+                    # FIX: Keep the box expanded after analysis completes so logs remain visible
                     status_box.update(label="Analysis Complete", state="complete", expanded=True)
 
                     summary = analysis_result["summary"]

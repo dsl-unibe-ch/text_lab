@@ -57,6 +57,7 @@ AGENT_TOOLS = {
         "run_correlation",
         "run_group_comparison",
         "run_linear_regression",
+        "rank_target_correlations",
     ]
 }
 
