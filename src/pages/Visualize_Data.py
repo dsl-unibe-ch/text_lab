@@ -13,6 +13,8 @@ import plotly.io as pio
 import streamlit as st
 from PIL import Image
 
+from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
+
 # Ensure absolute imports resolve correctly
 current_dir = os.path.dirname(os.path.abspath(__file__))
 src_dir = os.path.dirname(current_dir)
@@ -46,12 +48,6 @@ except Exception:
 
 
 def render_sidebar() -> str:
-    """
-    Renders the sidebar for model selection based on hardware capabilities.
-
-    Returns:
-        The name of the selected Ollama model.
-    """
     st.sidebar.title("Model Selection")
     
     current_gpu = get_gpu_name()
@@ -83,14 +79,6 @@ def render_results(
     final_artifacts: list[dict[str, str | bytes]], 
     run_id: str
 ) -> None:
-    """
-    Renders the final LLM summary, generated plots, and the download button.
-
-    Args:
-        summary: The markdown summary returned by the LLM.
-        final_artifacts: A list of dictionaries containing the plot metadata and bytes.
-        run_id: The unique identifier for the current analysis run.
-    """
     st.success("Analysis Complete.")
     st.subheader("Analysis Summary")
     st.markdown(summary)
@@ -101,7 +89,6 @@ def render_results(
         st.warning("No plots were generated. Try refining your prompt.")
         return
 
-    # Render visualizations to the UI
     for idx, artifact in enumerate(final_artifacts):
         filename = artifact["filename"]
         file_bytes = artifact["bytes"]
@@ -109,13 +96,10 @@ def render_results(
         
         with st.container():
             if filename.endswith(".json"):
-                # Render interactive Plotly chart
                 json_str = file_bytes.decode("utf-8")
                 fig = pio.from_json(json_str)
-                # ADDED UNIQUE KEY HERE using the run_id and loop index
                 st.plotly_chart(fig, use_container_width=True, key=f"plotly_{run_id}_{idx}")
             else:
-                # Render static Matplotlib/Seaborn image
                 st.image(file_bytes, caption=filename)
                 
             with st.expander(f"View Source Code: {filename}"):
@@ -123,7 +107,6 @@ def render_results(
             
             st.divider()
 
-    # Build the ZIP archive for downloading
     zip_buffer = BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
         for artifact in final_artifacts:
@@ -132,15 +115,12 @@ def render_results(
             code = artifact["code"]
             
             if filename.endswith(".json"):
-                # Convert Plotly JSON back to an interactive HTML file for offline viewing
                 fig = pio.from_json(file_bytes.decode("utf-8"))
                 html_filename = filename.replace(".json", ".html")
                 zf.writestr(html_filename, fig.to_html(include_plotlyjs="cdn"))
             else:
-                # Save standard static images
                 zf.writestr(filename, file_bytes)
                 
-            # Save the associated Python script
             code_filename = filename.replace(".json", ".py").replace(".png", ".py")
             zf.writestr(code_filename, code)
 
@@ -154,7 +134,6 @@ def render_results(
 
 
 def main() -> None:
-    """Main execution function for the Data Visualization page."""
     check_token()
     
     if not check_ollama_server():
@@ -178,13 +157,27 @@ def main() -> None:
     )
 
     if st.button("Generate Visualisations", type="primary", disabled=(not uploaded_file)):
-        with st.spinner("Multi-Agent Team is analyzing your data... this may take a moment as agents coordinate."):
+        with st.status("Orchestrating Multi-Agent Team...", expanded=True) as status_box:
+            
+            # Capture current Streamlit context to inject into async callback
+            ctx = get_script_run_ctx()
+            
+            def live_log_callback(log_type: str, msg: str):
+                if ctx:
+                    add_script_run_ctx(ctx=ctx)
+                if log_type == "error":
+                    status_box.error(msg)
+                elif log_type == "warning":
+                    status_box.warning(msg)
+                else:
+                    status_box.write(msg)
+
             run_id = f"ds-{uuid.uuid4().hex[:8]}"
             
             try:
                 ollama.pull(selected_model)
             except Exception as e:
-                st.error(f"Failed to pull model {selected_model}: {e}")
+                status_box.error(f"Failed to pull model {selected_model}: {e}")
                 st.stop()
 
             try:
@@ -194,14 +187,12 @@ def main() -> None:
                     
                     df = get_fast_data_preview(data_file_path, uploaded_file.name)
                     if df is None:
-                        st.error("Failed to generate a data preview.")
+                        status_box.error("Failed to generate a data preview.")
                         st.stop()
 
                     data_head = df.to_string()
                     final_user_prompt = user_prompt if user_prompt.strip() else DEFAULT_PROMPT
 
-                    # We removed SYSTEM_PROMPT here because the Supervisor prompt 
-                    # is now injected directly inside run_analysis() in viz_agent.py
                     messages = [
                         {
                             "role": "user",
@@ -212,27 +203,23 @@ def main() -> None:
                         },
                     ]
 
-                    # Execute the autonomous MAS loop
+                    status_box.write("Starting Supervisor Agent...")
+
                     analysis_result = asyncio.run(
-                        run_analysis(messages, data_file_path, selected_model, MCP_SERVER_SCRIPT)
+                        run_analysis(
+                            messages, 
+                            data_file_path, 
+                            selected_model, 
+                            MCP_SERVER_SCRIPT, 
+                            log_callback=live_log_callback
+                        )
                     )
 
-                    # Unpack the typed result
+                    status_box.update(label="Analysis Complete", state="complete", expanded=True)
+
                     summary = analysis_result["summary"]
                     plot_results = analysis_result["plots"]
-                    logs = analysis_result["logs"]
 
-                    # --- NEW: Display Agent Execution Logs ---
-                    with st.expander("🤖 View Multi-Agent Execution Logs", expanded=False):
-                        for log_type, msg in logs:
-                            if log_type == "error":
-                                st.error(msg)
-                            elif log_type == "warning":
-                                st.warning(msg)
-                            else:
-                                st.info(msg)
-
-                    # Read generated artifacts into memory
                     final_artifacts = []
                     for item in plot_results:
                         path = item["path"]
@@ -252,10 +239,10 @@ def main() -> None:
                             st.error(f"Could not find plot at: {path}")
 
             except Exception as e:
-                st.error(f"An unexpected error occurred: {e}")
+                status_box.update(label="Analysis Failed", state="error", expanded=True)
+                status_box.error(f"An unexpected error occurred: {e}")
                 st.stop()
 
-            # Display final results
             render_results(summary, final_artifacts, run_id)
 
 

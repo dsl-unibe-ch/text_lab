@@ -5,7 +5,7 @@ Implements a Supervisor-Worker pattern to route tasks and manage tool hallucinat
 
 import sys
 import traceback
-from typing import Any
+from typing import Any, Callable
 
 import ollama
 from mcp import ClientSession, StdioServerParameters, types
@@ -27,7 +27,6 @@ WORKER_PROMPTS = {
     "stats": STATS_PROMPT,
 }
 
-# The Supervisor's specialized pseudo-tool used to route tasks to workers.
 DELEGATE_TASK_TOOL = {
     "type": "function",
     "function": {
@@ -53,16 +52,6 @@ DELEGATE_TASK_TOOL = {
 
 
 async def _get_mcp_tools(session: ClientSession, allowed_names: list[str] | None = None) -> list[dict[str, Any]]:
-    """
-    Fetch available tools from the MCP server and filter them based on the agent's role.
-
-    Args:
-        session: An active MCP ClientSession.
-        allowed_names: A list of tool names this specific agent is allowed to see.
-
-    Returns:
-        A list of dictionaries representing the scoped tools for the Ollama API.
-    """
     tool_list_response = await session.list_tools()
     ollama_tools: list[dict[str, Any]] = []
     
@@ -90,11 +79,14 @@ async def _run_worker_agent(
     model_name: str,
     global_plots: list[PlotArtifact],
     global_logs: list[tuple[str, str]],
-    max_iterations: int = 4
+    max_iterations: int = 4,
+    log_callback: Callable[[str, str], None] | None = None
 ) -> str:
-    """
-    Executes a specialist agent's loop. Handles retries if MCP tool execution fails.
-    """
+    def _log(l_type: str, msg: str):
+        global_logs.append((l_type, msg))
+        if log_callback:
+            log_callback(l_type, msg)
+
     allowed_tools = AGENT_TOOLS.get(agent_role, [])
     tools = await _get_mcp_tools(session, allowed_names=allowed_tools)
 
@@ -104,7 +96,7 @@ async def _run_worker_agent(
         {"role": "user", "content": f"Task: {task_instruction}"}
     ]
 
-    global_logs.append(("info", f"Supervisor delegated task to '{agent_role}' agent."))
+    _log("info", f"Supervisor delegated task to '{agent_role}' agent.")
 
     for iteration in range(max_iterations):
         try:
@@ -116,13 +108,12 @@ async def _run_worker_agent(
             messages.append(response["message"])
         except Exception as e:
             error_msg = f"Worker '{agent_role}' failed to communicate with Ollama: {e}"
-            global_logs.append(("error", error_msg))
+            _log("error", error_msg)
             return error_msg
 
-        # If the worker didn't call any tools, its task is complete.
         if not response["message"].get("tool_calls"):
             worker_summary = response["message"].get("content", f"{agent_role} agent completed task silently.")
-            global_logs.append(("info", f"Worker '{agent_role}' finished task successfully."))
+            _log("info", f"Worker '{agent_role}' finished task successfully.")
             return worker_summary
 
         tool_calls = response["message"]["tool_calls"]
@@ -131,7 +122,7 @@ async def _run_worker_agent(
         for tool_call in tool_calls:
             tool_name = tool_call["function"]["name"]
             tool_args = tool_call["function"]["arguments"]
-            tool_args["data_file_path"] = data_file_path  # Inject file path
+            tool_args["data_file_path"] = data_file_path
 
             try:
                 result = await session.call_tool(tool_name, arguments=tool_args)
@@ -139,24 +130,24 @@ async def _run_worker_agent(
                 tool_output_raw = ""
                 if result.content and isinstance(result.content[0], types.TextContent):
                     tool_output_raw = result.content[0].text
-
-                # Handle Execution Errors (LLM Retry Prompting)
-                if "Error:" in tool_output_raw:
-                    global_logs.append(("warning", f"Worker '{agent_role}' tool '{tool_name}' failed: {tool_output_raw}. Retrying..."))
-                    mcp_tool_results.append({
-                        "role": "tool",
-                        "content": f"Execution Error: {tool_output_raw}\nPlease correct your code/parameters and try again.",
-                    })
                 
                 # Handle Data Summaries & Stats
-                elif tool_name in ["get_column_summary", "run_correlation", "run_group_comparison", "run_linear_regression"]:
-                    mcp_tool_results.append({
-                        "role": "tool",
-                        "content": tool_output_raw,
-                    })
+                if tool_name in ["get_column_summary", "run_correlation", "run_group_comparison", "run_linear_regression"]:
+                    if "Error" in tool_output_raw:
+                        _log("warning", f"Worker '{agent_role}' stat tool '{tool_name}' failed. Retrying...")
+                        mcp_tool_results.append({
+                            "role": "tool",
+                            "content": f"Execution Error: {tool_output_raw.strip()}\nPlease correct your code/parameters and try again.",
+                        })
+                    else:
+                        mcp_tool_results.append({
+                            "role": "tool",
+                            "content": tool_output_raw,
+                        })
                 
                 # Handle Plotting Tools
                 else:
+                    # FIX: Plotting tools MUST return path|||code. If they don't, force a retry.
                     if "|||" in tool_output_raw:
                         path_part, code_part = tool_output_raw.split("|||", 1)
                         global_plots.append({
@@ -169,28 +160,23 @@ async def _run_worker_agent(
                             "content": f"Successfully generated plot at {path_part.strip()}",
                         })
                     else:
-                        global_plots.append({
-                            "path": tool_output_raw.strip(),
-                            "code": "# Source code unavailable.",
-                            "name": tool_name
-                        })
+                        _log("warning", f"Worker '{agent_role}' plot tool '{tool_name}' failed: {tool_output_raw.strip()}. Retrying...")
                         mcp_tool_results.append({
                             "role": "tool",
-                            "content": f"Successfully generated plot at {tool_output_raw.strip()}",
+                            "content": f"Execution Error: {tool_output_raw.strip()}\nPlease correct your code or parameters and try again.",
                         })
 
             except Exception as e:
                 error_msg = f"Tool '{tool_name}' crashed: {str(e)}"
-                global_logs.append(("error", error_msg))
+                _log("error", error_msg)
                 mcp_tool_results.append({
                     "role": "tool",
                     "content": error_msg,
                 })
 
-        # Append tool execution results back to worker's context
         messages.extend(mcp_tool_results)
 
-    # If the loop maxes out
+    _log("error", f"Worker '{agent_role}' reached maximum iterations without resolving issues.")
     return f"Worker '{agent_role}' reached maximum iterations and terminated. Last known state appended."
 
 
@@ -199,11 +185,14 @@ async def run_analysis(
     data_file_path: str,
     model_name: str,
     mcp_server_script: str,
-    max_iterations: int = 7
+    max_iterations: int = 7,
+    log_callback: Callable[[str, str], None] | None = None
 ) -> VizAnalysisResult:
-    """
-    Main entrypoint: Runs the Supervisor Agent which delegates to workers.
-    """
+    def _log(l_type: str, msg: str):
+        logs.append((l_type, msg))
+        if log_callback:
+            log_callback(l_type, msg)
+
     server_params = StdioServerParameters(
         command="python3",
         args=[mcp_server_script],
@@ -212,7 +201,6 @@ async def run_analysis(
     plot_results: list[PlotArtifact] = []
     logs: list[tuple[str, str]] = []
     
-    # Inject Supervisor Prompt into the incoming conversation
     supervisor_messages = [{"role": "system", "content": SUPERVISOR_PROMPT}] + messages
 
     try:
@@ -220,7 +208,6 @@ async def run_analysis(
             async with ClientSession(read, write) as session:
                 await session.initialize()
 
-                # The supervisor ONLY has access to the delegate_task pseudo-tool
                 supervisor_tools = [DELEGATE_TASK_TOOL]
 
                 for iteration in range(max_iterations):
@@ -232,11 +219,11 @@ async def run_analysis(
                         )
                         supervisor_messages.append(response["message"])
                     except Exception as e:
-                        logs.append(("error", f"Error communicating with Supervisor: {e}"))
+                        _log("error", f"Error communicating with Supervisor: {e}")
                         break
 
-                    # If supervisor decides it is done (no tool calls), exit loop
                     if not response["message"].get("tool_calls"):
+                        _log("info", "Supervisor completed task delegation and synthesized final summary.")
                         break
 
                     tool_calls = response["message"]["tool_calls"]
@@ -254,7 +241,6 @@ async def run_analysis(
                                 })
                                 continue
 
-                            # Execute the worker agent
                             worker_result = await _run_worker_agent(
                                 session=session,
                                 agent_role=agent_role,
@@ -262,7 +248,8 @@ async def run_analysis(
                                 data_file_path=data_file_path,
                                 model_name=model_name,
                                 global_plots=plot_results,
-                                global_logs=logs
+                                global_logs=logs,
+                                log_callback=log_callback
                             )
 
                             supervisor_tool_results.append({
@@ -270,13 +257,11 @@ async def run_analysis(
                                 "content": f"Results from {agent_role}:\n{worker_result}",
                             })
 
-                    # Feed worker results back to the supervisor
                     supervisor_messages.extend(supervisor_tool_results)
 
     except Exception as e:
-        logs.append(("error", f"Fatal error in MAS session: {str(e)}\n{traceback.format_exc()}"))
+        _log("error", f"Fatal error in MAS session: {str(e)}\n{traceback.format_exc()}")
 
-    # Extract the final synthesis summary from the Supervisor
     summary = ""
     if supervisor_messages and supervisor_messages[-1].get("role") == "assistant":
         summary = supervisor_messages[-1].get("content", "")
@@ -284,7 +269,6 @@ async def run_analysis(
     if not summary:
         summary = "Analysis complete. Please review the generated visualizations below."
 
-    # Enforce type safety
     final_logs: list[tuple[Any, str]] = []
     for log_type, msg in logs:
         if log_type in ("info", "warning", "error"):
