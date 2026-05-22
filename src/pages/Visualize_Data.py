@@ -102,7 +102,7 @@ def render_results(
         return
 
     # Render visualizations to the UI
-    for artifact in final_artifacts:
+    for idx, artifact in enumerate(final_artifacts):
         filename = artifact["filename"]
         file_bytes = artifact["bytes"]
         code = artifact["code"]
@@ -112,7 +112,8 @@ def render_results(
                 # Render interactive Plotly chart
                 json_str = file_bytes.decode("utf-8")
                 fig = pio.from_json(json_str)
-                st.plotly_chart(fig, use_container_width=True)
+                # ADDED UNIQUE KEY HERE using the run_id and loop index
+                st.plotly_chart(fig, use_container_width=True, key=f"plotly_{run_id}_{idx}")
             else:
                 # Render static Matplotlib/Seaborn image
                 st.image(file_bytes, caption=filename)
