@@ -1,6 +1,6 @@
 """
-Agentic loop for the AI Visualization Engine.
-Handles communication between the Ollama LLM and the MCP server.
+Agentic Multi-Agent System (MAS) for the AI Visualization Engine.
+Implements a Supervisor-Worker pattern to route tasks and manage tool hallucinations.
 """
 
 import sys
@@ -11,36 +11,187 @@ import ollama
 from mcp import ClientSession, StdioServerParameters, types
 from mcp.client.stdio import stdio_client
 
-from core.visualization.viz_config import PlotArtifact, VizAnalysisResult
+from core.visualization.viz_config import (
+    AGENT_TOOLS,
+    INTERACTIVE_PROMPT,
+    STATIC_PROMPT,
+    STATS_PROMPT,
+    SUPERVISOR_PROMPT,
+    PlotArtifact,
+    VizAnalysisResult,
+)
+
+WORKER_PROMPTS = {
+    "interactive": INTERACTIVE_PROMPT,
+    "static": STATIC_PROMPT,
+    "stats": STATS_PROMPT,
+}
+
+# The Supervisor's specialized pseudo-tool used to route tasks to workers.
+DELEGATE_TASK_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "delegate_task",
+        "description": "Delegate a sub-task to a specialist agent.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "agent_role": {
+                    "type": "string",
+                    "enum": ["interactive", "static", "stats"],
+                    "description": "The specific agent to assign the task to."
+                },
+                "task_instruction": {
+                    "type": "string",
+                    "description": "Clear instructions on what the agent should do."
+                }
+            },
+            "required": ["agent_role", "task_instruction"]
+        }
+    }
+}
 
 
-async def _get_mcp_tools(session: ClientSession) -> list[dict[str, Any]]:
+async def _get_mcp_tools(session: ClientSession, allowed_names: list[str] | None = None) -> list[dict[str, Any]]:
     """
-    Fetch available tools from the MCP server and format them for Ollama.
+    Fetch available tools from the MCP server and filter them based on the agent's role.
 
     Args:
         session: An active MCP ClientSession.
+        allowed_names: A list of tool names this specific agent is allowed to see.
 
     Returns:
-        A list of dictionaries representing the tools in the format expected
-        by the Ollama API.
+        A list of dictionaries representing the scoped tools for the Ollama API.
     """
     tool_list_response = await session.list_tools()
     ollama_tools: list[dict[str, Any]] = []
     
     for tool in tool_list_response.tools:
-        ollama_tools.append(
-            {
-                "type": "function",
-                "function": {
-                    "name": tool.name,
-                    "description": tool.description,
-                    "parameters": tool.inputSchema,
-                },
-            }
-        )
-        
+        if allowed_names is None or tool.name in allowed_names:
+            ollama_tools.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": tool.inputSchema,
+                    },
+                }
+            )
+            
     return ollama_tools
+
+
+async def _run_worker_agent(
+    session: ClientSession,
+    agent_role: str,
+    task_instruction: str,
+    data_file_path: str,
+    model_name: str,
+    global_plots: list[PlotArtifact],
+    global_logs: list[tuple[str, str]],
+    max_iterations: int = 4
+) -> str:
+    """
+    Executes a specialist agent's loop. Handles retries if MCP tool execution fails.
+    """
+    allowed_tools = AGENT_TOOLS.get(agent_role, [])
+    tools = await _get_mcp_tools(session, allowed_names=allowed_tools)
+
+    system_prompt = WORKER_PROMPTS.get(agent_role, "You are a helpful assistant.")
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": f"Task: {task_instruction}"}
+    ]
+
+    global_logs.append(("info", f"Supervisor delegated task to '{agent_role}' agent."))
+
+    for iteration in range(max_iterations):
+        try:
+            response = ollama.chat(
+                model=model_name,
+                messages=messages,
+                tools=tools,
+            )
+            messages.append(response["message"])
+        except Exception as e:
+            error_msg = f"Worker '{agent_role}' failed to communicate with Ollama: {e}"
+            global_logs.append(("error", error_msg))
+            return error_msg
+
+        # If the worker didn't call any tools, its task is complete.
+        if not response["message"].get("tool_calls"):
+            worker_summary = response["message"].get("content", f"{agent_role} agent completed task silently.")
+            global_logs.append(("info", f"Worker '{agent_role}' finished task successfully."))
+            return worker_summary
+
+        tool_calls = response["message"]["tool_calls"]
+        mcp_tool_results: list[dict[str, Any]] = []
+
+        for tool_call in tool_calls:
+            tool_name = tool_call["function"]["name"]
+            tool_args = tool_call["function"]["arguments"]
+            tool_args["data_file_path"] = data_file_path  # Inject file path
+
+            try:
+                result = await session.call_tool(tool_name, arguments=tool_args)
+                
+                tool_output_raw = ""
+                if result.content and isinstance(result.content[0], types.TextContent):
+                    tool_output_raw = result.content[0].text
+
+                # Handle Execution Errors (LLM Retry Prompting)
+                if "Error:" in tool_output_raw:
+                    global_logs.append(("warning", f"Worker '{agent_role}' tool '{tool_name}' failed: {tool_output_raw}. Retrying..."))
+                    mcp_tool_results.append({
+                        "role": "tool",
+                        "content": f"Execution Error: {tool_output_raw}\nPlease correct your code/parameters and try again.",
+                    })
+                
+                # Handle Data Summaries & Stats
+                elif tool_name in ["get_column_summary", "run_correlation", "run_group_comparison", "run_linear_regression"]:
+                    mcp_tool_results.append({
+                        "role": "tool",
+                        "content": tool_output_raw,
+                    })
+                
+                # Handle Plotting Tools
+                else:
+                    if "|||" in tool_output_raw:
+                        path_part, code_part = tool_output_raw.split("|||", 1)
+                        global_plots.append({
+                            "path": path_part.strip(),
+                            "code": code_part.strip(),
+                            "name": tool_name
+                        })
+                        mcp_tool_results.append({
+                            "role": "tool",
+                            "content": f"Successfully generated plot at {path_part.strip()}",
+                        })
+                    else:
+                        global_plots.append({
+                            "path": tool_output_raw.strip(),
+                            "code": "# Source code unavailable.",
+                            "name": tool_name
+                        })
+                        mcp_tool_results.append({
+                            "role": "tool",
+                            "content": f"Successfully generated plot at {tool_output_raw.strip()}",
+                        })
+
+            except Exception as e:
+                error_msg = f"Tool '{tool_name}' crashed: {str(e)}"
+                global_logs.append(("error", error_msg))
+                mcp_tool_results.append({
+                    "role": "tool",
+                    "content": error_msg,
+                })
+
+        # Append tool execution results back to worker's context
+        messages.extend(mcp_tool_results)
+
+    # If the loop maxes out
+    return f"Worker '{agent_role}' reached maximum iterations and terminated. Last known state appended."
 
 
 async def run_analysis(
@@ -48,23 +199,10 @@ async def run_analysis(
     data_file_path: str,
     model_name: str,
     mcp_server_script: str,
-    max_iterations: int = 5
+    max_iterations: int = 7
 ) -> VizAnalysisResult:
     """
-    Run the LLM analysis in an agentic loop, allowing the AI to call tools,
-    evaluate data, and generate plots autonomously.
-
-    Args:
-        messages: The conversation history, including system and user prompts.
-        data_file_path: The absolute path to the data file to analyze.
-        model_name: The Ollama model to use for generation.
-        mcp_server_script: The path to the MCP server Python script.
-        max_iterations: The maximum number of tool-calling iterations allowed
-            before forcing a final summary (prevents infinite loops).
-
-    Returns:
-        A VizAnalysisResult dictionary containing the markdown summary,
-        a list of generated PlotArtifacts, and execution logs.
+    Main entrypoint: Runs the Supervisor Agent which delegates to workers.
     """
     server_params = StdioServerParameters(
         command="python3",
@@ -73,110 +211,80 @@ async def run_analysis(
 
     plot_results: list[PlotArtifact] = []
     logs: list[tuple[str, str]] = []
+    
+    # Inject Supervisor Prompt into the incoming conversation
+    supervisor_messages = [{"role": "system", "content": SUPERVISOR_PROMPT}] + messages
 
     try:
         async with stdio_client(server_params) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
-                tools = await _get_mcp_tools(session)
+
+                # The supervisor ONLY has access to the delegate_task pseudo-tool
+                supervisor_tools = [DELEGATE_TASK_TOOL]
 
                 for iteration in range(max_iterations):
-                    # 1. Ask Ollama for the next action
                     try:
                         response = ollama.chat(
                             model=model_name,
-                            messages=messages,
-                            tools=tools,
+                            messages=supervisor_messages,
+                            tools=supervisor_tools,
                         )
-                        messages.append(response["message"])
+                        supervisor_messages.append(response["message"])
                     except Exception as e:
-                        logs.append(("error", f"Error communicating with Ollama: {e}"))
+                        logs.append(("error", f"Error communicating with Supervisor: {e}"))
                         break
 
-                    # 2. Check if the AI decided to stop calling tools
+                    # If supervisor decides it is done (no tool calls), exit loop
                     if not response["message"].get("tool_calls"):
                         break
 
-                    # 3. Execute the requested tools via MCP
                     tool_calls = response["message"]["tool_calls"]
-                    mcp_tool_results: list[dict[str, Any]] = []
+                    supervisor_tool_results: list[dict[str, Any]] = []
 
                     for tool_call in tool_calls:
-                        tool_name = tool_call["function"]["name"]
-                        tool_args = tool_call["function"]["arguments"]
-                        
-                        # Inject the data path automatically so the LLM does not have to guess it
-                        tool_args["data_file_path"] = data_file_path
+                        if tool_call["function"]["name"] == "delegate_task":
+                            agent_role = tool_call["function"]["arguments"].get("agent_role")
+                            task_instruction = tool_call["function"]["arguments"].get("task_instruction")
 
-                        try:
-                            result = await session.call_tool(tool_name, arguments=tool_args)
-
-                            tool_output_raw = ""
-                            if result.content and isinstance(result.content[0], types.TextContent):
-                                tool_output_raw = result.content[0].text
-
-                            # Handle Tool Errors gracefully
-                            if "Error:" in tool_output_raw:
-                                logs.append(("warning", f"Tool '{tool_name}' failed: {tool_output_raw}"))
-                                mcp_tool_results.append({
+                            if agent_role not in WORKER_PROMPTS:
+                                supervisor_tool_results.append({
                                     "role": "tool",
-                                    "content": f"Tool Error: {tool_output_raw}",
+                                    "content": f"Error: Agent role '{agent_role}' does not exist.",
                                 })
-                            
-                            # Handle Data Summary Tools (Return text context to the LLM)
-                            elif tool_name == "get_column_summary":
-                                mcp_tool_results.append({
-                                    "role": "tool",
-                                    "content": tool_output_raw,
-                                })
-                                
-                            # Handle Plotting Tools (Parse the path and code snippet)
-                            else:
-                                if "|||" in tool_output_raw:
-                                    path_part, code_part = tool_output_raw.split("|||", 1)
-                                    plot_results.append({
-                                        "path": path_part.strip(),
-                                        "code": code_part.strip(),
-                                        "name": tool_name
-                                    })
-                                    mcp_tool_results.append({
-                                        "role": "tool",
-                                        "content": f"Successfully generated plot at {path_part.strip()}",
-                                    })
-                                else:
-                                    plot_results.append({
-                                        "path": tool_output_raw.strip(),
-                                        "code": "# Source code unavailable for this plot.",
-                                        "name": tool_name
-                                    })
-                                    mcp_tool_results.append({
-                                        "role": "tool",
-                                        "content": f"Successfully generated plot at {tool_output_raw}",
-                                    })
+                                continue
 
-                        except Exception as e:
-                            error_msg = f"Failed to execute tool '{tool_name}': {str(e)}"
-                            logs.append(("error", error_msg))
-                            mcp_tool_results.append({
+                            # Execute the worker agent
+                            worker_result = await _run_worker_agent(
+                                session=session,
+                                agent_role=agent_role,
+                                task_instruction=task_instruction,
+                                data_file_path=data_file_path,
+                                model_name=model_name,
+                                global_plots=plot_results,
+                                global_logs=logs
+                            )
+
+                            supervisor_tool_results.append({
                                 "role": "tool",
-                                "content": error_msg,
+                                "content": f"Results from {agent_role}:\n{worker_result}",
                             })
 
-                    # 4. Append tool results to history to inform the AI's next decision
-                    messages.extend(mcp_tool_results)
+                    # Feed worker results back to the supervisor
+                    supervisor_messages.extend(supervisor_tool_results)
 
     except Exception as e:
-        logs.append(("error", f"Fatal error in MCP session: {str(e)}\n{traceback.format_exc()}"))
+        logs.append(("error", f"Fatal error in MAS session: {str(e)}\n{traceback.format_exc()}"))
 
-    # 5. Extract the final conversational summary
+    # Extract the final synthesis summary from the Supervisor
     summary = ""
-    if messages and messages[-1].get("role") == "assistant":
-        summary = messages[-1].get("content", "")
+    if supervisor_messages and supervisor_messages[-1].get("role") == "assistant":
+        summary = supervisor_messages[-1].get("content", "")
         
     if not summary:
         summary = "Analysis complete. Please review the generated visualizations below."
 
-    # Enforce type safety before returning
+    # Enforce type safety
     final_logs: list[tuple[Any, str]] = []
     for log_type, msg in logs:
         if log_type in ("info", "warning", "error"):

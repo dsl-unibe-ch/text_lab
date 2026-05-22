@@ -21,7 +21,7 @@ sys.path.append(src_dir)
 from auth import check_token
 from core.chat_engine import check_ollama_server, get_gpu_name
 from core.visualization.viz_agent import run_analysis
-from core.visualization.viz_config import DEFAULT_PROMPT, SYSTEM_PROMPT
+from core.visualization.viz_config import DEFAULT_PROMPT
 from core.visualization.viz_utils import get_fast_data_preview, save_data_file
 
 # --- Page Configuration ---
@@ -58,7 +58,7 @@ def render_sidebar() -> str:
     is_high_memory_gpu = any(x in current_gpu for x in ["A100", "H100", "H200"])
 
     small_models = ["gemma4:26b", "ministral-3:14b"]
-    large_models = ["qwen3-coder-next:latest", "gemma4:31b"]
+    large_models = ["qwen3-coder-next:latest", "gemma4:31b", "deepseek-r1:70b", "llama3.3", "firefunction-v2", "qwen3.6:35b", "qwen3.5:122b", "mistral-medium-3.5:128b"]
 
     if is_high_memory_gpu:
         available_models = small_models + large_models
@@ -177,7 +177,7 @@ def main() -> None:
     )
 
     if st.button("Generate Visualisations", type="primary", disabled=(not uploaded_file)):
-        with st.spinner("AI is analyzing your data and generating plots..."):
+        with st.spinner("Multi-Agent Team is analyzing your data... this may take a moment as agents coordinate."):
             run_id = f"ds-{uuid.uuid4().hex[:8]}"
             
             try:
@@ -199,8 +199,9 @@ def main() -> None:
                     data_head = df.to_string()
                     final_user_prompt = user_prompt if user_prompt.strip() else DEFAULT_PROMPT
 
+                    # We removed SYSTEM_PROMPT here because the Supervisor prompt 
+                    # is now injected directly inside run_analysis() in viz_agent.py
                     messages = [
-                        {"role": "system", "content": SYSTEM_PROMPT},
                         {
                             "role": "user",
                             "content": (
@@ -210,7 +211,7 @@ def main() -> None:
                         },
                     ]
 
-                    # Execute the autonomous MCP agent loop
+                    # Execute the autonomous MAS loop
                     analysis_result = asyncio.run(
                         run_analysis(messages, data_file_path, selected_model, MCP_SERVER_SCRIPT)
                     )
@@ -220,12 +221,15 @@ def main() -> None:
                     plot_results = analysis_result["plots"]
                     logs = analysis_result["logs"]
 
-                    # Display engine logs
-                    for log_type, msg in logs:
-                        if log_type == "error":
-                            st.error(msg)
-                        else:
-                            st.warning(msg)
+                    # --- NEW: Display Agent Execution Logs ---
+                    with st.expander("🤖 View Multi-Agent Execution Logs", expanded=False):
+                        for log_type, msg in logs:
+                            if log_type == "error":
+                                st.error(msg)
+                            elif log_type == "warning":
+                                st.warning(msg)
+                            else:
+                                st.info(msg)
 
                     # Read generated artifacts into memory
                     final_artifacts = []

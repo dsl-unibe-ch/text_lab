@@ -34,6 +34,12 @@ from core.visualization.plot_static import (
     plot_static_wordcloud_impl,
 )
 
+from core.visualization.stats_analysis import (
+    run_correlation_impl,
+    run_group_comparison_impl,
+    run_linear_regression_impl,
+)
+
 # Configure strict logging to prevent interference with stdout/stderr JSON-RPC
 logging.basicConfig(level=logging.ERROR)
 logging.getLogger("mcp").setLevel(logging.ERROR)
@@ -81,6 +87,15 @@ def generate_custom_plotly(
 ) -> str:
     """Executes custom Python code (px, pd) to generate complex Plotly charts."""
     return generate_custom_plotly_impl(data_file_path, python_code, plot_filename_keyword)
+
+
+@mcp.tool()
+def get_column_summary(data_file_path: str, column: str) -> str:
+    """
+    Analyzes a specific column in the dataset and returns a statistical summary.
+    Use this to check values, ranges, or unique items before selecting plotting parameters.
+    """
+    return get_column_summary_impl(data_file_path, column)
 
 
 # --- STATIC TOOLS (Matplotlib/Seaborn) ---
@@ -134,6 +149,43 @@ def plot_static_wordcloud(
     Use this when the user wants to visualize the most frequent terms in a dataset.
     """
     return plot_static_wordcloud_impl(data_file_path, text_column, title)
+
+
+# --- STATISTICAL TOOLS ---
+
+@mcp.tool()
+def run_correlation(
+    data_file_path: str, x_column: str, y_column: str, method: str = "pearson"
+) -> str:
+    """
+    Computes statistical correlation (pearson, spearman) between two numeric columns.
+    Use this to mathematically verify relationships before plotting scatterplots.
+    """
+    return run_correlation_impl(data_file_path, x_column, y_column, method)
+
+
+@mcp.tool()
+def run_group_comparison(
+    data_file_path: str, target_col: str, group_col: str
+) -> str:
+    """
+    Performs T-tests (2 groups) or ANOVA (>2 groups) to see if a numeric variable 
+    (target_col) differs significantly across categories (group_col).
+    Use this before generating boxplots.
+    """
+    return run_group_comparison_impl(data_file_path, target_col, group_col)
+
+
+@mcp.tool()
+def run_linear_regression(
+    data_file_path: str, target_col: str, predictor_cols: list[str]
+) -> str:
+    """
+    Runs an OLS Linear Regression. 
+    target_col is the dependent variable (Y) you want to predict.
+    predictor_cols is a list of independent variables (X).
+    """
+    return run_linear_regression_impl(data_file_path, target_col, predictor_cols)
 
 
 if __name__ == "__main__":
