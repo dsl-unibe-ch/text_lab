@@ -31,6 +31,8 @@ from core.chat_engine import (
     format_chat_history
 )
 
+from core.model_config import get_available_models, is_high_memory_gpu
+
 check_token()
 
 def main():
@@ -57,17 +59,16 @@ def main():
 
     # --- GPU Detection & Model Filtering ---
     current_gpu = get_gpu_name()
-    small_models = ["gemma4:26b", "ministral-3:14b"]
-    large_models = ["qwen3-coder-next:latest", "gemma4:31b"]
+    available_models_in_ui = get_available_models(current_gpu)
 
-    is_high_memory_gpu = any(x in current_gpu for x in ["A100", "H100", "H200"])
-
-    if is_high_memory_gpu:
-        available_models_in_ui = small_models + large_models
-        gpu_badge = f"🚀 **High-Performance Mode** detected ({current_gpu})"
+    if is_high_memory_gpu(current_gpu):
+        gpu_badge = f"**High-Performance Mode** detected ({current_gpu})"
     else:
-        available_models_in_ui = small_models
-        gpu_badge = f"⚠️ **Standard Mode** detected ({current_gpu}). Large models are hidden."
+        gpu_badge = f" **Standard Mode** detected ({current_gpu}). Large models are hidden."
+
+    if not available_models_in_ui:
+        st.error("No models are configured. Please check src/config/models.json.")
+        st.stop()
 
     # Sidebar
     st.sidebar.title("Model Selection")

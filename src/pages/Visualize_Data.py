@@ -26,6 +26,7 @@ from core.chat_engine import check_ollama_server, get_gpu_name
 from core.visualization.viz_agent import run_analysis
 from core.visualization.viz_config import DEFAULT_PROMPT
 from core.visualization.viz_utils import get_fast_data_preview, save_data_file
+from core.model_config import get_available_models, is_high_memory_gpu
 
 # --- Page Configuration ---
 favicon_path = os.path.join(src_dir, "assets", "text_lab_logo.png")
@@ -52,17 +53,16 @@ def render_sidebar() -> str:
     st.sidebar.title("Model Selection")
     
     current_gpu = get_gpu_name()
-    is_high_memory_gpu = any(x in current_gpu for x in ["A100", "H100", "H200"])
+    available_models = get_available_models(current_gpu)
 
-    small_models = ["gemma4:26b", "ministral-3:14b"]
-    large_models = ["qwen3-coder-next:latest", "gemma4:31b", "deepseek-r1:70b", "llama3.3", "firefunction-v2", "qwen3.6:35b", "qwen3.5:122b", "mistral-medium-3.5:128b"]
-
-    if is_high_memory_gpu:
-        available_models = small_models + large_models
+    if is_high_memory_gpu(current_gpu):
         gpu_badge = f"High-Performance Mode ({current_gpu})"
     else:
-        available_models = small_models
         gpu_badge = f"Standard Mode ({current_gpu})"
+
+    if not available_models:
+        st.sidebar.error("No models are configured. Please check src/config/models.json.")
+        st.stop()
 
     st.sidebar.markdown(f"**{gpu_badge}**")
 

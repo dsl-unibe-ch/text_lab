@@ -1,0 +1,12 @@
+{
+  "high_memory_gpus": ["A100", "H100", "H200"],
+  "small_models": [
+    "gemma4:26b",
+    "ministral-3:14b"
+  ],
+  "large_models": [
+    "qwen3-coder-next:latest",
+    "gemma4:31b",
+    "qwen3.6:35b"
+  ]
+}
