@@ -78,8 +78,9 @@ You have access to the following specialist agents:
 Instructions:
 1. Analyze the user's request and the provided Data Head.
 2. Decide which specialist agents need to be called and what specific instructions to give them.
-3. Call the `delegate_task` tool to send instructions to a specialist. You can call multiple specialists.
-4. Once all specialists have returned their results, synthesize their findings into a final, comprehensive Markdown summary for the user. Do not mention the agents in your final summary; present it as a cohesive analysis.
+3. Call the `delegate_task` tool to send instructions to a specialist. You can call multiple specialists in parallel.
+4. Once a specialist returns its results, do NOT re-delegate the same task. Only delegate again if the prior result was an explicit error and you have a corrective instruction.
+5. Once all specialists have returned their results, synthesize their findings into a final, comprehensive Markdown summary for the user. Do not mention the agents in your final summary; present it as a cohesive analysis.
 """
 
 INTERACTIVE_PROMPT: str = """

@@ -4,7 +4,9 @@ Generates publication-ready Matplotlib and Seaborn charts (.png).
 """
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
+import pandas.api.types as ptypes
 import seaborn as sns
 from wordcloud import WordCloud
 
@@ -132,7 +134,8 @@ def plot_static_boxplot_impl(
         plt.title(title)
         plt.xlabel(x_label)
         plt.ylabel(y_label)
-        plt.xticks(rotation=45)
+        if not ptypes.is_numeric_dtype(df[x_column]):
+            plt.xticks(rotation=45)
 
         plot_path = get_plot_path(
             data_file_path, f"boxplot_{y_column}_by_{x_column}", ext=".png"
@@ -157,36 +160,49 @@ def generate_custom_static_plot_impl(
 ) -> str:
     """
     Executes custom Python code to generate complex Matplotlib/Seaborn charts.
+    The LLM may either assign its figure to `fig`, or just call seaborn/matplotlib
+    directly; we save the current active figure in either case.
     """
     try:
         df = load_data_safely(data_file_path)
 
         local_scope = {
             "pd": pd,
+            "np": np,
             "sns": sns,
             "plt": plt,
+            "WordCloud": WordCloud,
             "df": df,
             "data_file_path": data_file_path,
         }
 
         clean_code = python_code.replace("```python", "").replace("```", "").strip()
 
-        plt.clf()
-        plt.figure(figsize=(10, 6))
+        # Close any stale figures from previous runs in this process.
+        plt.close("all")
 
         exec(clean_code, {}, local_scope)
+
+        # Prefer an explicit `fig` if the LLM created one; otherwise use the
+        # currently active matplotlib figure.
+        fig = local_scope.get("fig")
+        if fig is None:
+            if not plt.get_fignums():
+                return "Error: Your code did not produce any matplotlib figure."
+            fig = plt.gcf()
 
         plot_path = get_plot_path(
             data_file_path, f"custom_static_{plot_filename_keyword}", ext=".png"
         )
-        plt.savefig(plot_path, bbox_inches="tight", dpi=300)
-        plt.close()
+        fig.savefig(plot_path, bbox_inches="tight", dpi=300)
+        plt.close("all")
 
         full_user_code = _generate_static_code_snippet(clean_code)
 
         return f"{plot_path}|||{full_user_code}"
 
     except Exception as e:
+        plt.close("all")
         return f"Error executing custom static plot code: {str(e)}"
     
 
@@ -215,7 +231,8 @@ def plot_static_lineplot_impl(
         plt.title(title)
         plt.xlabel(x_label)
         plt.ylabel(y_label)
-        plt.xticks(rotation=45)
+        if not ptypes.is_numeric_dtype(df[x_column]):
+            plt.xticks(rotation=45)
 
         plot_path = get_plot_path(
             data_file_path, f"lineplot_{y_column}_over_{x_column}", ext=".png"

@@ -5,7 +5,8 @@ Provides tools for the LLM to inspect dataset columns before plotting.
 
 import pandas as pd
 
-from core.visualization.viz_utils import load_data_safely
+from core.visualization.viz_config import MAX_ROWS
+from core.visualization.viz_utils import load_data_safely, was_last_load_truncated
 
 
 def get_column_summary_impl(data_file_path: str, column: str) -> str:
@@ -26,7 +27,14 @@ def get_column_summary_impl(data_file_path: str, column: str) -> str:
     """
     try:
         df = load_data_safely(data_file_path)
-        
+
+        truncation_note = ""
+        if was_last_load_truncated(data_file_path):
+            truncation_note = (
+                f"\n\nNote: dataset was truncated to the first {MAX_ROWS:,} rows for "
+                "memory safety. Mention this in your final summary."
+            )
+
         if column not in df.columns:
             return f"Error: Column '{column}' not found in the dataset."
             
@@ -40,7 +48,7 @@ def get_column_summary_impl(data_file_path: str, column: str) -> str:
             
             return (
                 f"Numeric Column '{column}': Min={min_val}, Max={max_val}, "
-                f"Mean={mean_val:.2f}, Nulls={null_count}"
+                f"Mean={mean_val:.2f}, Nulls={null_count}{truncation_note}"
             )
         else:
             unique_vals = col_data.unique()
@@ -54,7 +62,7 @@ def get_column_summary_impl(data_file_path: str, column: str) -> str:
                 
             return (
                 f"Categorical Column '{column}': {total_unique} unique values. "
-                f"Top values: {val_str}. Nulls={null_count}"
+                f"Top values: {val_str}. Nulls={null_count}{truncation_note}"
             )
             
     except Exception as e:

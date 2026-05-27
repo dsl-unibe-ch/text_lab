@@ -3,8 +3,10 @@ Interactive Plotting Module for the AI Visualization Engine.
 Generates web-ready interactive Plotly charts (.json).
 """
 
+import numpy as np
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 
 from core.visualization.viz_utils import (
     generate_code_snippet,
@@ -43,7 +45,7 @@ def plot_histogram_impl(
             f"fig = px.histogram(df, x='{column}'{color_arg}, "
             f"title='{title}', template='plotly_white')"
         )
-        code = generate_code_snippet(code_logic)
+        code = generate_code_snippet(code_logic, data_file_path)
 
         return f"{plot_path}|||{code}"
     except Exception as e:
@@ -87,7 +89,7 @@ def plot_scatterplot_impl(
             f"fig = px.scatter(df, x='{x_column}', y='{y_column}'{color_arg}, "
             f"title='{title}', template='plotly_white')"
         )
-        code = generate_code_snippet(code_logic)
+        code = generate_code_snippet(code_logic, data_file_path)
 
         return f"{plot_path}|||{code}"
     except Exception as e:
@@ -131,7 +133,7 @@ def plot_boxplot_impl(
             f"fig = px.box(df, x='{x_column}', y='{y_column}'{color_arg}, "
             f"title='{title}', template='plotly_white')"
         )
-        code = generate_code_snippet(code_logic)
+        code = generate_code_snippet(code_logic, data_file_path)
 
         return f"{plot_path}|||{code}"
     except Exception as e:
@@ -175,7 +177,7 @@ def plot_lineplot_impl(
             f"fig = px.line(df, x='{x_column}', y='{y_column}'{color_arg}, "
             f"title='{title}', template='plotly_white')"
         )
-        code = generate_code_snippet(code_logic)
+        code = generate_code_snippet(code_logic, data_file_path)
 
         return f"{plot_path}|||{code}"
     except Exception as e:
@@ -191,10 +193,13 @@ def generate_custom_plotly_impl(
     try:
         df = load_data_safely(data_file_path)
 
-        # Prepare a secure local scope for `exec`
+        # Local scope for `exec`. Note: this is not a security sandbox -- the LLM
+        # is trusted. Globals are kept empty merely to reduce accidental name leaks.
         local_scope = {
             "pd": pd,
             "px": px,
+            "go": go,
+            "np": np,
             "df": df,
             "data_file_path": data_file_path,
         }
@@ -218,7 +223,7 @@ def generate_custom_plotly_impl(
         )
         fig.write_json(plot_path)
 
-        full_user_code = generate_code_snippet(clean_code)
+        full_user_code = generate_code_snippet(clean_code, data_file_path)
 
         return f"{plot_path}|||{full_user_code}"
 

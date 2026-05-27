@@ -13,9 +13,6 @@ import plotly.io as pio
 import streamlit as st
 from PIL import Image
 
-# Import Streamlit's context manager to fix missing async logs
-from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
-
 # Ensure absolute imports resolve correctly
 current_dir = os.path.dirname(os.path.abspath(__file__))
 src_dir = os.path.dirname(current_dir)
@@ -24,7 +21,7 @@ sys.path.append(src_dir)
 from auth import check_token
 from core.chat_engine import check_ollama_server, get_gpu_name
 from core.visualization.viz_agent import run_analysis
-from core.visualization.viz_config import DEFAULT_PROMPT
+from core.visualization.viz_config import DEFAULT_PROMPT, MAX_ROWS
 from core.visualization.viz_utils import get_fast_data_preview, save_data_file
 from core.model_config import get_available_models, is_high_memory_gpu
 
@@ -77,7 +74,7 @@ def render_sidebar() -> str:
 
 def render_results(
     summary: str, 
-    final_artifacts: list[dict[str, str | bytes]], 
+    final_artifacts: list[dict], 
     run_id: str
 ) -> None:
     st.success("Analysis Complete.")
@@ -94,11 +91,10 @@ def render_results(
         filename = artifact["filename"]
         file_bytes = artifact["bytes"]
         code = artifact["code"]
+        fig = artifact.get("fig")
         
         with st.container():
-            if filename.endswith(".json"):
-                json_str = file_bytes.decode("utf-8")
-                fig = pio.from_json(json_str)
+            if filename.endswith(".json") and fig is not None:
                 st.plotly_chart(fig, use_container_width=True, key=f"plotly_{run_id}_{idx}")
             else:
                 st.image(file_bytes, caption=filename)
@@ -114,11 +110,12 @@ def render_results(
             filename = artifact["filename"]
             file_bytes = artifact["bytes"]
             code = artifact["code"]
+            fig = artifact.get("fig")
             
-            if filename.endswith(".json"):
-                fig = pio.from_json(file_bytes.decode("utf-8"))
+            if filename.endswith(".json") and fig is not None:
                 html_filename = filename.replace(".json", ".html")
-                zf.writestr(html_filename, fig.to_html(include_plotlyjs="cdn"))
+                # include_plotlyjs=True embeds the JS so the HTML works offline.
+                zf.writestr(html_filename, fig.to_html(include_plotlyjs=True))
             else:
                 zf.writestr(filename, file_bytes)
                 
@@ -172,14 +169,12 @@ def main() -> None:
     )
 
     if st.button("Generate Visualisations", type="primary", disabled=(not uploaded_file)):
+        summary = ""
+        final_artifacts: list[dict] = []
+
         with st.status("Orchestrating Multi-Agent Team...", expanded=True) as status_box:
-            
-            # Capture current Streamlit context to inject into async callback
-            ctx = get_script_run_ctx()
-            
+
             def live_log_callback(log_type: str, msg: str):
-                if ctx:
-                    add_script_run_ctx(ctx=ctx)
                 if log_type == "error":
                     status_box.error(msg)
                 elif log_type == "warning":
@@ -213,7 +208,8 @@ def main() -> None:
                             "role": "user",
                             "content": (
                                 f"User Request: {final_user_prompt}\n\n"
-                                f"Data Head:\n{data_head}"
+                                f"Data Head:\n{data_head}\n\n"
+                                f"Note: datasets larger than {MAX_ROWS:,} rows will be truncated."
                             ),
                         },
                     ]
@@ -230,13 +226,11 @@ def main() -> None:
                         )
                     )
 
-                    # FIX: Keep the box expanded after analysis completes so logs remain visible
                     status_box.update(label="Analysis Complete", state="complete", expanded=True)
 
                     summary = analysis_result["summary"]
                     plot_results = analysis_result["plots"]
 
-                    final_artifacts = []
                     for item in plot_results:
                         path = item["path"]
                         code = item["code"]
@@ -245,12 +239,21 @@ def main() -> None:
                             filename = os.path.basename(path)
                             with open(path, "rb") as f:
                                 img_bytes = f.read()
-                                
-                            final_artifacts.append({
+
+                            artifact: dict = {
                                 "filename": filename,
                                 "bytes": img_bytes,
-                                "code": code
-                            })
+                                "code": code,
+                                "fig": None,
+                            }
+                            # Parse Plotly JSON once and reuse for both render + export.
+                            if filename.endswith(".json"):
+                                try:
+                                    artifact["fig"] = pio.from_json(img_bytes.decode("utf-8"))
+                                except Exception as e:
+                                    status_box.warning(f"Failed to parse plot {filename}: {e}")
+                                    continue
+                            final_artifacts.append(artifact)
                         else:
                             st.error(f"Could not find plot at: {path}")
 
@@ -259,7 +262,7 @@ def main() -> None:
                 status_box.error(f"An unexpected error occurred: {e}")
                 st.stop()
 
-            render_results(summary, final_artifacts, run_id)
+        render_results(summary, final_artifacts, run_id)
 
 
 if __name__ == "__main__":

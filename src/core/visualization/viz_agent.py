@@ -121,7 +121,9 @@ async def _run_worker_agent(
 
         for tool_call in tool_calls:
             tool_name = tool_call["function"]["name"]
-            tool_args = tool_call["function"]["arguments"]
+            tool_args = tool_call["function"].get("arguments")
+            if not isinstance(tool_args, dict):
+                tool_args = {}
             tool_args["data_file_path"] = data_file_path
 
             try:
@@ -131,9 +133,11 @@ async def _run_worker_agent(
                 if result.content and isinstance(result.content[0], types.TextContent):
                     tool_output_raw = result.content[0].text
                 
+                is_error = tool_output_raw.strip().startswith("Error")
+
                 # Handle Data Summaries & Stats
                 if tool_name in ["get_column_summary", "run_correlation", "run_group_comparison", "run_linear_regression", "rank_target_correlations"]:
-                    if "Error" in tool_output_raw:
+                    if is_error:
                         _log("warning", f"Worker '{agent_role}' stat tool '{tool_name}' failed. Retrying...")
                         mcp_tool_results.append({
                             "role": "tool",
@@ -147,8 +151,7 @@ async def _run_worker_agent(
                 
                 # Handle Plotting Tools
                 else:
-                    # FIX: Plotting tools MUST return path|||code. If they don't, force a retry.
-                    if "|||" in tool_output_raw:
+                    if not is_error and "|||" in tool_output_raw:
                         path_part, code_part = tool_output_raw.split("|||", 1)
                         global_plots.append({
                             "path": path_part.strip(),
