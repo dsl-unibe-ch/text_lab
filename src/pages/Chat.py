@@ -28,7 +28,12 @@ from core.chat_engine import (
     extract_model_name,
     process_uploaded_files,
     get_response_generator,
-    format_chat_history
+    format_chat_history,
+    estimate_tokens,
+    chunk_text,
+    get_chunk_answer,
+    get_synthesis_generator,
+    MAX_CONTEXT_TOKENS,
 )
 
 from core.model_config import get_available_models, is_high_memory_gpu
@@ -170,27 +175,55 @@ def main():
         # 4. Generate response
         last_msg_obj = st.session_state["messages"][-1]
         original_content = last_msg_obj["content"]
-        last_msg_obj["content"] = full_prompt
-        
+
         # --- DYNAMIC SPINNER LOGIC ---
         if is_model_loaded(model_name):
             spinner_text = "Thinking..."
         else:
             spinner_text = f"🚀 Loading **{model_name}** into GPU memory... This first run may take 1-2 minutes."
 
-        with st.spinner(spinner_text):
-            try:
-                response_stream = get_response_generator(model_name, st.session_state["messages"])
+        needs_chunking = bool(context_text) and estimate_tokens(context_text) > MAX_CONTEXT_TOKENS
+
+        try:
+            if needs_chunking:
+                chunks = chunk_text(context_text)
+                partial_answers = []
+                progress_placeholder = st.empty()
+
+                for i, chunk_content in enumerate(chunks, 1):
+                    progress_placeholder.info(
+                        f"📄 Analyzing document part {i} of {len(chunks)} "
+                        f"(~{estimate_tokens(context_text):,} tokens total)..."
+                    )
+                    answer = get_chunk_answer(
+                        model_name, chunk_content, i, len(chunks),
+                        user_text, st.session_state["messages"][:-1]
+                    )
+                    partial_answers.append(answer)
+
+                progress_placeholder.info(f"🔗 Synthesizing responses from {len(chunks)} chunks...")
                 with st.chat_message("assistant"):
-                    assistant_reply = st.write_stream(response_stream)
+                    synthesis_stream = get_synthesis_generator(
+                        model_name, partial_answers,
+                        user_text, st.session_state["messages"][:-1]
+                    )
+                    assistant_reply = st.write_stream(synthesis_stream)
+                progress_placeholder.empty()
                 st.session_state["messages"].append({"role": "assistant", "content": assistant_reply})
-            except ResponseError as e:
-                status = getattr(e, "status_code", "?")
-                st.error(f"Ollama ResponseError (status={status})")
-                st.code(str(e))
-        
-        # Restore original content for display history
-        last_msg_obj["content"] = original_content
+            else:
+                last_msg_obj["content"] = full_prompt
+                with st.spinner(spinner_text):
+                    response_stream = get_response_generator(model_name, st.session_state["messages"])
+                    with st.chat_message("assistant"):
+                        assistant_reply = st.write_stream(response_stream)
+                    st.session_state["messages"].append({"role": "assistant", "content": assistant_reply})
+        except ResponseError as e:
+            status = getattr(e, "status_code", "?")
+            st.error(f"Ollama ResponseError (status={status})")
+            st.code(str(e))
+        finally:
+            # Always restore display text so chat history shows the friendly version
+            last_msg_obj["content"] = original_content
 
     if len(st.session_state["messages"]) > 0:
         chat_export = format_chat_history(st.session_state["messages"])

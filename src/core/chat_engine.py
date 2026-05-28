@@ -22,6 +22,11 @@ else:
 
 OLLAMA_MODELS = os.getenv("OLLAMA_MODELS", "/opt/ollama/models")
 
+# --- Context / Token Management ---
+CHARS_PER_TOKEN = 4          # rough approximation for token counting
+MAX_CONTEXT_TOKENS = 75_000  # trigger chunked processing above this (~300K chars)
+CHUNK_SIZE_TOKENS = 14_000   # tokens per chunk sent to the LLM (~56K chars)
+
 
 def is_port_open(host: str, port: int) -> bool:
     """
@@ -238,6 +243,112 @@ def get_response_generator(model_name: str, messages: List[Dict[str, str]]) -> G
     stream = ollama.chat(model=model_name, messages=messages, stream=True)
     for chunk in stream:
         yield chunk["message"]["content"]
+
+
+def estimate_tokens(text: str) -> int:
+    """Estimate the number of tokens in a string using a character-based heuristic."""
+    return max(1, len(text) // CHARS_PER_TOKEN)
+
+
+def chunk_text(text: str, chunk_size_tokens: int = CHUNK_SIZE_TOKENS) -> List[str]:
+    """
+    Split text into chunks of approximately chunk_size_tokens each.
+    Prefers splitting on paragraph breaks to preserve coherence.
+
+    Args:
+        text (str): The text to split.
+        chunk_size_tokens (int): Target token count per chunk.
+
+    Returns:
+        List[str]: Non-empty text chunks.
+    """
+    chunk_size_chars = chunk_size_tokens * CHARS_PER_TOKEN
+    chunks: List[str] = []
+    start = 0
+    while start < len(text):
+        end = start + chunk_size_chars
+        if end < len(text):
+            # prefer paragraph break, fall back to line break
+            bp = text.rfind('\n\n', start, end)
+            if bp == -1:
+                bp = text.rfind('\n', start, end)
+            if bp != -1 and bp > start:
+                end = bp
+        chunks.append(text[start:end].strip())
+        start = end
+    return [c for c in chunks if c]
+
+
+def get_chunk_answer(
+    model_name: str,
+    chunk: str,
+    chunk_index: int,
+    total_chunks: int,
+    user_question: str,
+    chat_history: List[Dict[str, str]],
+) -> str:
+    """
+    Send a single document chunk to the LLM and return a partial answer (non-streaming).
+
+    Args:
+        model_name (str): The language model to use.
+        chunk (str): The document fragment for this call.
+        chunk_index (int): 1-based index of this chunk.
+        total_chunks (int): Total number of chunks.
+        user_question (str): The user's original question.
+        chat_history (list): Conversation history *excluding* the current user turn.
+
+    Returns:
+        str: The model's partial answer for this chunk.
+    """
+    chunk_prompt = (
+        f"You are analyzing part {chunk_index} of {total_chunks} of a document.\n\n"
+        f"--- Document Part {chunk_index}/{total_chunks} ---\n{chunk}\n"
+        f"--- End of Part {chunk_index}/{total_chunks} ---\n\n"
+        f"Based only on the content above, provide a partial answer to:\n{user_question}"
+    )
+    messages = chat_history + [{"role": "user", "content": chunk_prompt}]
+    response = ollama.chat(model=model_name, messages=messages, stream=False)
+    if isinstance(response, dict):
+        return response["message"]["content"]
+    return response.message.content
+
+
+def get_synthesis_generator(
+    model_name: str,
+    partial_answers: List[str],
+    user_question: str,
+    chat_history: List[Dict[str, str]],
+) -> Generator[str, None, None]:
+    """
+    Stream a final synthesized answer from the LLM, combining all per-chunk partial answers.
+
+    Args:
+        model_name (str): The language model to use.
+        partial_answers (list): Collected answers from each chunk.
+        user_question (str): The user's original question.
+        chat_history (list): Conversation history *excluding* the current user turn.
+
+    Yields:
+        str: Incremental text chunks of the synthesized answer.
+    """
+    parts = "\n\n".join(
+        f"--- Answer from Part {i + 1} ---\n{ans}" for i, ans in enumerate(partial_answers)
+    )
+    synthesis_prompt = (
+        f"A long document was split into {len(partial_answers)} parts. "
+        f"Each part was analyzed separately to answer: \"{user_question}\"\n\n"
+        f"{parts}\n\n"
+        f"--- End of Partial Answers ---\n\n"
+        f"Now synthesize all of the above into one comprehensive, well-structured final answer."
+    )
+    messages = chat_history + [{"role": "user", "content": synthesis_prompt}]
+    stream = ollama.chat(model=model_name, messages=messages, stream=True)
+    for chunk in stream:
+        if isinstance(chunk, dict):
+            yield chunk["message"]["content"]
+        else:
+            yield chunk.message.content
 
 
 def format_chat_history(messages: List[Dict[str, str]]) -> str:
