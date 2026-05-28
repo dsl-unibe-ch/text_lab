@@ -19,7 +19,9 @@ from core.visualization.viz_config import (
     STATS_PROMPT,
     SUPERVISOR_PROMPT,
     PlotArtifact,
+    StatsArtifact,
     VizAnalysisResult,
+    get_tool_label,
 )
 
 WORKER_PROMPTS = {
@@ -79,6 +81,7 @@ async def _run_worker_agent(
     data_file_path: str,
     model_name: str,
     global_plots: list[PlotArtifact],
+    global_stats: list[StatsArtifact],
     global_logs: list[tuple[str, str]],
     max_iterations: int = 6,
     log_callback: Callable[[str, str], None] | None = None
@@ -108,6 +111,8 @@ async def _run_worker_agent(
     ]
 
     _log("info", f"Supervisor delegated task to '{agent_role}' agent.")
+
+    STATS_TOOLS = {"run_correlation", "run_group_comparison", "run_linear_regression", "rank_target_correlations"}
 
     for iteration in range(max_iterations):
         try:
@@ -148,11 +153,11 @@ async def _run_worker_agent(
 
                 # Route by response format:
                 # - Plot tools always return "path|||code"
-                # - Data summary / stats tools return plain text
+                # - Stats tools return plain text with an embedded ```python code block
+                # - Data summary tools return plain text
                 is_plot_tool = "|||" in tool_output_raw
 
                 if not is_plot_tool:
-                    # Data summary or stats tool — pass response straight to the model.
                     if is_error:
                         _log("warning", f"Worker '{agent_role}' stat tool '{tool_name}' failed. Retrying...")
                         mcp_tool_results.append({
@@ -160,6 +165,14 @@ async def _run_worker_agent(
                             "content": f"Execution Error: {tool_output_raw.strip()}\nPlease correct your code/parameters and try again.",
                         })
                     else:
+                        # For stats tools, capture result + code as a StatsArtifact for the UI.
+                        if tool_name in STATS_TOOLS:
+                            result_text, code_snippet = _extract_stats_code(tool_output_raw)
+                            global_stats.append({
+                                "title": get_tool_label(tool_name),
+                                "result": result_text,
+                                "code": code_snippet,
+                            })
                         mcp_tool_results.append({
                             "role": "tool",
                             "content": tool_output_raw,
@@ -200,6 +213,23 @@ async def _run_worker_agent(
     return f"Worker '{agent_role}' reached maximum iterations and terminated. Last known state appended."
 
 
+def _extract_stats_code(tool_output: str) -> tuple[str, str]:
+    """
+    Splits a stats tool output into (result_text, code_snippet).
+    Stats tools embed a ```python ... ``` block at the end of their output.
+    Returns the markdown table/summary and the code block separately.
+    """
+    import re
+    match = re.search(r"```python\n(.*?)```", tool_output, re.DOTALL)
+    if match:
+        code = match.group(1).strip()
+        result_text = tool_output[:match.start()].strip()
+    else:
+        code = ""
+        result_text = tool_output.strip()
+    return result_text, code
+
+
 async def run_analysis(
     messages: list[dict[str, Any]],
     data_file_path: str,
@@ -219,6 +249,7 @@ async def run_analysis(
     )
 
     plot_results: list[PlotArtifact] = []
+    stats_results: list[StatsArtifact] = []
     logs: list[tuple[str, str]] = []
     
     supervisor_messages = [{"role": "system", "content": SUPERVISOR_PROMPT}] + messages
@@ -268,6 +299,7 @@ async def run_analysis(
                                 data_file_path=data_file_path,
                                 model_name=model_name,
                                 global_plots=plot_results,
+                                global_stats=stats_results,
                                 global_logs=logs,
                                 log_callback=log_callback
                             )
@@ -299,5 +331,6 @@ async def run_analysis(
     return {
         "summary": summary,
         "plots": plot_results,
+        "stats": stats_results,
         "logs": final_logs
     }

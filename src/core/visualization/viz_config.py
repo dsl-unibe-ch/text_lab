@@ -13,10 +13,18 @@ class PlotArtifact(TypedDict):
     tool_name: str
 
 
+class StatsArtifact(TypedDict):
+    """Represents a single statistical analysis result returned by the stats agent."""
+    title: str      # short human-readable label, e.g. "T-test: radius_mean by diagnosis"
+    result: str     # the markdown table / summary text returned by the stats tool
+    code: str       # the reproducible Python code snippet embedded in the result
+
+
 class VizAnalysisResult(TypedDict):
     """Represents the complete final output of the visualization agentic loop."""
     summary: str
     plots: list[PlotArtifact]
+    stats: list[StatsArtifact]
     logs: list[tuple[Literal["info", "warning", "error"], str]]
 
 
@@ -170,6 +178,10 @@ _TOOL_LABELS: dict[str, str] = {
     "plot_static_correlation_heatmap": "Static Correlation Heatmap",
     "generate_custom_static_plot": "Custom Static Chart",
     "plot_static_wordcloud": "Word Cloud",
+    "run_correlation": "Correlation Analysis",
+    "run_group_comparison": "Group Comparison (T-test / ANOVA)",
+    "run_linear_regression": "Linear Regression (OLS)",
+    "rank_target_correlations": "Feature Correlation Ranking",
 }
 
 

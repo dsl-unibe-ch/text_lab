@@ -99,63 +99,69 @@ def render_sidebar() -> str:
 def render_results(
     summary: str, 
     final_artifacts: list[dict], 
+    stats_results: list[dict],
     run_id: str
 ) -> None:
     st.success("Analysis Complete.")
     st.subheader("Analysis Summary")
     st.markdown(summary)
 
-    st.subheader("Generated Visualisations")
-    
-    if not final_artifacts:
-        st.warning("No plots were generated. Try refining your prompt.")
-        return
+    if stats_results:
+        st.subheader("Statistical Analysis Results")
+        for item in stats_results:
+            with st.expander(f"📊 {item['title']}", expanded=True):
+                st.markdown(item["result"])
+                if item["code"]:
+                    st.code(item["code"], language="python")
+        st.divider()
 
-    for idx, artifact in enumerate(final_artifacts):
-        filename = artifact["filename"]
-        file_bytes = artifact["bytes"]
-        code = artifact["code"]
-        fig = artifact.get("fig")
-        tool_label = get_tool_label(artifact.get("tool_name", ""))
-        
-        with st.container():
-            if tool_label:
-                st.markdown(f"**{tool_label}**")
-            if filename.endswith(".json") and fig is not None:
-                st.plotly_chart(fig, use_container_width=True, key=f"plotly_{run_id}_{idx}")
-            else:
-                st.image(file_bytes, caption=filename)
-                
-            with st.expander(f"View Source Code: {tool_label or filename}"):
-                st.code(code, language="python")
-            
-            st.divider()
+    if final_artifacts:
+        st.subheader("Generated Visualisations")
 
-    zip_buffer = BytesIO()
-    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-        for artifact in final_artifacts:
+        for idx, artifact in enumerate(final_artifacts):
             filename = artifact["filename"]
             file_bytes = artifact["bytes"]
             code = artifact["code"]
             fig = artifact.get("fig")
+            tool_label = get_tool_label(artifact.get("tool_name", ""))
             
-            if filename.endswith(".json") and fig is not None:
-                html_filename = filename.replace(".json", ".html")
-                # include_plotlyjs=True embeds the JS so the HTML works offline.
-                zf.writestr(html_filename, fig.to_html(include_plotlyjs=True))
-            else:
-                zf.writestr(filename, file_bytes)
+            with st.container():
+                if tool_label:
+                    st.markdown(f"**{tool_label}**")
+                if filename.endswith(".json") and fig is not None:
+                    st.plotly_chart(fig, use_container_width=True, key=f"plotly_{run_id}_{idx}")
+                else:
+                    st.image(file_bytes, caption=filename)
+                    
+                with st.expander(f"View Source Code: {tool_label or filename}"):
+                    st.code(code, language="python")
                 
-            code_filename = filename.replace(".json", ".py").replace(".png", ".py")
-            zf.writestr(code_filename, code)
+                st.divider()
 
-    zip_buffer.seek(0)
-    st.download_button(
-        label="Download Dashboards & Code (.zip)",
-        data=zip_buffer,
-        file_name=f"{run_id}_analysis.zip",
-        mime="application/zip",
-    )
+        zip_buffer = BytesIO()
+        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+            for artifact in final_artifacts:
+                filename = artifact["filename"]
+                file_bytes = artifact["bytes"]
+                code = artifact["code"]
+                fig = artifact.get("fig")
+                
+                if filename.endswith(".json") and fig is not None:
+                    html_filename = filename.replace(".json", ".html")
+                    zf.writestr(html_filename, fig.to_html(include_plotlyjs=True))
+                else:
+                    zf.writestr(filename, file_bytes)
+                    
+                code_filename = filename.replace(".json", ".py").replace(".png", ".py")
+                zf.writestr(code_filename, code)
+
+        zip_buffer.seek(0)
+        st.download_button(
+            label="Download Dashboards & Code (.zip)",
+            data=zip_buffer,
+            file_name=f"{run_id}_analysis.zip",
+            mime="application/zip",
+        )
 
 
 def main() -> None:
@@ -308,6 +314,7 @@ def main() -> None:
 
                     summary = analysis_result["summary"]
                     plot_results = analysis_result["plots"]
+                    stats_results = analysis_result.get("stats", [])
 
                     for item in plot_results:
                         path = item["path"]
@@ -341,7 +348,7 @@ def main() -> None:
                 status_box.error(f"An unexpected error occurred: {e}")
                 st.stop()
 
-        render_results(summary, final_artifacts, run_id)
+        render_results(summary, final_artifacts, stats_results, run_id)
 
 
 if __name__ == "__main__":
