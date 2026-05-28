@@ -27,6 +27,15 @@ CHARS_PER_TOKEN = 4          # rough approximation for token counting
 MAX_CONTEXT_TOKENS = 75_000  # trigger chunked processing above this (~300K chars)
 CHUNK_SIZE_TOKENS = 14_000   # tokens per chunk sent to the LLM (~56K chars)
 
+# --- System Prompt ---
+SYSTEM_PROMPT = (
+    "You are a helpful, knowledgeable, and concise AI assistant. "
+    "Answer questions accurately and honestly. "
+    "If you are unsure about something, say so rather than guessing. "
+    "When analysing documents or data provided by the user, focus on the content given "
+    "and clearly indicate when you are drawing on your own knowledge versus the provided material."
+)
+
 
 def is_port_open(host: str, port: int) -> bool:
     """
@@ -240,7 +249,8 @@ def get_response_generator(model_name: str, messages: List[Dict[str, str]]) -> G
     Yields:
         str: Incremental text chunks from the language model.
     """
-    stream = ollama.chat(model=model_name, messages=messages, stream=True)
+    system_message = {"role": "system", "content": SYSTEM_PROMPT}
+    stream = ollama.chat(model=model_name, messages=[system_message] + messages, stream=True)
     for chunk in stream:
         yield chunk["message"]["content"]
 
@@ -307,7 +317,8 @@ def get_chunk_answer(
         f"--- End of Part {chunk_index}/{total_chunks} ---\n\n"
         f"Based only on the content above, provide a partial answer to:\n{user_question}"
     )
-    messages = chat_history + [{"role": "user", "content": chunk_prompt}]
+    system_message = {"role": "system", "content": SYSTEM_PROMPT}
+    messages = [system_message] + chat_history + [{"role": "user", "content": chunk_prompt}]
     response = ollama.chat(model=model_name, messages=messages, stream=False)
     if isinstance(response, dict):
         return response["message"]["content"]
@@ -342,7 +353,8 @@ def get_synthesis_generator(
         f"--- End of Partial Answers ---\n\n"
         f"Now synthesize all of the above into one comprehensive, well-structured final answer."
     )
-    messages = chat_history + [{"role": "user", "content": synthesis_prompt}]
+    system_message = {"role": "system", "content": SYSTEM_PROMPT}
+    messages = [system_message] + chat_history + [{"role": "user", "content": synthesis_prompt}]
     stream = ollama.chat(model=model_name, messages=messages, stream=True)
     for chunk in stream:
         if isinstance(chunk, dict):
