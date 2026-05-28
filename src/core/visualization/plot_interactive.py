@@ -185,6 +185,114 @@ def plot_lineplot_impl(
         return f"Error plotting interactive lineplot: {str(e)}"
 
 
+def plot_barchart_impl(
+    data_file_path: str,
+    x_column: str,
+    y_column: str,
+    title: str,
+    color_column: str | None = None,
+    aggregation: str = "mean",
+) -> str:
+    """
+    Generates and saves an interactive Plotly bar chart.
+
+    Args:
+        aggregation: How to aggregate y values per x category ('mean', 'sum', 'count', 'median').
+    """
+    try:
+        df = load_data_safely(data_file_path)
+        if x_column not in df.columns or y_column not in df.columns:
+            return f"Error: Columns '{x_column}' or '{y_column}' not found."
+
+        if color_column and color_column not in df.columns:
+            color_column = None
+
+        valid_aggs = {"mean", "sum", "count", "median"}
+        if aggregation not in valid_aggs:
+            aggregation = "mean"
+
+        agg_fn = getattr(df.groupby([x_column] + ([color_column] if color_column else []))[y_column], aggregation)
+        agg_df = agg_fn().reset_index()
+
+        color_arg = f", color='{color_column}'" if color_column else ""
+        fig = px.bar(
+            agg_df,
+            x=x_column,
+            y=y_column,
+            color=color_column,
+            barmode="group" if color_column else "relative",
+            title=title,
+            template="plotly_white",
+        )
+
+        plot_path = get_plot_path(
+            data_file_path, f"bar_{y_column}_by_{x_column}", ext=".json"
+        )
+        fig.write_json(plot_path)
+
+        code_logic = (
+            f"agg_df = df.groupby(['{x_column}'{(', ' + repr(color_column)) if color_column else ''}])"
+            f"['{y_column}'].{aggregation}().reset_index()\n"
+            f"fig = px.bar(agg_df, x='{x_column}', y='{y_column}'{color_arg},\n"
+            f"    barmode='group', title='{title}', template='plotly_white')"
+        )
+        code = generate_code_snippet(code_logic, data_file_path)
+        return f"{plot_path}|||{code}"
+    except Exception as e:
+        return f"Error plotting interactive bar chart: {str(e)}"
+
+
+def plot_scatter_matrix_impl(
+    data_file_path: str,
+    columns: str,
+    title: str,
+    color_column: str | None = None,
+) -> str:
+    """
+    Generates and saves an interactive Plotly scatter matrix (pair plot equivalent).
+
+    Args:
+        columns: Comma-separated list of numeric column names to include.
+        color_column: Optional categorical column to colour points by (e.g. 'diagnosis').
+    """
+    try:
+        df = load_data_safely(data_file_path)
+
+        col_list = [c.strip() for c in columns.split(",") if c.strip()]
+        missing = [c for c in col_list if c not in df.columns]
+        if missing:
+            return f"Error: columns not found in data: {', '.join(missing)}"
+
+        if color_column and color_column not in df.columns:
+            color_column = None
+
+        fig = px.scatter_matrix(
+            df,
+            dimensions=col_list,
+            color=color_column,
+            title=title,
+            template="plotly_white",
+        )
+        fig.update_traces(diagonal_visible=False, showupperhalf=False)
+
+        plot_path = get_plot_path(
+            data_file_path, f"scatter_matrix_{'_'.join(col_list[:3])}", ext=".json"
+        )
+        fig.write_json(plot_path)
+
+        color_arg = f", color='{color_column}'" if color_column else ""
+        code_logic = (
+            f"cols = {col_list!r}\n"
+            f"fig = px.scatter_matrix(df, dimensions=cols{color_arg},\n"
+            f"    title='{title}', template='plotly_white')\n"
+            "fig.update_traces(diagonal_visible=False, showupperhalf=False)"
+        )
+        code = generate_code_snippet(code_logic, data_file_path)
+        return f"{plot_path}|||{code}"
+    except Exception as e:
+        return f"Error plotting scatter matrix: {str(e)}"
+
+
 def plot_correlation_heatmap_impl(
     data_file_path: str,
     title: str,

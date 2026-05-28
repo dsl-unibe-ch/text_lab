@@ -188,8 +188,19 @@ import re as _re
 
 
 def _strip_show_calls(code: str) -> str:
-    """Remove standalone fig.show() and plt.show() lines from model-generated code."""
-    return _re.sub(r"^\s*(fig|plt)\.show\(\)\s*$", "", code, flags=_re.MULTILINE).rstrip()
+    """
+    Remove standalone display/save calls from model-generated code before exec.
+
+    Strips:
+      - fig.show() / plt.show()   — clear the active figure on non-interactive backends
+      - plt.savefig(...)           — model may save to an arbitrary/wrong path;
+                                     the tool always saves explicitly afterwards
+    """
+    # Remove show() calls
+    code = _re.sub(r"^\s*(fig|plt)\.show\(\)\s*$", "", code, flags=_re.MULTILINE)
+    # Remove plt.savefig(...) — matches single-line calls (balanced or not)
+    code = _re.sub(r"^\s*plt\.savefig\([^\n]*\)\s*$", "", code, flags=_re.MULTILINE)
+    return code.rstrip()
 
 
 def generate_code_snippet(plot_code: str, data_file_path: str | None = None) -> str:
@@ -217,7 +228,8 @@ def generate_code_snippet(plot_code: str, data_file_path: str | None = None) -> 
     clean = _strip_show_calls(plot_code)
     return (
         "import pandas as pd\n"
-        "import plotly.express as px\n\n"
+        "import plotly.express as px\n"
+        "import plotly.graph_objects as go\n\n"
         "# Load Data\n"
         f"{loader}\n\n"
         "# Generate Plot\n"

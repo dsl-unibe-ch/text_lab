@@ -36,20 +36,25 @@ DEFAULT_PROMPT: str = (
 # This prevents hallucination by strictly limiting the LLM's context window.
 AGENT_TOOLS = {
     "interactive": [
+        "get_all_columns_summary",
         "get_column_summary",
         "plot_interactive_histogram",
         "plot_interactive_scatterplot",
         "plot_interactive_boxplot",
         "plot_interactive_lineplot",
+        "plot_interactive_barchart",
+        "plot_interactive_scatter_matrix",
         "plot_interactive_correlation_heatmap",
         "generate_custom_plotly",
     ],
     "static": [
+        "get_all_columns_summary",
         "get_column_summary",
         "plot_static_histogram",
         "plot_static_scatterplot",
         "plot_static_boxplot",
         "plot_static_lineplot",
+        "plot_static_barchart",
         "plot_static_pairplot",
         "plot_static_correlation_heatmap",
         "generate_custom_static_plot",
@@ -96,45 +101,52 @@ INTERACTIVE_PROMPT: str = """
 You are the Interactive Visualization Expert. Your job is to generate web-ready Plotly charts based on the Supervisor's instructions.
 
 Rules:
-1. ALWAYS call `get_column_summary` FIRST to verify data types and categorical values before plotting.
+1. ALWAYS call `get_all_columns_summary` FIRST to get the full dataset schema in one call before plotting.
 2. Use the provided interactive tools for standard plots.
-3. Use `plot_interactive_correlation_heatmap` when the user wants to see relationships between all numeric columns at once.
-4. If you must use `generate_custom_plotly`, you MUST assign your final chart to a variable named `fig`.
-5. CRITICAL: In `generate_custom_plotly` code, NEVER call pd.read_csv(), pd.read_excel(), or any file-loading function. The dataframe is ALREADY loaded as `df`. Using any file path will cause an error.
-6. CRITICAL: Explicitly handle data types (e.g., pd.to_datetime) if needed.
-7. If a tool returns an error, read the error message, correct your parameters, and try again.
+3. Use `plot_interactive_barchart` for bar/column charts. Choose the appropriate aggregation ('mean', 'sum', 'count', 'median').
+4. Use `plot_interactive_scatter_matrix` for pair plots or multi-feature distribution charts.
+5. Use `plot_interactive_correlation_heatmap` when the user wants to see relationships between numeric columns. Use `column_filter` (e.g. '_mean') to restrict to a column subset.
+6. If you must use `generate_custom_plotly`, you MUST assign your final chart to a variable named `fig`.
+7. CRITICAL: In `generate_custom_plotly` code, NEVER call pd.read_csv(), pd.read_excel(), or any file-loading function. The dataframe is ALREADY loaded as `df`. Using any file path will cause an error.
+8. CRITICAL: Explicitly handle data types (e.g., pd.to_datetime) if needed.
+9. If a tool returns an error, read the error message, correct your parameters, and try again.
 """
 
 STATIC_PROMPT: str = """
 You are the Static Visualization Expert. Your job is to generate Matplotlib/Seaborn charts and Word Clouds based on the Supervisor's instructions.
 
 Rules:
-1. ALWAYS call `get_column_summary` FIRST to verify data types and categorical values before plotting.
+1. ALWAYS call `get_all_columns_summary` FIRST to get the full dataset schema in one call before plotting.
 2. Use the provided static tools for standard plots.
-3. Use `plot_static_pairplot` for pair plots / scatter matrices. Pass only numeric column names in `columns` (comma-separated) and the optional categorical column in `hue_column` (e.g. 'diagnosis'). NEVER include string/categorical columns in the `columns` parameter.
-4. Use `plot_static_correlation_heatmap` when the user wants to see relationships between numeric columns.
+3. Use `plot_static_barchart` for bar/column charts. Choose the appropriate aggregation ('mean', 'sum', 'count', 'median').
+4. Use `plot_static_pairplot` for pair plots / scatter matrices. Pass only numeric column names in `columns` (comma-separated) and the optional categorical column in `hue_column` (e.g. 'diagnosis'). NEVER include string/categorical columns in the `columns` parameter.
+5. Use `plot_static_correlation_heatmap` when the user wants to see relationships between numeric columns.
    - Use the `column_filter` parameter to restrict to a subset: pass a suffix like '_mean' to select all columns ending in _mean, or pass exact comma-separated column names.
    - Example: column_filter='_mean' selects all columns ending in _mean.
-5. For word clouds weighted by correlation strength, use `generate_custom_static_plot` with code that:
+6. For word clouds weighted by correlation strength, use `generate_custom_static_plot` with code that:
    a. Computes correlations between columns and the target column.
    b. Uses the absolute correlation values as word frequencies for WordCloud.
    c. Do NOT call plt.show() or plt.savefig() — the tool handles saving automatically.
-6. For other word clouds, use the `extra_stopwords` parameter to filter common filler words.
-7. If you use `generate_custom_static_plot`, NEVER call `plt.show()` or `plt.savefig()` in the code. The tool handles saving automatically.
-8. CRITICAL: In `generate_custom_static_plot` code, NEVER call pd.read_csv(), pd.read_excel(), or any file-loading function. The dataframe is ALREADY loaded as `df`. Using any file path will cause an error.
-9. CRITICAL: Explicitly handle data types (e.g., pd.to_datetime) if needed.
-10. If a tool returns an error, read the error message, correct your parameters, and try again.
+7. For other word clouds, use the `extra_stopwords` parameter to filter common filler words.
+8. If you use `generate_custom_static_plot`, NEVER call `plt.show()` or `plt.savefig()` in the code. The tool handles saving automatically.
+9. CRITICAL: In `generate_custom_static_plot` code, NEVER call pd.read_csv(), pd.read_excel(), or any file-loading function. The dataframe is ALREADY loaded as `df`. Using any file path will cause an error.
+10. CRITICAL: Explicitly handle data types (e.g., pd.to_datetime) if needed.
+11. If a tool returns an error, read the error message, correct your parameters, and try again.
 """
 
 STATS_PROMPT: str = """
-You are the Statistical Analysis Expert. Your job is to run rigorous statistical tests on the dataset based on the Supervisor's instructions.
+You are the Statistical Analysis Expert. Your job is to run rigorous statistical tests on the dataset using your tools.
 
-Rules:
-1. ALWAYS call `get_column_summary` FIRST to check distributions and null values before running tests.
-2. Use the provided statistical tools to run Correlations, Group Comparisons (T-tests/ANOVA), or Linear Regressions.
-3. Read the markdown tables returned by your tools, and write a clear, plain-English summary of the p-values, t-stats, and R-squared values to send back to the Supervisor.
-4. Do not generate plots. Focus purely on the math and statistical significance.
-5. If a tool returns an error, read the error message, adjust your column names or methods, and try again.
+CRITICAL RULES — follow these exactly:
+1. You MUST call `get_column_summary` FIRST to verify that the columns mentioned in the task exist in the dataset before running any test.
+2. You MUST then call the appropriate stats tool to compute actual results. NEVER answer with numbers, p-values, or statistics from your own knowledge — always call the tool and return its output.
+3. For T-tests or ANOVA, use `run_group_comparison`.
+4. For Linear Regression, use `run_linear_regression`. The `predictor_cols` argument MUST be a JSON array, e.g. ["col1", "col2"].
+5. For ranking correlations with a target, use `rank_target_correlations`.
+6. For a single pairwise correlation, use `run_correlation`.
+7. After the tool returns its markdown table, write a short plain-English interpretation of the key numbers (p-value, R², t-stat, etc.).
+8. Do not generate plots. Focus purely on numbers and statistical significance.
+9. If a tool returns an error, read it carefully, correct the column names or parameters, and try again.
 """
 
 # =========================================================================
@@ -146,12 +158,15 @@ _TOOL_LABELS: dict[str, str] = {
     "plot_interactive_scatterplot": "Interactive Scatter Plot",
     "plot_interactive_boxplot": "Interactive Box Plot",
     "plot_interactive_lineplot": "Interactive Line Plot",
+    "plot_interactive_barchart": "Interactive Bar Chart",
+    "plot_interactive_scatter_matrix": "Interactive Scatter Matrix",
     "plot_interactive_correlation_heatmap": "Interactive Correlation Heatmap",
     "generate_custom_plotly": "Custom Interactive Chart",
     "plot_static_histogram": "Static Histogram",
     "plot_static_scatterplot": "Static Scatter Plot",
     "plot_static_boxplot": "Static Box Plot",
     "plot_static_lineplot": "Static Line Plot",
+    "plot_static_barchart": "Static Bar Chart",
     "plot_static_pairplot": "Static Pair Plot",
     "plot_static_correlation_heatmap": "Static Correlation Heatmap",
     "generate_custom_static_plot": "Custom Static Chart",

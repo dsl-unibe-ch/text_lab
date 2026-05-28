@@ -13,19 +13,22 @@ from wordcloud import STOPWORDS, WordCloud
 from core.visualization.viz_utils import _strip_show_calls, get_plot_path, load_data_safely
 
 
-def _generate_static_code_snippet(plot_code: str) -> str:
+def _generate_static_code_snippet(plot_code: str, grid_figure: bool = False) -> str:
     """
     Format the raw plot generation code into a complete, runnable script string
     for Matplotlib and Seaborn.
 
     Args:
         plot_code: The core logic used to generate the plot.
+        grid_figure: When True, omit the ``plt.figure()`` call. Use this for
+            seaborn grid plots (pairplot, FacetGrid) and heatmaps that create
+            their own figure internally.
 
     Returns:
         A formatted Python script string including imports and data loading.
     """
-    from core.visualization.viz_utils import _strip_show_calls
     clean = _strip_show_calls(plot_code)
+    figure_line = "" if grid_figure else "plt.figure(figsize=(10, 6))\n"
     return (
         "import matplotlib.pyplot as plt\n"
         "import pandas as pd\n"
@@ -33,7 +36,7 @@ def _generate_static_code_snippet(plot_code: str) -> str:
         "# Load Data\n"
         "df = pd.read_csv('your_data.csv')\n\n"
         "# Generate Plot\n"
-        "plt.figure(figsize=(10, 6))\n"
+        f"{figure_line}"
         f"{clean}\n"
         "plt.show()"
     )
@@ -262,7 +265,70 @@ def plot_static_lineplot_impl(
         return f"{plot_path}|||{code}"
     except Exception as e:
         return f"Error plotting static lineplot: {str(e)}"
-    
+
+
+def plot_static_barchart_impl(
+    data_file_path: str,
+    x_column: str,
+    y_column: str,
+    title: str,
+    x_label: str,
+    y_label: str,
+    hue_column: str | None = None,
+    aggregation: str = "mean",
+) -> str:
+    """
+    Generates and saves a static Seaborn bar chart.
+
+    Args:
+        aggregation: How to aggregate y values per x category ('mean', 'sum', 'count', 'median').
+    """
+    try:
+        df = load_data_safely(data_file_path)
+        if x_column not in df.columns or y_column not in df.columns:
+            return f"Error: Columns '{x_column}' or '{y_column}' not found."
+
+        if hue_column and hue_column not in df.columns:
+            hue_column = None
+
+        valid_aggs = {"mean", "sum", "count", "median"}
+        if aggregation not in valid_aggs:
+            aggregation = "mean"
+
+        plt.figure(figsize=(12, 6))
+        sns.barplot(
+            data=df,
+            x=x_column,
+            y=y_column,
+            hue=hue_column,
+            estimator=aggregation,
+            errorbar="sd" if aggregation in {"mean", "median"} else None,
+        )
+        plt.title(title)
+        plt.xlabel(x_label)
+        plt.ylabel(y_label)
+        if not ptypes.is_numeric_dtype(df[x_column]):
+            plt.xticks(rotation=45, ha="right")
+
+        plot_path = get_plot_path(
+            data_file_path, f"bar_{y_column}_by_{x_column}", ext=".png"
+        )
+        plt.savefig(plot_path, bbox_inches="tight", dpi=300)
+        plt.close()
+
+        hue_arg = f", hue='{hue_column}'" if hue_column else ""
+        code = _generate_static_code_snippet(
+            f"sns.barplot(data=df, x='{x_column}', y='{y_column}'{hue_arg},\n"
+            f"    estimator='{aggregation}', errorbar='sd')\n"
+            f"plt.title('{title}')\n"
+            f"plt.xlabel('{x_label}')\n"
+            f"plt.ylabel('{y_label}')\n"
+            "plt.xticks(rotation=45, ha='right')"
+        )
+        return f"{plot_path}|||{code}"
+    except Exception as e:
+        return f"Error plotting static bar chart: {str(e)}"
+
 
 def plot_static_wordcloud_impl(
     data_file_path: str,
@@ -332,6 +398,9 @@ def plot_static_wordcloud_impl(
         return f"Error plotting word cloud: {str(e)}"
 
 
+_PAIRPLOT_MAX_ROWS = 5_000  # sns.pairplot is O(n²) — cap to avoid hangs on large datasets
+
+
 def plot_static_pairplot_impl(
     data_file_path: str,
     columns: str,
@@ -359,6 +428,15 @@ def plot_static_pairplot_impl(
         plot_cols = col_list + ([hue_column] if hue_column else [])
         plot_df = df[plot_cols].dropna()
 
+        # Cap rows to prevent multi-minute hangs on large datasets.
+        sampled = len(plot_df) > _PAIRPLOT_MAX_ROWS
+        if sampled:
+            plot_df = plot_df.sample(_PAIRPLOT_MAX_ROWS, random_state=42)
+
+        display_title = title
+        if sampled:
+            display_title = f"{title} (sampled {_PAIRPLOT_MAX_ROWS:,} rows)"
+
         sns.set_theme(style="ticks")
         g = sns.pairplot(
             plot_df,
@@ -368,8 +446,8 @@ def plot_static_pairplot_impl(
             diag_kind="kde",
             plot_kws={"alpha": 0.6},
         )
-        if title:
-            g.fig.suptitle(title, y=1.02, fontsize=14)
+        if display_title:
+            g.fig.suptitle(display_title, y=1.02, fontsize=14)
 
         safe_name = "_".join(col_list[:3])
         plot_path = get_plot_path(data_file_path, f"pairplot_{safe_name}", ext=".png")
@@ -377,15 +455,20 @@ def plot_static_pairplot_impl(
         plt.close("all")
 
         hue_code = f", hue='{hue_column}'" if hue_column else ""
+        sample_code = (
+            f"if len(plot_df) > {_PAIRPLOT_MAX_ROWS}:\n"
+            f"    plot_df = plot_df.sample({_PAIRPLOT_MAX_ROWS}, random_state=42)\n"
+        ) if sampled else ""
         code_body = (
             f"import seaborn as sns\n"
             f"cols = {col_list!r}\n"
             f"plot_df = df[cols{' + [' + repr(hue_column) + ']' if hue_column else ''}].dropna()\n"
-            f"sns.set_theme(style='ticks')\n"
+            + sample_code
+            + f"sns.set_theme(style='ticks')\n"
             f"g = sns.pairplot(plot_df, vars=cols{hue_code}, palette='husl', diag_kind='kde', plot_kws={{'alpha': 0.6}})\n"
-            f"g.fig.suptitle('{title}', y=1.02, fontsize=14)\n"
+            f"g.fig.suptitle('{display_title}', y=1.02, fontsize=14)\n"
         )
-        code = _generate_static_code_snippet(code_body)
+        code = _generate_static_code_snippet(code_body, grid_figure=True)
         return f"{plot_path}|||{code}"
     except Exception as e:
         return f"Error generating pair plot: {str(e)}"
@@ -452,11 +535,26 @@ def plot_static_correlation_heatmap_impl(
         fig.savefig(plot_path, bbox_inches="tight", dpi=300)
         plt.close(fig)
 
+        # Build snippet that reflects the actual column selection used.
+        if column_filter:
+            filters_repr = repr([f.strip() for f in column_filter.split(",") if f.strip()])
+            filter_snippet = (
+                f"filters = {filters_repr}\n"
+                f"numeric_df = df.select_dtypes(include='number')\n"
+                f"numeric_df = numeric_df[[c for c in numeric_df.columns "
+                f"if c in filters or any(c.endswith(f) for f in filters)]]\n"
+                f"corr_matrix = numeric_df.corr(method='{method}')\n"
+            )
+        else:
+            filter_snippet = f"corr_matrix = df.select_dtypes(include='number').corr(method='{method}')\n"
+
         code = _generate_static_code_snippet(
-            f"corr_matrix = df.select_dtypes(include='number').corr(method='{method}')\n"
-            f"sns.heatmap(corr_matrix, annot=True, fmt='.2f', cmap='coolwarm',\n"
-            f"    center=0, vmin=-1, vmax=1, square=True, linewidths=0.5)\n"
-            f"plt.title('{title}', fontsize=14, pad=15)"
+            filter_snippet
+            + f"fig, ax = plt.subplots(figsize=({fig_size}, {fig_size}))\n"
+            + f"sns.heatmap(corr_matrix, annot=True, fmt='.2f', cmap='coolwarm',\n"
+            + f"    center=0, vmin=-1, vmax=1, square=True, linewidths=0.5, ax=ax)\n"
+            + f"ax.set_title('{title}', fontsize=14, pad=15)",
+            grid_figure=True,
         )
         return f"{plot_path}|||{code}"
     except Exception as e:

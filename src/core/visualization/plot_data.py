@@ -64,6 +64,43 @@ def get_column_summary_impl(data_file_path: str, column: str) -> str:
                 f"Categorical Column '{column}': {total_unique} unique values. "
                 f"Top values: {val_str}. Nulls={null_count}{truncation_note}"
             )
-            
+
     except Exception as e:
         return f"Error analyzing column '{column}': {str(e)}"
+
+
+def get_all_columns_summary_impl(data_file_path: str) -> str:
+    """
+    Returns a compact schema of every column: name and type only.
+    Intentionally terse to minimise token load on the model.
+    Use get_column_summary for detailed stats on a specific column.
+    """
+    try:
+        df = load_data_safely(data_file_path)
+
+        truncation_note = ""
+        if was_last_load_truncated(data_file_path):
+            truncation_note = f" (truncated to {MAX_ROWS:,} rows)"
+
+        numeric_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
+        datetime_cols = [c for c in df.columns if pd.api.types.is_datetime64_any_dtype(df[c])]
+        categorical_cols = [c for c in df.columns if c not in numeric_cols and c not in datetime_cols]
+
+        lines = [
+            f"Dataset: {len(df):,} rows × {len(df.columns)} columns{truncation_note}",
+            f"Numeric columns ({len(numeric_cols)}): {', '.join(numeric_cols)}",
+        ]
+        if categorical_cols:
+            cat_details = []
+            for c in categorical_cols:
+                unique_vals = df[c].dropna().unique()
+                sample = ", ".join(str(v) for v in sorted(unique_vals, key=str)[:5])
+                cat_details.append(f"{c} [{sample}]")
+            lines.append(f"Categorical columns ({len(categorical_cols)}): {'; '.join(cat_details)}")
+        if datetime_cols:
+            lines.append(f"Datetime columns ({len(datetime_cols)}): {', '.join(datetime_cols)}")
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        return f"Error summarizing columns: {str(e)}"

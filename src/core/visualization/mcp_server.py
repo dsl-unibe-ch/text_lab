@@ -17,17 +17,20 @@ if src_dir not in sys.path:
 
 from mcp.server.fastmcp import FastMCP
 
-from core.visualization.plot_data import get_column_summary_impl
+from core.visualization.plot_data import get_all_columns_summary_impl, get_column_summary_impl
 from core.visualization.plot_interactive import (
     generate_custom_plotly_impl,
+    plot_barchart_impl as interactive_barchart,
     plot_boxplot_impl as interactive_boxplot,
     plot_correlation_heatmap_impl as interactive_correlation_heatmap,
     plot_histogram_impl as interactive_histogram,
     plot_lineplot_impl as interactive_lineplot,
+    plot_scatter_matrix_impl as interactive_scatter_matrix,
     plot_scatterplot_impl as interactive_scatterplot,
 )
 from core.visualization.plot_static import (
     generate_custom_static_plot_impl,
+    plot_static_barchart_impl,
     plot_static_boxplot_impl,
     plot_static_correlation_heatmap_impl,
     plot_static_histogram_impl,
@@ -103,6 +106,40 @@ def plot_interactive_correlation_heatmap(
 
 
 @mcp.tool()
+def plot_interactive_barchart(
+    data_file_path: str,
+    x_column: str,
+    y_column: str,
+    title: str,
+    color_column: str | None = None,
+    aggregation: str = "mean",
+) -> str:
+    """
+    Generates an interactive Plotly grouped bar chart.
+    x_column: categorical column for the x-axis groups.
+    y_column: numeric column to aggregate.
+    aggregation: how to aggregate y per group — 'mean' (default), 'sum', 'count', or 'median'.
+    color_column: optional column to split bars by colour.
+    """
+    return interactive_barchart(data_file_path, x_column, y_column, title, color_column, aggregation)
+
+
+@mcp.tool()
+def plot_interactive_scatter_matrix(
+    data_file_path: str,
+    columns: str,
+    title: str,
+    color_column: str | None = None,
+) -> str:
+    """
+    Generates an interactive Plotly scatter matrix (pair plot equivalent).
+    columns: comma-separated list of numeric column names (e.g. 'radius_mean,texture_mean,area_mean').
+    color_column: optional categorical column to colour points by (e.g. 'diagnosis').
+    """
+    return interactive_scatter_matrix(data_file_path, columns, title, color_column)
+
+
+@mcp.tool()
 def generate_custom_plotly(
     data_file_path: str, python_code: str, plot_filename_keyword: str
 ) -> str:
@@ -111,10 +148,20 @@ def generate_custom_plotly(
 
 
 @mcp.tool()
+def get_all_columns_summary(data_file_path: str) -> str:
+    """
+    Returns a compact schema of ALL columns in one call: column names grouped by type
+    (numeric, categorical, datetime). Categorical columns also show their unique values.
+    Call this FIRST to understand the dataset structure, then call plot or stats tools.
+    """
+    return get_all_columns_summary_impl(data_file_path)
+
+
+@mcp.tool()
 def get_column_summary(data_file_path: str, column: str) -> str:
     """
     Analyzes a specific column in the dataset and returns a statistical summary.
-    Use this to check values, ranges, or unique items before selecting plotting parameters.
+    Use this for a deep dive into one column after using get_all_columns_summary.
     """
     return get_column_summary_impl(data_file_path, column)
 
@@ -151,6 +198,27 @@ def plot_static_lineplot(
 ) -> str:
     """Generates a static Matplotlib/Seaborn line plot (for papers/publications)."""
     return plot_static_lineplot_impl(data_file_path, x_column, y_column, title, x_label, y_label, hue_column)
+
+
+@mcp.tool()
+def plot_static_barchart(
+    data_file_path: str,
+    x_column: str,
+    y_column: str,
+    title: str,
+    x_label: str,
+    y_label: str,
+    hue_column: str | None = None,
+    aggregation: str = "mean",
+) -> str:
+    """
+    Generates a static Seaborn bar chart (for papers/publications).
+    x_column: categorical column for the x-axis groups.
+    y_column: numeric column to aggregate.
+    aggregation: how to aggregate y per group — 'mean' (default), 'sum', 'count', or 'median'.
+    hue_column: optional column to split bars by colour.
+    """
+    return plot_static_barchart_impl(data_file_path, x_column, y_column, title, x_label, y_label, hue_column, aggregation)
 
 
 @mcp.tool()

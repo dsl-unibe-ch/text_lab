@@ -135,8 +135,13 @@ async def _run_worker_agent(
                 
                 is_error = tool_output_raw.strip().startswith("Error")
 
-                # Handle Data Summaries & Stats
-                if tool_name in ["get_column_summary", "run_correlation", "run_group_comparison", "run_linear_regression", "rank_target_correlations"]:
+                # Route by response format:
+                # - Plot tools always return "path|||code"
+                # - Data summary / stats tools return plain text
+                is_plot_tool = "|||" in tool_output_raw
+
+                if not is_plot_tool:
+                    # Data summary or stats tool — pass response straight to the model.
                     if is_error:
                         _log("warning", f"Worker '{agent_role}' stat tool '{tool_name}' failed. Retrying...")
                         mcp_tool_results.append({
@@ -148,19 +153,20 @@ async def _run_worker_agent(
                             "role": "tool",
                             "content": tool_output_raw,
                         })
-                
-                # Handle Plotting Tools
+
                 else:
-                    if not is_error and "|||" in tool_output_raw:
+                    # Plot tool — extract path+code, store artifact, return generic ack.
+                    if not is_error:
                         path_part, code_part = tool_output_raw.split("|||", 1)
                         global_plots.append({
                             "path": path_part.strip(),
                             "code": code_part.strip(),
                             "tool_name": tool_name,
                         })
+                        # Generic message — never expose internal file paths to the model.
                         mcp_tool_results.append({
                             "role": "tool",
-                            "content": f"Successfully generated plot at {path_part.strip()}",
+                            "content": "Plot generated successfully. It will be displayed to the user.",
                         })
                     else:
                         _log("warning", f"Worker '{agent_role}' plot tool '{tool_name}' failed: {tool_output_raw.strip()}. Retrying...")

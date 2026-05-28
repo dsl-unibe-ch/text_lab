@@ -96,7 +96,7 @@ def run_group_comparison_impl(
             return f"Error: Columns '{target_col}' or '{group_col}' not found."
 
         clean_df = df[[target_col, group_col]].dropna()
-        groups = clean_df[group_col].unique()
+        groups = sorted(clean_df[group_col].unique(), key=str)
 
         if len(groups) == 2:
             group1 = clean_df[clean_df[group_col] == groups[0]][target_col]
@@ -154,7 +154,11 @@ def run_linear_regression_impl(
     """
     try:
         df = load_data_safely(data_file_path)
-        
+
+        # Coerce predictor_cols to a list in case the LLM passed a comma-separated string.
+        if isinstance(predictor_cols, str):
+            predictor_cols = [c.strip() for c in predictor_cols.split(",") if c.strip()]
+
         missing_cols = [col for col in [target_col] + predictor_cols if col not in df.columns]
         if missing_cols:
             return f"Error: Missing columns in data: {', '.join(missing_cols)}"
@@ -211,6 +215,7 @@ def rank_target_correlations_impl(
             return f"Error: Target column '{target_col}' not found in the dataset."
 
         working_df = df.copy()
+        binary_encode_snippet = ""
 
         if not pd.api.types.is_numeric_dtype(working_df[target_col]):
             raw_unique = working_df[target_col].dropna().unique()
@@ -229,13 +234,19 @@ def rank_target_correlations_impl(
             neg_idx = 1 - pos_idx
             val_map = {sorted_vals[pos_idx]: 1, sorted_vals[neg_idx]: 0}
             working_df[target_col] = working_df[target_col].map(val_map)
+            # Build the encoding step to include in the reproducible snippet.
+            binary_encode_snippet = (
+                f"# Binary encode target column\n"
+                f"val_map = {{{repr(sorted_vals[pos_idx])}: 1, {repr(sorted_vals[neg_idx])}: 0}}\n"
+                f"df['{target_col}'] = df['{target_col}'].map(val_map)\n\n"
+            )
 
         numeric_df = working_df.select_dtypes(include=["number"])
         if target_col not in numeric_df.columns:
             return f"Error: Target column '{target_col}' could not be evaluated numerically."
 
         correlations = numeric_df.corr(method=method)[target_col].drop(target_col)
-        
+
         if correlations.empty:
             return "Error: No other numeric columns found to correlate against."
 
@@ -247,6 +258,7 @@ def rank_target_correlations_impl(
 
         code = (
             _stats_code_header(data_file_path)
+            + binary_encode_snippet
             + f"corr = df.select_dtypes(include='number').corr(method='{method}')['{target_col}']\n"
             + f"corr = corr.drop('{target_col}').abs().sort_values(ascending=False)\n"
             + "print(corr)"
