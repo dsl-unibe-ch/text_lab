@@ -21,7 +21,7 @@ sys.path.append(src_dir)
 from auth import check_token
 from core.chat_engine import check_ollama_server, get_gpu_name
 from core.visualization.viz_agent import run_analysis
-from core.visualization.viz_config import DEFAULT_PROMPT, MAX_ROWS
+from core.visualization.viz_config import DEFAULT_PROMPT, MAX_ROWS, get_tool_label
 from core.visualization.viz_utils import get_fast_data_preview, save_data_file
 from core.model_config import get_available_models, is_high_memory_gpu
 
@@ -92,14 +92,17 @@ def render_results(
         file_bytes = artifact["bytes"]
         code = artifact["code"]
         fig = artifact.get("fig")
+        tool_label = get_tool_label(artifact.get("tool_name", ""))
         
         with st.container():
+            if tool_label:
+                st.markdown(f"**{tool_label}**")
             if filename.endswith(".json") and fig is not None:
                 st.plotly_chart(fig, use_container_width=True, key=f"plotly_{run_id}_{idx}")
             else:
                 st.image(file_bytes, caption=filename)
                 
-            with st.expander(f"View Source Code: {filename}"):
+            with st.expander(f"View Source Code: {tool_label or filename}"):
                 st.code(code, language="python")
             
             st.divider()
@@ -149,9 +152,9 @@ def main() -> None:
         st.markdown("""
         This tool uses a **Multi-Agent System** to analyze your data. A Supervisor AI reads your prompt and delegates tasks to three specialist agents:
         
-        * **Interactive Agent (Default):** Generates web-ready, interactive Plotly charts (Scatter, Bar, Line, Box, etc.). Best for exploring data on this page.
-        * **Static Agent:** Generates publication-ready Matplotlib/Seaborn charts and Word Clouds. (Triggered when you explicitly ask for "static", "images", or "publication figures").
-        * **Statistical Agent:** Runs rigorous mathematical tests including Correlations, T-tests, ANOVA, and OLS Linear Regression.
+        * **Interactive Agent (Default):** Generates web-ready, interactive Plotly charts (Scatter, Bar, Line, Box, Correlation Heatmap, etc.). Best for exploring data on this page.
+        * **Static Agent:** Generates publication-ready Matplotlib/Seaborn charts and Word Clouds (with custom stopwords). (Triggered when you explicitly ask for "static", "images", or "publication figures").
+        * **Statistical Agent:** Runs rigorous mathematical tests including Correlations, T-tests, ANOVA, and OLS Linear Regression. Each result includes reproducible Python code.
         
         **Prompting Tip:** Be specific about what you want! 
         *(e.g., "Run a linear regression on column X and Y, then plot an interactive scatter plot.")*
@@ -162,6 +165,24 @@ def main() -> None:
         "Upload your data file (CSV, TSV, Excel, JSON)",
         type=["csv", "tsv", "xls", "xlsx", "json"],
     )
+
+    if uploaded_file:
+        file_size_mb = uploaded_file.size / (1024 * 1024)
+        # Quick single-row read to count columns without loading entire file.
+        _preview = get_fast_data_preview(
+            save_data_file(uploaded_file.getvalue(), uploaded_file.name, tempfile.gettempdir()),
+            uploaded_file.name,
+            nrows=1,
+        )
+        n_cols = len(_preview.columns) if _preview is not None else "?"
+        st.caption(
+            f"📄 **{uploaded_file.name}** · {file_size_mb:.1f} MB · {n_cols} columns"
+        )
+        if file_size_mb > 100:
+            st.warning(
+                f"Large file detected ({file_size_mb:.0f} MB). "
+                f"Data will be capped at {MAX_ROWS:,} rows for memory safety."
+            )
 
     user_prompt = st.text_area(
         "Describe what you want to do (optional)",
@@ -245,6 +266,7 @@ def main() -> None:
                                 "bytes": img_bytes,
                                 "code": code,
                                 "fig": None,
+                                "tool_name": item.get("tool_name", ""),
                             }
                             # Parse Plotly JSON once and reuse for both render + export.
                             if filename.endswith(".json"):

@@ -25,6 +25,35 @@ def _read_csv_with_fallback(file_path: str, sep: str = ",", nrows: int | None = 
         return pd.read_csv(file_path, sep=sep, nrows=nrows, encoding="latin1")
 
 
+def _read_excel_safely(file_path: str, max_rows: int) -> pd.DataFrame:
+    """
+    Read an Excel file using openpyxl in read-only streaming mode for .xlsx files,
+    which avoids loading the entire workbook into memory at once.
+    Falls back to standard pd.read_excel for .xls files (xlrd doesn't support streaming).
+    """
+    if file_path.lower().endswith(".xls"):
+        return pd.read_excel(file_path, nrows=max_rows)
+
+    try:
+        import openpyxl
+        wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
+        ws = wb.active
+        row_iter = ws.iter_rows(values_only=True)
+        header = next(row_iter, None)
+        if header is None:
+            wb.close()
+            return pd.DataFrame()
+        data = []
+        for row in row_iter:
+            if len(data) >= max_rows:
+                break
+            data.append(row)
+        wb.close()
+        return pd.DataFrame(data, columns=header)
+    except ImportError:
+        return pd.read_excel(file_path, nrows=max_rows)
+
+
 def save_data_file(file_bytes: bytes, file_name: str, run_dir: str) -> str:
     """
     Save the uploaded file bytes to a temporary workspace directory.
@@ -66,7 +95,7 @@ def get_fast_data_preview(file_path: str, file_name: str, nrows: int = 5) -> pd.
         if lower_name.endswith(".tsv"):
             return _read_csv_with_fallback(file_path, sep="\t", nrows=nrows)
         if lower_name.endswith((".xls", ".xlsx")):
-            return pd.read_excel(file_path, nrows=nrows)
+            return _read_excel_safely(file_path, nrows)
         if lower_name.endswith(".json"):
             try:
                 return pd.read_json(file_path, lines=True, nrows=nrows)
@@ -87,7 +116,7 @@ def _load_data_cached(file_path: str, mtime: float, size: int) -> pd.DataFrame:
     elif lower_name.endswith(".tsv"):
         df = _read_csv_with_fallback(file_path, sep="\t", nrows=MAX_ROWS + 1)
     elif lower_name.endswith((".xls", ".xlsx")):
-        df = pd.read_excel(file_path, nrows=MAX_ROWS + 1)
+        df = _read_excel_safely(file_path, MAX_ROWS + 1)
     elif lower_name.endswith(".json"):
         try:
             df = pd.read_json(file_path, lines=True, nrows=MAX_ROWS + 1)
@@ -155,6 +184,14 @@ def get_plot_path(data_file_path: str, plot_name: str, ext: str = ".json") -> st
     return os.path.join(plot_dir, f"{safe_plot_name}{ext}")
 
 
+import re as _re
+
+
+def _strip_show_calls(code: str) -> str:
+    """Remove standalone fig.show() and plt.show() lines from model-generated code."""
+    return _re.sub(r"^\s*(fig|plt)\.show\(\)\s*$", "", code, flags=_re.MULTILINE).rstrip()
+
+
 def generate_code_snippet(plot_code: str, data_file_path: str | None = None) -> str:
     """
     Format the raw plot generation code into a complete, runnable script string.
@@ -177,12 +214,13 @@ def generate_code_snippet(plot_code: str, data_file_path: str | None = None) -> 
         elif ext == ".json":
             loader = "df = pd.read_json('your_data.json')"
 
+    clean = _strip_show_calls(plot_code)
     return (
         "import pandas as pd\n"
         "import plotly.express as px\n\n"
         "# Load Data\n"
         f"{loader}\n\n"
         "# Generate Plot\n"
-        f"{plot_code}\n"
+        f"{clean}\n"
         "fig.show()"
     )

@@ -79,7 +79,7 @@ async def _run_worker_agent(
     model_name: str,
     global_plots: list[PlotArtifact],
     global_logs: list[tuple[str, str]],
-    max_iterations: int = 4,
+    max_iterations: int = 6,
     log_callback: Callable[[str, str], None] | None = None
 ) -> str:
     def _log(l_type: str, msg: str):
@@ -156,7 +156,7 @@ async def _run_worker_agent(
                         global_plots.append({
                             "path": path_part.strip(),
                             "code": code_part.strip(),
-                            "name": tool_name
+                            "tool_name": tool_name,
                         })
                         mcp_tool_results.append({
                             "role": "tool",

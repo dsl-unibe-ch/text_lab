@@ -9,6 +9,27 @@ import statsmodels.api as sm
 
 from core.visualization.viz_utils import load_data_safely
 
+# Values that represent the "positive" class in binary categorical columns.
+# Used by rank_target_correlations for deterministic encoding.
+_KNOWN_POSITIVE_VALUES = {
+    "m", "malignant", "yes", "true", "1", "positive", "pos",
+    "disease", "infected", "bad", "high", "abnormal"
+}
+
+
+def _stats_code_header(data_file_path: str) -> str:
+    """Returns the import/load preamble for a reproducible stats snippet."""
+    ext = data_file_path.rsplit(".", 1)[-1].lower()
+    if ext == "tsv":
+        loader = "df = pd.read_csv('your_data.tsv', sep='\\t')"
+    elif ext in ("xls", "xlsx"):
+        loader = f"df = pd.read_excel('your_data.{ext}')"
+    elif ext == "json":
+        loader = "df = pd.read_json('your_data.json')"
+    else:
+        loader = "df = pd.read_csv('your_data.csv')"
+    return f"import pandas as pd\n\n# Load Data\n{loader}\n\n"
+
 
 def run_correlation_impl(
     data_file_path: str, x_column: str, y_column: str, method: str = "pearson"
@@ -23,22 +44,31 @@ def run_correlation_impl(
         method: The correlation method ('pearson', 'spearman', or 'kendall').
 
     Returns:
-        A markdown-formatted string of the correlation results, or an error message.
+        A markdown-formatted string of the correlation results + reproducible code,
+        or an error message.
     """
     try:
         df = load_data_safely(data_file_path)
         if x_column not in df.columns or y_column not in df.columns:
             return f"Error: Columns '{x_column}' and/or '{y_column}' not found."
 
-        # Drop NaNs to prevent calculation errors
         clean_df = df[[x_column, y_column]].dropna()
         if len(clean_df) < 3:
             return "Error: Not enough valid data points to calculate correlation."
 
         res = pg.corr(clean_df[x_column], clean_df[y_column], method=method)
+
+        code = (
+            _stats_code_header(data_file_path)
+            + "import pingouin as pg\n\n"
+            + f"clean_df = df[['{x_column}', '{y_column}']].dropna()\n"
+            + f"result = pg.corr(clean_df['{x_column}'], clean_df['{y_column}'], method='{method}')\n"
+            + "print(result)"
+        )
         return (
             f"Correlation Analysis ({method}) between '{x_column}' and '{y_column}':\n\n"
-            f"{res.to_markdown()}"
+            f"{res.to_markdown()}\n\n"
+            f"```python\n{code}\n```"
         )
     except Exception as e:
         return f"Error computing correlation: {str(e)}"
@@ -57,7 +87,8 @@ def run_group_comparison_impl(
         group_col: The categorical column defining the groups.
 
     Returns:
-        A markdown-formatted string of the test results, or an error message.
+        A markdown-formatted string of the test results + reproducible code,
+        or an error message.
     """
     try:
         df = load_data_safely(data_file_path)
@@ -71,18 +102,37 @@ def run_group_comparison_impl(
             group1 = clean_df[clean_df[group_col] == groups[0]][target_col]
             group2 = clean_df[clean_df[group_col] == groups[1]][target_col]
             res = pg.ttest(group1, group2)
-            return (
+            result_text = (
                 f"Independent T-test for '{target_col}' grouped by '{group_col}' "
                 f"(Groups: {groups[0]} vs {groups[1]}):\n\n{res.to_markdown()}"
             )
+            code_logic = (
+                f"clean_df = df[['{target_col}', '{group_col}']].dropna()\n"
+                f"g1 = clean_df[clean_df['{group_col}'] == '{groups[0]}']['{target_col}']\n"
+                f"g2 = clean_df[clean_df['{group_col}'] == '{groups[1]}']['{target_col}']\n"
+                "result = pg.ttest(g1, g2)\nprint(result)"
+            )
         elif len(groups) > 2:
             res = pg.anova(dv=target_col, between=group_col, data=clean_df, detailed=True)
-            return (
+            result_text = (
                 f"One-way ANOVA for '{target_col}' grouped by '{group_col}' "
                 f"({len(groups)} groups):\n\n{res.to_markdown()}"
             )
+            code_logic = (
+                f"clean_df = df[['{target_col}', '{group_col}']].dropna()\n"
+                f"result = pg.anova(dv='{target_col}', between='{group_col}', data=clean_df, detailed=True)\n"
+                "print(result)"
+            )
         else:
             return "Error: The grouping column must have at least 2 unique values."
+
+        code = (
+            _stats_code_header(data_file_path)
+            + "import pingouin as pg\n\n"
+            + code_logic
+        )
+        return f"{result_text}\n\n```python\n{code}\n```"
+
     except Exception as e:
         return f"Error computing group comparison: {str(e)}"
 
@@ -99,33 +149,41 @@ def run_linear_regression_impl(
         predictor_cols: A list of independent variables (X).
 
     Returns:
-        A formatted string of the statsmodels regression summary, or an error message.
+        A formatted string of the statsmodels regression summary + reproducible code,
+        or an error message.
     """
     try:
         df = load_data_safely(data_file_path)
         
-        # Verify all columns exist
         missing_cols = [col for col in [target_col] + predictor_cols if col not in df.columns]
         if missing_cols:
             return f"Error: Missing columns in data: {', '.join(missing_cols)}"
 
-        # Drop rows with NaNs in the required columns
         cols = [target_col] + predictor_cols
         clean_df = df[cols].dropna()
         
         if len(clean_df) <= len(predictor_cols):
             return "Error: Not enough data points to run regression after dropping NaNs."
 
-        X = clean_df[predictor_cols]
+        X = sm.add_constant(clean_df[predictor_cols])
         y = clean_df[target_col]
-
-        # Add a constant (intercept) to the model
-        X = sm.add_constant(X)
         model = sm.OLS(y, X).fit()
-        
+
+        pred_list = str(predictor_cols)
+        code = (
+            _stats_code_header(data_file_path)
+            + "import statsmodels.api as sm\n\n"
+            + f"cols = ['{target_col}'] + {pred_list}\n"
+            + "clean_df = df[cols].dropna()\n"
+            + f"X = sm.add_constant(clean_df[{pred_list}])\n"
+            + f"y = clean_df['{target_col}']\n"
+            + "model = sm.OLS(y, X).fit()\n"
+            + "print(model.summary())"
+        )
         return (
             f"OLS Linear Regression Results (Target: {target_col}):\n\n"
-            f"{model.summary().as_text()}"
+            f"{model.summary().as_text()}\n\n"
+            f"```python\n{code}\n```"
         )
     except Exception as e:
         return f"Error computing linear regression: {str(e)}"
@@ -136,7 +194,8 @@ def rank_target_correlations_impl(
 ) -> str:
     """
     Calculates the correlation between a target column and all other numeric features,
-    sorting them by absolute correlation strength. Automatically encodes binary text.
+    sorting them by absolute correlation strength. Automatically encodes binary text
+    deterministically (known positive class → 1, otherwise alphabetically lower → 0).
 
     Args:
         data_file_path: The absolute path to the data file.
@@ -144,49 +203,58 @@ def rank_target_correlations_impl(
         method: The correlation method ('pearson' or 'spearman').
 
     Returns:
-        A markdown table ranking the features, or an error message.
+        A markdown table ranking the features + reproducible code, or an error message.
     """
     try:
         df = load_data_safely(data_file_path)
         if target_col not in df.columns:
             return f"Error: Target column '{target_col}' not found in the dataset."
 
-        # Work on a copy to avoid mutating cache
         working_df = df.copy()
 
-        # Handle text-based binary columns (e.g., Malignant/Benign or M/B)
         if not pd.api.types.is_numeric_dtype(working_df[target_col]):
-            unique_vals = working_df[target_col].dropna().unique()
-            if len(unique_vals) == 2:
-                val_map = {unique_vals[0]: 1, unique_vals[1]: 0}
-                working_df[target_col] = working_df[target_col].map(val_map)
-            else:
+            raw_unique = working_df[target_col].dropna().unique()
+            if len(raw_unique) != 2:
                 return (
                     f"Error: Target column '{target_col}' is non-numeric and contains "
-                    f"{len(unique_vals)} unique values. It must be strictly binary to auto-encode."
+                    f"{len(raw_unique)} unique values. It must be strictly binary to auto-encode."
                 )
+            # Sort so the result is deterministic regardless of row order.
+            sorted_vals = sorted(raw_unique, key=lambda x: str(x).lower())
+            # Check whether either value is a known "positive" class.
+            pos_idx = next(
+                (i for i, v in enumerate(sorted_vals) if str(v).lower() in _KNOWN_POSITIVE_VALUES),
+                1  # default: alphabetically second value → 1
+            )
+            neg_idx = 1 - pos_idx
+            val_map = {sorted_vals[pos_idx]: 1, sorted_vals[neg_idx]: 0}
+            working_df[target_col] = working_df[target_col].map(val_map)
 
-        # Isolate numeric metrics
         numeric_df = working_df.select_dtypes(include=["number"])
         if target_col not in numeric_df.columns:
             return f"Error: Target column '{target_col}' could not be evaluated numerically."
 
-        # Compute correlations and drop self-correlation entry
         correlations = numeric_df.corr(method=method)[target_col].drop(target_col)
         
         if correlations.empty:
             return "Error: No other numeric columns found to correlate against."
 
-        # Construct and sort ranking frame
         ranking_df = pd.DataFrame({
             "Feature": correlations.index,
             "Correlation Coefficient": correlations.values,
             "Absolute Strength": correlations.abs().values
         }).sort_values(by="Absolute Strength", ascending=False).drop(columns=["Absolute Strength"])
 
+        code = (
+            _stats_code_header(data_file_path)
+            + f"corr = df.select_dtypes(include='number').corr(method='{method}')['{target_col}']\n"
+            + f"corr = corr.drop('{target_col}').abs().sort_values(ascending=False)\n"
+            + "print(corr)"
+        )
         return (
             f"Correlation Ranking with respect to target column '{target_col}' ({method}):\n\n"
-            f"{ranking_df.to_markdown(index=False)}"
+            f"{ranking_df.to_markdown(index=False)}\n\n"
+            f"```python\n{code}\n```"
         )
     except Exception as e:
         return f"Error ranking correlations: {str(e)}"

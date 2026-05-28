@@ -10,7 +10,7 @@ class PlotArtifact(TypedDict):
     """Represents a single generated plot artifact returned by the MCP server."""
     path: str
     code: str
-    name: str
+    tool_name: str
 
 
 class VizAnalysisResult(TypedDict):
@@ -41,6 +41,7 @@ AGENT_TOOLS = {
         "plot_interactive_scatterplot",
         "plot_interactive_boxplot",
         "plot_interactive_lineplot",
+        "plot_interactive_correlation_heatmap",
         "generate_custom_plotly",
     ],
     "static": [
@@ -49,6 +50,7 @@ AGENT_TOOLS = {
         "plot_static_scatterplot",
         "plot_static_boxplot",
         "plot_static_lineplot",
+        "plot_static_correlation_heatmap",
         "generate_custom_static_plot",
         "plot_static_wordcloud",
     ],
@@ -89,10 +91,11 @@ You are the Interactive Visualization Expert. Your job is to generate web-ready 
 Rules:
 1. ALWAYS call `get_column_summary` FIRST to verify data types and categorical values before plotting.
 2. Use the provided interactive tools for standard plots.
-3. If you must use `generate_custom_plotly`, you MUST assign your final chart to a variable named `fig`.
-4. CRITICAL: Explicitly handle data types (e.g., pd.to_datetime) if needed.
-5. The data is already loaded in a dataframe named `df`. Do NOT use pd.read_csv().
-6. If a tool returns an error, read the error message, correct your parameters, and try again.
+3. Use `plot_interactive_correlation_heatmap` when the user wants to see relationships between all numeric columns at once.
+4. If you must use `generate_custom_plotly`, you MUST assign your final chart to a variable named `fig`.
+5. CRITICAL: In `generate_custom_plotly` code, NEVER call pd.read_csv(), pd.read_excel(), or any file-loading function. The dataframe is ALREADY loaded as `df`. Using any file path will cause an error.
+6. CRITICAL: Explicitly handle data types (e.g., pd.to_datetime) if needed.
+7. If a tool returns an error, read the error message, correct your parameters, and try again.
 """
 
 STATIC_PROMPT: str = """
@@ -101,10 +104,12 @@ You are the Static Visualization Expert. Your job is to generate Matplotlib/Seab
 Rules:
 1. ALWAYS call `get_column_summary` FIRST to verify data types and categorical values before plotting.
 2. Use the provided static tools for standard plots.
-3. If you use `generate_custom_static_plot`, do NOT call `plt.show()`. The tool handles saving automatically.
-4. CRITICAL: Explicitly handle data types (e.g., pd.to_datetime) if needed.
-5. The data is already loaded in a dataframe named `df`. Do NOT use pd.read_csv().
-6. If a tool returns an error, read the error message, correct your parameters, and try again.
+3. Use `plot_static_correlation_heatmap` when the user wants to see relationships between all numeric columns at once.
+4. For word clouds, use the `extra_stopwords` parameter to filter out common filler words if the user mentions a non-English dataset or specific words to exclude.
+5. If you use `generate_custom_static_plot`, do NOT call `plt.show()` or `plt.savefig()`. The tool handles saving automatically.
+6. CRITICAL: In `generate_custom_static_plot` code, NEVER call pd.read_csv(), pd.read_excel(), or any file-loading function. The dataframe is ALREADY loaded as `df`. Using any file path will cause an error.
+7. CRITICAL: Explicitly handle data types (e.g., pd.to_datetime) if needed.
+8. If a tool returns an error, read the error message, correct your parameters, and try again.
 """
 
 STATS_PROMPT: str = """
@@ -117,3 +122,28 @@ Rules:
 4. Do not generate plots. Focus purely on the math and statistical significance.
 5. If a tool returns an error, read the error message, adjust your column names or methods, and try again.
 """
+
+# =========================================================================
+# TOOL DISPLAY LABELS
+# =========================================================================
+
+_TOOL_LABELS: dict[str, str] = {
+    "plot_interactive_histogram": "Interactive Histogram",
+    "plot_interactive_scatterplot": "Interactive Scatter Plot",
+    "plot_interactive_boxplot": "Interactive Box Plot",
+    "plot_interactive_lineplot": "Interactive Line Plot",
+    "plot_interactive_correlation_heatmap": "Interactive Correlation Heatmap",
+    "generate_custom_plotly": "Custom Interactive Chart",
+    "plot_static_histogram": "Static Histogram",
+    "plot_static_scatterplot": "Static Scatter Plot",
+    "plot_static_boxplot": "Static Box Plot",
+    "plot_static_lineplot": "Static Line Plot",
+    "plot_static_correlation_heatmap": "Static Correlation Heatmap",
+    "generate_custom_static_plot": "Custom Static Chart",
+    "plot_static_wordcloud": "Word Cloud",
+}
+
+
+def get_tool_label(tool_name: str) -> str:
+    """Return a human-readable display name for an MCP tool name."""
+    return _TOOL_LABELS.get(tool_name, tool_name.replace("_", " ").title())

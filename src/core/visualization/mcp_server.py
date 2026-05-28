@@ -21,6 +21,7 @@ from core.visualization.plot_data import get_column_summary_impl
 from core.visualization.plot_interactive import (
     generate_custom_plotly_impl,
     plot_boxplot_impl as interactive_boxplot,
+    plot_correlation_heatmap_impl as interactive_correlation_heatmap,
     plot_histogram_impl as interactive_histogram,
     plot_lineplot_impl as interactive_lineplot,
     plot_scatterplot_impl as interactive_scatterplot,
@@ -28,6 +29,7 @@ from core.visualization.plot_interactive import (
 from core.visualization.plot_static import (
     generate_custom_static_plot_impl,
     plot_static_boxplot_impl,
+    plot_static_correlation_heatmap_impl,
     plot_static_histogram_impl,
     plot_static_lineplot_impl,
     plot_static_scatterplot_impl,
@@ -80,6 +82,18 @@ def plot_interactive_lineplot(
 ) -> str:
     """Generates a web-ready interactive Plotly line plot."""
     return interactive_lineplot(data_file_path, x_column, y_column, title, color_column)
+
+
+@mcp.tool()
+def plot_interactive_correlation_heatmap(
+    data_file_path: str, title: str, method: str = "pearson"
+) -> str:
+    """
+    Generates an interactive Plotly correlation heatmap for all numeric columns.
+    Use this to visualize relationships between all numeric features at once.
+    method must be 'pearson' or 'spearman'.
+    """
+    return interactive_correlation_heatmap(data_file_path, title, method)
 
 
 @mcp.tool()
@@ -143,13 +157,29 @@ def generate_custom_static_plot(
 
 @mcp.tool()
 def plot_static_wordcloud(
-    data_file_path: str, text_column: str, title: str = "Word Cloud"
+    data_file_path: str,
+    text_column: str,
+    title: str = "Word Cloud",
+    extra_stopwords: str | None = None,
 ) -> str:
     """
     Generates a static Word Cloud image from a column containing text data.
     Use this when the user wants to visualize the most frequent terms in a dataset.
+    extra_stopwords: optional comma-separated words to exclude (e.g. "said,also,one").
     """
-    return plot_static_wordcloud_impl(data_file_path, text_column, title)
+    return plot_static_wordcloud_impl(data_file_path, text_column, title, extra_stopwords)
+
+
+@mcp.tool()
+def plot_static_correlation_heatmap(
+    data_file_path: str, title: str, method: str = "pearson"
+) -> str:
+    """
+    Generates a publication-ready Seaborn correlation heatmap for all numeric columns.
+    Use this when the user explicitly asks for static or publication figures.
+    method must be 'pearson' or 'spearman'.
+    """
+    return plot_static_correlation_heatmap_impl(data_file_path, title, method)
 
 
 # --- STATISTICAL TOOLS ---

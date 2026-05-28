@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import pandas.api.types as ptypes
 import seaborn as sns
-from wordcloud import WordCloud
+from wordcloud import STOPWORDS, WordCloud
 
 from core.visualization.viz_utils import get_plot_path, load_data_safely
 
@@ -24,6 +24,8 @@ def _generate_static_code_snippet(plot_code: str) -> str:
     Returns:
         A formatted Python script string including imports and data loading.
     """
+    from core.visualization.viz_utils import _strip_show_calls
+    clean = _strip_show_calls(plot_code)
     return (
         "import matplotlib.pyplot as plt\n"
         "import pandas as pd\n"
@@ -32,7 +34,7 @@ def _generate_static_code_snippet(plot_code: str) -> str:
         "df = pd.read_csv('your_data.csv')\n\n"
         "# Generate Plot\n"
         "plt.figure(figsize=(10, 6))\n"
-        f"{plot_code}\n"
+        f"{clean}\n"
         "plt.show()"
     )
 
@@ -166,6 +168,10 @@ def generate_custom_static_plot_impl(
     try:
         df = load_data_safely(data_file_path)
 
+        # Pass as a single dict (used as both globals and locals) so that nested
+        # scopes like list comprehensions can also resolve `df`, `sns`, etc.
+        # Using exec(code, {}, locals) would hide injected names inside comprehensions
+        # and function defs due to Python 3's exec scoping rules.
         local_scope = {
             "pd": pd,
             "np": np,
@@ -173,7 +179,8 @@ def generate_custom_static_plot_impl(
             "plt": plt,
             "WordCloud": WordCloud,
             "df": df,
-            "data_file_path": data_file_path,
+            # data_file_path is intentionally NOT exposed: the model should use df
+            # directly and must not call pd.read_csv() or reference file paths.
         }
 
         clean_code = python_code.replace("```python", "").replace("```", "").strip()
@@ -181,7 +188,7 @@ def generate_custom_static_plot_impl(
         # Close any stale figures from previous runs in this process.
         plt.close("all")
 
-        exec(clean_code, {}, local_scope)
+        exec(clean_code, local_scope)
 
         # Prefer an explicit `fig` if the LLM created one; otherwise use the
         # currently active matplotlib figure.
@@ -254,29 +261,39 @@ def plot_static_lineplot_impl(
     
 
 def plot_static_wordcloud_impl(
-    data_file_path: str, text_column: str, title: str = "Word Cloud"
+    data_file_path: str,
+    text_column: str,
+    title: str = "Word Cloud",
+    extra_stopwords: str | None = None,
 ) -> str:
     """
     Generates and saves a static Word Cloud from a text column.
+
+    Args:
+        extra_stopwords: Optional comma-separated list of additional words to exclude
+            (e.g., "the,and,said"). Combined with the built-in English stopword list.
     """
     try:
         df = load_data_safely(data_file_path)
         if text_column not in df.columns:
             return f"Error: Column '{text_column}' not found in data."
 
-        # Combine all text in the column into a single string, dropping nulls
         text_data = " ".join(df[text_column].dropna().astype(str))
         
         if not text_data.strip():
             return "Error: The specified text column is empty or contains only null values."
 
-        # Generate the word cloud
+        stopword_set = set(STOPWORDS)
+        if extra_stopwords:
+            stopword_set.update(w.strip().lower() for w in extra_stopwords.split(",") if w.strip())
+
         wordcloud = WordCloud(
             width=1200, 
             height=600, 
             background_color="white", 
             colormap="viridis",
-            max_words=200
+            max_words=200,
+            stopwords=stopword_set,
         ).generate(text_data)
 
         plt.figure(figsize=(12, 6))
@@ -290,10 +307,18 @@ def plot_static_wordcloud_impl(
         plt.savefig(plot_path, bbox_inches="tight", dpi=300)
         plt.close()
 
+        stopwords_arg = f", extra_stopwords='{extra_stopwords}'" if extra_stopwords else ""
+        extra_code = ""
+        if extra_stopwords:
+            extra_code = (
+                f"from wordcloud import STOPWORDS\n"
+                f"stopwords = set(STOPWORDS) | {{{', '.join(repr(w.strip()) for w in extra_stopwords.split(',') if w.strip())}}}\n"
+            )
         code = _generate_static_code_snippet(
-            "from wordcloud import WordCloud\n\n"
+            f"from wordcloud import WordCloud{''.join(['', chr(10) + extra_code] if extra_code else [''])}\n"
             f"text_data = ' '.join(df['{text_column}'].dropna().astype(str))\n"
-            "wordcloud = WordCloud(width=1200, height=600, background_color='white', colormap='viridis').generate(text_data)\n"
+            f"wordcloud = WordCloud(width=1200, height=600, background_color='white',\n"
+            f"    colormap='viridis', stopwords={'stopwords' if extra_stopwords else 'None'}).generate(text_data)\n"
             "plt.imshow(wordcloud, interpolation='bilinear')\n"
             f"plt.title('{title}', fontsize=16, pad=20)\n"
             "plt.axis('off')"
@@ -301,3 +326,52 @@ def plot_static_wordcloud_impl(
         return f"{plot_path}|||{code}"
     except Exception as e:
         return f"Error plotting word cloud: {str(e)}"
+
+
+def plot_static_correlation_heatmap_impl(
+    data_file_path: str, title: str, method: str = "pearson"
+) -> str:
+    """
+    Generates a publication-ready Seaborn correlation heatmap for all numeric columns.
+    """
+    try:
+        df = load_data_safely(data_file_path)
+        numeric_df = df.select_dtypes(include="number")
+
+        if numeric_df.shape[1] < 2:
+            return "Error: Need at least 2 numeric columns to generate a correlation heatmap."
+
+        corr_matrix = numeric_df.corr(method=method)
+        n_cols = corr_matrix.shape[1]
+        fig_size = max(8, n_cols)
+
+        fig, ax = plt.subplots(figsize=(fig_size, fig_size))
+        sns.heatmap(
+            corr_matrix,
+            annot=True,
+            fmt=".2f",
+            cmap="coolwarm",
+            center=0,
+            vmin=-1,
+            vmax=1,
+            square=True,
+            linewidths=0.5,
+            ax=ax,
+        )
+        ax.set_title(title, fontsize=14, pad=15)
+
+        plot_path = get_plot_path(
+            data_file_path, f"static_corr_heatmap_{method}", ext=".png"
+        )
+        fig.savefig(plot_path, bbox_inches="tight", dpi=300)
+        plt.close(fig)
+
+        code = _generate_static_code_snippet(
+            f"corr_matrix = df.select_dtypes(include='number').corr(method='{method}')\n"
+            f"sns.heatmap(corr_matrix, annot=True, fmt='.2f', cmap='coolwarm',\n"
+            f"    center=0, vmin=-1, vmax=1, square=True, linewidths=0.5)\n"
+            f"plt.title('{title}', fontsize=14, pad=15)"
+        )
+        return f"{plot_path}|||{code}"
+    except Exception as e:
+        return f"Error plotting static correlation heatmap: {str(e)}"
