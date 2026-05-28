@@ -8,7 +8,7 @@ HOST_TEXT_LAB_DIR="${TEXT_LAB_DIR:-/storage/research/dsl_shared/solutions/ondema
 CONT_TEXT_LAB_DIR="/text_lab"
 
 #point to the apptainer containers on research storage
-TL_CONTAINER="$HOST_TEXT_LAB_DIR/container/text_lab_090426.sif"
+TL_CONTAINER="$HOST_TEXT_LAB_DIR/container/text_lab_210526.sif"
 
 #point to where the ollama models are stored on research storage
 HOST_OLLAMA_DIR="/storage/research/dsl_shared/solutions/ondemand/text_lab/container/models/ollama"
@@ -108,8 +108,8 @@ apptainer exec \
            export TMPDIR=/tmp/ollama_${USER}_${SLURM_JOB_ID:-unknown} && \
            mkdir -p \$OLLAMA_TMPDIR && \
            ollama serve > $CONT_TEXT_LAB_DIR/logs/ollama_server_${SLURM_JOB_ID:-unknown}.log 2>&1 & \
-           sleep 10 && \
-           /opt/conda/envs/text_lab_main/bin/python -u -m streamlit run '/storage/research/dsl_shared/solutions/ondemand/text_lab/src_main090426/src/Home.py' \
+           while ! curl -s http://$OLLAMA_HOST/api/tags > /dev/null; do sleep 1; done && \
+           /opt/conda/envs/text_lab_main/bin/python -u -m streamlit run '/storage/research/dsl_shared/solutions/ondemand/text_lab/src_main280526/src/Home.py' \
              --server.address 0.0.0.0 \
              --server.port '$TEXT_LAB_PORT' \
              --server.baseUrlPath '$SERVER_BASEURLPATH' \
@@ -118,6 +118,6 @@ apptainer exec \
              --browser.serverAddress ondemand.hpc.unibe.ch \
              --browser.gatherUsageStats false \
              --logger.level info \
-             --client.showErrorDetails true"
+             --client.showErrorDetails true > $CONT_TEXT_LAB_DIR/logs/streamlit_${SLURM_JOB_ID:-unknown}.log 2>&1"
 
 popd
