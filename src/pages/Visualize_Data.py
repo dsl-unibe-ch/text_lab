@@ -1,8 +1,11 @@
 import asyncio
+import io
 import os
 import pathlib
+import shutil
 import sys
 import tempfile
+import time
 import uuid
 import zipfile
 from io import BytesIO
@@ -39,11 +42,32 @@ _SRC_DIR = _CURRENT_SCRIPT_DIR.parent
 MCP_SERVER_SCRIPT = str(_SRC_DIR / "core" / "visualization" / "mcp_server.py")
 ARTIFACTS_DIR = str(_SRC_DIR / "mcp_artifacts")
 
+# Max seconds before the analysis is cancelled and an error is shown.
+ANALYSIS_TIMEOUT_SECONDS = 600
+
 os.makedirs(ARTIFACTS_DIR, exist_ok=True)
 try:
     os.chmod(ARTIFACTS_DIR, 0o700)
 except Exception:
     pass
+
+
+def _cleanup_orphaned_artifacts(max_age_hours: int = 12) -> None:
+    """
+    Remove any mcp_artifacts/tmp* directories that are older than max_age_hours.
+    These can accumulate when Streamlit crashes mid-analysis before the
+    TemporaryDirectory context manager can run its cleanup.
+    Called once per browser session via session_state guard.
+    """
+    cutoff = time.time() - max_age_hours * 3600
+    artifacts = pathlib.Path(ARTIFACTS_DIR)
+    for entry in artifacts.iterdir():
+        if entry.is_dir() and entry.name.startswith("tmp"):
+            try:
+                if entry.stat().st_mtime < cutoff:
+                    shutil.rmtree(entry, ignore_errors=True)
+            except Exception:
+                pass
 
 
 def render_sidebar() -> str:
@@ -136,7 +160,12 @@ def render_results(
 
 def main() -> None:
     check_token()
-    
+
+    # Orphaned artifact cleanup — once per browser session.
+    if "artifacts_cleaned" not in st.session_state:
+        _cleanup_orphaned_artifacts()
+        st.session_state["artifacts_cleaned"] = True
+
     if not check_ollama_server():
         st.error("Could not connect to Ollama server.")
         st.info("Please check the log file: text_lab/ollama_server.log")
@@ -147,19 +176,18 @@ def main() -> None:
     st.title("AI Data Visualiser")
     st.info(f"Using Model: **{selected_model}**")
 
-    # --- NEW CAPABILITIES EXPANDER ---
+    # --- CAPABILITIES EXPANDER ---
     with st.expander("View Available AI Capabilities"):
         st.markdown("""
         This tool uses a **Multi-Agent System** to analyze your data. A Supervisor AI reads your prompt and delegates tasks to three specialist agents:
-        
-        * **Interactive Agent (Default):** Generates web-ready, interactive Plotly charts (Scatter, Bar, Line, Box, Correlation Heatmap, etc.). Best for exploring data on this page.
-        * **Static Agent:** Generates publication-ready Matplotlib/Seaborn charts and Word Clouds (with custom stopwords). (Triggered when you explicitly ask for "static", "images", or "publication figures").
+
+        * **Interactive Agent (Default):** Generates web-ready, interactive Plotly charts (Scatter, Bar, Line, Box, Scatter Matrix, Correlation Heatmap, etc.). Best for exploring data on this page.
+        * **Static Agent:** Generates publication-ready Matplotlib/Seaborn charts, Pair Plots, and Word Clouds. Triggered when you explicitly ask for "static", "publication figures", "pair plot", or "word cloud".
         * **Statistical Agent:** Runs rigorous mathematical tests including Correlations, T-tests, ANOVA, and OLS Linear Regression. Each result includes reproducible Python code.
-        
-        **Prompting Tip:** Be specific about what you want! 
-        *(e.g., "Run a linear regression on column X and Y, then plot an interactive scatter plot.")*
+
+        **Prompting Tip:** Be specific about what you want!
+        *(e.g., "Run a t-test on column X grouped by Y, then plot an interactive bar chart of the means.")*
         """)
-    # ---------------------------------
 
     uploaded_file = st.file_uploader(
         "Upload your data file (CSV, TSV, Excel, JSON)",
@@ -168,13 +196,27 @@ def main() -> None:
 
     if uploaded_file:
         file_size_mb = uploaded_file.size / (1024 * 1024)
-        # Quick single-row read to count columns without loading entire file.
-        _preview = get_fast_data_preview(
-            save_data_file(uploaded_file.getvalue(), uploaded_file.name, tempfile.gettempdir()),
-            uploaded_file.name,
-            nrows=1,
-        )
-        n_cols = len(_preview.columns) if _preview is not None else "?"
+        # Parse column count from raw bytes in memory — never write to /tmp.
+        try:
+            file_bytes_for_preview = uploaded_file.getvalue()
+            name_lower = uploaded_file.name.lower()
+            if name_lower.endswith(".csv"):
+                _preview_df = pd.read_csv(io.BytesIO(file_bytes_for_preview), nrows=1)
+            elif name_lower.endswith(".tsv"):
+                _preview_df = pd.read_csv(io.BytesIO(file_bytes_for_preview), sep="\t", nrows=1)
+            elif name_lower.endswith((".xls", ".xlsx")):
+                _preview_df = pd.read_excel(io.BytesIO(file_bytes_for_preview), nrows=1)
+            elif name_lower.endswith(".json"):
+                try:
+                    _preview_df = pd.read_json(io.BytesIO(file_bytes_for_preview), lines=True, nrows=1)
+                except Exception:
+                    _preview_df = pd.read_json(io.BytesIO(file_bytes_for_preview)).head(1)
+            else:
+                _preview_df = None
+            n_cols = len(_preview_df.columns) if _preview_df is not None else "?"
+        except Exception:
+            n_cols = "?"
+
         st.caption(
             f"📄 **{uploaded_file.name}** · {file_size_mb:.1f} MB · {n_cols} columns"
         )
@@ -204,9 +246,13 @@ def main() -> None:
                     status_box.write(msg)
 
             run_id = f"ds-{uuid.uuid4().hex[:8]}"
-            
+
+            # Only pull if the model isn't already present locally.
             try:
-                ollama.pull(selected_model)
+                local_models = {m["model"] for m in ollama.list().get("models", [])}
+                if selected_model not in local_models:
+                    status_box.write(f"Pulling model '{selected_model}'...")
+                    ollama.pull(selected_model)
             except Exception as e:
                 status_box.error(f"Failed to pull model {selected_model}: {e}")
                 st.stop()
@@ -215,7 +261,7 @@ def main() -> None:
                 with tempfile.TemporaryDirectory(dir=ARTIFACTS_DIR) as run_dir:
                     file_bytes = uploaded_file.getvalue()
                     data_file_path = save_data_file(file_bytes, uploaded_file.name, run_dir)
-                    
+
                     df = get_fast_data_preview(data_file_path, uploaded_file.name)
                     if df is None:
                         status_box.error("Failed to generate a data preview.")
@@ -237,15 +283,26 @@ def main() -> None:
 
                     status_box.write("Starting Supervisor Agent...")
 
-                    analysis_result = asyncio.run(
-                        run_analysis(
-                            messages, 
-                            data_file_path, 
-                            selected_model, 
-                            MCP_SERVER_SCRIPT, 
-                            log_callback=live_log_callback
+                    try:
+                        analysis_result = asyncio.run(
+                            asyncio.wait_for(
+                                run_analysis(
+                                    messages,
+                                    data_file_path,
+                                    selected_model,
+                                    MCP_SERVER_SCRIPT,
+                                    log_callback=live_log_callback,
+                                ),
+                                timeout=ANALYSIS_TIMEOUT_SECONDS,
+                            )
                         )
-                    )
+                    except asyncio.TimeoutError:
+                        status_box.update(label="Analysis Timed Out", state="error", expanded=True)
+                        status_box.error(
+                            f"Analysis exceeded the {ANALYSIS_TIMEOUT_SECONDS // 60}-minute limit. "
+                            "Try a simpler prompt or a smaller dataset."
+                        )
+                        st.stop()
 
                     status_box.update(label="Analysis Complete", state="complete", expanded=True)
 
@@ -255,7 +312,7 @@ def main() -> None:
                     for item in plot_results:
                         path = item["path"]
                         code = item["code"]
-                        
+
                         if os.path.exists(path):
                             filename = os.path.basename(path)
                             with open(path, "rb") as f:
