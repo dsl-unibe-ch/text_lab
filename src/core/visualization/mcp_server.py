@@ -32,6 +32,7 @@ from core.visualization.plot_static import (
     plot_static_correlation_heatmap_impl,
     plot_static_histogram_impl,
     plot_static_lineplot_impl,
+    plot_static_pairplot_impl,
     plot_static_scatterplot_impl,
     plot_static_wordcloud_impl,
 )
@@ -86,14 +87,19 @@ def plot_interactive_lineplot(
 
 @mcp.tool()
 def plot_interactive_correlation_heatmap(
-    data_file_path: str, title: str, method: str = "pearson"
+    data_file_path: str,
+    title: str,
+    method: str = "pearson",
+    column_filter: str = "",
 ) -> str:
     """
-    Generates an interactive Plotly correlation heatmap for all numeric columns.
-    Use this to visualize relationships between all numeric features at once.
+    Generates an interactive Plotly correlation heatmap.
+    Use this to visualize relationships between numeric features.
     method must be 'pearson' or 'spearman'.
+    column_filter: optional comma-separated column names or suffix patterns (e.g. '_mean')
+        to restrict the heatmap to a subset of columns. Leave empty for all numeric columns.
     """
-    return interactive_correlation_heatmap(data_file_path, title, method)
+    return interactive_correlation_heatmap(data_file_path, title, method, column_filter or None)
 
 
 @mcp.tool()
@@ -156,6 +162,22 @@ def generate_custom_static_plot(
 
 
 @mcp.tool()
+def plot_static_pairplot(
+    data_file_path: str,
+    columns: str,
+    title: str = "Pair Plot",
+    hue_column: str = "",
+) -> str:
+    """
+    Generates a Seaborn pair plot (scatter matrix) for the specified columns.
+    Use this for multi-feature distribution and correlation exploration.
+    columns: comma-separated list of numeric column names (e.g. 'radius_mean,texture_mean,area_mean').
+    hue_column: optional categorical column name to colour points by (e.g. 'diagnosis'). Leave empty if not needed.
+    """
+    return plot_static_pairplot_impl(data_file_path, columns, title, hue_column or None)
+
+
+@mcp.tool()
 def plot_static_wordcloud(
     data_file_path: str,
     text_column: str,
@@ -172,14 +194,19 @@ def plot_static_wordcloud(
 
 @mcp.tool()
 def plot_static_correlation_heatmap(
-    data_file_path: str, title: str, method: str = "pearson"
+    data_file_path: str,
+    title: str,
+    method: str = "pearson",
+    column_filter: str = "",
 ) -> str:
     """
-    Generates a publication-ready Seaborn correlation heatmap for all numeric columns.
+    Generates a publication-ready Seaborn correlation heatmap.
     Use this when the user explicitly asks for static or publication figures.
     method must be 'pearson' or 'spearman'.
+    column_filter: optional comma-separated column names or suffix patterns (e.g. '_mean')
+        to restrict the heatmap to a subset of columns. Leave empty for all numeric columns.
     """
-    return plot_static_correlation_heatmap_impl(data_file_path, title, method)
+    return plot_static_correlation_heatmap_impl(data_file_path, title, method, column_filter or None)
 
 
 # --- STATISTICAL TOOLS ---

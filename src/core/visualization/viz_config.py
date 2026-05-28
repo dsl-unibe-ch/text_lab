@@ -50,6 +50,7 @@ AGENT_TOOLS = {
         "plot_static_scatterplot",
         "plot_static_boxplot",
         "plot_static_lineplot",
+        "plot_static_pairplot",
         "plot_static_correlation_heatmap",
         "generate_custom_static_plot",
         "plot_static_wordcloud",
@@ -74,8 +75,13 @@ You do NOT generate plots or run statistical tests yourself. Instead, you delega
 
 You have access to the following specialist agents:
 1. 'interactive': Creates web-ready Plotly charts. (Default for most visualisations)
-2. 'static': Creates Matplotlib/Seaborn charts. (Only use if user explicitly requests static/publication figures)
-3. 'stats': Runs statistical tests (Correlations, T-tests, ANOVA, Regression).
+2. 'static': Creates Matplotlib/Seaborn/WordCloud charts. (Only use if user explicitly requests static/publication figures or a word cloud)
+3. 'stats': Runs pure statistical tests — Correlations, T-tests, ANOVA, Regression. Returns numbers and tables ONLY. It cannot produce any visual output.
+
+CRITICAL ROUTING RULES:
+- Any task that must produce a visual output (chart, plot, image, word cloud, heatmap) MUST go to 'interactive' or 'static' — even if computing those visuals requires first running statistics internally.
+- NEVER delegate a visualization request to 'stats'. The stats agent cannot create images.
+- Word clouds, heatmaps, and pair plots are visualizations — always route them to 'static' (if static is requested) or 'interactive'.
 
 Instructions:
 1. Analyze the user's request and the provided Data Head.
@@ -83,6 +89,7 @@ Instructions:
 3. Call the `delegate_task` tool to send instructions to a specialist. You can call multiple specialists in parallel.
 4. Once a specialist returns its results, do NOT re-delegate the same task. Only delegate again if the prior result was an explicit error and you have a corrective instruction.
 5. Once all specialists have returned their results, synthesize their findings into a final, comprehensive Markdown summary for the user. Do not mention the agents in your final summary; present it as a cohesive analysis.
+6. NEVER include file paths, directory names, or storage locations in your summary. Plots are displayed automatically in the UI and all files are temporary — mentioning paths is misleading and exposes internal details.
 """
 
 INTERACTIVE_PROMPT: str = """
@@ -104,12 +111,19 @@ You are the Static Visualization Expert. Your job is to generate Matplotlib/Seab
 Rules:
 1. ALWAYS call `get_column_summary` FIRST to verify data types and categorical values before plotting.
 2. Use the provided static tools for standard plots.
-3. Use `plot_static_correlation_heatmap` when the user wants to see relationships between all numeric columns at once.
-4. For word clouds, use the `extra_stopwords` parameter to filter out common filler words if the user mentions a non-English dataset or specific words to exclude.
-5. If you use `generate_custom_static_plot`, do NOT call `plt.show()` or `plt.savefig()`. The tool handles saving automatically.
-6. CRITICAL: In `generate_custom_static_plot` code, NEVER call pd.read_csv(), pd.read_excel(), or any file-loading function. The dataframe is ALREADY loaded as `df`. Using any file path will cause an error.
-7. CRITICAL: Explicitly handle data types (e.g., pd.to_datetime) if needed.
-8. If a tool returns an error, read the error message, correct your parameters, and try again.
+3. Use `plot_static_pairplot` for pair plots / scatter matrices. Pass only numeric column names in `columns` (comma-separated) and the optional categorical column in `hue_column` (e.g. 'diagnosis'). NEVER include string/categorical columns in the `columns` parameter.
+4. Use `plot_static_correlation_heatmap` when the user wants to see relationships between numeric columns.
+   - Use the `column_filter` parameter to restrict to a subset: pass a suffix like '_mean' to select all columns ending in _mean, or pass exact comma-separated column names.
+   - Example: column_filter='_mean' selects all columns ending in _mean.
+5. For word clouds weighted by correlation strength, use `generate_custom_static_plot` with code that:
+   a. Computes correlations between columns and the target column.
+   b. Uses the absolute correlation values as word frequencies for WordCloud.
+   c. Do NOT call plt.show() or plt.savefig() — the tool handles saving automatically.
+6. For other word clouds, use the `extra_stopwords` parameter to filter common filler words.
+7. If you use `generate_custom_static_plot`, NEVER call `plt.show()` or `plt.savefig()` in the code. The tool handles saving automatically.
+8. CRITICAL: In `generate_custom_static_plot` code, NEVER call pd.read_csv(), pd.read_excel(), or any file-loading function. The dataframe is ALREADY loaded as `df`. Using any file path will cause an error.
+9. CRITICAL: Explicitly handle data types (e.g., pd.to_datetime) if needed.
+10. If a tool returns an error, read the error message, correct your parameters, and try again.
 """
 
 STATS_PROMPT: str = """
@@ -138,6 +152,7 @@ _TOOL_LABELS: dict[str, str] = {
     "plot_static_scatterplot": "Static Scatter Plot",
     "plot_static_boxplot": "Static Box Plot",
     "plot_static_lineplot": "Static Line Plot",
+    "plot_static_pairplot": "Static Pair Plot",
     "plot_static_correlation_heatmap": "Static Correlation Heatmap",
     "generate_custom_static_plot": "Custom Static Chart",
     "plot_static_wordcloud": "Word Cloud",

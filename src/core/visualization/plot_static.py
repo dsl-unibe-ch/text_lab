@@ -10,7 +10,7 @@ import pandas.api.types as ptypes
 import seaborn as sns
 from wordcloud import STOPWORDS, WordCloud
 
-from core.visualization.viz_utils import get_plot_path, load_data_safely
+from core.visualization.viz_utils import _strip_show_calls, get_plot_path, load_data_safely
 
 
 def _generate_static_code_snippet(plot_code: str) -> str:
@@ -184,6 +184,10 @@ def generate_custom_static_plot_impl(
         }
 
         clean_code = python_code.replace("```python", "").replace("```", "").strip()
+        # Strip plt.show() / fig.show() calls before exec — on non-interactive
+        # backends (Agg on HPC), plt.show() clears the active figure, making
+        # it impossible to retrieve and save it afterwards.
+        clean_code = _strip_show_calls(clean_code)
 
         # Close any stale figures from previous runs in this process.
         plt.close("all")
@@ -328,15 +332,96 @@ def plot_static_wordcloud_impl(
         return f"Error plotting word cloud: {str(e)}"
 
 
-def plot_static_correlation_heatmap_impl(
-    data_file_path: str, title: str, method: str = "pearson"
+def plot_static_pairplot_impl(
+    data_file_path: str,
+    columns: str,
+    title: str,
+    hue_column: str | None = None,
 ) -> str:
     """
-    Generates a publication-ready Seaborn correlation heatmap for all numeric columns.
+    Generates a Seaborn pair plot (scatter matrix) for the specified numeric columns.
+
+    Args:
+        columns: Comma-separated list of numeric column names to include.
+        hue_column: Optional categorical column to colour the points by (e.g. 'diagnosis').
+    """
+    try:
+        df = load_data_safely(data_file_path)
+
+        col_list = [c.strip() for c in columns.split(",") if c.strip()]
+        missing = [c for c in col_list if c not in df.columns]
+        if missing:
+            return f"Error: columns not found in data: {', '.join(missing)}"
+
+        if hue_column and hue_column not in df.columns:
+            return f"Error: hue_column '{hue_column}' not found in data."
+
+        plot_cols = col_list + ([hue_column] if hue_column else [])
+        plot_df = df[plot_cols].dropna()
+
+        sns.set_theme(style="ticks")
+        g = sns.pairplot(
+            plot_df,
+            hue=hue_column,
+            vars=col_list,
+            palette="husl",
+            diag_kind="kde",
+            plot_kws={"alpha": 0.6},
+        )
+        if title:
+            g.fig.suptitle(title, y=1.02, fontsize=14)
+
+        safe_name = "_".join(col_list[:3])
+        plot_path = get_plot_path(data_file_path, f"pairplot_{safe_name}", ext=".png")
+        g.fig.savefig(plot_path, bbox_inches="tight", dpi=150)
+        plt.close("all")
+
+        hue_code = f", hue='{hue_column}'" if hue_column else ""
+        code_body = (
+            f"import seaborn as sns\n"
+            f"cols = {col_list!r}\n"
+            f"plot_df = df[cols{' + [' + repr(hue_column) + ']' if hue_column else ''}].dropna()\n"
+            f"sns.set_theme(style='ticks')\n"
+            f"g = sns.pairplot(plot_df, vars=cols{hue_code}, palette='husl', diag_kind='kde', plot_kws={{'alpha': 0.6}})\n"
+            f"g.fig.suptitle('{title}', y=1.02, fontsize=14)\n"
+        )
+        code = _generate_static_code_snippet(code_body)
+        return f"{plot_path}|||{code}"
+    except Exception as e:
+        return f"Error generating pair plot: {str(e)}"
+
+
+def plot_static_correlation_heatmap_impl(
+    data_file_path: str,
+    title: str,
+    method: str = "pearson",
+    column_filter: str | None = None,
+) -> str:
+    """
+    Generates a publication-ready Seaborn correlation heatmap.
+
+    Args:
+        column_filter: Optional comma-separated column names or glob-style suffix
+            (e.g. "_mean" to select only columns ending in _mean). When omitted,
+            all numeric columns are used.
     """
     try:
         df = load_data_safely(data_file_path)
         numeric_df = df.select_dtypes(include="number")
+
+        if column_filter:
+            filters = [f.strip() for f in column_filter.split(",") if f.strip()]
+            # Support either exact names or suffix patterns like "_mean"
+            selected = [
+                c for c in numeric_df.columns
+                if c in filters or any(c.endswith(f) for f in filters)
+            ]
+            if len(selected) < 2:
+                return (
+                    f"Error: column_filter '{column_filter}' matched fewer than 2 columns. "
+                    f"Available numeric columns: {', '.join(numeric_df.columns)}"
+                )
+            numeric_df = numeric_df[selected]
 
         if numeric_df.shape[1] < 2:
             return "Error: Need at least 2 numeric columns to generate a correlation heatmap."
@@ -360,8 +445,9 @@ def plot_static_correlation_heatmap_impl(
         )
         ax.set_title(title, fontsize=14, pad=15)
 
+        safe_filter = column_filter.replace(",", "_").replace(" ", "") if column_filter else "all"
         plot_path = get_plot_path(
-            data_file_path, f"static_corr_heatmap_{method}", ext=".png"
+            data_file_path, f"static_corr_heatmap_{safe_filter}_{method}", ext=".png"
         )
         fig.savefig(plot_path, bbox_inches="tight", dpi=300)
         plt.close(fig)

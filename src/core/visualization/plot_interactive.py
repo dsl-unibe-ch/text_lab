@@ -9,6 +9,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 from core.visualization.viz_utils import (
+    _strip_show_calls,
     generate_code_snippet,
     get_plot_path,
     load_data_safely,
@@ -185,14 +186,35 @@ def plot_lineplot_impl(
 
 
 def plot_correlation_heatmap_impl(
-    data_file_path: str, title: str, method: str = "pearson"
+    data_file_path: str,
+    title: str,
+    method: str = "pearson",
+    column_filter: str | None = None,
 ) -> str:
     """
-    Generates an interactive Plotly correlation heatmap for all numeric columns.
+    Generates an interactive Plotly correlation heatmap.
+
+    Args:
+        column_filter: Optional comma-separated column names or suffix patterns
+            (e.g. "_mean" to select only columns ending in _mean). When omitted,
+            all numeric columns are used.
     """
     try:
         df = load_data_safely(data_file_path)
         numeric_df = df.select_dtypes(include="number")
+
+        if column_filter:
+            filters = [f.strip() for f in column_filter.split(",") if f.strip()]
+            selected = [
+                c for c in numeric_df.columns
+                if c in filters or any(c.endswith(f) for f in filters)
+            ]
+            if len(selected) < 2:
+                return (
+                    f"Error: column_filter '{column_filter}' matched fewer than 2 columns. "
+                    f"Available numeric columns: {', '.join(numeric_df.columns)}"
+                )
+            numeric_df = numeric_df[selected]
 
         if numeric_df.shape[1] < 2:
             return "Error: Need at least 2 numeric columns to generate a correlation heatmap."
@@ -210,11 +232,22 @@ def plot_correlation_heatmap_impl(
         )
         fig.update_layout(template="plotly_white")
 
-        plot_path = get_plot_path(data_file_path, f"corr_heatmap_{method}", ext=".json")
+        safe_filter = column_filter.replace(",", "_").replace(" ", "") if column_filter else "all"
+        plot_path = get_plot_path(data_file_path, f"corr_heatmap_{safe_filter}_{method}", ext=".json")
         fig.write_json(plot_path)
 
+        filter_code = ""
+        if column_filter:
+            filter_code = (
+                f"filters = {repr([f.strip() for f in column_filter.split(',') if f.strip()])}\n"
+                f"numeric_df = df.select_dtypes(include='number')\n"
+                f"numeric_df = numeric_df[[c for c in numeric_df.columns if c in filters or any(c.endswith(f) for f in filters)]]\n"
+            )
+        else:
+            filter_code = "numeric_df = df.select_dtypes(include='number')\n"
+
         code_logic = (
-            f"numeric_df = df.select_dtypes(include='number')\n"
+            f"{filter_code}"
             f"corr_matrix = numeric_df.corr(method='{method}').round(2)\n"
             f"fig = px.imshow(corr_matrix, text_auto=True, aspect='auto',\n"
             f"    color_continuous_scale='RdBu_r', zmin=-1, zmax=1, title='{title}')\n"
@@ -250,8 +283,9 @@ def generate_custom_plotly_impl(
             # directly and must not call pd.read_csv() or reference file paths.
         }
 
-        # Strip markdown formatting if the LLM provided it
+        # Strip markdown formatting and any fig.show() / plt.show() calls before exec.
         clean_code = python_code.replace("```python", "").replace("```", "").strip()
+        clean_code = _strip_show_calls(clean_code)
 
         # Execute the custom code
         exec(clean_code, local_scope)
