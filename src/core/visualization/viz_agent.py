@@ -11,6 +11,7 @@ import ollama
 from mcp import ClientSession, StdioServerParameters, types
 from mcp.client.stdio import stdio_client
 
+from core.visualization.plot_data import get_all_columns_summary_impl
 from core.visualization.viz_config import (
     AGENT_TOOLS,
     INTERACTIVE_PROMPT,
@@ -91,9 +92,19 @@ async def _run_worker_agent(
     tools = await _get_mcp_tools(session, allowed_names=allowed_tools)
 
     system_prompt = WORKER_PROMPTS.get(agent_role, "You are a helpful assistant.")
+
+    # Pre-compute the dataset schema so the worker always knows what columns are available.
+    # This prevents the model from saying "please provide data" when it lacks context.
+    schema = get_all_columns_summary_impl(data_file_path)
     messages = [
         {"role": "system", "content": system_prompt},
-        {"role": "user", "content": f"Task: {task_instruction}"}
+        {
+            "role": "user",
+            "content": (
+                f"Dataset schema (already loaded — use your tools to analyze it):\n{schema}\n\n"
+                f"Task: {task_instruction}"
+            ),
+        },
     ]
 
     _log("info", f"Supervisor delegated task to '{agent_role}' agent.")
