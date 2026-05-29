@@ -8,6 +8,7 @@ TRANSCRIBE_LANGUAGE_MAPPING = {
     "Spanish": "es",
     "Italian": "it",
     "Swiss German": "ch_de",
+    "Swiss German (Flurin Turbo)": "ch_de_flurin",
     "Japanese": "ja",
     "Chinese": "zh",
     "Dutch": "nl",

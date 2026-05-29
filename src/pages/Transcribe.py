@@ -36,6 +36,10 @@ from core.transcribe_engine import (
 )
 
 HF_TOKEN_PATH = "/storage/research/dsl_shared/solutions/whisperx/cache/whisperx/cache/hf/hf_token.txt"
+
+# CTranslate2-converted copy of Flurin17/whisper-large-v3-turbo-swiss-german.
+# Built once with `ct2-transformers-converter` so whisperx.load_model() can use it.
+FLURIN_SWISS_MODEL_PATH = "/storage/research/dsl_shared/solutions/whisperx/cache/whisper/flurin-swiss-german-turbo-ct2"
 alignment.DEFAULT_ALIGN_MODELS_HF["uk"] = "Yehor/w2v-xls-r-uk"
 
 def main():
@@ -161,6 +165,9 @@ def main():
             if not is_auto_detect and language_name == "Swiss German":
                 default_model = "/storage/research/dsl_shared/solutions/whisperx/cache/whisper/swhisper-large-1.1"
                 st.info("ℹ️ Using Swiss German Whisper model")
+            elif not is_auto_detect and language_name == "Swiss German (Flurin Turbo)":
+                default_model = FLURIN_SWISS_MODEL_PATH
+                st.info("ℹ️ Using Flurin Swiss German Whisper Turbo model (CT2)")
             else:
                 default_model = "large-v3-turbo"
                 st.info(f"ℹ️ Using default Large v3 Turbo whisper model")
@@ -201,6 +208,11 @@ def main():
         if st.button("Start Batch Transcription", type="primary"):
             if batch_zip is None:
                 st.error("Please upload a ZIP file first.")
+            elif not is_auto_detect and language_name == "Swiss German (Flurin Turbo)" and not os.path.isdir(whisper_model):
+                st.error(
+                    f"Flurin CT2 model not found at `{whisper_model}`. "
+                    "Please convert the model first using `ct2-transformers-converter` before running batch transcription."
+                )
             else:
                 if torch.cuda.is_available():
                     device = "cuda"
@@ -265,8 +277,8 @@ def main():
                                         file_lang = LANGUAGE_MAPPING[language_name]
                                         status_text.text(f"Processing ({idx+1}/{len(audio_files)}): {os.path.basename(filename)}")
                                     
-                                    # Fix custom Swiss German mapped code
-                                    align_lang = "de" if file_lang == "ch_de" else file_lang
+                                    # Fix custom Swiss German mapped codes (both Swiss German models align via German)
+                                    align_lang = "de" if file_lang in ("ch_de", "ch_de_flurin") else file_lang
 
                                     # Convert to wav numpy array
                                     _, _, audio = convert_audio_to_wav_bytes(audio_bytes, filename, sr=sampling_rate)
@@ -438,6 +450,9 @@ def main():
             if language == "ch_de":
                 default_model = "/storage/research/dsl_shared/solutions/whisperx/cache/whisper/swhisper-large-1.1"
                 st.info("ℹ️ Using Swiss German Whisper model")
+            elif language == "ch_de_flurin":
+                default_model = FLURIN_SWISS_MODEL_PATH
+                st.info("ℹ️ Using Flurin Swiss German Whisper Turbo model (CT2)")
             else:
                 default_model = "large-v3-turbo"
                 st.info(f"ℹ️ Using default Large v3 Turbo whisper model")
@@ -482,9 +497,22 @@ def main():
         if st.session_state.last_config != current_config:
             st.session_state.transcription_results = None
         
+        # Warn early if the Flurin CT2 model has not been converted yet
+        if language == "ch_de_flurin" and not os.path.isdir(whisper_model):
+            st.warning(
+                "⚠️ The Flurin Swiss German Turbo model has not been converted yet. "
+                "Run the `ct2-transformers-converter` command described in the docs first, "
+                f"then verify that the output folder exists at:\n`{whisper_model}`"
+            )
+
         if st.button("Start Transcription", type="primary"):
             if transcribe_audio is None:
                 st.error("Please upload an audio file first.")
+            elif language == "ch_de_flurin" and not os.path.isdir(whisper_model):
+                st.error(
+                    f"❌ Flurin CT2 model not found at `{whisper_model}`. "
+                    "Please convert the model first — see the warning above."
+                )
             else:
                 if torch.cuda.is_available():
                     device = "cuda"
@@ -511,8 +539,8 @@ def main():
                         player_wav_bytes, preview_seconds = create_wavesurfer_preview(wav_bytes, audio, sr=sampling_rate)
                         
                         align_language = language
-                        if language == "ch_de":
-                            align_language = "de" 
+                        if language in ("ch_de", "ch_de_flurin"):
+                            align_language = "de"
                         
                         with st.spinner("Loading Whisper model..."):
                             model = whisperx.load_model(whisper_model, device=device, compute_type=compute_type, language=align_language)
