@@ -36,6 +36,8 @@ Text Lab includes a specialized fine-tuned model for **Swiss German**.
 * Select **Swiss German** from the language list.
 * This uses the `swhisper-large-1.1` model, which achieves a Word Error Rate (WER) of approximately **18**, significantly outperforming standard models on Swiss German dialects. More info about the fine-tuned whisper will be published soon.
 
+The model (Flurin17/whisper-large-v3-turbo-swiss-german) is also available on Text Lab when selecting "Swiss German (Flurin Turbo)". More info on the model in the [link](https://huggingface.co/Flurin17/whisper-large-v3-turbo-swiss-german)
+
 ### Configuration Options
 
 * **VAD (Voice Activity Detection) (Optional):**
