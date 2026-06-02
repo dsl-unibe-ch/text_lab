@@ -184,9 +184,6 @@ def get_plot_path(data_file_path: str, plot_name: str, ext: str = ".json") -> st
     return os.path.join(plot_dir, f"{safe_plot_name}{ext}")
 
 
-import re as _re
-
-
 def _strip_show_calls(code: str) -> str:
     """
     Remove standalone display/save calls from model-generated code before exec.
@@ -197,9 +194,9 @@ def _strip_show_calls(code: str) -> str:
                                      the tool always saves explicitly afterwards
     """
     # Remove show() calls
-    code = _re.sub(r"^\s*(fig|plt)\.show\(\)\s*$", "", code, flags=_re.MULTILINE)
+    code = re.sub(r"^\s*(fig|plt)\.show\(\)\s*$", "", code, flags=re.MULTILINE)
     # Remove plt.savefig(...) — matches single-line calls (balanced or not)
-    code = _re.sub(r"^\s*plt\.savefig\([^\n]*\)\s*$", "", code, flags=_re.MULTILINE)
+    code = re.sub(r"^\s*plt\.savefig\([^\n]*\)\s*$", "", code, flags=re.MULTILINE)
     return code.rstrip()
 
 

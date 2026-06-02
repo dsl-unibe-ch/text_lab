@@ -232,6 +232,16 @@ def main() -> None:
                 f"Data will be capped at {MAX_ROWS:,} rows for memory safety."
             )
 
+        # Clear stored results if a different file is uploaded.
+        if "viz_results" in st.session_state:
+            stored_id = st.session_state["viz_results"].get("file_id")
+            if stored_id != (uploaded_file.name, uploaded_file.size):
+                del st.session_state["viz_results"]
+
+        if _preview_df is not None:
+            with st.expander("Preview Data", expanded=False):
+                st.dataframe(_preview_df, use_container_width=True)
+
     user_prompt = st.text_area(
         "Describe what you want to do (optional)",
         placeholder=DEFAULT_PROMPT,
@@ -348,7 +358,17 @@ def main() -> None:
                 status_box.error(f"An unexpected error occurred: {e}")
                 st.stop()
 
-        render_results(summary, final_artifacts, stats_results, run_id)
+        st.session_state["viz_results"] = {
+            "summary": summary,
+            "final_artifacts": final_artifacts,
+            "stats_results": stats_results,
+            "run_id": run_id,
+            "file_id": (uploaded_file.name, uploaded_file.size),
+        }
+
+    if "viz_results" in st.session_state:
+        r = st.session_state["viz_results"]
+        render_results(r["summary"], r["final_artifacts"], r["stats_results"], r["run_id"])
 
 
 if __name__ == "__main__":

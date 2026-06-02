@@ -3,6 +3,8 @@ Static Plotting Module for the AI Visualization Engine.
 Generates publication-ready Matplotlib and Seaborn charts (.png).
 """
 
+import os
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -13,7 +15,9 @@ from wordcloud import STOPWORDS, WordCloud
 from core.visualization.viz_utils import _strip_show_calls, get_plot_path, load_data_safely
 
 
-def _generate_static_code_snippet(plot_code: str, grid_figure: bool = False) -> str:
+def _generate_static_code_snippet(
+    plot_code: str, grid_figure: bool = False, data_file_path: str | None = None
+) -> str:
     """
     Format the raw plot generation code into a complete, runnable script string
     for Matplotlib and Seaborn.
@@ -23,21 +27,35 @@ def _generate_static_code_snippet(plot_code: str, grid_figure: bool = False) -> 
         grid_figure: When True, omit the ``plt.figure()`` call. Use this for
             seaborn grid plots (pairplot, FacetGrid) and heatmaps that create
             their own figure internally.
+        data_file_path: Optional source file path; its extension is used to choose
+            the appropriate pandas reader in the generated snippet.
 
     Returns:
         A formatted Python script string including imports and data loading.
     """
     clean = _strip_show_calls(plot_code)
     figure_line = "" if grid_figure else "plt.figure(figsize=(10, 6))\n"
+
+    loader = "df = pd.read_csv('your_data.csv')"
+    if data_file_path:
+        ext = os.path.splitext(data_file_path)[1].lower()
+        if ext == ".tsv":
+            loader = "df = pd.read_csv('your_data.tsv', sep='\\t')"
+        elif ext in (".xls", ".xlsx"):
+            loader = f"df = pd.read_excel('your_data{ext}')"
+        elif ext == ".json":
+            loader = "df = pd.read_json('your_data.json')"
+
     return (
         "import matplotlib.pyplot as plt\n"
         "import pandas as pd\n"
         "import seaborn as sns\n\n"
         "# Load Data\n"
-        "df = pd.read_csv('your_data.csv')\n\n"
+        f"{loader}\n\n"
         "# Generate Plot\n"
         f"{figure_line}"
         f"{clean}\n"
+        "plt.savefig('output.png', bbox_inches='tight', dpi=300)\n"
         "plt.show()"
     )
 
@@ -67,7 +85,8 @@ def plot_static_histogram_impl(
             f"sns.histplot(df['{column}'], kde=True)\n"
             f"plt.title('{title}')\n"
             f"plt.xlabel('{x_label}')\n"
-            "plt.ylabel('Frequency')"
+            "plt.ylabel('Frequency')",
+            data_file_path=data_file_path,
         )
         return f"{plot_path}|||{code}"
     except Exception as e:
@@ -111,7 +130,8 @@ def plot_static_scatterplot_impl(
             f"sns.scatterplot(data=df, x='{x_column}', y='{y_column}'{hue_arg})\n"
             f"plt.title('{title}')\n"
             f"plt.xlabel('{x_label}')\n"
-            f"plt.ylabel('{y_label}')"
+            f"plt.ylabel('{y_label}')",
+            data_file_path=data_file_path,
         )
         return f"{plot_path}|||{code}"
     except Exception as e:
@@ -153,7 +173,8 @@ def plot_static_boxplot_impl(
             f"plt.title('{title}')\n"
             f"plt.xlabel('{x_label}')\n"
             f"plt.ylabel('{y_label}')\n"
-            "plt.xticks(rotation=45)"
+            "plt.xticks(rotation=45)",
+            data_file_path=data_file_path,
         )
         return f"{plot_path}|||{code}"
     except Exception as e:
@@ -211,7 +232,7 @@ def generate_custom_static_plot_impl(
         fig.savefig(plot_path, bbox_inches="tight", dpi=300)
         plt.close("all")
 
-        full_user_code = _generate_static_code_snippet(clean_code)
+        full_user_code = _generate_static_code_snippet(clean_code, data_file_path=data_file_path)
 
         return f"{plot_path}|||{full_user_code}"
 
@@ -260,7 +281,8 @@ def plot_static_lineplot_impl(
             f"plt.title('{title}')\n"
             f"plt.xlabel('{x_label}')\n"
             f"plt.ylabel('{y_label}')\n"
-            "plt.xticks(rotation=45)"
+            "plt.xticks(rotation=45)",
+            data_file_path=data_file_path,
         )
         return f"{plot_path}|||{code}"
     except Exception as e:
@@ -323,7 +345,8 @@ def plot_static_barchart_impl(
             f"plt.title('{title}')\n"
             f"plt.xlabel('{x_label}')\n"
             f"plt.ylabel('{y_label}')\n"
-            "plt.xticks(rotation=45, ha='right')"
+            "plt.xticks(rotation=45, ha='right')",
+            data_file_path=data_file_path,
         )
         return f"{plot_path}|||{code}"
     except Exception as e:
@@ -391,7 +414,8 @@ def plot_static_wordcloud_impl(
             f"    colormap='viridis', stopwords={'stopwords' if extra_stopwords else 'None'}).generate(text_data)\n"
             "plt.imshow(wordcloud, interpolation='bilinear')\n"
             f"plt.title('{title}', fontsize=16, pad=20)\n"
-            "plt.axis('off')"
+            "plt.axis('off')",
+            data_file_path=data_file_path,
         )
         return f"{plot_path}|||{code}"
     except Exception as e:
@@ -468,7 +492,7 @@ def plot_static_pairplot_impl(
             f"g = sns.pairplot(plot_df, vars=cols{hue_code}, palette='husl', diag_kind='kde', plot_kws={{'alpha': 0.6}})\n"
             f"g.fig.suptitle('{display_title}', y=1.02, fontsize=14)\n"
         )
-        code = _generate_static_code_snippet(code_body, grid_figure=True)
+        code = _generate_static_code_snippet(code_body, grid_figure=True, data_file_path=data_file_path)
         return f"{plot_path}|||{code}"
     except Exception as e:
         return f"Error generating pair plot: {str(e)}"
@@ -555,6 +579,7 @@ def plot_static_correlation_heatmap_impl(
             + f"    center=0, vmin=-1, vmax=1, square=True, linewidths=0.5, ax=ax)\n"
             + f"ax.set_title('{title}', fontsize=14, pad=15)",
             grid_figure=True,
+            data_file_path=data_file_path,
         )
         return f"{plot_path}|||{code}"
     except Exception as e:
