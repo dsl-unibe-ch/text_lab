@@ -171,6 +171,7 @@ def _start_analysis_thread(
     file_id: tuple[str, int],
     user_prompt: str,
     selected_model: str,
+    selected_columns: list[str],
 ) -> None:
     """
     Capture all inputs, initialise shared session_state structures, then start the
@@ -211,12 +212,27 @@ def _start_analysis_thread(
                     return
 
                 final_user_prompt = user_prompt.strip() or DEFAULT_PROMPT
+
+                # If the user narrowed down the columns, filter the data head and
+                # add an explicit instruction so the supervisor focuses on them.
+                valid_selected = [c for c in selected_columns if c in df.columns]
+                if valid_selected:
+                    head_df = df[valid_selected]
+                    column_instruction = (
+                        f"Column Selection: Focus ONLY on these columns chosen by the user: "
+                        f"{', '.join(valid_selected)}\n\n"
+                    )
+                else:
+                    head_df = df
+                    column_instruction = ""
+
                 messages = [
                     {
                         "role": "user",
                         "content": (
                             f"User Request: {final_user_prompt}\n\n"
-                            f"Data Head:\n{df.to_string()}\n\n"
+                            f"{column_instruction}"
+                            f"Data Head:\n{head_df.to_string()}\n\n"
                             f"Note: datasets larger than {MAX_ROWS:,} rows will be truncated."
                         ),
                     }
@@ -445,7 +461,38 @@ def main() -> None:
     if run_state in ("running", "cancelling"):
         _render_running_state()
     else:
-        # Idle — show prompt + generate button.
+        # Idle — show column selector, prompt, and generate button.
+
+        # Column selector — only shown when a file with a known schema is uploaded.
+        selected_columns: list[str] = []
+        if _preview_df is not None:
+            all_columns = list(_preview_df.columns)
+
+            # Reset selection to all columns whenever a new file is uploaded.
+            if st.session_state.get("viz_columns_file_id") != file_id:
+                st.session_state["viz_col_multiselect"] = all_columns
+                st.session_state["viz_columns_file_id"] = file_id
+
+            st.markdown("**Select columns to include in the analysis:**")
+            btn_col1, btn_col2, _ = st.columns([1, 1, 8])
+            with btn_col1:
+                if st.button("Select All", key="viz_sel_all_btn"):
+                    st.session_state["viz_col_multiselect"] = all_columns
+                    st.rerun()
+            with btn_col2:
+                if st.button("Clear All", key="viz_sel_none_btn"):
+                    st.session_state["viz_col_multiselect"] = []
+                    st.rerun()
+
+            selected_columns = st.multiselect(
+                "Columns",
+                options=all_columns,
+                key="viz_col_multiselect",
+                label_visibility="collapsed",
+            )
+            if not selected_columns:
+                st.caption("ℹ️ No columns selected — all columns will be used.")
+
         user_prompt = st.text_area(
             "Describe what you want to do (optional)",
             placeholder=DEFAULT_PROMPT,
@@ -459,6 +506,7 @@ def main() -> None:
                 file_id=(uploaded_file.name, uploaded_file.size),
                 user_prompt=user_prompt,
                 selected_model=selected_model,
+                selected_columns=selected_columns,
             )
             st.rerun()
 
