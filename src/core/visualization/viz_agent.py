@@ -4,6 +4,7 @@ Implements a Supervisor-Worker pattern to route tasks and manage tool hallucinat
 """
 
 import sys
+import threading
 import traceback
 from typing import Any, Callable
 
@@ -84,7 +85,8 @@ async def _run_worker_agent(
     global_stats: list[StatsArtifact],
     global_logs: list[tuple[str, str]],
     max_iterations: int = 6,
-    log_callback: Callable[[str, str], None] | None = None
+    log_callback: Callable[[str, str], None] | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> str:
     def _log(l_type: str, msg: str):
         global_logs.append((l_type, msg))
@@ -115,6 +117,9 @@ async def _run_worker_agent(
     STATS_TOOLS = {"run_correlation", "run_group_comparison", "run_linear_regression", "rank_target_correlations"}
 
     for iteration in range(max_iterations):
+        if cancel_event and cancel_event.is_set():
+            _log("warning", f"Worker '{agent_role}' cancelled by user.")
+            return f"Worker '{agent_role}' was cancelled."
         try:
             response = ollama.chat(
                 model=model_name,
@@ -236,7 +241,8 @@ async def run_analysis(
     model_name: str,
     mcp_server_script: str,
     max_iterations: int = 7,
-    log_callback: Callable[[str, str], None] | None = None
+    log_callback: Callable[[str, str], None] | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> VizAnalysisResult:
     def _log(l_type: str, msg: str):
         logs.append((l_type, msg))
@@ -262,6 +268,9 @@ async def run_analysis(
                 supervisor_tools = [DELEGATE_TASK_TOOL]
 
                 for iteration in range(max_iterations):
+                    if cancel_event and cancel_event.is_set():
+                        _log("warning", "Analysis cancelled by user.")
+                        break
                     try:
                         response = ollama.chat(
                             model=model_name,
@@ -301,7 +310,8 @@ async def run_analysis(
                                 global_plots=plot_results,
                                 global_stats=stats_results,
                                 global_logs=logs,
-                                log_callback=log_callback
+                                log_callback=log_callback,
+                                cancel_event=cancel_event,
                             )
 
                             supervisor_tool_results.append({
