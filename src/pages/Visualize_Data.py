@@ -110,7 +110,7 @@ def render_results(
     if stats_results:
         st.subheader("Statistical Analysis Results")
         for item in stats_results:
-            with st.expander(f"📊 {item['title']}", expanded=True):
+            with st.expander(item["title"], expanded=True):
                 st.markdown(item["result"])
                 if item["code"]:
                     st.code(item["code"], language="python")
@@ -178,19 +178,23 @@ def _start_analysis_thread(
     analysis in a daemon thread so the Streamlit UI remains responsive.
     """
     cancel_event: threading.Event = threading.Event()
-    # live_logs is a plain list appended to by the thread and read by the main thread.
-    # CPython's GIL makes list.append / list copy thread-safe for our purposes.
     live_logs: list[tuple[str, str]] = []
     thread_result: dict = {
-        "status": "running",   # "running" | "done" | "cancelled" | "timeout" | "error"
+        "status": "running",
         "result": None,
         "final_artifacts": [],
         "error": None,
     }
     run_id = f"ds-{uuid.uuid4().hex[:8]}"
 
+    st.session_state["viz_submission"] = {
+        "file_name": file_name,
+        "selected_columns": selected_columns,
+        "user_prompt": user_prompt.strip(),
+        "model": selected_model,
+    }
+
     def _worker() -> None:
-        # Pull model if not already cached locally.
         try:
             local_models = {m["model"] for m in ollama.list().get("models", [])}
             if selected_model not in local_models:
@@ -213,8 +217,6 @@ def _start_analysis_thread(
 
                 final_user_prompt = user_prompt.strip() or DEFAULT_PROMPT
 
-                # If the user narrowed down the columns, filter the data head and
-                # add an explicit instruction so the supervisor focuses on them.
                 valid_selected = [c for c in selected_columns if c in df.columns]
                 if valid_selected:
                     head_df = df[valid_selected]
@@ -261,8 +263,6 @@ def _start_analysis_thread(
                     thread_result["status"] = "timeout"
                     return
 
-                # Read all plot bytes into memory before the TemporaryDirectory is
-                # cleaned up, so the Streamlit UI can render them after the thread ends.
                 final_artifacts: list[dict] = []
                 for item in analysis_result["plots"]:
                     path = item["path"]
@@ -307,47 +307,57 @@ def _start_analysis_thread(
     thread.start()
 
 
-def _render_running_state() -> None:
+def _render_log_box(live_logs: list, is_complete: bool = False) -> None:
     """
-    Render the in-progress view: cancel button, live agent log, and a polling rerun.
-    Also handles finalising results once the background thread has finished.
+    Renders the log section. Kept expanded during analysis, but collapses
+    automatically when complete so it doesn't push results off-screen.
     """
-    thread_result: dict = st.session_state.get("viz_thread_result", {})
-    live_logs: list = st.session_state.get("viz_live_logs", [])
-    run_state: str = st.session_state.get("viz_run_state", "running")
-    status: str = thread_result.get("status", "running")
-
-    if run_state == "cancelling":
-        st.warning("⏳ Cancelling analysis, please wait...")
-    else:
-        col1, col2 = st.columns([5, 1])
-        with col1:
-            st.info("Analysis in progress...")
-        with col2:
-            if st.button("Cancel", type="secondary", use_container_width=True):
-                st.session_state["viz_cancel_event"].set()
-                st.session_state["viz_run_state"] = "cancelling"
-                st.rerun()
-
-    # Snapshot the list to avoid race with the thread appending new entries.
-    current_logs = list(live_logs)
-    if current_logs:
-        with st.expander("Agent Activity Log", expanded=True):
-            for log_type, msg in current_logs:
+    log_state = "complete" if is_complete else "running"
+    
+    with st.status("Agent Activity Log", expanded=(not is_complete), state=log_state):
+        if live_logs:
+            for log_type, msg in live_logs:
                 if log_type == "error":
                     st.error(msg)
                 elif log_type == "warning":
                     st.warning(msg)
                 else:
                     st.write(msg)
+        else:
+            st.caption("Starting agents...")
 
-    # Thread still running — wait 1 s then poll again.
+
+def _render_log_section() -> None:
+    """
+    Render the live log, cancel button, and polling logic.
+    Called from main() BELOW the form area while analysis is running.
+    Handles all terminal-state transitions when the thread finishes.
+    """
+    thread_result: dict = st.session_state.get("viz_thread_result", {})
+    live_logs: list = st.session_state.get("viz_live_logs", [])
+    run_state: str = st.session_state.get("viz_run_state", "running")
+    status: str = thread_result.get("status", "running")
+
+    st.divider()
+
+    cancel_col, _ = st.columns([1, 5])
+    with cancel_col:
+        if run_state == "cancelling":
+            st.warning("Cancelling...")
+        else:
+            if st.button("Cancel Analysis", type="secondary", use_container_width=True):
+                st.session_state["viz_cancel_event"].set()
+                st.session_state["viz_run_state"] = "cancelling"
+                st.rerun()
+
+    current_logs = list(live_logs)
+    _render_log_box(current_logs, is_complete=False)
+
     if status == "running":
         time.sleep(1)
         st.rerun()
         return
 
-    # Thread has finished — handle each terminal state.
     if status == "done":
         analysis_result = thread_result["result"]
         run_id = st.session_state.get("viz_run_id", "ds-unknown")
@@ -375,7 +385,6 @@ def _render_running_state() -> None:
 def main() -> None:
     check_token()
 
-    # Orphaned artifact cleanup — once per browser session.
     if "artifacts_cleaned" not in st.session_state:
         _cleanup_orphaned_artifacts()
         st.session_state["artifacts_cleaned"] = True
@@ -390,7 +399,6 @@ def main() -> None:
     st.title("AI Data Visualiser")
     st.info(f"Using Model: **{selected_model}**")
 
-    # --- CAPABILITIES EXPANDER ---
     with st.expander("View Available AI Capabilities"):
         st.markdown("""
         This tool uses a **Multi-Agent System** to analyze your data. A Supervisor AI reads your prompt and delegates tasks to three specialist agents:
@@ -403,17 +411,26 @@ def main() -> None:
         *(e.g., "Run a t-test on column X grouped by Y, then plot an interactive bar chart of the means.")*
         """)
 
+    run_state = st.session_state.get("viz_run_state", "idle")
+    is_running = run_state in ("running", "cancelling")
+
+    # =========================================================
+    # INPUT FORM — remains visible but disabled during execution
+    # =========================================================
+    uploaded_file = None
+    _preview_df = None
+    file_id: tuple[str, int] | None = None
+
     uploaded_file = st.file_uploader(
         "Upload your data file (CSV, TSV, Excel, JSON)",
         type=["csv", "tsv", "xls", "xlsx", "json"],
+        disabled=is_running,
     )
 
-    _preview_df = None
     if uploaded_file:
         file_size_mb = uploaded_file.size / (1024 * 1024)
-        file_id: tuple[str, int] = (uploaded_file.name, uploaded_file.size)
+        file_id = (uploaded_file.name, uploaded_file.size)
 
-        # Read up to 10 rows for column count + data preview.
         try:
             file_bytes_for_preview = uploaded_file.getvalue()
             name_lower = uploaded_file.name.lower()
@@ -434,71 +451,63 @@ def main() -> None:
         except Exception:
             n_cols = "?"
 
-        st.caption(
-            f"📄 **{uploaded_file.name}** · {file_size_mb:.1f} MB · {n_cols} columns"
-        )
+        st.caption(f"**{uploaded_file.name}** | {file_size_mb:.1f} MB | {n_cols} columns")
         if file_size_mb > 100:
             st.warning(
                 f"Large file detected ({file_size_mb:.0f} MB). "
                 f"Data will be capped at {MAX_ROWS:,} rows for memory safety."
             )
 
-        # Clear stored results when a different file is uploaded (idle only — don't
-        # interrupt a running analysis).
-        run_state_now = st.session_state.get("viz_run_state", "idle")
-        if run_state_now == "idle" and "viz_results" in st.session_state:
+        if "viz_results" in st.session_state:
             stored_id = st.session_state["viz_results"].get("file_id")
             if stored_id != file_id:
                 del st.session_state["viz_results"]
+                if "viz_live_logs" in st.session_state:
+                    del st.session_state["viz_live_logs"]
 
         if _preview_df is not None:
             with st.expander("Preview Data", expanded=False):
                 st.dataframe(_preview_df, use_container_width=True)
 
-    # --- STATE MACHINE ---
-    run_state = st.session_state.get("viz_run_state", "idle")
+    selected_columns: list[str] = []
+    if _preview_df is not None:
+        all_columns = list(_preview_df.columns)
 
-    if run_state in ("running", "cancelling"):
-        _render_running_state()
-    else:
-        # Idle — show column selector, prompt, and generate button.
+        if st.session_state.get("viz_columns_file_id") != file_id:
+            st.session_state["viz_col_multiselect"] = all_columns
+            st.session_state["viz_columns_file_id"] = file_id
 
-        # Column selector — only shown when a file with a known schema is uploaded.
-        selected_columns: list[str] = []
-        if _preview_df is not None:
-            all_columns = list(_preview_df.columns)
-
-            # Reset selection to all columns whenever a new file is uploaded.
-            if st.session_state.get("viz_columns_file_id") != file_id:
+        st.markdown("**Select columns to include in the analysis:**")
+        btn_col1, btn_col2, _ = st.columns([1, 1, 8])
+        with btn_col1:
+            if st.button("Select All", key="viz_sel_all_btn", disabled=is_running):
                 st.session_state["viz_col_multiselect"] = all_columns
-                st.session_state["viz_columns_file_id"] = file_id
+                st.rerun()
+        with btn_col2:
+            if st.button("Clear All", key="viz_sel_none_btn", disabled=is_running):
+                st.session_state["viz_col_multiselect"] = []
+                st.rerun()
 
-            st.markdown("**Select columns to include in the analysis:**")
-            btn_col1, btn_col2, _ = st.columns([1, 1, 8])
-            with btn_col1:
-                if st.button("Select All", key="viz_sel_all_btn"):
-                    st.session_state["viz_col_multiselect"] = all_columns
-                    st.rerun()
-            with btn_col2:
-                if st.button("Clear All", key="viz_sel_none_btn"):
-                    st.session_state["viz_col_multiselect"] = []
-                    st.rerun()
-
-            selected_columns = st.multiselect(
-                "Columns",
-                options=all_columns,
-                key="viz_col_multiselect",
-                label_visibility="collapsed",
-            )
-            if not selected_columns:
-                st.caption("ℹ️ No columns selected — all columns will be used.")
-
-        user_prompt = st.text_area(
-            "Describe what you want to do (optional)",
-            placeholder=DEFAULT_PROMPT,
-            key="viz_prompt",
+        selected_columns = st.multiselect(
+            "Columns",
+            options=all_columns,
+            key="viz_col_multiselect",
+            label_visibility="collapsed",
+            disabled=is_running,
         )
+        if not selected_columns:
+            st.caption("No columns selected -- all columns will be used.")
 
+    user_prompt = st.text_area(
+        "Describe what you want to do (optional)",
+        placeholder=DEFAULT_PROMPT,
+        key="viz_prompt",
+        disabled=is_running,
+    )
+
+    if is_running:
+        st.button("Generating...", type="primary", disabled=True)
+    else:
         if st.button("Generate Visualisations", type="primary", disabled=(not uploaded_file)):
             _start_analysis_thread(
                 file_bytes=uploaded_file.getvalue(),
@@ -510,8 +519,21 @@ def main() -> None:
             )
             st.rerun()
 
-    # Render any persisted results (survives reruns).
+    # =========================================================
+    # RUNNING STATE — log and cancel controls placed under the form
+    # =========================================================
+    if is_running:
+        _render_log_section()
+        return  # End execution here so results aren't rendered until done
+
+    # =========================================================
+    # RESULTS — persisted results shown below the form
+    # =========================================================
     if "viz_results" in st.session_state:
+        # Render the completed log, cleanly collapsed by default
+        if "viz_live_logs" in st.session_state:
+            _render_log_box(st.session_state["viz_live_logs"], is_complete=True)
+
         r = st.session_state["viz_results"]
         render_results(r["summary"], r["final_artifacts"], r["stats_results"], r["run_id"])
 
