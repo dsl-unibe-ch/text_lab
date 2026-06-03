@@ -1,4 +1,6 @@
 import asyncio
+import base64
+import html as html_lib
 import io
 import os
 import pathlib
@@ -9,6 +11,7 @@ import threading
 import time
 import uuid
 import zipfile
+from datetime import datetime
 from io import BytesIO
 
 import ollama
@@ -114,6 +117,145 @@ def _build_column_profile(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _build_html_report(
+    summary: str,
+    final_artifacts: list[dict],
+    stats_results: list[dict],
+    submission_info: dict,
+    run_id: str,
+) -> str:
+    """
+    Build a fully self-contained HTML analysis report.
+    Plotly charts are embedded as interactive divs (CDN JS, no inline bundle).
+    Static images are embedded as base64 data URIs.
+    Stats tables and code blocks are rendered as HTML.
+    """
+    try:
+        import markdown as _md_lib
+        def _md(text: str) -> str:
+            return _md_lib.markdown(text, extensions=["tables", "fenced_code"])
+    except ImportError:
+        def _md(text: str) -> str:
+            return f"<pre style='white-space:pre-wrap'>{html_lib.escape(text)}</pre>"
+
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+    file_name = submission_info.get("file_name", "—")
+    model = submission_info.get("model", "—")
+    prompt = submission_info.get("user_prompt") or "(default exploratory analysis)"
+    columns = submission_info.get("selected_columns") or []
+    columns_str = ", ".join(columns) if columns else "All columns"
+
+    has_plotly = any(a.get("fig") is not None for a in final_artifacts)
+    plotly_cdn = (
+        '<script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>'
+        if has_plotly else ""
+    )
+
+    css = """
+    body{font-family:system-ui,-apple-system,sans-serif;max-width:1200px;margin:40px auto;padding:0 24px;color:#1a1a1a;line-height:1.6}
+    h1{color:#0f2346;border-bottom:3px solid #0f2346;padding-bottom:12px}
+    h2{color:#1a3a6b;margin-top:40px}
+    h3{color:#2a4a7f;margin-top:0}
+    .meta{display:grid;grid-template-columns:max-content 1fr;gap:6px 20px;background:#f5f8ff;padding:16px 20px;border-radius:8px;border-left:4px solid #4a7fd4;margin:20px 0;font-size:.95em}
+    .mk{font-weight:600;color:#4a6fa5}
+    .mv{word-break:break-word}
+    .summary-box{background:#fafafa;border:1px solid #e0e0e0;border-radius:8px;padding:20px 24px;margin:16px 0}
+    .stat-card{border:1px solid #dde4f0;border-radius:8px;padding:16px 20px;margin:16px 0;background:#fff}
+    pre,code{background:#f4f4f4;border-radius:4px;font-family:'SFMono-Regular',Consolas,monospace;font-size:.85em}
+    pre{padding:12px 16px;overflow-x:auto;border:1px solid #e0e0e0}
+    table{border-collapse:collapse;width:100%;margin:12px 0;font-size:.9em}
+    th{background:#e8eef8;color:#1a3a6b;font-weight:600;text-align:left;padding:8px 12px;border:1px solid #c8d4e8}
+    td{padding:7px 12px;border:1px solid #dde4f0}
+    tr:nth-child(even) td{background:#f8faff}
+    .chart-card{margin:24px 0;border:1px solid #e0e8f0;border-radius:8px;overflow:hidden}
+    .chart-title{background:#e8eef8;padding:10px 16px;font-weight:600;color:#1a3a6b}
+    .chart-body{padding:16px}
+    img{max-width:100%;height:auto;display:block;margin:0 auto}
+    details summary{cursor:pointer;font-weight:600;color:#4a6fa5;padding:6px 0;user-select:none}
+    .footer{margin-top:48px;padding-top:16px;border-top:1px solid #e0e0e0;font-size:.8em;color:#888;text-align:center}
+    """
+
+    meta_html = f"""
+    <div class="meta">
+      <span class="mk">File</span><span class="mv">{html_lib.escape(file_name)}</span>
+      <span class="mk">Model</span><span class="mv">{html_lib.escape(model)}</span>
+      <span class="mk">Prompt</span><span class="mv">{html_lib.escape(prompt)}</span>
+      <span class="mk">Columns analysed</span><span class="mv">{html_lib.escape(columns_str)}</span>
+      <span class="mk">Generated</span><span class="mv">{timestamp}</span>
+      <span class="mk">Run ID</span><span class="mv">{html_lib.escape(run_id)}</span>
+    </div>"""
+
+    summary_html = f'<div class="summary-box">{_md(summary)}</div>' if summary else ""
+
+    stats_parts = []
+    for item in stats_results:
+        title = html_lib.escape(item.get("title", ""))
+        code = item.get("code", "")
+        code_block = (
+            f"<details><summary>View reproducible code</summary>"
+            f"<pre><code>{html_lib.escape(code)}</code></pre></details>"
+            if code else ""
+        )
+        stats_parts.append(
+            f'<div class="stat-card"><h3>{title}</h3>'
+            f'{_md(item.get("result", ""))}{code_block}</div>'
+        )
+    stats_section = (
+        f'<h2>Statistical Analysis</h2>{"".join(stats_parts)}' if stats_parts else ""
+    )
+
+    chart_parts = []
+    for artifact in final_artifacts:
+        filename = artifact["filename"]
+        fig = artifact.get("fig")
+        code = artifact.get("code", "")
+        tool_label = get_tool_label(artifact.get("tool_name", "")) or filename
+        code_block = (
+            f"<details><summary>View source code</summary>"
+            f"<pre><code>{html_lib.escape(code)}</code></pre></details>"
+            if code else ""
+        )
+        if filename.endswith(".json") and fig is not None:
+            chart_div = fig.to_html(full_html=False, include_plotlyjs=False)
+        else:
+            img_b64 = base64.b64encode(artifact["bytes"]).decode()
+            ext = filename.rsplit(".", 1)[-1].lower()
+            mime = f"image/{ext}" if ext != "jpg" else "image/jpeg"
+            chart_div = f'<img src="data:{mime};base64,{img_b64}" alt="{html_lib.escape(filename)}">'
+        chart_parts.append(
+            f'<div class="chart-card">'
+            f'<div class="chart-title">{html_lib.escape(tool_label)}</div>'
+            f'<div class="chart-body">{chart_div}{code_block}</div>'
+            f'</div>'
+        )
+    charts_section = (
+        f'<h2>Visualisations</h2>{"".join(chart_parts)}' if chart_parts else ""
+    )
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Analysis Report — {html_lib.escape(run_id)}</title>
+  {plotly_cdn}
+  <style>{css}</style>
+</head>
+<body>
+  <h1>Analysis Report</h1>
+  {meta_html}
+  <h2>Summary</h2>
+  {summary_html}
+  {stats_section}
+  {charts_section}
+  <div class="footer">
+    Generated by Text Lab AI Visualiser &nbsp;·&nbsp;
+    Run {html_lib.escape(run_id)} &nbsp;·&nbsp; {timestamp}
+  </div>
+</body>
+</html>"""
+
+
 def render_sidebar() -> str:
     st.sidebar.title("Model Selection")
     
@@ -144,7 +286,8 @@ def render_results(
     summary: str, 
     final_artifacts: list[dict], 
     stats_results: list[dict],
-    run_id: str
+    run_id: str,
+    submission_info: dict,
 ) -> None:
     st.success("Analysis Complete.")
     st.subheader("Analysis Summary")
@@ -182,6 +325,7 @@ def render_results(
                 
                 st.divider()
 
+    if final_artifacts or stats_results:
         zip_buffer = BytesIO()
         with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
             for artifact in final_artifacts:
@@ -199,9 +343,23 @@ def render_results(
                 code_filename = filename.replace(".json", ".py").replace(".png", ".py")
                 zf.writestr(code_filename, code)
 
+            report_html = _build_html_report(
+                summary, final_artifacts, stats_results, submission_info, run_id
+            )
+            zf.writestr("report.html", report_html)
+
         zip_buffer.seek(0)
+        has_plots = bool(final_artifacts)
+        has_stats = bool(stats_results)
+        if has_plots and has_stats:
+            zip_label = "Download Report, Dashboards & Code (.zip)"
+        elif has_plots:
+            zip_label = "Download Dashboards & Code (.zip)"
+        else:
+            zip_label = "Download Report (.zip)"
+
         st.download_button(
-            label="Download Dashboards & Code (.zip)",
+            label=zip_label,
             data=zip_buffer,
             file_name=f"{run_id}_analysis.zip",
             mime="application/zip",
@@ -594,7 +752,8 @@ def main() -> None:
             _render_log_box(st.session_state["viz_live_logs"], is_complete=True)
 
         r = st.session_state["viz_results"]
-        render_results(r["summary"], r["final_artifacts"], r["stats_results"], r["run_id"])
+        render_results(r["summary"], r["final_artifacts"], r["stats_results"], r["run_id"],
+                       st.session_state.get("viz_submission", {}))
 
 
 if __name__ == "__main__":
