@@ -3,6 +3,7 @@ Agentic Multi-Agent System (MAS) for the AI Visualization Engine.
 Implements a Supervisor-Worker pattern to route tasks and manage tool hallucinations.
 """
 
+import asyncio
 import sys
 import threading
 import traceback
@@ -76,11 +77,11 @@ async def _get_mcp_tools(session: ClientSession, allowed_names: list[str] | None
 
 
 async def _run_worker_agent(
-    session: ClientSession,
     agent_role: str,
     task_instruction: str,
     data_file_path: str,
     model_name: str,
+    mcp_server_script: str,
     global_plots: list[PlotArtifact],
     global_stats: list[StatsArtifact],
     global_logs: list[tuple[str, str]],
@@ -93,6 +94,44 @@ async def _run_worker_agent(
         if log_callback:
             log_callback(l_type, msg)
 
+    server_params = StdioServerParameters(
+        command="python3",
+        args=[mcp_server_script],
+    )
+
+    async with stdio_client(server_params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            return await _run_worker_agent_inner(
+                session=session,
+                agent_role=agent_role,
+                task_instruction=task_instruction,
+                data_file_path=data_file_path,
+                model_name=model_name,
+                global_plots=global_plots,
+                global_stats=global_stats,
+                global_logs=global_logs,
+                max_iterations=max_iterations,
+                log_callback=log_callback,
+                cancel_event=cancel_event,
+                _log=_log,
+            )
+
+
+async def _run_worker_agent_inner(
+    session: ClientSession,
+    agent_role: str,
+    task_instruction: str,
+    data_file_path: str,
+    model_name: str,
+    global_plots: list[PlotArtifact],
+    global_stats: list[StatsArtifact],
+    global_logs: list[tuple[str, str]],
+    max_iterations: int,
+    log_callback: Callable[[str, str], None] | None,
+    cancel_event: threading.Event | None,
+    _log: Callable[[str, str], None],
+) -> str:
     allowed_tools = AGENT_TOOLS.get(agent_role, [])
     tools = await _get_mcp_tools(session, allowed_names=allowed_tools)
 
@@ -249,77 +288,80 @@ async def run_analysis(
         if log_callback:
             log_callback(l_type, msg)
 
-    server_params = StdioServerParameters(
-        command="python3",
-        args=[mcp_server_script],
-    )
-
     plot_results: list[PlotArtifact] = []
     stats_results: list[StatsArtifact] = []
     logs: list[tuple[str, str]] = []
-    
+
     supervisor_messages = [{"role": "system", "content": SUPERVISOR_PROMPT}] + messages
 
     try:
-        async with stdio_client(server_params) as (read, write):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
+        for iteration in range(max_iterations):
+            if cancel_event and cancel_event.is_set():
+                _log("warning", "Analysis cancelled by user.")
+                break
+            try:
+                response = ollama.chat(
+                    model=model_name,
+                    messages=supervisor_messages,
+                    tools=[DELEGATE_TASK_TOOL],
+                )
+                supervisor_messages.append(response["message"])
+            except Exception as e:
+                _log("error", f"Error communicating with Supervisor: {e}")
+                break
 
-                supervisor_tools = [DELEGATE_TASK_TOOL]
+            if not response["message"].get("tool_calls"):
+                _log("info", "Supervisor completed task delegation and synthesized final summary.")
+                break
 
-                for iteration in range(max_iterations):
-                    if cancel_event and cancel_event.is_set():
-                        _log("warning", "Analysis cancelled by user.")
-                        break
-                    try:
-                        response = ollama.chat(
-                            model=model_name,
-                            messages=supervisor_messages,
-                            tools=supervisor_tools,
-                        )
-                        supervisor_messages.append(response["message"])
-                    except Exception as e:
-                        _log("error", f"Error communicating with Supervisor: {e}")
-                        break
+            # Collect all valid delegate_task calls for this iteration
+            pending: list[tuple[str, str]] = []  # (agent_role, task_instruction)
+            invalid_results: list[dict[str, Any]] = []
 
-                    if not response["message"].get("tool_calls"):
-                        _log("info", "Supervisor completed task delegation and synthesized final summary.")
-                        break
+            for tool_call in response["message"]["tool_calls"]:
+                if tool_call["function"]["name"] != "delegate_task":
+                    continue
+                agent_role = tool_call["function"]["arguments"].get("agent_role")
+                task_instruction = tool_call["function"]["arguments"].get("task_instruction")
+                if agent_role not in WORKER_PROMPTS:
+                    invalid_results.append({
+                        "role": "tool",
+                        "content": f"Error: Agent role '{agent_role}' does not exist.",
+                    })
+                else:
+                    pending.append((agent_role, task_instruction))
 
-                    tool_calls = response["message"]["tool_calls"]
-                    supervisor_tool_results: list[dict[str, Any]] = []
+            # Run all valid workers concurrently — each opens its own MCP subprocess
+            if pending:
+                worker_coroutines = [
+                    _run_worker_agent(
+                        agent_role=role,
+                        task_instruction=instruction,
+                        data_file_path=data_file_path,
+                        model_name=model_name,
+                        mcp_server_script=mcp_server_script,
+                        global_plots=plot_results,
+                        global_stats=stats_results,
+                        global_logs=logs,
+                        log_callback=log_callback,
+                        cancel_event=cancel_event,
+                    )
+                    for role, instruction in pending
+                ]
+                worker_outputs = await asyncio.gather(*worker_coroutines, return_exceptions=True)
+            else:
+                worker_outputs = []
 
-                    for tool_call in tool_calls:
-                        if tool_call["function"]["name"] == "delegate_task":
-                            agent_role = tool_call["function"]["arguments"].get("agent_role")
-                            task_instruction = tool_call["function"]["arguments"].get("task_instruction")
+            supervisor_tool_results = list(invalid_results)
+            for (role, _), output in zip(pending, worker_outputs):
+                if isinstance(output, Exception):
+                    _log("error", f"Worker '{role}' raised an exception: {output}")
+                    content = f"Error from {role}: {output}"
+                else:
+                    content = f"Results from {role}:\n{output}"
+                supervisor_tool_results.append({"role": "tool", "content": content})
 
-                            if agent_role not in WORKER_PROMPTS:
-                                supervisor_tool_results.append({
-                                    "role": "tool",
-                                    "content": f"Error: Agent role '{agent_role}' does not exist.",
-                                })
-                                continue
-
-                            worker_result = await _run_worker_agent(
-                                session=session,
-                                agent_role=agent_role,
-                                task_instruction=task_instruction,
-                                data_file_path=data_file_path,
-                                model_name=model_name,
-                                global_plots=plot_results,
-                                global_stats=stats_results,
-                                global_logs=logs,
-                                log_callback=log_callback,
-                                cancel_event=cancel_event,
-                            )
-
-                            supervisor_tool_results.append({
-                                "role": "tool",
-                                "content": f"Results from {agent_role}:\n{worker_result}",
-                            })
-
-                    supervisor_messages.extend(supervisor_tool_results)
+            supervisor_messages.extend(supervisor_tool_results)
 
     except Exception as e:
         _log("error", f"Fatal error in MAS session: {str(e)}\n{traceback.format_exc()}")
