@@ -71,6 +71,49 @@ def _cleanup_orphaned_artifacts(max_age_hours: int = 12) -> None:
                 pass
 
 
+def _build_column_profile(df: pd.DataFrame) -> pd.DataFrame:
+    """Build a per-column summary DataFrame for the data profile tab."""
+    total = len(df)
+    rows = []
+    for col in df.columns:
+        series = df[col]
+        non_null = int(series.notna().sum())
+        null_pct = (total - non_null) / total * 100 if total > 0 else 0.0
+        is_numeric = pd.api.types.is_numeric_dtype(series)
+
+        # JSON columns can contain lists/dicts (unhashable). Coerce to str for stats.
+        first_val = series.dropna().iloc[0] if non_null > 0 else None
+        is_nested = isinstance(first_val, (list, dict))
+        safe_series = series.dropna().astype(str) if is_nested else series.dropna()
+
+        try:
+            unique = int(safe_series.nunique())
+        except TypeError:
+            unique = -1
+
+        if is_numeric and not is_nested:
+            s = series.dropna()
+            range_str = f"{s.min():.4g} / {s.mean():.4g} / {s.max():.4g}" if len(s) > 0 else "—"
+            top_str = ""
+        else:
+            try:
+                top_vals = safe_series.value_counts()
+                top_str = str(top_vals.index[0])[:50] if len(top_vals) > 0 else "—"
+            except TypeError:
+                top_str = "nested"
+            range_str = "nested" if is_nested else ""
+
+        rows.append({
+            "Column": col,
+            "Type": "nested (list/dict)" if is_nested else str(series.dtype),
+            "Non-Null %": f"{100 - null_pct:.1f}%",
+            "Unique": unique if unique >= 0 else "—",
+            "Range (min / mean / max)": range_str,
+            "Top Value": top_str,
+        })
+    return pd.DataFrame(rows)
+
+
 def render_sidebar() -> str:
     st.sidebar.title("Model Selection")
     
@@ -419,6 +462,7 @@ def main() -> None:
     # =========================================================
     uploaded_file = None
     _preview_df = None
+    _profile_df = None
     file_id: tuple[str, int] | None = None
 
     uploaded_file = st.file_uploader(
@@ -434,19 +478,21 @@ def main() -> None:
         try:
             file_bytes_for_preview = uploaded_file.getvalue()
             name_lower = uploaded_file.name.lower()
+            _PROFILE_NROWS = 2000
             if name_lower.endswith(".csv"):
-                _preview_df = pd.read_csv(io.BytesIO(file_bytes_for_preview), nrows=10)
+                _profile_df = pd.read_csv(io.BytesIO(file_bytes_for_preview), nrows=_PROFILE_NROWS)
             elif name_lower.endswith(".tsv"):
-                _preview_df = pd.read_csv(io.BytesIO(file_bytes_for_preview), sep="\t", nrows=10)
+                _profile_df = pd.read_csv(io.BytesIO(file_bytes_for_preview), sep="\t", nrows=_PROFILE_NROWS)
             elif name_lower.endswith((".xls", ".xlsx")):
-                _preview_df = pd.read_excel(io.BytesIO(file_bytes_for_preview), nrows=10)
+                _profile_df = pd.read_excel(io.BytesIO(file_bytes_for_preview), nrows=_PROFILE_NROWS)
             elif name_lower.endswith(".json"):
                 try:
-                    _preview_df = pd.read_json(io.BytesIO(file_bytes_for_preview), lines=True, nrows=10)
+                    _profile_df = pd.read_json(io.BytesIO(file_bytes_for_preview), lines=True, nrows=_PROFILE_NROWS)
                 except Exception:
-                    _preview_df = pd.read_json(io.BytesIO(file_bytes_for_preview)).head(10)
+                    _profile_df = pd.read_json(io.BytesIO(file_bytes_for_preview)).head(_PROFILE_NROWS)
             else:
-                _preview_df = None
+                _profile_df = None
+            _preview_df = _profile_df.head(10) if _profile_df is not None else None
             n_cols = len(_preview_df.columns) if _preview_df is not None else "?"
         except Exception:
             n_cols = "?"
@@ -467,7 +513,20 @@ def main() -> None:
 
         if _preview_df is not None:
             with st.expander("Preview Data", expanded=False):
-                st.dataframe(_preview_df, use_container_width=True)
+                tab_raw, tab_profile = st.tabs(["Raw Data (first 10 rows)", "Column Profile"])
+                with tab_raw:
+                    st.dataframe(_preview_df, use_container_width=True)
+                with tab_profile:
+                    profile_source = _profile_df if _profile_df is not None else _preview_df
+                    st.caption(
+                        f"Summary based on first {len(profile_source):,} rows. "
+                        "Numeric columns show min / mean / max; text columns show the most frequent value."
+                    )
+                    st.dataframe(
+                        _build_column_profile(profile_source),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
 
     selected_columns: list[str] = []
     if _preview_df is not None:
