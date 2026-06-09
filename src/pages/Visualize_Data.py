@@ -145,12 +145,6 @@ def _build_html_report(
     columns = submission_info.get("selected_columns") or []
     columns_str = ", ".join(columns) if columns else "All columns"
 
-    has_plotly = any(a.get("fig") is not None for a in final_artifacts)
-    plotly_cdn = (
-        '<script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>'
-        if has_plotly else ""
-    )
-
     css = """
     body{font-family:system-ui,-apple-system,sans-serif;max-width:1200px;margin:40px auto;padding:0 24px;color:#1a1a1a;line-height:1.6}
     h1{color:#0f2346;border-bottom:3px solid #0f2346;padding-bottom:12px}
@@ -205,6 +199,7 @@ def _build_html_report(
     )
 
     chart_parts = []
+    plotly_js_embedded = False
     for artifact in final_artifacts:
         filename = artifact["filename"]
         fig = artifact.get("fig")
@@ -216,7 +211,11 @@ def _build_html_report(
             if code else ""
         )
         if filename.endswith(".json") and fig is not None:
-            chart_div = fig.to_html(full_html=False, include_plotlyjs=False)
+            # Embed the full Plotly JS bundle with the first chart so the report
+            # is completely self-contained and never requests external resources.
+            include_js = not plotly_js_embedded
+            chart_div = fig.to_html(full_html=False, include_plotlyjs=include_js)
+            plotly_js_embedded = True
         else:
             img_b64 = base64.b64encode(artifact["bytes"]).decode()
             ext = filename.rsplit(".", 1)[-1].lower()
@@ -238,7 +237,6 @@ def _build_html_report(
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Analysis Report — {html_lib.escape(run_id)}</title>
-  {plotly_cdn}
   <style>{css}</style>
 </head>
 <body>
