@@ -1,4 +1,4 @@
-echo "Waiting for the Whisper UI server to open port ${SERVER_PORT}..."
+echo "Waiting for the Text Lab to open port ${SERVER_PORT}..."
 
 # Check if the server is listening on host:port within a 120-second timeout.
 if wait_until_port_used "${host}:${SERVER_PORT}" 120; then
