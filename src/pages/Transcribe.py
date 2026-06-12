@@ -65,7 +65,7 @@ def main():
         col1, col2 = st.columns(2)
         with col1:
             audio_path = st.text_input("Audio file path (server-side)", value="", key="upload_audio_path")
-            audio_upload = st.file_uploader("Or upload audio", type=["wav", "mp3", "flac", "m4a"], key="upload_audio")
+            audio_upload = st.file_uploader("Or upload audio", type=["wav", "mp3", "flac", "m4a", "ogg", "webm", "oga", "opus"], key="upload_audio")
         with col2:
             transcript_path = st.text_input("Transcript CSV/TSV path (server-side)", value="", key="upload_transcript_path")
             transcript_upload = st.file_uploader("Or upload CSV/TSV", type=["csv", "tsv"], key="upload_transcript")
@@ -385,7 +385,7 @@ def main():
 
         col1, col2 = st.columns(2)
         with col1:
-            transcribe_audio = st.file_uploader("Upload audio file", type=["wav", "mp3", "flac", "m4a"], key="transcribe_audio")
+            transcribe_audio = st.file_uploader("Upload audio file", type=["wav", "mp3", "flac", "m4a", "ogg", "webm", "oga", "opus"], key="transcribe_audio")
 
         if transcribe_audio is not None:
             upload_size = getattr(transcribe_audio, "size", "unknown")
