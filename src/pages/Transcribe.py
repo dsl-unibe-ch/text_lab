@@ -221,7 +221,7 @@ def main():
                     device = "cpu"
                     compute_type = "float32"
 
-                valid_extensions = ('.wav', '.mp3', '.flac', '.m4a')
+                valid_extensions = ('.wav', '.mp3', '.flac', '.m4a', '.ogg', '.webm', '.oga', '.opus')
                 audio_files = []
                 
                 with zipfile.ZipFile(batch_zip, "r") as z:
