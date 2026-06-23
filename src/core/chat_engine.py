@@ -417,9 +417,285 @@ def get_synthesis_generator(
             yield chunk.message.content
 
 
+# --- Tool Routing (Data Analysis Supervisor) ---
+
+ROUTER_SYSTEM_PROMPT = (
+    "You are a routing supervisor for a chat assistant. The user is chatting and has "
+    "uploaded a tabular dataset (a schema is provided below). Decide whether answering "
+    "the user's latest message requires generating plots/charts or running statistical "
+    "analysis (correlations, t-tests, ANOVA, regression) on that dataset.\n\n"
+    "- If the request requires visualisations or statistics on the dataset, call the "
+    "`analyze_data` tool with a clear, self-contained instruction derived from the user's "
+    "request and conversation.\n"
+    "- If the request is general conversation, a factual question, or can be answered from "
+    "the dataset text already in context WITHOUT producing plots or statistical tests, do "
+    "NOT call any tool and simply reply normally.\n\n"
+    "Only call `analyze_data` when visual or statistical output is genuinely needed."
+)
+
+ANALYZE_DATA_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "analyze_data",
+        "description": (
+            "Run data visualisation and/or statistical analysis on the user's uploaded "
+            "dataset. Use this only when the user's request requires plots, charts, or "
+            "statistical tests."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "instruction": {
+                    "type": "string",
+                    "description": (
+                        "A clear, self-contained analysis instruction derived from the "
+                        "user's request (e.g. 'Plot an interactive scatter of age vs income "
+                        "and run a correlation between them')."
+                    ),
+                }
+            },
+            "required": ["instruction"],
+        },
+    },
+}
+
+
+def decide_tool_use(
+    model_name: str,
+    user_text: str,
+    schema_text: str,
+    chat_history: List[Dict[str, str]] | None = None,
+) -> Tuple[bool, str]:
+    """
+    Ask the model (acting as a router/supervisor) whether the user's latest message
+    requires data-analysis tools (plots / statistics) on the uploaded dataset.
+
+    Args:
+        model_name: The Ollama model to use for routing. Must support tool calling.
+        user_text: The user's latest message.
+        schema_text: A compact schema/summary of the uploaded dataset.
+        chat_history: Prior conversation turns (excluding the current user turn).
+
+    Returns:
+        Tuple[bool, str]: (use_tools, instruction). When use_tools is False the
+        instruction is an empty string. On any error, falls back to (False, "").
+    """
+    history = chat_history or []
+    router_messages = (
+        [{"role": "system", "content": ROUTER_SYSTEM_PROMPT}]
+        + history
+        + [
+            {
+                "role": "user",
+                "content": (
+                    f"Dataset schema:\n{schema_text}\n\n"
+                    f"User message: {user_text}"
+                ),
+            }
+        ]
+    )
+
+    try:
+        response = ollama.chat(
+            model=model_name,
+            messages=router_messages,
+            tools=[ANALYZE_DATA_TOOL],
+        )
+    except Exception:
+        # Router failed (e.g. model lacks tool support) — fall back to plain chat.
+        return False, ""
+
+    message = response["message"] if isinstance(response, dict) else response.message
+    tool_calls = (
+        message.get("tool_calls") if isinstance(message, dict) else getattr(message, "tool_calls", None)
+    )
+    if not tool_calls:
+        return False, ""
+
+    for tool_call in tool_calls:
+        fn = tool_call["function"] if isinstance(tool_call, dict) else tool_call.function
+        name = fn["name"] if isinstance(fn, dict) else fn.name
+        if name != "analyze_data":
+            continue
+        args = fn["arguments"] if isinstance(fn, dict) else fn.arguments
+        if isinstance(args, str):
+            import json
+            try:
+                args = json.loads(args)
+            except Exception:
+                args = {}
+        instruction = (args or {}).get("instruction", "").strip()
+        if not instruction:
+            instruction = user_text.strip()
+        return True, instruction
+
+    return False, ""
+
+
+def _artifact_to_markdown(artifact: Dict[str, Any], index: int) -> str:
+    """
+    Render a single plot artifact as embeddable Markdown.
+
+    Static images (PNG) are embedded inline as base64 data URIs. Interactive Plotly
+    charts (stored as JSON) are converted to a static PNG via kaleido when available;
+    otherwise a note and the reproducible source code are included instead.
+    """
+    import base64
+
+    tool_label = artifact.get("tool_name", "") or f"Plot {index + 1}"
+    md = f"**{tool_label.replace('_', ' ').title()}**\n\n"
+    fig_json = artifact.get("fig_json")
+    img_bytes = artifact.get("bytes")
+    png_b64 = None
+
+    if fig_json:
+        try:
+            import plotly.io as pio
+            fig = pio.from_json(fig_json)
+            png_bytes = fig.to_image(format="png")  # requires kaleido
+            png_b64 = base64.b64encode(png_bytes).decode("ascii")
+        except Exception:
+            png_b64 = None
+    elif img_bytes and artifact.get("filename", "").lower().endswith((".png", ".jpg", ".jpeg")):
+        png_b64 = base64.b64encode(img_bytes).decode("ascii")
+
+    if png_b64:
+        md += f"![{tool_label}](data:image/png;base64,{png_b64})\n\n"
+    elif fig_json:
+        md += (
+            "_Interactive chart — not embeddable as a static image in this export. "
+            "Reproduce it with the code below._\n\n"
+        )
+
+    code = artifact.get("code")
+    if code:
+        md += f"```python\n{code}\n```\n\n"
+    return md
+
+
+def _has_analysis_plots(messages: List[Dict[str, Any]]) -> bool:
+    """Return True if any assistant turn produced plot artifacts."""
+    for msg in messages:
+        analysis = msg.get("analysis") if isinstance(msg, dict) else None
+        if analysis and analysis.get("artifacts"):
+            return True
+    return False
+
+
+def format_chat_history_html(messages: List[Dict[str, Any]]) -> str:
+    """
+    Convert the conversation into a self-contained HTML document.
+
+    Interactive Plotly charts are rendered using Plotly's own ``fig.to_html``
+    (which generates correct embedding code). Plotly.js is bundled inline on
+    the first interactive chart so the file works without an internet connection.
+    Static images are embedded as base64 data URIs.
+
+    Args:
+        messages (list): The conversation history.
+
+    Returns:
+        str: A complete HTML document string.
+    """
+    import base64
+    import html as html_lib
+
+    parts: List[str] = [
+        "<!DOCTYPE html><html><head><meta charset='utf-8'>",
+        "<title>Text Lab Chat Export</title>",
+        "<style>",
+        "body{font-family:system-ui,Arial,sans-serif;max-width:900px;margin:2rem auto;"
+        "padding:0 1rem;line-height:1.5;color:#1e1e1e;}",
+        ".turn{border:1px solid #ddd;border-radius:8px;padding:1rem 1.25rem;margin:1rem 0;}",
+        ".user{background:#f5f5f5;}.assistant{background:#fff;}",
+        ".role{font-weight:600;margin-bottom:.5rem;color:#555;}",
+        "img{max-width:100%;height:auto;}",
+        "pre{background:#f0f0f0;padding:.75rem;border-radius:6px;overflow-x:auto;}",
+        "h4{margin-top:1.25rem;}",
+        "</style>",
+        "</head><body>",
+        "<h1>Text Lab Chat Export</h1>",
+    ]
+
+    # Track whether Plotly.js has been bundled yet.
+    # First interactive chart includes it inline; subsequent charts omit it to
+    # avoid duplication. This keeps the file self-contained and offline-capable.
+    plotlyjs_included = False
+
+    for msg in messages:
+        role = msg.get("role")
+        if role not in ("user", "assistant"):
+            continue
+        content_html = html_lib.escape(msg.get("content", "")).replace("\n", "<br>")
+        parts.append(f"<div class='turn {role}'>")
+        parts.append(f"<div class='role'>{role.title()}</div>")
+        parts.append(f"<div>{content_html}</div>")
+
+        analysis = msg.get("analysis") if role == "assistant" else None
+        if analysis:
+            artifacts = analysis.get("artifacts", [])
+            if artifacts:
+                parts.append("<h4>Generated Visualisations</h4>")
+            for artifact in artifacts:
+                label = html_lib.escape(
+                    (artifact.get("tool_name", "") or "Plot").replace("_", " ").title()
+                )
+                parts.append(f"<p><strong>{label}</strong></p>")
+                fig_json = artifact.get("fig_json")
+                if fig_json:
+                    try:
+                        import plotly.io as pio
+                        fig = pio.from_json(fig_json)
+                        # Bundle plotlyjs inline on the first chart so the exported
+                        # file is self-contained. Subsequent charts skip it.
+                        include_js = True if not plotlyjs_included else False
+                        chart_html = fig.to_html(
+                            full_html=False,
+                            include_plotlyjs=include_js,
+                        )
+                        plotlyjs_included = True
+                        parts.append(chart_html)
+                    except Exception:
+                        parts.append("<p><em>Could not render interactive chart.</em></p>")
+                else:
+                    img_bytes = artifact.get("bytes")
+                    if img_bytes:
+                        b64 = base64.b64encode(img_bytes).decode("ascii")
+                        parts.append(
+                            f"<img src='data:image/png;base64,{b64}' alt='{label}'>"
+                        )
+                code = artifact.get("code")
+                if code:
+                    parts.append(f"<details><summary>View source code</summary>"
+                                 f"<pre>{html_lib.escape(code)}</pre></details>")
+
+            stats_results = analysis.get("stats", [])
+            if stats_results:
+                parts.append("<h4>Statistical Analysis Results</h4>")
+                for item in stats_results:
+                    parts.append(
+                        f"<p><strong>{html_lib.escape(item.get('title', 'Result'))}</strong></p>"
+                    )
+                    result_html = html_lib.escape(item.get("result", "")).replace("\n", "<br>")
+                    parts.append(f"<div>{result_html}</div>")
+                    if item.get("code"):
+                        parts.append(
+                            f"<details><summary>View source code</summary>"
+                            f"<pre>{html_lib.escape(item['code'])}</pre></details>"
+                        )
+
+        parts.append("</div>")
+
+    parts.append("</body></html>")
+    return "".join(parts)
+
+
 def format_chat_history(messages: List[Dict[str, str]]) -> str:
     """
     Convert the session state messages into a clean, readable Markdown string suitable for export.
+
+    Assistant turns that produced data analysis embed their plots (as base64 images)
+    and statistical results so the exported document is self-contained.
 
     Args:
         messages (list): The conversation history.
@@ -432,5 +708,24 @@ def format_chat_history(messages: List[Dict[str, str]]) -> str:
         if msg["role"] == "user":
             formatted_text += f"### User\n{msg['content']}\n\n---\n\n"
         elif msg["role"] == "assistant":
-            formatted_text += f"### Assistant\n{msg['content']}\n\n---\n\n"
+            formatted_text += f"### Assistant\n{msg['content']}\n\n"
+
+            analysis = msg.get("analysis")
+            if analysis:
+                artifacts = analysis.get("artifacts", [])
+                if artifacts:
+                    formatted_text += "#### Generated Visualisations\n\n"
+                    for idx, artifact in enumerate(artifacts):
+                        formatted_text += _artifact_to_markdown(artifact, idx)
+
+                stats_results = analysis.get("stats", [])
+                if stats_results:
+                    formatted_text += "#### Statistical Analysis Results\n\n"
+                    for item in stats_results:
+                        formatted_text += f"**{item.get('title', 'Result')}**\n\n"
+                        formatted_text += f"{item.get('result', '')}\n\n"
+                        if item.get("code"):
+                            formatted_text += f"```python\n{item['code']}\n```\n\n"
+
+            formatted_text += "---\n\n"
     return formatted_text
