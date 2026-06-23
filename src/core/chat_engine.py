@@ -129,6 +129,60 @@ def is_model_loaded(model_name: str) -> bool:
         return False
 
 
+def get_loaded_models() -> List[str]:
+    """
+    Return the names of all models currently resident in Ollama's VRAM.
+
+    Returns:
+        List[str]: Model name strings, or an empty list if none are loaded
+        or the Ollama server is unreachable.
+    """
+    try:
+        running = ollama.ps()
+        models = (
+            running.get("models", [])
+            if isinstance(running, dict)
+            else getattr(running, "models", [])
+        )
+        return [extract_model_name(m) for m in models]
+    except Exception:
+        return []
+
+
+def unload_model(model_name: str) -> bool:
+    """
+    Evict a single model from Ollama's VRAM by requesting a keep_alive of 0.
+
+    This sends a minimal generate request with ``keep_alive=0``, which
+    instructs Ollama to release the model immediately after responding.
+
+    Args:
+        model_name (str): The model identifier to unload.
+
+    Returns:
+        bool: True if the request was accepted, False on any error.
+    """
+    try:
+        ollama.generate(model=model_name, prompt="", keep_alive=0)
+        return True
+    except Exception:
+        return False
+
+
+def unload_all_models() -> List[str]:
+    """
+    Evict every model currently loaded in Ollama's VRAM.
+
+    Returns:
+        List[str]: Names of the models that were unloaded. Empty if none
+        were loaded or the server was unreachable.
+    """
+    loaded = get_loaded_models()
+    for name in loaded:
+        unload_model(name)
+    return loaded
+
+
 # --- File Processing ---
 
 def read_pdf(file_bytes: bytes) -> str:
