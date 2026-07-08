@@ -16,6 +16,7 @@ import pathlib
 import shutil
 import sys 
 import json
+import base64
 import cv2
 import ollama
 import io
@@ -65,10 +66,37 @@ def get_easyocr_reader(lang_code="en"):
     import easyocr
     return easyocr.Reader([lang_code], gpu=True)
 
-@st.cache_resource(show_spinner=False)
-def get_paddleocr_engine(lang_code="en"):
-    from paddleocr import PaddleOCR
-    return PaddleOCR(use_textline_orientation=True, lang=lang_code)
+def run_paddleocr_backend(image_paths, lang_code="en"):
+    backend_python = os.environ.get("PADDLE_BACKEND_PYTHON", "/opt/conda/envs/paddle_backend/bin/python")
+    worker_path = pathlib.Path(src_dir) / "core" / "paddle_ocr_worker.py"
+    env = os.environ.copy()
+    env["PATH"] = f"{pathlib.Path(backend_python).parent}:{env.get('PATH', '')}"
+    env["LD_LIBRARY_PATH"] = f"/opt/conda/envs/paddle_backend/lib:{env.get('LD_LIBRARY_PATH', '')}"
+    env.setdefault("DISABLE_MODEL_SOURCE_CHECK", "True")
+    env.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
+    cmd = [backend_python, str(worker_path), "--lang", lang_code, *[str(p) for p in image_paths]]
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", env=env)
+    if result.returncode != 0:
+        raise RuntimeError(
+            "PaddleOCR backend failed.\n"
+            f"stdout:\n{result.stdout[-4000:]}\n\nstderr:\n{result.stderr[-4000:]}"
+        )
+    marker = "TEXTLAB_PADDLEOCR_RESULT_JSON="
+    for line in reversed(result.stdout.splitlines()):
+        if line.startswith(marker):
+            return json.loads(line[len(marker):]).get("pages", [])
+    raise RuntimeError(
+        "PaddleOCR backend did not return JSON.\n"
+        f"stdout:\n{result.stdout[-4000:]}\n\nstderr:\n{result.stderr[-4000:]}"
+    )
+
+def decode_png_b64(value):
+    if not value:
+        return None
+    try:
+        return base64.b64decode(value)
+    except Exception:
+        return None
 
 def clear_results(reset_running=False):
     keys_to_clear = [
@@ -318,20 +346,20 @@ if workflow_mode == "Single Document OCR":
 
                     # --- 2. PaddleOCR ---
                     elif ocr_engine == "PaddleOCR":
-                        ocr = get_paddleocr_engine(ocr_language)
-                        for idx, img_path in enumerate(image_paths, start=1):
-                            page_preds = ocr.predict(str(img_path))
-                            compact_preds = [compact_paddle_prediction(pred) for pred in page_preds]
-                            
-                            page_text_lines = []
-                            for pred in compact_preds:
-                                page_text_lines.extend(pred.get("rec_texts", []))
-                            page_text = "\n".join([line for line in page_text_lines if line])
-                            
+                        paddle_pages = run_paddleocr_backend(image_paths, ocr_language)
+                        for idx, page in enumerate(paddle_pages, start=1):
+                            img_path = pathlib.Path(page.get("image") or image_paths[idx - 1])
+                            compact_preds = page.get("raw", [])
+                            page_text = page.get("text", "")
                             ocr_results.append({"page": idx, "text": page_text, "raw": compact_preds})
-                            
-                            pl, pr = render_paddle_preview(img_path, page_preds)
-                            if pl and pr: preview_images.append((pl, pr))
+
+                            rendered_png = decode_png_b64(page.get("rendered_png_b64"))
+                            if rendered_png:
+                                preview_images.append(rendered_png)
+                            else:
+                                pl, _ = render_paddle_preview(img_path, compact_preds)
+                                if pl:
+                                    preview_images.append(pl)
                             progress_bar.progress(idx / len(image_paths), text=f"Running PaddleOCR... page {idx}/{len(image_paths)}")
 
                     # --- 3. GLM-OCR ---
@@ -576,11 +604,9 @@ elif workflow_mode == "Batch OCR (ZIP)":
                     raise RuntimeError("No valid documents or images found in the ZIP.")
                 
                 # Pre-load Models for Image Engines (Saves massive time)
-                reader, paddle_ocr = None, None
+                reader = None
                 if ocr_engine == "EasyOCR":
                     reader = get_easyocr_reader(ocr_language)
-                elif ocr_engine == "PaddleOCR":
-                    paddle_ocr = get_paddleocr_engine(ocr_language)
                 
                 progress_bar = st.progress(0.0)
                 status_text = st.empty()
@@ -642,44 +668,41 @@ elif workflow_mode == "Batch OCR (ZIP)":
                             image_paths = [dest_path]
                             
                         ocr_results = []
-                        for p_idx, img_path in enumerate(image_paths, start=1):
-                            if ocr_engine == "EasyOCR":
-                                page_res = reader.readtext(str(img_path), detail=1, paragraph=True)
-                                page_text = "\n".join([r[1] for r in page_res])
-                                ocr_results.append({"page": p_idx, "text": page_text, "raw": page_res})
-                            
-                            elif ocr_engine == "PaddleOCR":
-                                page_preds = paddle_ocr.predict(str(img_path))
-                                compact_preds = [compact_paddle_prediction(pred) for pred in page_preds]
-                                page_text_lines = []
-                                for pred in compact_preds:
-                                    page_text_lines.extend(pred.get("rec_texts", []))
-                                page_text = "\n".join([line for line in page_text_lines if line])
-                                ocr_results.append({"page": p_idx, "text": page_text, "raw": compact_preds})
-                            
-                            elif ocr_engine == "GLM-OCR":
-                                img = cv2.imread(str(img_path))
-                                max_dim = 2048
-                                h, w = img.shape[:2]
-                                if h > max_dim or w > max_dim:
-                                    scale = max_dim / max(h, w)
-                                    img = cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
-                                
-                                success, encoded_img = cv2.imencode('.png', img)
-                                if success:
-                                    try:
-                                        response = ollama.chat(
-                                            model='glm-ocr:latest',
-                                            messages=[{'role': 'user', 'content': glm_mode, 'images': [encoded_img.tobytes()]}],
-                                            options={'temperature': 0, 'num_ctx': 8192}
-                                        )
-                                        page_text = response.get('message', {}).get('content', '')
-                                    except Exception as e:
-                                        page_text = f"[Error processing page {p_idx}: {str(e)}]"
-                                else:
-                                    page_text = "[Error encoding image]"
-                                
-                                ocr_results.append({"page": p_idx, "text": page_text, "raw": {"content": page_text}})
+                        if ocr_engine == "PaddleOCR":
+                            ocr_results = [
+                                {"page": page.get("page", p_idx), "text": page.get("text", ""), "raw": page.get("raw", [])}
+                                for p_idx, page in enumerate(run_paddleocr_backend(image_paths, ocr_language), start=1)
+                            ]
+                        else:
+                            for p_idx, img_path in enumerate(image_paths, start=1):
+                                if ocr_engine == "EasyOCR":
+                                    page_res = reader.readtext(str(img_path), detail=1, paragraph=True)
+                                    page_text = "\n".join([r[1] for r in page_res])
+                                    ocr_results.append({"page": p_idx, "text": page_text, "raw": page_res})
+
+                                elif ocr_engine == "GLM-OCR":
+                                    img = cv2.imread(str(img_path))
+                                    max_dim = 2048
+                                    h, w = img.shape[:2]
+                                    if h > max_dim or w > max_dim:
+                                        scale = max_dim / max(h, w)
+                                        img = cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
+
+                                    success, encoded_img = cv2.imencode('.png', img)
+                                    if success:
+                                        try:
+                                            response = ollama.chat(
+                                                model='glm-ocr:latest',
+                                                messages=[{'role': 'user', 'content': glm_mode, 'images': [encoded_img.tobytes()]}],
+                                                options={'temperature': 0, 'num_ctx': 8192}
+                                            )
+                                            page_text = response.get('message', {}).get('content', '')
+                                        except Exception as e:
+                                            page_text = f"[Error processing page {p_idx}: {str(e)}]"
+                                    else:
+                                        page_text = "[Error encoding image]"
+
+                                    ocr_results.append({"page": p_idx, "text": page_text, "raw": {"content": page_text}})
 
                         # Write Results
                         all_text = []

@@ -183,6 +183,24 @@ def unload_all_models() -> List[str]:
     return loaded
 
 
+def warm_model(model_name: str) -> bool:
+    """
+    Pre-load a model into Ollama's VRAM by sending an empty generate request
+    with a non-zero keep_alive, so the next real request is instant.
+
+    Args:
+        model_name (str): The model identifier to warm.
+
+    Returns:
+        bool: True if the request was accepted, False on any error.
+    """
+    try:
+        ollama.generate(model=model_name, prompt="", keep_alive=300)
+        return True
+    except Exception:
+        return False
+
+
 # --- File Processing ---
 
 def read_pdf(file_bytes: bytes) -> str:
@@ -307,6 +325,135 @@ def get_response_generator(model_name: str, messages: List[Dict[str, str]]) -> G
     stream = ollama.chat(model=model_name, messages=[system_message] + messages, stream=True)
     for chunk in stream:
         yield chunk["message"]["content"]
+
+
+# --- Image generation as a first-class chat tool -----------------------------
+# Exposing generate_image to the model (not just the keyword router) lets it fire
+# in conversation — e.g. when the user confirms ("yes") an image the model just
+# offered to make. The system hint also stops models from role-playing a fake
+# `dalle.text2im`/JSON tool call or claiming they cannot generate images.
+
+IMAGE_TOOL_SYSTEM_HINT = (
+    "You have a REAL image-generation tool named `generate_image` that renders images locally. "
+    "When the user actually wants an image NOW — asks you to create, draw, generate, paint, design, or "
+    "produce an image/picture/visual/poster/logo/scene/portrait, or confirms (e.g. 'yes') an image you just "
+    "offered to make — you MUST call the `generate_image` tool with a single detailed `prompt` describing the "
+    "scene. Never claim you are unable to generate images, and never write a tool call as plain text or JSON — "
+    "use the actual tool. "
+    "BUT if the user is only discussing or asking a QUESTION about images or prompts (e.g. 'which prompt would "
+    "you use for...', 'how would you describe...', 'can you explain...') rather than requesting an image right "
+    "now, answer in plain text and do NOT call the tool. Answer normally for everything else."
+)
+
+GENERATE_IMAGE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "generate_image",
+        "description": (
+            "Generate/create/draw an image locally from a text description. Call this whenever the "
+            "user asks to create, generate, draw, paint, or produce an image, picture, visual, poster, "
+            "logo, scene, etc., including when they confirm a picture you offered to make."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "prompt": {
+                    "type": "string",
+                    "description": (
+                        "A detailed, self-contained visual description of the image to create, derived "
+                        "from the user's request and the conversation: subject, style, setting, mood, colours."
+                    ),
+                }
+            },
+            "required": ["prompt"],
+        },
+    },
+}
+
+
+def _extract_image_tool_prompt(message) -> str | None:
+    """Return the `prompt` argument if `message` contains a generate_image tool call."""
+    import json as _json
+
+    tool_calls = (
+        message.get("tool_calls") if isinstance(message, dict)
+        else getattr(message, "tool_calls", None)
+    )
+    if not tool_calls:
+        return None
+    for tc in tool_calls:
+        fn = tc["function"] if isinstance(tc, dict) else tc.function
+        name = fn["name"] if isinstance(fn, dict) else fn.name
+        if name != "generate_image":
+            continue
+        args = fn["arguments"] if isinstance(fn, dict) else fn.arguments
+        if isinstance(args, str):
+            try:
+                args = _json.loads(args)
+            except Exception:
+                args = {}
+        prompt = (args or {}).get("prompt", "")
+        if isinstance(prompt, str) and prompt.strip():
+            return prompt.strip()
+    return None
+
+
+def stream_chat_with_image_tool(
+    model_name: str,
+    messages: List[Dict[str, str]],
+    offer_image: bool = False,
+) -> Tuple[str, Any]:
+    """Stream a chat reply while offering the model the generate_image tool.
+
+    Returns a ``(kind, payload)`` tuple:
+      * ``("image", prompt)``  — the model chose to generate an image; run the pipeline.
+      * ``("text", generator)`` — a normal streamed text answer (yield to the UI).
+
+    A single streaming call: if the model opens with a generate_image tool call we
+    catch it; otherwise we stream its text unchanged (no extra latency). Falls back
+    to a plain stream if the model does not support tool calling.
+    """
+    def _plain_stream() -> Generator[str, None, None]:
+        system_message = {"role": "system", "content": SYSTEM_PROMPT}
+        for chunk in ollama.chat(model=model_name, messages=[system_message] + messages, stream=True):
+            content = chunk["message"].get("content")
+            if content:
+                yield content
+
+    if not offer_image:
+        return "text", _plain_stream()
+
+    def _content_of(msg):
+        return msg.get("content") if isinstance(msg, dict) else getattr(msg, "content", "")
+
+    try:
+        system_message = {"role": "system", "content": SYSTEM_PROMPT + "\n\n" + IMAGE_TOOL_SYSTEM_HINT}
+        stream = ollama.chat(
+            model=model_name,
+            messages=[system_message] + messages,
+            tools=[GENERATE_IMAGE_TOOL],
+            stream=True,
+        )
+        for chunk in stream:
+            message = chunk["message"] if isinstance(chunk, dict) else chunk.message
+            prompt = _extract_image_tool_prompt(message)
+            if prompt:
+                return "image", prompt
+            content = _content_of(message)
+            if content:
+                # Real text answer begins here; emit this chunk then the remainder.
+                def _continue(first_chunk, remaining):
+                    yield first_chunk
+                    for c in remaining:
+                        m = c["message"] if isinstance(c, dict) else c.message
+                        cc = _content_of(m)
+                        if cc:
+                            yield cc
+                return "text", _continue(content, stream)
+        return "text", iter(())
+    except Exception:
+        # Model likely lacks tool support — fall back to a normal streamed reply.
+        return "text", _plain_stream()
 
 
 def estimate_tokens(text: str) -> int:

@@ -1,5 +1,8 @@
 __pycache__
 mcp_artifacts/
+# Built apptainer images and runtime logs live on research storage, not in git.
+*.sif
+logs/
 .streamlit/
 bin/
 etc/

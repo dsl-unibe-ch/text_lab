@@ -1,5 +1,5 @@
 Bootstrap: docker
-From: nvidia/cuda:12.5.0-devel-ubuntu22.04
+From: nvidia/cuda:12.8.0-cudnn-devel-ubuntu22.04
 
 %environment
     export DEBIAN_FRONTEND=noninteractive
@@ -12,9 +12,15 @@ From: nvidia/cuda:12.5.0-devel-ubuntu22.04
     export HUGGINGFACE_HUB_CACHE=/opt/huggingface/hub
     export TRANSFORMERS_CACHE=/opt/huggingface/transformers
     export EASYOCR_CACHE=/opt/easyocr
+    # PaddleOCR/PaddleX also use ~/.paddleocr and ~/.paddlex in some versions.
+    # The OnDemand launcher bind-mounts the shared cache onto those paths.
     export PADDLEOCR_CACHE=/opt/paddleocr
     export PADDLEX_HOME=/opt/paddlex
+    export PADDLE_PDX_CACHE_HOME=/opt/paddlex
     export OLLAMA_MODELS=/opt/ollama/models
+    # Pyannote/WhisperX checkpoints include trusted non-tensor objects. PyTorch
+    # 2.6+ defaults torch.load(weights_only=True), which rejects those files.
+    export TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1
     
     # --- NLTK Data Path for offline Topic Modeling ---
     export NLTK_DATA=/opt/nltk_data
@@ -27,6 +33,10 @@ From: nvidia/cuda:12.5.0-devel-ubuntu22.04
 
     # DEFAULT TO MAIN ENVIRONMENT
     export PATH="/opt/conda/envs/text_lab_main/bin:/opt/conda/bin:$PATH"
+    export TEXT_LAB_PYTHON=/opt/conda/envs/text_lab_main/bin/python
+    export PADDLE_BACKEND_PYTHON=/opt/conda/envs/paddle_backend/bin/python
+    export OLMOCR_BACKEND_PYTHON=/opt/conda/envs/olmocr_backend/bin/python
+    export TEXT_LAB_IMAGEGEN_PYTHON=/opt/conda/envs/imagegen_backend/bin/python
 
 %post
     set -e
@@ -39,112 +49,129 @@ From: nvidia/cuda:12.5.0-devel-ubuntu22.04
         /opt/easyocr /opt/paddleocr /opt/paddlex
     chmod -R a+rX /opt/whisper /opt/ollama /opt/whisperx /opt/torch /opt/huggingface /opt/easyocr /opt/paddleocr /opt/paddlex
 
-    # 2. Install OS Dependencies
+    # 2. Install OS dependencies
     apt-get update
     echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" | debconf-set-selections
     apt-get install -y --no-install-recommends \
-        software-properties-common ca-certificates curl git build-essential \
+        ca-certificates curl git build-essential \
         pkg-config ffmpeg libsndfile1 zstd poppler-utils ttf-mscorefonts-installer \
         msttcorefonts fonts-crosextra-caladea fonts-crosextra-carlito gsfonts \
-        lcdf-typetools wget bzip2 gnupg libcudnn8 libcudnn8-dev
+        lcdf-typetools wget bzip2
 
-    # Apptainer (in-container support)
-    add-apt-repository -y ppa:apptainer/ppa
-    apt-get update
-    apt-get install -y apptainer
-
-    # 3. Install Ollama Backend (PINNED TO LATEST STABLE AS OF MAY 2026)
+    # 3. Install Ollama backend
     export OLLAMA_VERSION="0.24.0"
     curl -fsSL https://ollama.com/install.sh | OLLAMA_VERSION=${OLLAMA_VERSION} sh
 
-    # 4. Install Miniconda (PINNED TO SPECIFIC INSTALLER)
+    # 4. Install Miniconda
     mkdir -p /opt
     wget -qO /tmp/miniconda.sh https://repo.anaconda.com/miniconda/Miniconda3-py311_24.3.0-0-Linux-x86_64.sh
     bash /tmp/miniconda.sh -b -p /opt/conda
     rm -f /tmp/miniconda.sh
     export PATH="/opt/conda/bin:$PATH"
     
-    # --- Accept Anaconda ToS for non-interactive builds ---
     conda config --set auto_update_conda false
-    # -----------------------------------------------------------
 
     # ===================================================================
-    # ENVIRONMENT 1: TEXT LAB MAIN (Streamlit, Whisper, Paddle, LDA)
+    # ENVIRONMENT 1: TEXT LAB MAIN
+    # Streamlit, WhisperX, EasyOCR, topic modeling, embeddings, data tools.
+    #
+    # Keep this on the Torch 2.8 family. Torchaudio 2.9 removed APIs still used
+    # by pyannote-audio 3.x, which WhisperX 3.7.x imports at load time.
     # ===================================================================
     conda create -y -n text_lab_main python=3.11
     export MAIN_PIP="/opt/conda/envs/text_lab_main/bin/python -m pip"
     
-    $MAIN_PIP install pip setuptools wheel
+    $MAIN_PIP install --no-cache-dir "pip>=25" "setuptools<82" "wheel>=0.47.0"
     
-    # PyTorch 2.7.1
-    $MAIN_PIP install --no-cache-dir torch==2.7.1 torchvision==0.22.1 torchaudio==2.7.1 --index-url https://download.pytorch.org/whl/cu118
+    $MAIN_PIP install --no-cache-dir \
+        torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0 \
+        --index-url https://download.pytorch.org/whl/cu126
 
-    # Constraints for Whisper/Main
-    cat > /tmp/constraints.txt <<'EOF'
-torch==2.7.1+cu118
-torchvision==0.22.1+cu118
-torchaudio==2.7.1+cu118
+    cat > /tmp/main_constraints.txt <<'EOF'
+torch==2.8.0+cu126
+torchvision==0.23.0+cu126
+torchaudio==2.8.0+cu126
 pyannote-audio>=3.3.2,<4.0.0
 huggingface_hub<1.0.0
-transformers<5
-ctranslate2<4.5.0
+transformers>=4.49.0,<5
+ctranslate2>=4.5.0
 EOF
 
-    # Core UI, Data, and App Packages (Removed --upgrade flag for stability)
+    # Core UI, OCR, transcription, topic modeling, visualization, and data tools.
     $MAIN_PIP install --no-cache-dir \
-        streamlit requests openai-whisper sentence-transformers \
+        streamlit requests openai openai-whisper whisperx silero_vad easyocr \
+        sentence-transformers \
         scikit-learn umap-learn matplotlib numpy pandas seaborn plotly \
         ipython jupyter polars pyarrow openpyxl datasets soundfile \
-        opencv-python-headless scikit-image mcp[cli] openai tabulate \
+        opencv-python-headless scikit-image "mcp[cli]" tabulate \
         tqdm filelock evaluate librosa networkx pyvis \
         pymupdf pymupdf4llm "unstructured[all-docs]" ollama \
-        --constraint /tmp/constraints.txt
+        gensim pyLDAvis spacy nltk wordcloud bertopic top2vec keybert stopwordsiso \
+        scipy statsmodels pingouin arch \
+        --constraint /tmp/main_constraints.txt
 
-    # WhisperX & VAD
-    $MAIN_PIP install --no-cache-dir whisperx==3.4.1 silero_vad --constraint /tmp/constraints.txt
-
-    # PaddleOCR
-    $MAIN_PIP install --no-cache-dir paddlepaddle-gpu==3.3.0 -i https://www.paddlepaddle.org.cn/packages/stable/cu118/
-    $MAIN_PIP install --no-cache-dir paddleocr paddlex easyocr
-
-    # *** TOPIC MODELING & NLP DEPENDENCIES ***
-    $MAIN_PIP install --no-cache-dir gensim pyLDAvis spacy nltk wordcloud \
-        bertopic top2vec keybert stopwordsiso
-        
-    # *** STATS PACKAGES FOR MCP / ADVANCED ANALYSIS ***
-    $MAIN_PIP install --no-cache-dir scipy statsmodels pingouin arch
-
-    # Download Spacy Language Models
+    # Offline NLP assets.
     /opt/conda/envs/text_lab_main/bin/python -m spacy download en_core_web_sm
     /opt/conda/envs/text_lab_main/bin/python -m spacy download de_core_news_sm
     /opt/conda/envs/text_lab_main/bin/python -m spacy download fr_core_news_sm
 
-    # Download NLTK data to an internal shared folder so it works offline
     mkdir -p /opt/nltk_data
     chmod -R a+rX /opt/nltk_data
     /opt/conda/envs/text_lab_main/bin/python -m nltk.downloader -d /opt/nltk_data stopwords punkt punkt_tab
 
     # ===================================================================
-    # ENVIRONMENT 2: OLMOCR BACKEND (vLLM, PyTorch 2.4.0, Numpy < 2)
+    # ENVIRONMENT 2: PADDLE OCR BACKEND (Paddle CUDA 12.6 wheel family)
+    # ===================================================================
+    conda create -y -n paddle_backend python=3.11
+    export PADDLE_PIP="/opt/conda/envs/paddle_backend/bin/python -m pip"
+
+    $PADDLE_PIP install --no-cache-dir "pip>=25" "setuptools<82" "wheel>=0.47.0"
+
+    # Paddle does not publish a cu128 wheel. Keep its cu126 runtime isolated.
+    $PADDLE_PIP install --no-cache-dir paddlepaddle-gpu==3.3.1 \
+        -i https://www.paddlepaddle.org.cn/packages/stable/cu126/
+    $PADDLE_PIP install --no-cache-dir paddleocr==3.3.3 paddlex==3.3.13
+
+    # ===================================================================
+    # ENVIRONMENT 3: OLMOCR BACKEND
+    # Latest OlmOCR GPU depends on vLLM 0.11.2, which pins Torch 2.9,
+    # Torchaudio 2.9, Torchvision 0.24, and Transformers <5.
     # ===================================================================
     conda create -y -n olmocr_backend python=3.11
     export OLM_PIP="/opt/conda/envs/olmocr_backend/bin/python -m pip"
     
-    $OLM_PIP install pip
-    
-    # Strict pins for vLLM & OlmOCR compatibility
-    $OLM_PIP install --no-cache-dir "numpy==1.26.4"
-    $OLM_PIP install --no-cache-dir torch==2.4.0+cu118 torchvision==0.19.0+cu118 torchaudio==2.4.0+cu118 --index-url https://download.pytorch.org/whl/cu118
-    $OLM_PIP install --no-cache-dir "vllm==0.11.0"
-    $OLM_PIP install --no-cache-dir "olmocr[gpu]==0.4.4" --no-deps
-    
-    # Satisfy olmocr runtime deps safely
-    $OLM_PIP install --no-cache-dir \
-        "transformers==4.55.2" tokenizers==0.21.4 \
-        beaker-py bleach boto3 cached_path ftfy lingua-language-detector \
-        markdown2 markdownify orjson "pypdf>=5.2.0" pypdfium2 smart_open zstandard \
-        matplotlib pandas seaborn scikit-learn umap-learn opencv-python-headless scikit-image \
-        mlflow datasets flask requests Flask-Cors ollama rich
+    $OLM_PIP install --no-cache-dir "pip>=25" "setuptools<82" "wheel>=0.47.0"
+
+    # Use the cu126 PyTorch index because vLLM 0.11.2 currently resolves to the
+    # Torch 2.9 CUDA 12.6 wheel family. The CUDA 12.8 base image/driver can run it.
+    $OLM_PIP install --no-cache-dir "olmocr[gpu]" \
+        --extra-index-url https://download.pytorch.org/whl/cu126
+    $OLM_PIP install --no-cache-dir "flashinfer-python>=0.5.2"
+
+    # ===================================================================
+    # ENVIRONMENT 4: IMAGE GENERATION BACKEND
+    # Ideogram 4 nf4 needs Torch >=2.11 and Transformers 5.x for its Qwen3-VL
+    # text encoder config. Keep it away from WhisperX and OlmOCR/vLLM.
+    # ===================================================================
+    conda create -y -n imagegen_backend python=3.11
+    export IMG_PIP="/opt/conda/envs/imagegen_backend/bin/python -m pip"
+
+    $IMG_PIP install --no-cache-dir "pip>=25" "setuptools<82" "wheel>=0.47.0"
+
+    $IMG_PIP install --no-cache-dir torch==2.11.0 --index-url https://download.pytorch.org/whl/cu128
+
+    cat > /tmp/img_constraints.txt <<'EOF'
+torch==2.11.0+cu128
+transformers>=5,<6
+huggingface_hub<2.0.0
+EOF
+
+    # Use the maintained local fork/branch while these provider changes are
+    # unreleased upstream. Pin to a commit once the branch is finalized.
+    $IMG_PIP install --no-cache-dir \
+        "git+https://github.com/BoiMat/ideogram4.git@main" \
+        "transformers>=5,<6" "mcp[cli]" \
+        --constraint /tmp/img_constraints.txt
 
     # ===================================================================
     # FINAL CLEANUP
@@ -152,7 +179,7 @@ EOF
     conda clean -a -y
     apt-get clean
     rm -rf /var/lib/apt/lists/*
-    rm -f /tmp/constraints.txt
+    rm -f /tmp/main_constraints.txt /tmp/img_constraints.txt
 
 %runscript
     exec "$@"
