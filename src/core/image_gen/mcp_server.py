@@ -30,15 +30,9 @@ import uuid
 
 os.environ.setdefault("TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD", "1")
 
-# The ideogram-4-nf4 repo is GATED: without a token, HEAD requests to it 401
-# (not 404), so any user who didn't personally `huggingface-cli login` fails. The
-# shared cache is complete (single-file weights; the sharded .index.json is
-# legitimately absent and recorded in .no_exist), so offline is the default: it
-# honors the .no_exist marker, never touches the network, and needs no token.
-# Opt out (TEXT_LAB_IMAGEGEN_OFFLINE=0) only to refresh the cache online.
-if os.environ.get("TEXT_LAB_IMAGEGEN_OFFLINE", "1") == "1":
-    os.environ["HF_HUB_OFFLINE"] = "1"
-    os.environ["TRANSFORMERS_OFFLINE"] = "1"
+# NB: offline vs. online is decided further down, once we know which model repo was
+# selected and whether it is already cached (see the offline gate below). No HF
+# library is imported before that point, so setting the flags there is in time.
 
 # This script is launched as an isolated subprocess by the MCP stdio client, so
 # make the 'src' root importable for `core.*` packages.
@@ -51,11 +45,15 @@ from mcp.server.fastmcp import FastMCP
 
 from core.image_gen.image_config import (
     DEFAULT_PRESET,
-    MODEL_REPO,
     get_artifacts_dir,
     get_hf_home,
     get_hf_token,
+    get_model_repo,
 )
+
+# The weights repo for this run: fp8 on high-memory GPUs, nf4 otherwise. Selected
+# by the launcher (Chat.py) and passed in via TEXT_LAB_IMAGEGEN_MODEL_REPO.
+MODEL_REPO = get_model_repo()
 
 # Point the HF libraries at the shared cache that holds the pre-downloaded NF4
 # weights (reachable on host and in-container), before any of them is imported.
@@ -95,6 +93,30 @@ _MODEL_CACHE_DIR = os.path.join(
     os.environ.get("HF_HUB_CACHE", os.path.join(_HF_HOME, "hub")),
     "models--" + MODEL_REPO.replace("/", "--"),
 )
+
+
+def _model_is_cached() -> bool:
+    """True if the selected model has a populated snapshot in the shared cache."""
+    snapshots = os.path.join(_MODEL_CACHE_DIR, "snapshots")
+    try:
+        return os.path.isdir(snapshots) and any(os.scandir(snapshots))
+    except OSError:
+        return False
+
+
+# The gated repos 401 (not 404) on unauthenticated HEAD requests, so any user who
+# didn't personally `huggingface-cli login` fails online. When the selected model
+# is already cached, offline is therefore the default: it honors the .no_exist
+# markers, never touches the network, and needs no token — so it works for every
+# user. When the model is NOT yet cached (e.g. the fp8 upgrade on its first run),
+# fall back to online so a token-holder can populate the shared cache once; all
+# users then get it offline. Force with TEXT_LAB_IMAGEGEN_OFFLINE=1/0.
+_offline_env = os.environ.get("TEXT_LAB_IMAGEGEN_OFFLINE")
+_offline = _offline_env == "1" or (_offline_env is None and _model_is_cached())
+if _offline:
+    os.environ["HF_HUB_OFFLINE"] = "1"
+    os.environ["TRANSFORMERS_OFFLINE"] = "1"
+
 _debug("=" * 60)
 _debug(f"MCP server startup pid={os.getpid()} exe={sys.executable}")
 _debug(f"HF_HOME={os.environ.get('HF_HOME')}")

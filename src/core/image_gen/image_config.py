@@ -14,9 +14,31 @@ import os
 import pathlib
 from typing import Literal, TypedDict
 
-# Gated Hugging Face repo (nf4 = bitsandbytes 4-bit, CUDA only). Downloaded once
-# into the bind-mounted HF cache; read locally from then on.
+# Gated Hugging Face repo (nf4 = bitsandbytes 4-bit, CUDA only, ~16 GB). This is
+# the low-VRAM default that fits 24 GB cards (RTX 4090). Downloaded once into the
+# bind-mounted HF cache; read locally from then on.
 MODEL_REPO: str = "ideogram-ai/ideogram-4-nf4"
+
+# High-VRAM upgrade: fp8 is the larger, higher-quality build. Only selected on
+# high-memory GPUs (A100/H100/H200), where there is room for it — see
+# ``model_repo_for_gpu``. Must be present in the shared HF cache to serve offline.
+MODEL_REPO_HIGH_VRAM: str = "ideogram-ai/ideogram-4-fp8"
+
+
+def model_repo_for_gpu(gpu_name: str) -> str:
+    """Pick the weights repo for a GPU: the better fp8 model on high-memory cards
+    (A100/H100/H200), the 4-bit nf4 model otherwise. The launcher (Chat.py) calls
+    this and exports the result so the MCP subprocess loads the matching model."""
+    from core.model_config import is_high_memory_gpu
+
+    return MODEL_REPO_HIGH_VRAM if is_high_memory_gpu(gpu_name) else MODEL_REPO
+
+
+def get_model_repo() -> str:
+    """Weights repo the backend should load, as selected by the launcher via the
+    ``TEXT_LAB_IMAGEGEN_MODEL_REPO`` env var (see ``model_repo_for_gpu``). Falls
+    back to the nf4 default when unset (e.g. dev runs outside the Streamlit app)."""
+    return os.environ.get("TEXT_LAB_IMAGEGEN_MODEL_REPO", "").strip() or MODEL_REPO
 
 # Absolute path to the shared HF cache on research storage. It is reachable both
 # on the host and inside the container (via the /storage bind), so it works as a

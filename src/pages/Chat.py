@@ -69,6 +69,7 @@ from core.image_gen.image_config import (
     SIZE_OPTIONS,
     is_image_gen_installed,
     is_image_gen_supported,
+    model_repo_for_gpu,
 )
 
 _SRC_DIR = pathlib.Path(__file__).resolve().parent.parent
@@ -543,7 +544,15 @@ def main():
     elif not image_gen_ok:
         st.sidebar.caption(f"Needs a GPU with ≥20 GB VRAM. Current: {current_gpu}.")
     else:
-        if not is_high_memory_gpu(current_gpu):
+        # Pick the weights repo for this GPU (fp8 on high-memory cards, nf4 else)
+        # and hand it to the MCP subprocess, which inherits this process's env.
+        os.environ["TEXT_LAB_IMAGEGEN_MODEL_REPO"] = model_repo_for_gpu(current_gpu)
+        if is_high_memory_gpu(current_gpu):
+            st.sidebar.caption(
+                "✨ Using the higher-quality Ideogram 4 (fp8) model, enabled by this "
+                "GPU's larger memory."
+            )
+        else:
             st.sidebar.caption(
                 f"⚠️ Image generation is slow on this GPU ({current_gpu}): with limited "
                 "VRAM the chat model is unloaded and reloaded around each image, so "
