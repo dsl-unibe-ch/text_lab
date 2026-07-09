@@ -101,16 +101,10 @@ def ensure_grobid_server():
     # --- CHANGE 2: Robust Error Message with Manual Workaround ---
     if apptainer_cmd is None:
         raise GrobidError(
-            f"""
-            Auto-start failed: The 'apptainer' command is not available inside this container.
-            
-            WORKAROUND:
-            1. Keep this app open.
-            2. Go to your Open OnDemand Dashboard -> Clusters -> Shell Access.
-            3. Run this command in the terminal to start Grobid manually on the same node:
-            
-            apptainer exec --bind /storage:/storage {GROBID_CONTAINER} bash -c "cd /opt/grobid && ./grobid-service/bin/grobid-service"
-            """
+            "Knowledge Graph feature unavailable: Grobid requires nested container support (apptainer/singularity not available). "
+            "This is a known limitation when running TextLab inside an apptainer container. "
+            "The Knowledge Graph feature requires infrastructure changes to support container nesting or shared network namespaces. "
+            "Please use Document OCR or Chat features instead."
         )
 
     if not os.path.exists(GROBID_CONTAINER):
