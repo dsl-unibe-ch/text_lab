@@ -543,6 +543,12 @@ def main():
     elif not image_gen_ok:
         st.sidebar.caption(f"Needs a GPU with ≥20 GB VRAM. Current: {current_gpu}.")
     else:
+        if not is_high_memory_gpu(current_gpu):
+            st.sidebar.caption(
+                f"⚠️ Image generation is slow on this GPU ({current_gpu}): with limited "
+                "VRAM the chat model is unloaded and reloaded around each image, so "
+                "expect a wait of a few minutes per generation."
+            )
         image_mode = st.sidebar.toggle(
             "🖼️ Generate image",
             value=st.session_state.get("image_mode", False),
