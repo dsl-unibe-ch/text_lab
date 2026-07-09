@@ -2,47 +2,41 @@
 
 set -euo pipefail
 
-# Allow callers to override base directories via environment variables. Defaults
-# target the deployed location on research storage; a dev sandbox overrides them
-# by exporting TEXT_LAB_DIR / TEXT_LAB_SIF before launch.
+# Allow callers to override base directories via environment variables.
 HOST_TEXT_LAB_DIR="${TEXT_LAB_DIR:-/storage/research/dsl_shared/solutions/ondemand/text_lab}"
 
 CONT_TEXT_LAB_DIR="/text_lab"
-CONT_STREAMLIT_APP="$CONT_TEXT_LAB_DIR/src/Home.py"
 
-# point to the apptainer container on research storage
-TL_CONTAINER="${TEXT_LAB_SIF:-$HOST_TEXT_LAB_DIR/container/text_lab_210526.sif}"
-
-# point to shared model/cache storage on research storage
-HOST_MODEL_DIR="${TEXT_LAB_MODEL_DIR:-/storage/research/dsl_shared/solutions/ondemand/text_lab/container/models}"
+#point to the apptainer containers on research storage
+TL_CONTAINER="$HOST_TEXT_LAB_DIR/container/text_lab_210526.sif"
 
 #point to where the ollama models are stored on research storage
-HOST_OLLAMA_DIR="$HOST_MODEL_DIR/ollama"
+HOST_OLLAMA_DIR="/storage/research/dsl_shared/solutions/ondemand/text_lab/container/models/ollama"
 CONT_OLLAMA_DIR="/opt/ollama"
 
 #point to where the whisper models are stored on research storage
-HOST_WHISPER_DIR="$HOST_MODEL_DIR/whisper"
+HOST_WHISPER_DIR="/storage/research/dsl_shared/solutions/ondemand/text_lab/container/models/whisper"
 CONT_WHISPER_DIR="/opt/whisper"
 
 # point to where whisperx cache is stored on research storage
-HOST_WHISPERX_DIR="$HOST_MODEL_DIR/whisperx"
+HOST_WHISPERX_DIR="/storage/research/dsl_shared/solutions/ondemand/text_lab/container/models/whisperx"
 CONT_WHISPERX_DIR="/opt/whisperx"
 
 #point to where torch models are stored on research storage
-HOST_TORCH_DIR="$HOST_MODEL_DIR/torch"
+HOST_TORCH_DIR="/storage/research/dsl_shared/solutions/ondemand/text_lab/container/models/torch"
 CONT_TORCH_DIR="/opt/torch"
 
 # point to where huggingface models are stored on research storage
-HOST_HF_DIR="$HOST_MODEL_DIR/huggingface"
+HOST_HF_DIR="/storage/research/dsl_shared/solutions/ondemand/text_lab/container/models/huggingface"
 CONT_HF_DIR="/opt/huggingface"
 
 # point to where OCR caches are stored on research storage
-HOST_EASYOCR_DIR="$HOST_MODEL_DIR/easyocr"
+HOST_EASYOCR_DIR="/storage/research/dsl_shared/solutions/ondemand/text_lab/container/models/easyocr"
 CONT_EASYOCR_DIR="/opt/easyocr"
 
 # PaddleX/PaddleOCR ignore env vars in some versions and default to ~/.paddlex/.paddleocr
-HOST_PADDLEOCR_DIR="$HOST_MODEL_DIR/paddleocr"
-HOST_PADDLEX_DIR="$HOST_MODEL_DIR/paddlex"
+HOST_PADDLEOCR_DIR="/storage/research/dsl_shared/solutions/ondemand/text_lab/container/models/paddleocr"
+HOST_PADDLEX_DIR="/storage/research/dsl_shared/solutions/ondemand/text_lab/container/models/paddlex"
 CONT_PADDLEOCR_DIR="$HOME/.paddleocr"
 CONT_PADDLEX_DIR="$HOME/.paddlex"
 PADDLE_PDX_CACHE_HOME="${PADDLE_PDX_CACHE_HOME:-$HOST_PADDLEX_DIR}"
@@ -78,18 +72,6 @@ if [ -z "${CUDA_VISIBLE_DEVICES:-}" ]; then
   export CUDA_VISIBLE_DEVICES=0
 fi
 
-mkdir -p "$HOST_TEXT_LAB_DIR/logs"
-
-if [[ ! -f "$TL_CONTAINER" ]]; then
-  echo "Text Lab container not found: $TL_CONTAINER" >&2
-  exit 1
-fi
-
-if [[ ! -f "$HOST_TEXT_LAB_DIR/src/Home.py" ]]; then
-  echo "Text Lab app entrypoint not found: $HOST_TEXT_LAB_DIR/src/Home.py" >&2
-  exit 1
-fi
-
 
 
 echo "=========================================================="
@@ -97,16 +79,8 @@ echo "Starting Text Lab Session for User: $USER"
 echo "Slurm Job ID: ${SLURM_JOB_ID:-unknown}"
 echo "Assigned Ollama Host/Port: $OLLAMA_HOST"
 echo "Assigned GPU(s): $CUDA_VISIBLE_DEVICES"
-echo "Text Lab app root: $HOST_TEXT_LAB_DIR"
-echo "Text Lab container: $TL_CONTAINER"
-echo "Text Lab model dir: $HOST_MODEL_DIR"
 echo "=========================================================="
 
-# Image-gen "magic prompt" (JSON caption) config is passed via --env below. The
-# default path is keyless/local: the Streamlit client expands each prompt via the
-# active Ollama chat model. GPUSTACK_API_KEY / MAGIC_PROMPT_API_KEY / TEXT_LAB_MAGIC_PROMPT_MODEL
-# / TEXT_LAB_MAGIC_PROMPT_OLLAMA_MODEL are optional overrides (a remote provider,
-# only used server-side when its key is set, and a server-side fallback model).
 apptainer exec \
   --nv \
   --bind "$HOST_TEXT_LAB_DIR:$CONT_TEXT_LAB_DIR" \
@@ -129,18 +103,13 @@ apptainer exec \
   --env OLLAMA_FLASH_ATTENTION="true" \
   --env OLLAMA_HOST="$OLLAMA_HOST" \
   --env GROBID_PORT="$GROBID_PORT" \
-  --env TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD="1" \
-  --env GPUSTACK_API_KEY="${GPUSTACK_API_KEY:-}" \
-  --env MAGIC_PROMPT_API_KEY="${MAGIC_PROMPT_API_KEY:-}" \
-  --env TEXT_LAB_MAGIC_PROMPT_MODEL="${TEXT_LAB_MAGIC_PROMPT_MODEL:-}" \
-  --env TEXT_LAB_MAGIC_PROMPT_OLLAMA_MODEL="${TEXT_LAB_MAGIC_PROMPT_OLLAMA_MODEL:-}" \
   "$TL_CONTAINER" \
   bash -c "export OLLAMA_TMPDIR=/tmp/ollama_${USER}_${SLURM_JOB_ID:-unknown} && \
            export TMPDIR=/tmp/ollama_${USER}_${SLURM_JOB_ID:-unknown} && \
            mkdir -p \$OLLAMA_TMPDIR && \
            ollama serve > $CONT_TEXT_LAB_DIR/logs/ollama_server_${SLURM_JOB_ID:-unknown}.log 2>&1 & \
            while ! curl -s http://$OLLAMA_HOST/api/tags > /dev/null; do sleep 1; done && \
-           /opt/conda/envs/text_lab_main/bin/python -u -m streamlit run '$CONT_STREAMLIT_APP' \
+           /opt/conda/envs/text_lab_main/bin/python -u -m streamlit run '/storage/research/dsl_shared/solutions/ondemand/text_lab/src_main280526/src/Home.py' \
              --server.address 0.0.0.0 \
              --server.port '$TEXT_LAB_PORT' \
              --server.baseUrlPath '$SERVER_BASEURLPATH' \

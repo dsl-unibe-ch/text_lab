@@ -26,6 +26,8 @@ import sys
 import traceback
 import uuid
 
+os.environ.setdefault("TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD", "1")
+
 # The ideogram-4-nf4 repo is GATED: without a token, HEAD requests to it 401
 # (not 404), which breaks the pipeline's file-resolution fallback. So online mode
 # + a token is the default working path (token wired in below). Offline mode is
