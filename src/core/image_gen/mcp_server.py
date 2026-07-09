@@ -9,9 +9,11 @@ Launched as a stdio subprocess by ``image_engine``. It runs under the isolated
 and cached in a module global for the process lifetime, so a persistent server
 reuses it across generations.
 
-The weights repo is gated: by default the server loads online with a resolved HF
-token (see ``image_config.get_hf_token``). Set ``TEXT_LAB_IMAGEGEN_OFFLINE=1`` to
-force offline loading from a known-complete local cache instead.
+The weights repo is gated. The shared cache is pre-downloaded and complete, so by
+default the server loads OFFLINE — no network, no per-user HF token needed, which
+is what makes it work for every user and not just whoever populated the cache. Set
+``TEXT_LAB_IMAGEGEN_OFFLINE=0`` to force online loading (e.g. an admin refreshing
+the cache), which then needs a resolved token (see ``image_config.get_hf_token``).
 
 Free-form prompts are expanded into Ideogram's structured caption JSON through
 the configured magic-prompt provider before local generation. Already-structured
@@ -29,10 +31,12 @@ import uuid
 os.environ.setdefault("TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD", "1")
 
 # The ideogram-4-nf4 repo is GATED: without a token, HEAD requests to it 401
-# (not 404), which breaks the pipeline's file-resolution fallback. So online mode
-# + a token is the default working path (token wired in below). Offline mode is
-# opt-in for fully air-gapped deployments where the cache is known-complete.
-if os.environ.get("TEXT_LAB_IMAGEGEN_OFFLINE", "0") == "1":
+# (not 404), so any user who didn't personally `huggingface-cli login` fails. The
+# shared cache is complete (single-file weights; the sharded .index.json is
+# legitimately absent and recorded in .no_exist), so offline is the default: it
+# honors the .no_exist marker, never touches the network, and needs no token.
+# Opt out (TEXT_LAB_IMAGEGEN_OFFLINE=0) only to refresh the cache online.
+if os.environ.get("TEXT_LAB_IMAGEGEN_OFFLINE", "1") == "1":
     os.environ["HF_HUB_OFFLINE"] = "1"
     os.environ["TRANSFORMERS_OFFLINE"] = "1"
 
