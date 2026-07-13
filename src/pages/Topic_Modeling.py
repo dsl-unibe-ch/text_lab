@@ -505,7 +505,52 @@ def _render_results(res: dict[str, Any]) -> None:
     if "evaluation_metrics" in res and res["evaluation_metrics"]:
         st.subheader("Model Evaluation Metrics")
         st.caption("Quantitative metrics to compare hyperparameter performance.")
-        
+
+        with st.expander("How are these scores computed?", expanded=False):
+            st.markdown(
+                """
+                **Topic Diversity** — the proportion of unique words across
+                the top-10 keywords of every topic. It is computed directly
+                from the *Topic Dictionary* above; no re-processing of the
+                corpus is involved. Higher values mean topics share fewer
+                keywords.
+
+                **Coherence (C_v, C_npmi, U_mass)** — computed with
+                Gensim's `CoherenceModel`. To do this, the raw corpus is
+                re-tokenized into a reference vocabulary that co-occurrence
+                statistics are read from:
+
+                - For **LDA**, the same lemmatized tokens used to train
+                  the model are reused, so keywords (which are lemmas)
+                  match the reference dictionary exactly.
+                - For **BERTopic** and **Top2Vec**, the corpus is
+                  tokenized to *surface forms* (lowercased, alphabetic,
+                  stopword-filtered, no lemmatization) because those
+                  models' keywords are surface tokens from the original
+                  text. Keywords not present in the reference dictionary
+                  (e.g. multi-word phrases when n-grams are enabled) are
+                  skipped, and topics with fewer than 2 remaining
+                  keywords do not contribute to the score.
+
+                Because coherence values depend on the reference
+                tokenization, they are best used to compare runs on the
+                **same dataset and language**, not as absolute quality
+                scores.
+
+                **LDA Perplexity** (LDA only) — held-out likelihood of
+                the training corpus under the fitted model
+                (`2^(−log_perplexity)`). Lower is better; useful only for
+                comparing LDA runs on the same data.
+
+                **Topic Stability** (when enabled) — the average Jaccard
+                similarity of the best-matching topics across three
+                independent runs with unlocked random seeds. Embeddings
+                (BERTopic) are computed once and reused, so only the
+                dimensionality-reduction / clustering variance is
+                measured.
+                """
+            )
+
         metrics = res["evaluation_metrics"]
         
         # Base Coherence Metrics
@@ -739,6 +784,7 @@ def main() -> None:
                     language=config.language,
                     custom_stopwords_str=config.custom_stopwords,
                     tokenized_texts=run_result.get("tokenized_texts"),
+                    use_lemmatization="LDA" in config.algorithm,
                 )
 
                 # Append LDA Perplexity if applicable

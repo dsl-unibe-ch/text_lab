@@ -6,7 +6,10 @@ import numpy as np
 from gensim.corpora import Dictionary
 from gensim.models.coherencemodel import CoherenceModel
 
-from core.topic_modeling.topic_utils import preprocess_texts_for_lda
+from core.topic_modeling.topic_utils import (
+    preprocess_texts_for_lda,
+    tokenize_texts_for_coherence,
+)
 
 
 def evaluate_topic_quality(
@@ -15,6 +18,7 @@ def evaluate_topic_quality(
     language: str,
     custom_stopwords_str: str,
     tokenized_texts: list[list[str]] | None = None,
+    use_lemmatization: bool = True,
 ) -> dict[str, float]:
     """
     Calculate Topic Diversity and Gensim Coherence metrics (C_v, C_npmi, U_mass).
@@ -26,7 +30,15 @@ def evaluate_topic_quality(
         custom_stopwords_str: Comma-separated custom stopwords to ignore.
         tokenized_texts: Optional pre-computed tokenized corpus (as returned by
             :func:`preprocess_texts_for_lda`). Providing this avoids
-            re-tokenizing the corpus with spaCy for the coherence metrics.
+            re-tokenizing the corpus for the coherence metrics and takes
+            precedence over ``use_lemmatization``.
+        use_lemmatization: When ``tokenized_texts`` is not provided, controls
+            whether the corpus is lemmatized (``True``, appropriate for LDA,
+            which trains on lemmas) or tokenized to surface forms (``False``,
+            required for BERTopic / Top2Vec, whose keywords are surface forms
+            from the original text). Using the wrong mode causes most
+            keywords to be filtered out of the coherence dictionary and
+            produces artificially low scores.
 
     Returns:
         A dictionary containing the calculated evaluation metrics.
@@ -48,12 +60,19 @@ def evaluate_topic_quality(
 
     # 2. Tokenize texts (or reuse a pre-computed tokenization) for Gensim.
     if tokenized_texts is None:
-        tokenized_texts = preprocess_texts_for_lda(
-            texts=raw_texts,
-            language=language,
-            custom_stopwords_str=custom_stopwords_str,
-            use_bigrams=False,
-        )
+        if use_lemmatization:
+            tokenized_texts = preprocess_texts_for_lda(
+                texts=raw_texts,
+                language=language,
+                custom_stopwords_str=custom_stopwords_str,
+                use_bigrams=False,
+            )
+        else:
+            tokenized_texts = tokenize_texts_for_coherence(
+                texts=raw_texts,
+                language=language,
+                custom_stopwords_str=custom_stopwords_str,
+            )
     
     dictionary = Dictionary(tokenized_texts)
     

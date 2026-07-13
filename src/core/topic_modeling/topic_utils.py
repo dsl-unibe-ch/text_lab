@@ -560,6 +560,56 @@ def get_stopword_set(language: str, custom_stopwords_str: str) -> Set[str]:
     return stop_set
 
 
+def tokenize_texts_for_coherence(
+    texts: List[str],
+    language: str,
+    custom_stopwords_str: str,
+) -> List[List[str]]:
+    """
+    Tokenize texts into surface-form tokens for coherence evaluation.
+
+    Unlike :func:`preprocess_texts_for_lda`, this function does **not**
+    lemmatize tokens. It is intended for evaluating models (BERTopic,
+    Top2Vec) whose keywords are drawn from the original surface forms of
+    the corpus. Using lemmatized tokens for those models causes most
+    keywords to be missing from the coherence dictionary and produces
+    artificially low Coherence / C_npmi / U_mass scores.
+
+    Tokens are lowercased, restricted to alphabetic tokens of length > 2,
+    and filtered by the stopword set for the given language.
+
+    Args:
+        texts: The input documents to tokenize.
+        language: The language name.
+        custom_stopwords_str: A comma-separated string of custom stopwords.
+
+    Returns:
+        A list of tokenized documents, where each document is a list of
+        surface-form tokens.
+    """
+    stop_set = get_stopword_set(language, custom_stopwords_str)
+    processed_texts: List[List[str]] = []
+
+    nlp = _load_spacy_model(language)
+    if nlp is not None:
+        for doc in nlp.pipe(texts, batch_size=50):
+            tokens = [
+                token.text.lower()
+                for token in doc
+                if token.is_alpha
+                and len(token) > 2
+                and token.text.lower() not in stop_set
+            ]
+            processed_texts.append(tokens)
+    else:
+        for text in texts:
+            words = re.findall(r"\b\w{3,}\b", text.lower())
+            tokens = [w for w in words if w not in stop_set and not w.isnumeric()]
+            processed_texts.append(tokens)
+
+    return processed_texts
+
+
 def preprocess_texts_for_lda(
     texts: List[str],
     language: str,
