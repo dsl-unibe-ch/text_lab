@@ -13,7 +13,8 @@ def evaluate_topic_quality(
     topic_keywords: list[list[str]],
     raw_texts: list[str],
     language: str,
-    custom_stopwords_str: str
+    custom_stopwords_str: str,
+    tokenized_texts: list[list[str]] | None = None,
 ) -> dict[str, float]:
     """
     Calculate Topic Diversity and Gensim Coherence metrics (C_v, C_npmi, U_mass).
@@ -23,6 +24,9 @@ def evaluate_topic_quality(
         raw_texts: The raw string documents from the dataset.
         language: The primary language of the texts.
         custom_stopwords_str: Comma-separated custom stopwords to ignore.
+        tokenized_texts: Optional pre-computed tokenized corpus (as returned by
+            :func:`preprocess_texts_for_lda`). Providing this avoids
+            re-tokenizing the corpus with spaCy for the coherence metrics.
 
     Returns:
         A dictionary containing the calculated evaluation metrics.
@@ -42,13 +46,14 @@ def evaluate_topic_quality(
     unique_words = set(all_words)
     metrics["Topic Diversity"] = round(len(unique_words) / len(all_words), 4) if all_words else 0.0
 
-    # 2. Tokenize texts to create a strict Gensim Dictionary and Corpus
-    tokenized_texts = preprocess_texts_for_lda(
-        texts=raw_texts, 
-        language=language, 
-        custom_stopwords_str=custom_stopwords_str, 
-        use_bigrams=False
-    )
+    # 2. Tokenize texts (or reuse a pre-computed tokenization) for Gensim.
+    if tokenized_texts is None:
+        tokenized_texts = preprocess_texts_for_lda(
+            texts=raw_texts,
+            language=language,
+            custom_stopwords_str=custom_stopwords_str,
+            use_bigrams=False,
+        )
     
     dictionary = Dictionary(tokenized_texts)
     
@@ -92,11 +97,11 @@ def evaluate_topic_quality(
     return metrics
 
 
-def calculate_lda_perplexity(lda_model: Any, corpus: list[list[tuple[int, int]]]) -> float:
+def calculate_lda_perplexity(lda_model: Any, corpus: list[list[tuple[int, int]]]) -> float | None:
     """
     Calculate the perplexity of a trained Gensim LDA model.
-    
-    Perplexity is a statistical measure of how well a probability model predicts 
+
+    Perplexity is a statistical measure of how well a probability model predicts
     a sample. Lower perplexity indicates better generalization performance.
 
     Args:
@@ -104,17 +109,19 @@ def calculate_lda_perplexity(lda_model: Any, corpus: list[list[tuple[int, int]]]
         corpus: The bag-of-words corpus used to train or evaluate the model.
 
     Returns:
-        The calculated perplexity score as a float, rounded to 4 decimal places.
-        Returns 0.0 if an error occurs during calculation.
+        The calculated perplexity score as a float, rounded to 4 decimal places,
+        or ``None`` if the calculation failed or returned a non-finite value.
     """
     try:
         # Gensim returns the bound (log perplexity). We exponentiate it for the standard metric.
         log_perplexity = lda_model.log_perplexity(corpus)
-        perplexity = np.exp2(-log_perplexity)
-        return round(float(perplexity), 4)
+        perplexity = float(np.exp2(-log_perplexity))
+        if not np.isfinite(perplexity):
+            return None
+        return round(perplexity, 4)
     except Exception as e:
         print(f"--- LDA Perplexity Error ---\n{e}", file=sys.stderr)
-        return 0.0
+        return None
 
 
 def calculate_jaccard_stability(

@@ -32,6 +32,10 @@ class TopicModelingConfig:
     use_bigrams: bool = False
     passes: int = 10
     random_state: int | None = 42
+    # Optional HuggingFace sentence-transformer model ID for BERTopic embeddings.
+    # None → use the language-based default (MiniLM). Custom IDs are downloaded
+    # to the user's home cache rather than the shared read-only model cache.
+    embedding_model_id: str | None = None
 
 
 class TopicModelingRunResult(TypedDict):
@@ -42,7 +46,10 @@ class TopicModelingRunResult(TypedDict):
     topic_df: pd.DataFrame
     docs_df: pd.DataFrame
     dashboard_assets: dict[str, str]
-    
+
     # Optional keys returned only by the LDA pipeline for Perplexity evaluation
     lda_model: NotRequired[Any]
     corpus: NotRequired[Any]
+    # Pre-tokenized corpus, if the pipeline already tokenized for training —
+    # allows :func:`evaluate_topic_quality` to skip re-tokenizing.
+    tokenized_texts: NotRequired[list[list[str]]]

@@ -46,6 +46,19 @@ NLTK_LANGUAGES: Dict[str, str] = {
     "Arabic": "arabic",
 }
 
+# Sentence-transformer models pre-downloaded into the shared read-only cache.
+# Anything else is treated as a "custom" model and will be downloaded to the
+# calling user's own HuggingFace cache directory.
+SHARED_EMBEDDING_MODELS: Set[str] = {
+    "all-MiniLM-L6-v2",
+    "sentence-transformers/all-MiniLM-L6-v2",
+    "paraphrase-multilingual-MiniLM-L12-v2",
+    "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+}
+
+DEFAULT_EMBEDDING_MODEL_ENGLISH: str = "all-MiniLM-L6-v2"
+DEFAULT_EMBEDDING_MODEL_MULTILINGUAL: str = "paraphrase-multilingual-MiniLM-L12-v2"
+
 
 @lru_cache(maxsize=None)
 def _load_spacy_model(language: str) -> Optional[spacy.language.Language]:
@@ -209,22 +222,136 @@ def get_embedding_model_name(config: TopicModelingConfig) -> str:
         The resolved embedding model name.
     """
     if "BERTopic" in config.algorithm:
-        return (
-            "all-MiniLM-L6-v2"
-            if config.language == "English"
-            else "paraphrase-multilingual-MiniLM-L12-v2"
-        )
+        return resolve_bertopic_embedding_model_id(config)
 
     if "Top2Vec" in config.algorithm:
         if config.top2vec_backend == "transformer":
             return (
-                "all-MiniLM-L6-v2"
+                DEFAULT_EMBEDDING_MODEL_ENGLISH
                 if config.language == "English"
-                else "paraphrase-multilingual-MiniLM-L12-v2"
+                else DEFAULT_EMBEDDING_MODEL_MULTILINGUAL
             )
         return "Doc2Vec (Trained from scratch)"
 
     return "N/A"
+
+
+def resolve_bertopic_embedding_model_id(config: TopicModelingConfig) -> str:
+    """
+    Resolve the concrete HuggingFace sentence-transformer model ID that BERTopic
+    should use, based on the user's configuration.
+
+    Args:
+        config: The topic modeling configuration.
+
+    Returns:
+        The HuggingFace model ID (e.g. "all-MiniLM-L6-v2").
+    """
+    if config.embedding_model_id and config.embedding_model_id.strip():
+        return config.embedding_model_id.strip()
+
+    return (
+        DEFAULT_EMBEDDING_MODEL_ENGLISH
+        if config.language == "English"
+        else DEFAULT_EMBEDDING_MODEL_MULTILINGUAL
+    )
+
+
+def is_shared_embedding_model(model_id: str) -> bool:
+    """
+    Return True if the given HuggingFace model ID is expected to be present in
+    the shared read-only cache. Non-shared models must be downloaded to the
+    calling user's home cache directory.
+    """
+    return model_id in SHARED_EMBEDDING_MODELS
+
+
+def get_user_hf_cache_dir() -> str:
+    """
+    Return the path to the calling user's writable HuggingFace cache directory,
+    creating it if necessary.
+
+    This is used for user-selected custom embedding models so they do not need
+    write access to the shared model cache.
+    """
+    cache_dir = os.path.expanduser("~/.cache/huggingface/hub")
+    try:
+        os.makedirs(cache_dir, exist_ok=True)
+    except OSError as e:
+        print(
+            f"WARNING (Text Lab): Could not create user HF cache dir '{cache_dir}': {e}",
+            file=sys.stderr,
+        )
+    return cache_dir
+
+
+def load_sentence_transformer(model_id: str) -> Any:
+    """
+    Instantiate a SentenceTransformer for the given model ID.
+
+    Shared/curated models resolve through the container-level HF_HOME (the
+    read-only shared cache). Custom models are directed to the user's own
+    HuggingFace cache directory so they can be downloaded without write access
+    to the shared cache.
+
+    Args:
+        model_id: The HuggingFace sentence-transformer model ID.
+
+    Returns:
+        A ready-to-use SentenceTransformer instance.
+    """
+    from sentence_transformers import SentenceTransformer
+
+    if is_shared_embedding_model(model_id):
+        return SentenceTransformer(model_id)
+
+    # Custom user-selected model — download into the user's own cache and allow
+    # remote code so common long-context models (Jina, Nomic, …) work.
+    return SentenceTransformer(
+        model_id,
+        cache_folder=get_user_hf_cache_dir(),
+        trust_remote_code=True,
+    )
+
+
+def count_docs_exceeding_context(
+    embedding_model: Any,
+    texts: List[str],
+) -> tuple[int, int, int]:
+    """
+    Count how many documents would be truncated by the embedding model.
+
+    The tokenizer associated with the sentence-transformer is used to count
+    WordPiece/BPE tokens for each document. Documents whose token count exceeds
+    the model's ``max_seq_length`` will be silently truncated by the encoder
+    and only their leading portion will contribute to the topic embedding.
+
+    Args:
+        embedding_model: A SentenceTransformer (or compatible) instance.
+        texts: The documents to inspect.
+
+    Returns:
+        A tuple ``(over_count, total_count, max_seq_length)``.
+    """
+    if not texts:
+        return 0, 0, 0
+
+    max_seq_length = int(getattr(embedding_model, "max_seq_length", 0) or 0)
+    tokenizer = getattr(embedding_model, "tokenizer", None)
+    if not max_seq_length or tokenizer is None:
+        return 0, len(texts), max_seq_length
+
+    over = 0
+    for text in texts:
+        try:
+            n_tokens = len(tokenizer.encode(text, add_special_tokens=True, truncation=False))
+        except Exception:
+            # Fall back to a coarse whitespace heuristic on tokenizer error.
+            n_tokens = len(str(text).split())
+        if n_tokens > max_seq_length:
+            over += 1
+
+    return over, len(texts), max_seq_length
 
 
 def generate_metadata_report(
@@ -350,7 +477,7 @@ def generate_metadata_report(
             "========================================="
         ])
         for metric_name, score in evaluation_metrics.items():
-            report.append(f"{metric_name}: {score}")
+            report.append(f"{metric_name}: {'N/A' if score is None else score}")
 
     return "\n".join(report)
 
@@ -377,8 +504,14 @@ def build_results_zip(
 
     with zipfile.ZipFile(zip_buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("run_configuration.txt", metadata_report.encode("utf-8"))
-        zf.writestr("document_topics.csv", docs_df.to_csv(index=False).encode("utf-8"))
-        zf.writestr("topic_keywords.csv", topic_df.to_csv(index=False).encode("utf-8"))
+        zf.writestr(
+            "document_topics.csv",
+            docs_df.to_csv(index=False).encode("utf-8-sig"),
+        )
+        zf.writestr(
+            "topic_keywords.csv",
+            topic_df.to_csv(index=False).encode("utf-8-sig"),
+        )
 
         for filename, html_data in dashboard_assets.items():
             if html_data:
@@ -412,7 +545,17 @@ def get_stopword_set(language: str, custom_stopwords_str: str) -> Set[str]:
         try:
             stop_set.update(stopwords.words(NLTK_LANGUAGES[language]))
         except LookupError:
-            pass
+            print(
+                f"WARNING (Text Lab): NLTK stopwords for '{language}' are not "
+                "installed. Only custom stopwords will be applied.",
+                file=sys.stderr,
+            )
+    else:
+        print(
+            f"NOTICE (Text Lab): No default stopword list is bundled for "
+            f"'{language}'. Only custom stopwords will be applied.",
+            file=sys.stderr,
+        )
 
     return stop_set
 

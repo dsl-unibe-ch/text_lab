@@ -14,6 +14,10 @@ from hdbscan import HDBSCAN
 from umap import UMAP
 
 
+_SUPPORTED_DIM_ALGOS = {"UMAP", "PCA", "Truncated SVD", "None"}
+_SUPPORTED_CLUSTERING_ALGOS = {"HDBSCAN", "KMeans"}
+
+
 def _notice_html(message: str) -> str:
     """
     Helper function to generate a styled HTML notice block for visualization messages.
@@ -47,47 +51,49 @@ def train_bertopic_model(
     reduce_outliers: bool = False,
     reduce_frequent_words: bool = True,
     random_state: int | None = 42,
-) -> tuple[BERTopic, list[int]]:
+    embedding_model: Any = None,
+    precomputed_embeddings: np.ndarray | None = None,
+) -> tuple[BERTopic, list[int], np.ndarray | None]:
     """
     Train a BERTopic model with configurable dimensionality reduction and
     clustering settings.
 
-    This function builds the vectorizer, class-based TF-IDF transformer,
-    dimensionality reduction model, and clustering model, then fits a
-    BERTopic model on the provided texts. Optionally, outliers can be
-    reduced after fitting when using HDBSCAN clustering.
-
     Args:
         texts: The input documents to model.
-        language: The language setting used to select the embedding model
-            and tokenization behavior.
-        num_topics: The desired number of topics for BERTopic when
-            applicable.
+        language: The language setting used to select the default embedding
+            model when ``embedding_model`` is not provided.
+        num_topics: The desired number of topics for BERTopic when applicable.
         stop_words_set: A set of stop words used by the vectorizer.
-        dim_reduction_algo: The dimensionality reduction algorithm to use.
-            Supported values in this implementation are "UMAP", "PCA",
-            "Truncated SVD", and "None".
-        dim_params: Optional parameters for the dimensionality reduction
-            model.
-        clustering_algo: The clustering algorithm to use. Supported values
-            in this implementation are "HDBSCAN" and "KMeans".
+        dim_reduction_algo: The dimensionality reduction algorithm. One of
+            ``"UMAP"``, ``"PCA"``, ``"Truncated SVD"``, ``"None"``.
+        dim_params: Optional parameters for the dimensionality reduction model.
+        clustering_algo: One of ``"HDBSCAN"`` or ``"KMeans"``.
         clustering_params: Optional parameters for the clustering model.
-        ngram_range: The lower and upper boundary of the n-grams to be
-            extracted.
+        ngram_range: The lower and upper boundary of the n-grams to extract.
         min_df: Minimum document frequency for the vectorizer.
-        reduce_outliers: Whether to reduce outlier assignments after model
-            fitting when HDBSCAN is used.
+        reduce_outliers: Whether to reduce outlier assignments after fitting
+            when using HDBSCAN.
         reduce_frequent_words: Whether to reduce frequent words in the
             class-based TF-IDF transformer.
+        random_state: Random seed for the dimensionality-reduction step. Set
+            to ``None`` to make the run non-deterministic (used by the
+            stability evaluation).
+        embedding_model: Optional pre-instantiated SentenceTransformer to use
+            as the embedding backbone. When ``None``, BERTopic will construct
+            its own default model based on ``language``.
+        precomputed_embeddings: Optional matrix of document embeddings. When
+            provided, the embedding step is skipped and this matrix is passed
+            directly to ``fit_transform``.
 
     Returns:
-        A tuple containing the fitted BERTopic model and the list of topic
-        assignments.
+        A tuple ``(topic_model, topics, probabilities)`` where
+        ``probabilities`` may be ``None`` if outlier reduction invalidated the
+        original probability matrix.
 
     Raises:
-        ValueError: If no texts are provided.
-        ValueError: If the lower bound of ngram_range is greater than the
-            upper bound.
+        ValueError: If no texts are provided, ``ngram_range`` is invalid, or
+            an unsupported dimensionality-reduction/clustering algorithm is
+            requested.
     """
     if clustering_params is None:
         clustering_params = {}
@@ -100,8 +106,19 @@ def train_bertopic_model(
         raise ValueError(
             "Invalid ngram_range: lower bound cannot be greater than upper bound."
         )
+    if dim_reduction_algo not in _SUPPORTED_DIM_ALGOS:
+        raise ValueError(
+            f"Unsupported dimensionality-reduction algorithm: "
+            f"'{dim_reduction_algo}'. Expected one of {sorted(_SUPPORTED_DIM_ALGOS)}."
+        )
+    if clustering_algo not in _SUPPORTED_CLUSTERING_ALGOS:
+        raise ValueError(
+            f"Unsupported clustering algorithm: '{clustering_algo}'. "
+            f"Expected one of {sorted(_SUPPORTED_CLUSTERING_ALGOS)}."
+        )
 
-    embedding_model = (
+    # Fall back to BERTopic's language shortcut only when no explicit model is provided.
+    embedding_language = (
         "english"
         if language == "English"
         else "multilingual"
@@ -117,7 +134,6 @@ def train_bertopic_model(
                 if stop_words_set:
                     return [t for t in tokens if t not in stop_words_set]
                 return tokens
-        
 
             tokenizer = tokenize_zh
         except ImportError:
@@ -140,23 +156,25 @@ def train_bertopic_model(
         reduce_frequent_words=reduce_frequent_words
     )
 
-    # Configure Dimensionality Reduction Step
+    # Configure Dimensionality Reduction. The top-level ``random_state`` is the
+    # source of truth; only fall back to ``dim_params`` if the caller did not
+    # pass ``random_state`` explicitly through ``dim_params`` either.
     n_components = int(dim_params.get("n_components", 5))
-    random_state = dim_params.get("random_state", 42)
+    effective_random_state = dim_params.get("random_state", random_state)
 
     if dim_reduction_algo == "PCA":
         dim_model = PCA(
             n_components=n_components,
-            random_state=random_state,
+            random_state=effective_random_state,
         )
     elif dim_reduction_algo == "Truncated SVD":
         dim_model = TruncatedSVD(
             n_components=n_components,
-            random_state=random_state,
+            random_state=effective_random_state,
         )
     elif dim_reduction_algo == "None":
         dim_model = BaseDimensionalityReduction()
-    else:  # Default UMAP
+    else:  # UMAP
         n_neighbors = int(dim_params.get("n_neighbors", 15))
         min_dist = float(dim_params.get("min_dist", 0.0))
         dim_model = UMAP(
@@ -164,7 +182,7 @@ def train_bertopic_model(
             n_components=n_components,
             min_dist=min_dist,
             metric="cosine",
-            random_state=random_state,
+            random_state=effective_random_state,
         )
 
     # Configure Clustering Step
@@ -172,7 +190,7 @@ def train_bertopic_model(
         n_clusters = int(clustering_params.get("n_clusters", 10))
         cluster_model = KMeans(
             n_clusters=n_clusters,
-            random_state=random_state,
+            random_state=effective_random_state,
             n_init="auto",
         )
         bertopic_nr_topics = None
@@ -192,7 +210,8 @@ def train_bertopic_model(
         bertopic_nr_topics = num_topics
 
     topic_model = BERTopic(
-        language=embedding_model,
+        language=embedding_language if embedding_model is None else None,
+        embedding_model=embedding_model,
         vectorizer_model=vectorizer_model,
         umap_model=dim_model,
         hdbscan_model=cluster_model,
@@ -201,7 +220,10 @@ def train_bertopic_model(
         calculate_probabilities=True,
     )
 
-    topics, probabilities = topic_model.fit_transform(texts)
+    topics, probabilities = topic_model.fit_transform(
+        texts,
+        embeddings=precomputed_embeddings,
+    )
 
     if reduce_outliers and clustering_algo == "HDBSCAN":
         topics = topic_model.reduce_outliers(
@@ -209,6 +231,10 @@ def train_bertopic_model(
             topics,
             strategy="c-tf-idf",
         )
+        # HDBSCAN probabilities correspond to the *original* topic assignments;
+        # once outliers are re-assigned via c-TF-IDF those confidences are no
+        # longer meaningful, so drop them rather than mislead the user.
+        probabilities = None
 
     return topic_model, topics, probabilities
 
@@ -257,6 +283,11 @@ def generate_bertopic_document_topics_df(
     probabilities: np.ndarray | None,
     original_df: pd.DataFrame
 ) -> pd.DataFrame:
+    """
+    Attach BERTopic topic assignments (and confidence when available) to the
+    original DataFrame. ``Dominant_Topic`` and ``Topic_Confidence`` are placed
+    as the first two columns.
+    """
     if len(topics) != len(original_df):
         raise ValueError(
             f"Topic assignment length ({len(topics)}) does not match "
@@ -264,25 +295,26 @@ def generate_bertopic_document_topics_df(
         )
 
     formatted_topics = [t + 1 if t != -1 else "Outlier" for t in topics]
-    result_df = original_df.assign(Dominant_Topic=formatted_topics)
 
-    #  Process and append probabilities ---
+    result_df = original_df.copy()
+    # Drop any pre-existing columns with our reserved names to avoid collisions.
+    result_df = result_df.drop(
+        columns=[c for c in ("Dominant_Topic", "Topic_Confidence") if c in result_df.columns],
+        errors="ignore",
+    )
+    result_df["Dominant_Topic"] = formatted_topics
+
     if probabilities is not None:
-        # If 2D matrix, get the max probability per document. If 1D, use as-is.
         if isinstance(probabilities, np.ndarray) and probabilities.ndim == 2:
             confidence = np.max(probabilities, axis=1)
         else:
             confidence = probabilities
-            
         result_df["Topic_Confidence"] = [round(float(p), 4) for p in confidence]
     else:
         result_df["Topic_Confidence"] = None
 
-    # Reorder columns to bring Dominant_Topic and Topic_Confidence to the front
-    cols = result_df.columns.tolist()
-    # Move the last 2 columns to the front
-    cols = cols[-2:] + cols[:-2] 
-    return result_df[cols]
+    other_cols = [c for c in result_df.columns if c not in ("Dominant_Topic", "Topic_Confidence")]
+    return result_df[["Dominant_Topic", "Topic_Confidence", *other_cols]]
 
 
 def generate_bertopic_visualizations(topic_model: BERTopic) -> dict[str, str]:
@@ -328,6 +360,10 @@ def generate_bertopic_visualizations(topic_model: BERTopic) -> dict[str, str]:
             include_plotlyjs="cdn",
         )
     except Exception:
+        print(
+            f"--- BERTopic distance map error ---\n{traceback.format_exc()}",
+            file=sys.stderr,
+        )
         visualizations["distance_map"] = _notice_html(
             "Could not generate the intertopic distance map."
         )
@@ -339,6 +375,10 @@ def generate_bertopic_visualizations(topic_model: BERTopic) -> dict[str, str]:
             include_plotlyjs="cdn",
         )
     except Exception:
+        print(
+            f"--- BERTopic barchart error ---\n{traceback.format_exc()}",
+            file=sys.stderr,
+        )
         visualizations["barchart"] = _notice_html(
             "Could not generate the topic word-score chart."
         )
@@ -350,6 +390,10 @@ def generate_bertopic_visualizations(topic_model: BERTopic) -> dict[str, str]:
             include_plotlyjs="cdn",
         )
     except Exception:
+        print(
+            f"--- BERTopic heatmap error ---\n{traceback.format_exc()}",
+            file=sys.stderr,
+        )
         visualizations["heatmap"] = _notice_html(
             "Could not generate the topic similarity heatmap."
         )
