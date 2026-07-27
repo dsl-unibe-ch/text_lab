@@ -14,7 +14,7 @@ import subprocess
 import uuid
 import pathlib
 import shutil
-import sys 
+import sys
 import json
 import base64
 import cv2
@@ -38,8 +38,11 @@ from core.ocr_engine import (
     compact_paddle_prediction,
     render_easyocr_preview,
     render_paddle_preview,
-    extract_html_table
+    extract_html_table,
+    render_layout_preview,
+    LAYOUT_TYPE_COLORS,
 )
+from core import auto_ocr, doc_ir, form_extract, vision_enrich
 
 try:
     from language_mappings import EASYOCR_LANGUAGE_MAPPING, PADDLEOCR_LANGUAGE_MAPPING
@@ -60,6 +63,9 @@ if not HOST_HOME:
 
 OCR_JOBS_BASE_DIR = pathlib.Path(HOST_HOME) / "ondemand_text_lab_ocr_jobs"
 OLMOCR_GPU_MEMORY_UTILIZATION = os.environ.get("OLMOCR_GPU_MEMORY_UTILIZATION", "0.6")
+
+AUTO_INPUT_TYPES = ["pdf", "png", "jpg", "jpeg", "bmp", "tiff", "tif"]
+
 
 @st.cache_resource(show_spinner=False)
 def get_easyocr_reader(lang_code="en"):
@@ -100,116 +106,821 @@ def decode_png_b64(value):
 
 def clear_results(reset_running=False):
     keys_to_clear = [
-        "ocr_complete", "extracted_text", "json_content", "txt_name", 
-        "json_name", "ocr_error", "ocr_error_details", "ocr_preview_images", 
+        # legacy engines
+        "ocr_complete", "extracted_text", "json_content", "txt_name",
+        "json_name", "ocr_error", "ocr_error_details", "ocr_preview_images",
         "ocr_preview_page", "ocr_preview_engine", "ocr_zip_bytes",
-        "batch_ocr_complete", "batch_ocr_zip_bytes"
+        "batch_ocr_complete", "batch_ocr_zip_bytes",
+        # automatic pipeline
+        "auto_complete", "auto_document", "auto_summary", "auto_downloads",
+        "auto_error", "batch_auto_complete", "batch_auto_zip",
     ]
     for key in keys_to_clear:
-        if key in st.session_state: 
+        if key in st.session_state:
             del st.session_state[key]
-    if reset_running: 
+    # Interactive survey-review widgets are keyed "rev_<group>_<row>..."; drop them
+    # so a new document does not inherit the previous document's selections.
+    for key in [k for k in st.session_state if isinstance(k, str) and k.startswith("rev_")]:
+        del st.session_state[key]
+    if reset_running:
         st.session_state.ocr_running = False
 
-# ==========================================
-#              UI LOGIC
-# ==========================================
+def _cleanup_job_dir(job_dir):
+    """Aggressive, self-cleaning removal of a job workspace (privacy)."""
+    if not job_dir.exists():
+        return
+    import time
+    import stat
+    time.sleep(1)
 
-workflow_mode = st.radio(
-    "Workflow",
-    ["Single Document OCR", "Batch OCR (ZIP)"],
-    index=0,
-    horizontal=True,
-    help="Choose to process a single file or batch process a ZIP archive",
-    on_change=clear_results,
-    args=(True,)
-)
+    def handle_remove_readonly(func, path, exc):
+        try:
+            os.chmod(path, stat.S_IWRITE)
+            func(path)
+        except Exception:
+            pass
 
-st.divider()
+    try:
+        shutil.rmtree(job_dir, onexc=handle_remove_readonly)
+    except Exception:
+        subprocess.run(["rm", "-rf", str(job_dir)], check=False)
+
 
 if "ocr_running" not in st.session_state:
     st.session_state.ocr_running = False
 
-# --- Engine Selection UI ---
-col_eng, col_mode = st.columns([1, 1])
-with col_eng:
-    ocr_engine = st.selectbox(
-        "OCR engine",
-        ["EasyOCR", "PaddleOCR", "OlmOCR", "GLM-OCR"],
-        index=0,
+
+# ==========================================
+#      AUTOMATIC PIPELINE — RUNNERS
+# ==========================================
+
+def run_auto_single(
+    uploaded_file,
+    native_fast_lane=True,
+    *,
+    describe_images=False,
+    extract_survey=False,
+):
+    clear_results(reset_running=False)
+    st.session_state.ocr_running = True
+
+    JOB_ID = str(uuid.uuid4())
+    JOB_DIR = OCR_JOBS_BASE_DIR / JOB_ID
+    INPUT_DIR = JOB_DIR / "input"
+    WORKSPACE_DIR = JOB_DIR / "workspace"
+    progress_bar = st.progress(0.0, text="Parsing document...")
+
+    try:
+        INPUT_DIR.mkdir(parents=True, exist_ok=True)
+        WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
+
+        input_file_path = INPUT_DIR / uploaded_file.name
+        with open(input_file_path, "wb") as f:
+            f.write(uploaded_file.getbuffer())
+
+        def _progress(frac, text):
+            progress_bar.progress(frac, text=text)
+
+        document = auto_ocr.process_document(
+            input_file_path,
+            WORKSPACE_DIR,
+            native_fast_lane=native_fast_lane,
+            progress=_progress,
+            source_name=uploaded_file.name,
+            describe_images=describe_images,
+            extract_survey=extract_survey,
+        )
+
+        stem = pathlib.Path(uploaded_file.name).stem or "document"
+        st.session_state.auto_document = document
+        st.session_state.auto_summary = auto_ocr.document_summary(document)
+        st.session_state.auto_downloads = {
+            "stem": stem,
+            "markdown_zip": doc_ir.build_markdown_zip(document, stem),
+            "json": doc_ir.to_json(document).encode("utf-8"),
+            "tables_zip": doc_ir.build_tables_csv_zip(document),
+            "responses_csv": doc_ir.build_form_responses_csv(document),
+            "full": doc_ir.build_full_bundle(document, stem),
+        }
+        st.session_state.auto_complete = True
+
+    except Exception as e:
+        st.session_state.auto_error = f"Automatic OCR failed: {e}"
+        st.exception(e)
+    finally:
+        progress_bar.empty()
+        st.session_state.ocr_running = False
+        _cleanup_job_dir(JOB_DIR)
+
+
+def run_auto_batch(
+    batch_zip,
+    native_fast_lane=True,
+    *,
+    describe_images=False,
+    extract_survey=False,
+    same_template=False,
+):
+    import zipfile
+
+    clear_results(reset_running=False)
+    st.session_state.ocr_running = True
+
+    JOB_ID = str(uuid.uuid4())
+    JOB_DIR = OCR_JOBS_BASE_DIR / JOB_ID
+    INPUT_DIR = JOB_DIR / "input"
+    WORKSPACE_DIR = JOB_DIR / "workspace"
+    RESULTS_DIR = WORKSPACE_DIR / "results"
+
+    shared_vision_client = (
+        vision_enrich.OllamaVisionClient()
+        if describe_images or extract_survey
+        else None
+    )
+    same_layout_template = (
+        form_extract.SameLayoutTemplate()
+        if extract_survey and same_template
+        else None
+    )
+
+    try:
+        INPUT_DIR.mkdir(parents=True, exist_ok=True)
+        RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+
+        with zipfile.ZipFile(batch_zip, "r") as z:
+            z.extractall(INPUT_DIR)
+
+        valid_exts = {"." + e for e in AUTO_INPUT_TYPES}
+        valid_files = []
+        for root, dirs, files in os.walk(INPUT_DIR):
+            for file in files:
+                if file.startswith("._"):
+                    continue
+                file_path = pathlib.Path(root) / file
+                if file_path.suffix.lower() in valid_exts:
+                    valid_files.append(file_path)
+        valid_files.sort(key=lambda path: str(path.relative_to(INPUT_DIR)).casefold())
+
+        if not valid_files:
+            raise RuntimeError("No valid documents or images found in the ZIP.")
+
+        progress_bar = st.progress(0.0)
+        status_text = st.empty()
+
+        for idx, file_path in enumerate(valid_files):
+            rel_path = file_path.relative_to(INPUT_DIR)
+            status_text.text(f"Processing ({idx + 1}/{len(valid_files)}): {rel_path}")
+
+            file_output_dir = RESULTS_DIR / rel_path.parent / file_path.stem
+            file_output_dir.mkdir(parents=True, exist_ok=True)
+            per_file_ws = WORKSPACE_DIR / "tmp" / f"job_{idx}"
+
+            document = auto_ocr.process_document(
+                file_path, per_file_ws,
+                native_fast_lane=native_fast_lane,
+                source_name=file_path.name,
+                describe_images=describe_images,
+                extract_survey=extract_survey,
+                vision_client=shared_vision_client,
+                same_layout_template=same_layout_template,
+            )
+
+            (file_output_dir / "document.md").write_text(
+                doc_ir.to_markdown(document), encoding="utf-8"
+            )
+            (file_output_dir / "document.json").write_text(
+                doc_ir.to_json(document), encoding="utf-8"
+            )
+
+            assets = doc_ir.collect_assets(document)
+            if assets:
+                assets_dir = file_output_dir / "assets"
+                assets_dir.mkdir(parents=True, exist_ok=True)
+                for fname, data in assets.items():
+                    (assets_dir / fname).write_bytes(data)
+
+            tables = doc_ir.tables_to_dataframes(document)
+            if tables:
+                tables_dir = file_output_dir / "tables"
+                tables_dir.mkdir(parents=True, exist_ok=True)
+                for entry in tables:
+                    (tables_dir / f"table_{entry['region_id']}.csv").write_text(
+                        entry["dataframe"].to_csv(index=False), encoding="utf-8"
+                    )
+
+            responses_csv = doc_ir.build_form_responses_csv(document)
+            if responses_csv:
+                (file_output_dir / "form_responses.csv").write_bytes(responses_csv)
+
+            shutil.rmtree(per_file_ws, ignore_errors=True)
+            progress_bar.progress((idx + 1) / len(valid_files))
+
+        status_text.text("Batch OCR complete! Zipping results...")
+
+        out_zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(out_zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+            for root, dirs, files in os.walk(RESULTS_DIR):
+                for file in files:
+                    fp = pathlib.Path(root) / file
+                    zf.write(fp, fp.relative_to(RESULTS_DIR))
+
+        st.session_state.batch_auto_zip = out_zip_buffer.getvalue()
+        st.session_state.batch_auto_complete = True
+
+    except Exception as e:
+        st.session_state.auto_error = f"Batch automatic OCR failed: {e}"
+        st.exception(e)
+    finally:
+        if shared_vision_client is not None:
+            shared_vision_client.close(unload_model=True)
+        st.session_state.ocr_running = False
+        _cleanup_job_dir(JOB_DIR)
+
+
+# ==========================================
+#      AUTOMATIC PIPELINE — RESULT TABS
+# ==========================================
+
+def _b64_bytes(b64):
+    if not b64:
+        return None
+    try:
+        return base64.b64decode(b64)
+    except Exception:
+        return None
+
+
+def render_document_tab(document):
+    for page in document.pages:
+        if len(document.pages) > 1:
+            st.caption(f"— Page {page.page_number} · {page.source} —")
+        for region in page.ordered_regions():
+            rtype = region.type
+            if rtype == doc_ir.TITLE:
+                text = region.text.strip()
+                if text:
+                    st.markdown(f"### {text}")
+            elif rtype == doc_ir.TABLE:
+                html = region.content.get("html", "").strip()
+                if html:
+                    st.markdown(html, unsafe_allow_html=True)
+            elif rtype == doc_ir.FORMULA:
+                latex = region.content.get("latex", "").strip()
+                if latex:
+                    try:
+                        st.latex(latex)
+                    except Exception:
+                        st.code(latex)
+            elif rtype in (doc_ir.FIGURE, doc_ir.SEAL):
+                data = _b64_bytes((region.asset or {}).get("b64"))
+                if data:
+                    st.image(data, caption=(region.text.strip() or rtype))
+                if region.visual_description:
+                    st.caption(f"AI description: {region.visual_description.description}")
+            elif rtype == doc_ir.CHECKBOX:
+                state = (region.markup or {}).get("state", "uncertain")
+                icon = {"checked": "☑", "unchecked": "☐", "uncertain": "❓"}.get(state, "❓")
+                st.markdown(f"{icon} {region.text.strip()}".rstrip())
+            else:
+                text = region.text.strip()
+                if text:
+                    st.markdown(text)
+        if len(document.pages) > 1:
+            st.divider()
+
+
+def render_tables_tab(document):
+    tables = doc_ir.tables_to_dataframes(document)
+    if not tables:
+        st.info("No tables were detected in this document.")
+        return
+    for entry in tables:
+        st.markdown(f"**Table — page {entry['page']}** (`{entry['region_id']}`)")
+        st.dataframe(entry["dataframe"], use_container_width=True)
+        st.download_button(
+            "📥 Download this table (CSV)",
+            entry["dataframe"].to_csv(index=False).encode("utf-8"),
+            file_name=f"table_{entry['region_id']}.csv",
+            mime="text/csv",
+            key=f"tbl_csv_{entry['region_id']}",
+        )
+        st.divider()
+
+
+def render_figures_tab(document):
+    figures = [
+        (page, region)
+        for page, region in document.all_regions()
+        if region.type in (doc_ir.FIGURE, doc_ir.SEAL) and region.asset
+    ]
+    if not figures:
+        st.info("No figures, charts, or seals were detected.")
+        return
+    cols = st.columns(2)
+    for i, (page, region) in enumerate(figures):
+        with cols[i % 2]:
+            data = _b64_bytes(region.asset.get("b64"))
+            if data:
+                st.image(data, use_container_width=True,
+                         caption=f"Page {page.page_number} · {region.type}")
+            caption = region.text.strip()
+            if caption:
+                st.caption(f"Printed caption/text: {caption[:300]}")
+            generated = region.visual_description
+            if generated:
+                st.markdown(generated.description)
+                if generated.visible_text:
+                    st.caption(f"Visible text: {generated.visible_text[:500]}")
+                st.caption(f"AI description · {generated.source} · {generated.model}")
+
+
+STATE_BADGE = {
+    "checked": "✅ checked",
+    "unchecked": "⬜ unchecked",
+    "uncertain": "⚠️ uncertain",
+}
+
+
+def _group_is_multiselect(group):
+    """True when a question's rows allow several answers (checkboxes vs one radio)."""
+    return group.question_type == "multiple" or group.selection_rule == "zero_or_more"
+
+
+def _render_form_review(document):
+    """Interactive answer-correction editor bound to ``FormOption.state``.
+
+    Each question is rendered as pre-filled widgets (radio for single/rating/matrix
+    rows, checkboxes for multi-answer questions). Saving writes the reviewer's
+    selections back onto the document and regenerates the CSV/JSON downloads; the
+    model's original answer is preserved in ``group.provenance``.
+    """
+    form_groups = [(page, g) for page in document.pages for g in page.form_groups]
+    if not form_groups:
+        return
+    n_review = sum(g.status == "needs_review" for _, g in form_groups)
+    if n_review:
+        st.warning(
+            f"⚠️ {n_review} of {len(form_groups)} question(s) were flagged for review. "
+            "Correct any answer below and press **Save corrections** — the downloads update "
+            "to your edits and the model's original answer is kept in the JSON."
+        )
+    else:
+        st.success(
+            f"Extracted {len(form_groups)} question(s). You can still correct any answer below."
+        )
+
+    with st.form("survey_review_form"):
+        for page, group in form_groups:
+            multi = _group_is_multiselect(group)
+            flag = "⚠️ " if group.status == "needs_review" else ""
+            st.markdown(f"**{flag}{group.question_text or group.id}**")
+            st.caption(
+                f"`{group.question_type}` · `{group.selection_rule}` · page {page.page_number}"
+            )
+            if group.condition_text:
+                st.caption(f"↳ conditional: {group.condition_text}")
+            for w in group.warnings:
+                st.caption(f"⚠️ {w}")
+            if not group.rows or not any(r.options for r in group.rows):
+                st.info(
+                    "Options for this question could not be extracted automatically. "
+                    "Open the scan below; if there is an answer, enter it from the export. "
+                    "(This often means the vision model's response failed validation.)"
+                )
+            for row in group.rows:
+                key_base = f"rev_{group.id}_{row.id}"
+                labels = [
+                    (o.label.strip() or f"option {i + 1}") for i, o in enumerate(row.options)
+                ]
+                if not row.options:
+                    st.caption(f"_{row.label or 'row'}: no options detected_")
+                    continue
+                if multi:
+                    if row.label:
+                        st.markdown(f"*{row.label}*")
+                    n_cols = min(len(row.options), 4)
+                    cols = st.columns(n_cols)
+                    for i, o in enumerate(row.options):
+                        cols[i % n_cols].checkbox(
+                            labels[i], value=(o.state == "selected"), key=f"{key_base}_{o.id}"
+                        )
+                else:
+                    sel_idx = next(
+                        (i + 1 for i, o in enumerate(row.options) if o.state == "selected"), 0
+                    )
+                    st.radio(
+                        row.label or "Answer",
+                        options=list(range(len(row.options) + 1)),
+                        index=sel_idx,
+                        format_func=lambda x, _l=labels: "— none —" if x == 0 else _l[x - 1],
+                        key=key_base,
+                        horizontal=(len(row.options) <= 6),
+                    )
+                for i, o in enumerate(row.options):
+                    if o.associated_text:
+                        st.text_input(
+                            f"✍️ handwriting near “{labels[i]}”",
+                            value=o.associated_text,
+                            key=f"{key_base}_{o.id}_txt",
+                        )
+            with st.expander("🔍 Show scan of this question"):
+                crop = _b64_bytes(group.source_crop_b64)
+                if crop:
+                    st.image(crop, use_container_width=True)
+                else:
+                    st.caption("No crop available for this question.")
+            st.divider()
+        submitted = st.form_submit_button("💾 Save corrections", type="primary")
+
+    if submitted:
+        _apply_form_corrections(document)
+        downloads = st.session_state.setdefault("auto_downloads", {})
+        stem = downloads.get("stem", "document")
+        downloads["json"] = doc_ir.to_json(document).encode("utf-8")
+        downloads["responses_csv"] = doc_ir.build_form_responses_csv(document)
+        downloads["full"] = doc_ir.build_full_bundle(document, stem)
+        st.session_state.auto_summary = auto_ocr.document_summary(document)
+        st.success("✅ Corrections saved. The downloads above now reflect your edits.")
+
+
+def _apply_form_corrections(document):
+    """Write reviewer selections back into the document, preserving model originals."""
+    for page in document.pages:
+        for group in page.form_groups:
+            multi = _group_is_multiselect(group)
+            if not group.provenance.get("human_reviewed"):
+                group.provenance["model_answer"] = [
+                    {
+                        "row": row.label or row.id,
+                        "selected": [o.label for o in row.options if o.state == "selected"],
+                        "states": {o.id: o.state for o in row.options},
+                    }
+                    for row in group.rows
+                ]
+            for row in group.rows:
+                key_base = f"rev_{group.id}_{row.id}"
+                if not row.options:
+                    continue
+                if multi:
+                    for o in row.options:
+                        chosen = st.session_state.get(
+                            f"{key_base}_{o.id}", o.state == "selected"
+                        )
+                        o.state = "selected" if chosen else "unselected"
+                else:
+                    sel = st.session_state.get(key_base)
+                    for i, o in enumerate(row.options):
+                        o.state = "selected" if sel == i + 1 else "unselected"
+                for o in row.options:
+                    tkey = f"{key_base}_{o.id}_txt"
+                    if tkey in st.session_state:
+                        o.associated_text = st.session_state[tkey]
+                row.status = "accepted"
+            group.status = "accepted"
+            group.provenance["human_reviewed"] = True
+
+
+def _render_legacy_mark_summary(glyph_regions, checkbox_marks):
+    """Compact, image-free note for the older geometric mark detector."""
+    n_total = len(checkbox_marks) + sum(
+        len((r.markup or {}).get("items", [])) for _, r in glyph_regions
+    )
+    n_uncertain = sum(
+        1 for _, r in checkbox_marks if (r.markup or {}).get("state") == "uncertain"
+    ) + sum((r.markup or {}).get("n_uncertain", 0) for _, r in glyph_regions)
+    with st.expander("Geometric mark detector (legacy) — details in the JSON / Layout preview"):
+        st.caption(
+            f"{n_total} geometric mark(s) across "
+            f"{len(glyph_regions) + len(checkbox_marks)} region(s)"
+            + (f"; {n_uncertain} uncertain" if n_uncertain else "")
+            + "."
+        )
+
+
+def render_markup_tab(document):
+    form_groups = [
+        (page, group)
+        for page in document.pages
+        for group in page.form_groups
+    ]
+    checkbox_marks = [
+        (page, region)
+        for page, region in document.all_regions()
+        if region.type == doc_ir.CHECKBOX and region.markup
+    ]
+    glyph_regions = [
+        (page, region)
+        for page, region in document.all_regions()
+        if region.type != doc_ir.CHECKBOX and (region.markup or {}).get("kind") == "glyph-marks"
+    ]
+    if not form_groups and not checkbox_marks and not glyph_regions:
+        st.info(
+            "No survey responses were extracted. Enable **Extract survey/form "
+            "responses** before parsing to run enhanced response analysis."
+        )
+        return
+
+    if form_groups:
+        _render_form_review(document)
+
+    if glyph_regions or checkbox_marks:
+        _render_legacy_mark_summary(glyph_regions, checkbox_marks)
+    return
+
+
+def render_layout_tab(document):
+    if not document.pages:
+        st.info("Nothing to preview.")
+        return
+
+    page_options = list(range(len(document.pages)))
+    idx = st.selectbox(
+        "Page",
+        page_options,
+        format_func=lambda i: f"Page {document.pages[i].page_number}",
+        key="auto_layout_page_select",
+    )
+    page = document.pages[idx]
+    img_bytes = _b64_bytes(page.image_b64)
+    if not img_bytes:
+        st.info("No page image is available for this page (native text-only page).")
+        return
+
+    regions = [{"bbox": r.bbox, "type": r.type} for r in page.regions if r.bbox]
+    preview = render_layout_preview(img_bytes, regions)
+    if preview:
+        st.image(preview, use_container_width=True)
+    else:
+        st.image(img_bytes, use_container_width=True)
+
+    present_types = sorted({r.type for r in page.regions})
+    if present_types:
+        legend = "  ".join(
+            f"<span style='color:rgb({LAYOUT_TYPE_COLORS.get(t, (90,90,90))[2]},"
+            f"{LAYOUT_TYPE_COLORS.get(t, (90,90,90))[1]},"
+            f"{LAYOUT_TYPE_COLORS.get(t, (90,90,90))[0]})'>&#9632; {t}</span>"
+            for t in present_types
+        )
+        st.markdown(f"**Legend:** {legend}", unsafe_allow_html=True)
+
+
+def render_auto_results():
+    document = st.session_state.get("auto_document")
+    if document is None:
+        return
+    summary = st.session_state.get("auto_summary", {})
+    downloads = st.session_state.get("auto_downloads", {})
+
+    st.success("🎉 Document parsed!")
+
+    counts = summary.get("region_counts", {})
+    chips = " · ".join(f"{k}: {v}" for k, v in counts.items()) or "no regions"
+    st.caption(
+        f"{summary.get('n_pages', 0)} page(s) · "
+        f"route(s): {', '.join(summary.get('routes', [])) or '-'} · {chips}"
+    )
+    if summary.get("n_form_groups"):
+        st.info(
+            f"Extracted {summary['n_form_groups']} survey/form response group(s) — "
+            "see the **Responses** tab."
+        )
+    if summary.get("n_markup_disagreements"):
+        st.warning(
+            f"{summary['n_markup_disagreements']} OCR/geometric mark disagreement(s) "
+            "were left unchanged and flagged for review."
+        )
+    if summary.get("n_uncertain_marks"):
+        st.warning(
+            f"⚠️ {summary['n_uncertain_marks']} checkbox/mark(s) flagged uncertain — "
+            "see the **Responses** tab."
+        )
+
+    # --- Downloads ---
+    stem = downloads.get("stem", "document")
+    d1, d2, d3, d4 = st.columns(4)
+    with d1:
+        md_zip = downloads.get("markdown_zip")
+        st.download_button(
+            "⬇️ Markdown + assets", md_zip or b"", file_name=f"{stem}_markdown.zip",
+            mime="application/zip", disabled=not md_zip, use_container_width=True,
+        )
+    with d2:
+        st.download_button(
+            "⬇️ JSON", downloads.get("json") or b"{}", file_name=f"{stem}.json",
+            mime="application/json", use_container_width=True,
+        )
+    with d3:
+        tables_zip = downloads.get("tables_zip")
+        st.download_button(
+            "⬇️ Tables (CSV)", tables_zip or b"", file_name=f"{stem}_tables.zip",
+            mime="application/zip", disabled=not tables_zip, use_container_width=True,
+        )
+    with d4:
+        st.download_button(
+            "⬇️ Full bundle", downloads.get("full") or b"", file_name=f"{stem}_bundle.zip",
+            mime="application/zip", disabled=not downloads.get("full"), use_container_width=True,
+            type="primary",
+        )
+
+    responses_csv = downloads.get("responses_csv")
+    if responses_csv:
+        st.download_button(
+            "⬇️ Form responses (CSV)",
+            responses_csv,
+            file_name=f"{stem}_form_responses.csv",
+            mime="text/csv",
+        )
+
+    tabs = st.tabs(["📄 Document", "📊 Tables", "🖼️ Figures", "☑️ Responses", "🗺️ Layout preview"])
+    with tabs[0]:
+        render_document_tab(document)
+    with tabs[1]:
+        render_tables_tab(document)
+    with tabs[2]:
+        render_figures_tab(document)
+    with tabs[3]:
+        render_markup_tab(document)
+    with tabs[4]:
+        render_layout_tab(document)
+
+
+# ==========================================
+#      AUTOMATIC PIPELINE — UI
+# ==========================================
+
+def auto_single_ui():
+    st.markdown(
+        "Upload a **PDF** or **image** and press **Parse document**. TextLab "
+        "automatically detects layout, tables, figures and formulas. Optional "
+        "AI analysis can describe images or extract survey responses."
+    )
+    uploaded_file = st.file_uploader(
+        "Choose a PDF or image file",
+        type=AUTO_INPUT_TYPES,
         on_change=clear_results,
         args=(True,),
-        help="Select the OCR backend. GLM-OCR is best for complex layouts and tables.",
+        key="auto_single_upload",
     )
+    if uploaded_file is not None:
+        highest_quality = st.checkbox(
+            "🔬 Highest quality — always use the AI vision model",
+            value=False,
+            key="auto_single_hq",
+            help=(
+                "Sends every page through PaddleOCR-VL, even pages that already "
+                "have a digital text layer. Slower, but best for equations, "
+                "forms, and complex layouts. Pages with detected math are "
+                "routed to the vision model automatically either way."
+            ),
+        )
+        c_desc, c_survey = st.columns(2)
+        with c_desc:
+            describe_images = st.checkbox(
+                "🖼️ Describe figures and images",
+                value=False,
+                key="auto_single_describe_images",
+                help=(
+                    "Uses the local vision-language model to add a generated "
+                    "description and visible-text transcription to detected figures."
+                ),
+            )
+        with c_survey:
+            extract_survey = st.checkbox(
+                "🧪 Extract survey/form responses (experimental)",
+                value=False,
+                key="auto_single_extract_survey",
+                help=(
+                    "Uses 300-DPI question crops and the local vision-language model. "
+                    "Original OCR text is preserved. This model has not passed the "
+                    "multi-document release benchmark, so extracted responses are "
+                    "flagged for review."
+                ),
+            )
+        if st.session_state.ocr_running:
+            st.warning("⏳ A job is currently running. The button is disabled until completion.")
+        if st.button("📑 Parse document", type="primary",
+                     disabled=st.session_state.ocr_running, key="auto_single_btn"):
+            run_auto_single(
+                uploaded_file,
+                native_fast_lane=not highest_quality,
+                describe_images=describe_images,
+                extract_survey=extract_survey,
+            )
 
-# Show GLM mode selector or OCR language selector in the second column
-glm_mode = "Text Recognition"
-ocr_language = "en"
-if ocr_engine == "GLM-OCR":
-    with col_mode:
-        glm_mode = st.selectbox(
-            "GLM-OCR Mode",
-            ["Text Recognition", "Table Recognition", "Figure Recognition"],
-            help="Choose what specific aspect of the document you want to extract."
-        )
-elif ocr_engine == "EasyOCR":
-    easyocr_language_labels = list(EASYOCR_LANGUAGE_MAPPING.keys())
-    easyocr_default_index = (
-        easyocr_language_labels.index("English")
-        if "English" in easyocr_language_labels
-        else 0
+    if st.session_state.get("auto_complete"):
+        render_auto_results()
+    elif st.session_state.get("auto_error"):
+        st.error(st.session_state.auto_error)
+
+
+def auto_batch_ui():
+    st.markdown(
+        "Upload a **ZIP archive** of PDFs or images. Each file is parsed with the "
+        "automatic pipeline; the result ZIP mirrors your folder structure with a "
+        "`document.md`, `document.json`, `tables/` and `assets/` per file."
     )
-    with col_mode:
-        easyocr_lang_label = st.selectbox(
-            "Document Language",
-            easyocr_language_labels,
-            index=easyocr_default_index,
-            on_change=clear_results,
-            args=(True,),
-            key="easyocr_language_select",
-            help="Select the text language for EasyOCR.",
+    batch_zip = st.file_uploader(
+        "Upload ZIP file",
+        type=["zip"],
+        on_change=clear_results,
+        args=(True,),
+        key="auto_batch_upload",
+    )
+    if batch_zip is not None:
+        highest_quality = st.checkbox(
+            "🔬 Highest quality — always use the AI vision model",
+            value=False,
+            key="auto_batch_hq",
+            help=(
+                "Sends every page through PaddleOCR-VL, even pages that already "
+                "have a digital text layer. Slower, but best for equations, "
+                "forms, and complex layouts."
+            ),
         )
-    ocr_language = EASYOCR_LANGUAGE_MAPPING[easyocr_lang_label]
-elif ocr_engine == "PaddleOCR":
-    with col_mode:
-        paddle_lang_label = st.selectbox(
-            "Document Language",
-            list(PADDLEOCR_LANGUAGE_MAPPING.keys()),
-            index=0,
-            on_change=clear_results,
-            args=(True,),
-            key="paddle_language_select",
-            help="Select the text language for PaddleOCR.",
+        c_desc, c_survey = st.columns(2)
+        with c_desc:
+            describe_images = st.checkbox(
+                "🖼️ Describe figures and images",
+                value=False,
+                key="auto_batch_describe_images",
+            )
+        with c_survey:
+            extract_survey = st.checkbox(
+                "🧪 Extract survey/form responses (experimental)",
+                value=False,
+                key="auto_batch_extract_survey",
+                help=(
+                    "Runs local, high-resolution response extraction for each form. "
+                    "Original OCR text remains unchanged. Results require review "
+                    "until the survey benchmark is complete."
+                ),
+            )
+        same_template = False
+        if extract_survey:
+            same_template = st.checkbox(
+                "📐 All files use the same questionnaire layout",
+                value=False,
+                key="auto_batch_same_template",
+                help=(
+                    "Learns normalized question crops and the printed option schema "
+                    "from the first document, then reuses them for the remaining "
+                    "files. Every answer is still read independently."
+                ),
+            )
+        if st.session_state.ocr_running:
+            st.warning("⏳ A job is currently running. The button is disabled until completion.")
+        if st.button("📦 Parse batch", type="primary",
+                     disabled=st.session_state.ocr_running, key="auto_batch_btn"):
+            run_auto_batch(
+                batch_zip,
+                native_fast_lane=not highest_quality,
+                describe_images=describe_images,
+                extract_survey=extract_survey,
+                same_template=same_template,
+            )
+
+    if st.session_state.get("batch_auto_complete"):
+        st.success("✅ Batch parsing completed successfully!")
+        st.download_button(
+            "📥 Download all results (ZIP)",
+            st.session_state.batch_auto_zip,
+            file_name="batch_auto_ocr_results.zip",
+            mime="application/zip",
+            use_container_width=True,
+            type="primary",
         )
-    ocr_language = PADDLEOCR_LANGUAGE_MAPPING[paddle_lang_label]
+    elif st.session_state.get("auto_error"):
+        st.error(st.session_state.auto_error)
 
 
 # ==========================================
-#         SINGLE DOCUMENT MODE
+#      LEGACY ENGINES (unchanged behavior)
 # ==========================================
-if workflow_mode == "Single Document OCR":
+
+def legacy_single_flow(ocr_engine, ocr_language, glm_mode):
     st.markdown("Upload a **PDF** or **Image** to extract its text content and preview the results.")
-    
+
     uploaded_file = st.file_uploader(
         "Choose a PDF or Image file",
         type=["pdf", "png", "jpg", "jpeg", "bmp", "tiff"],
-        on_change=clear_results, 
+        on_change=clear_results,
         args=(True,),
+        key="legacy_single_upload",
     )
 
     if uploaded_file is not None:
         if st.session_state.ocr_running:
             st.warning("⏳ OCR is currently running. The button is disabled until completion.")
 
-        if st.button("Run OCR", disabled=st.session_state.ocr_running):
+        if st.button("Run OCR", disabled=st.session_state.ocr_running, key="legacy_single_btn"):
             if st.session_state.ocr_running:
                 st.stop()
-                
+
             clear_results(reset_running=False)
             st.session_state.ocr_running = True
             run_notice = st.empty()
             run_notice.info("⏳ OCR has started.")
-        
+
             # Check and Pull GLM-OCR if needed
             if ocr_engine == "GLM-OCR":
                 model_name = "glm-ocr:latest"
@@ -222,7 +933,7 @@ if workflow_mode == "Single Document OCR":
                         models_list = getattr(models_dict, 'models', [])
                     local_models = [str(getattr(m, 'model', getattr(m, 'name', m.get('name', '')))) for m in models_list]
                     is_present = any(model_name in name or name in model_name for name in local_models)
-                    
+
                     if not is_present:
                         with st.spinner(f"📥 Pulling model '{model_name}'..."):
                             ollama.pull(model_name)
@@ -259,7 +970,7 @@ if workflow_mode == "Single Document OCR":
                 # --- OLMOCR PATH ---
                 if ocr_engine == "OlmOCR":
                     CONT_INPUT_FILE = str(input_file_path)
-                    
+
                     if not is_pdf:
                         try:
                             img = Image.open(input_file_path).convert("RGB")
@@ -283,7 +994,7 @@ if workflow_mode == "Single Document OCR":
                         "--pdfs", CONT_INPUT_FILE,
                         "--gpu-memory-utilization", OLMOCR_GPU_MEMORY_UTILIZATION,
                     ]
-                    
+
                     with st.spinner("Running OlmOCR..."):
                         # Pass the custom env dictionary here!
                         result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', env=olmocr_env)
@@ -339,7 +1050,7 @@ if workflow_mode == "Single Document OCR":
                             page_res = reader.readtext(str(img_path), detail=1, paragraph=True)
                             page_text = "\n".join([r[1] for r in page_res])
                             ocr_results.append({"page": idx, "text": page_text, "raw": page_res})
-                            
+
                             pl, pr = render_easyocr_preview(img_path, page_res)
                             if pl and pr: preview_images.append((pl, pr))
                             progress_bar.progress(idx / len(image_paths), text=f"Running EasyOCR... page {idx}/{len(image_paths)}")
@@ -366,7 +1077,7 @@ if workflow_mode == "Single Document OCR":
                     elif ocr_engine == "GLM-OCR":
                         for idx, img_path in enumerate(image_paths, start=1):
                             img = cv2.imread(str(img_path))
-                            
+
                             max_dim = 2048
                             h, w = img.shape[:2]
                             if h > max_dim or w > max_dim:
@@ -374,25 +1085,25 @@ if workflow_mode == "Single Document OCR":
                                 new_w = int(w * scale)
                                 new_h = int(h * scale)
                                 img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
-                            
+
                             success, encoded_img = cv2.imencode('.png', img)
                             if not success:
                                 ocr_results.append({"page": idx, "text": "[Error encoding image]", "raw": {}})
                                 continue
-                            
+
                             img_bytes = encoded_img.tobytes()
-                            
+
                             try:
                                 response = ollama.chat(
                                     model='glm-ocr:latest',
                                     messages=[{
                                         'role': 'user',
-                                        'content': glm_mode, 
+                                        'content': glm_mode,
                                         'images': [img_bytes]
                                     }],
                                     options={
                                         'temperature': 0,
-                                        'num_ctx': 8192 
+                                        'num_ctx': 8192
                                     }
                                 )
                                 page_text = response.get('message', {}).get('content', '')
@@ -400,7 +1111,7 @@ if workflow_mode == "Single Document OCR":
                                 page_text = f"[Error processing page {idx}: {str(e)}]"
 
                             ocr_results.append({"page": idx, "text": page_text, "raw": {"content": page_text}})
-                            preview_images.append(img_bytes) 
+                            preview_images.append(img_bytes)
                             progress_bar.progress(idx / len(image_paths), text=f"Running GLM-OCR... page {idx}/{len(image_paths)}")
 
                     progress_bar.empty()
@@ -433,31 +1144,16 @@ if workflow_mode == "Single Document OCR":
             except Exception as e:
                 st.session_state.ocr_error = f"An unexpected error occurred: {e}"
                 st.exception(e)
-            
+
             finally:
                 run_notice.empty()
                 st.session_state.ocr_running = False
-                
-                # Robust, aggressive cleanup
-                if JOB_DIR.exists():
-                    import time
-                    import stat
-                    time.sleep(1) 
-                    def handle_remove_readonly(func, path, exc):
-                        try:
-                            os.chmod(path, stat.S_IWRITE)
-                            func(path)
-                        except Exception:
-                            pass
-                    try:
-                        shutil.rmtree(JOB_DIR, onexc=handle_remove_readonly)
-                    except Exception as e:
-                        subprocess.run(["rm", "-rf", str(JOB_DIR)], check=False)
+                _cleanup_job_dir(JOB_DIR)
 
     # --- SINGLE FILE RESULTS DISPLAY ---
     if "ocr_complete" in st.session_state:
         st.success("🎉 OCR complete!")
-        
+
         # 1. HTML Table Detection & CSV Conversion
         df_table = extract_html_table(st.session_state.extracted_text)
         if df_table is not None:
@@ -479,7 +1175,7 @@ if workflow_mode == "Single Document OCR":
         # 2. Raw Text Output
         st.markdown("### Extracted Text / Code")
         st.text_area("Result", st.session_state.extracted_text, height=400, key="md_result")
-        
+
         # 3. Downloads
         c1, c2, c3 = st.columns(3)
         with c1: st.download_button("Download as .txt", st.session_state.extracted_text, st.session_state.txt_name, "text/plain")
@@ -492,18 +1188,18 @@ if workflow_mode == "Single Document OCR":
             st.markdown("---")
             st.markdown("### 👁️ Document Preview")
             preview_engine = st.session_state.get("ocr_preview_engine", "")
-            
+
             current_page = st.session_state.get("ocr_preview_page", 0)
             current_page = max(0, min(current_page, len(preview_images) - 1))
             st.session_state.ocr_preview_page = current_page
 
             c_prev, c_info, c_next = st.columns([1, 2, 1])
-            if c_prev.button("⬅ Previous", disabled=current_page <= 0):
+            if c_prev.button("⬅ Previous", disabled=current_page <= 0, key="legacy_prev"):
                 st.session_state.ocr_preview_page -= 1
                 st.rerun()
             with c_info:
                 st.caption(f"Page {current_page + 1} of {len(preview_images)}")
-            if c_next.button("Next ➡", disabled=current_page >= len(preview_images) - 1):
+            if c_next.button("Next ➡", disabled=current_page >= len(preview_images) - 1, key="legacy_next"):
                 st.session_state.ocr_preview_page += 1
                 st.rerun()
 
@@ -530,33 +1226,30 @@ if workflow_mode == "Single Document OCR":
         st.info("OCR is running. Please wait...")
 
 
-# ==========================================
-#         BATCH DOCUMENT MODE (ZIP)
-# ==========================================
-elif workflow_mode == "Batch OCR (ZIP)":
+def legacy_batch_flow(ocr_engine, ocr_language, glm_mode):
     st.markdown("Upload a **ZIP archive** containing multiple PDFs or Images. They will be processed and returned as a single organized ZIP.")
-    
+
     batch_zip = st.file_uploader(
         "Upload ZIP file",
         type=["zip"],
-        on_change=clear_results, 
+        on_change=clear_results,
         args=(True,),
-        key="batch_zip_upload"
+        key="legacy_batch_upload",
     )
 
     if batch_zip is not None:
         if st.session_state.ocr_running:
             st.warning("⏳ OCR is currently running. The button is disabled until completion.")
 
-        if st.button("Run Batch OCR", disabled=st.session_state.ocr_running):
+        if st.button("Run Batch OCR", disabled=st.session_state.ocr_running, key="legacy_batch_btn"):
             if st.session_state.ocr_running:
                 st.stop()
-                
+
             clear_results(reset_running=False)
             st.session_state.ocr_running = True
             run_notice = st.empty()
             run_notice.info("⏳ Batch OCR has started. This may take a while depending on the number of files.")
-            
+
             # Check and Pull GLM-OCR if needed
             if ocr_engine == "GLM-OCR":
                 model_name = "glm-ocr:latest"
@@ -582,15 +1275,15 @@ elif workflow_mode == "Batch OCR (ZIP)":
             INPUT_DIR = JOB_DIR / "input"
             WORKSPACE_DIR = JOB_DIR / "workspace"
             RESULTS_DIR = WORKSPACE_DIR / "results"
-            
+
             try:
                 INPUT_DIR.mkdir(parents=True, exist_ok=True)
                 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-                
+
                 # Extract the uploaded ZIP securely
                 with zipfile.ZipFile(batch_zip, "r") as z:
                     z.extractall(INPUT_DIR)
-                
+
                 valid_exts = {".pdf", ".png", ".jpg", ".jpeg", ".bmp", ".tiff"}
                 valid_files = []
                 for root, dirs, files in os.walk(INPUT_DIR):
@@ -599,30 +1292,30 @@ elif workflow_mode == "Batch OCR (ZIP)":
                         file_path = pathlib.Path(root) / file
                         if file_path.suffix.lower() in valid_exts:
                             valid_files.append(file_path)
-                
+
                 if not valid_files:
                     raise RuntimeError("No valid documents or images found in the ZIP.")
-                
+
                 # Pre-load Models for Image Engines (Saves massive time)
                 reader = None
                 if ocr_engine == "EasyOCR":
                     reader = get_easyocr_reader(ocr_language)
-                
+
                 progress_bar = st.progress(0.0)
                 status_text = st.empty()
-                
+
                 # Processing Loop
                 for idx, file_path in enumerate(valid_files):
                     base_name = file_path.stem
                     rel_path = file_path.relative_to(INPUT_DIR)
                     status_text.text(f"Processing ({idx+1}/{len(valid_files)}): {rel_path}")
-                    
+
                     # Create dedicated output folder replicating zip structure
                     file_output_dir = RESULTS_DIR / rel_path.parent / base_name
                     file_output_dir.mkdir(parents=True, exist_ok=True)
-                    
+
                     is_pdf = file_path.suffix.lower() == ".pdf"
-                    
+
                     if ocr_engine == "OlmOCR":
                         CONT_INPUT_FILE = str(file_path)
                         if not is_pdf:
@@ -630,7 +1323,7 @@ elif workflow_mode == "Batch OCR (ZIP)":
                             pdf_path = file_path.with_suffix(".pdf")
                             img.save(pdf_path, "PDF", resolution=100.0)
                             CONT_INPUT_FILE = str(pdf_path)
-                        
+
                         olmocr_env = os.environ.copy()
                         olmocr_env["PATH"] = f"/opt/conda/envs/olmocr_backend/bin:{olmocr_env.get('PATH', '')}"
                         olmocr_env["LD_LIBRARY_PATH"] = f"/opt/conda/envs/olmocr_backend/lib:{olmocr_env.get('LD_LIBRARY_PATH', '')}"
@@ -640,10 +1333,10 @@ elif workflow_mode == "Batch OCR (ZIP)":
                             str(file_output_dir), "--markdown", "--pdfs", CONT_INPUT_FILE,
                             "--gpu-memory-utilization", OLMOCR_GPU_MEMORY_UTILIZATION
                         ]
-                        
+
                         # Pass the custom env dictionary here!
                         result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', env=olmocr_env)
-                        
+
                         if result.returncode == 0:
                             jsonl_files = list(file_output_dir.glob("*.jsonl"))
                             if jsonl_files:
@@ -651,13 +1344,13 @@ elif workflow_mode == "Batch OCR (ZIP)":
                                     data = json.loads(f.readline())
                                 (file_output_dir / f"{base_name}.txt").write_text(data.get("text", ""), encoding="utf-8")
                                 shutil.move(str(jsonl_files[0]), str(file_output_dir / f"{base_name}.jsonl"))
-                    
+
                     else:
                         # Image-based Engines (EasyOCR, PaddleOCR, GLM-OCR)
                         tmp_img_dir = file_output_dir / "images_tmp"
                         tmp_img_dir.mkdir(parents=True, exist_ok=True)
                         image_paths = []
-                        
+
                         if is_pdf:
                             prefix = tmp_img_dir / "page"
                             subprocess.run(["pdftoppm", "-png", str(file_path), str(prefix)], check=True, capture_output=True)
@@ -666,7 +1359,7 @@ elif workflow_mode == "Batch OCR (ZIP)":
                             dest_path = tmp_img_dir / file_path.name
                             shutil.copy(file_path, dest_path)
                             image_paths = [dest_path]
-                            
+
                         ocr_results = []
                         if ocr_engine == "PaddleOCR":
                             ocr_results = [
@@ -709,16 +1402,16 @@ elif workflow_mode == "Batch OCR (ZIP)":
                         for item in ocr_results:
                             all_text.append(item["text"])
                             (file_output_dir / f"page_{item['page']:04d}.txt").write_text(item["text"], encoding="utf-8")
-                        
+
                         (file_output_dir / f"{base_name}.txt").write_text("\n\n".join(all_text), encoding="utf-8")
                         (file_output_dir / f"{base_name}.json").write_text(json.dumps(make_json_serializable(ocr_results), ensure_ascii=False), encoding="utf-8")
-                        
+
                         shutil.rmtree(tmp_img_dir, ignore_errors=True)
 
                     progress_bar.progress((idx + 1) / len(valid_files))
 
                 status_text.text("Batch OCR complete! Zipping results...")
-                
+
                 # Zip RESULTS_DIR directly to memory
                 out_zip_buffer = io.BytesIO()
                 with zipfile.ZipFile(out_zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -727,33 +1420,18 @@ elif workflow_mode == "Batch OCR (ZIP)":
                             file_path = pathlib.Path(root) / file
                             arcname = file_path.relative_to(RESULTS_DIR)
                             zf.write(file_path, arcname)
-                
+
                 st.session_state.batch_ocr_zip_bytes = out_zip_buffer.getvalue()
                 st.session_state.batch_ocr_complete = True
-                
+
             except Exception as e:
                 st.session_state.ocr_error = f"Batch processing failed: {e}"
                 st.exception(e)
-                
+
             finally:
                 run_notice.empty()
                 st.session_state.ocr_running = False
-                
-                # Robust cleanup
-                if JOB_DIR.exists():
-                    import time
-                    import stat
-                    time.sleep(1) 
-                    def handle_remove_readonly(func, path, exc):
-                        try:
-                            os.chmod(path, stat.S_IWRITE)
-                            func(path)
-                        except Exception:
-                            pass
-                    try:
-                        shutil.rmtree(JOB_DIR, onexc=handle_remove_readonly)
-                    except Exception as e:
-                        subprocess.run(["rm", "-rf", str(JOB_DIR)], check=False)
+                _cleanup_job_dir(JOB_DIR)
 
     # --- BATCH RESULTS DISPLAY ---
     if st.session_state.get("batch_ocr_complete"):
@@ -768,3 +1446,94 @@ elif workflow_mode == "Batch OCR (ZIP)":
         )
     elif "ocr_error" in st.session_state:
         st.error(st.session_state.ocr_error)
+
+
+def legacy_engines_expander(workflow_mode):
+    with st.expander("⚙️ Advanced: legacy engines (EasyOCR / PaddleOCR / OlmOCR / GLM-OCR)"):
+        st.caption(
+            "The classic engine-picker workflow. Each engine returns plain text; "
+            "the automatic pipeline above is recommended for structured documents."
+        )
+
+        col_eng, col_mode = st.columns([1, 1])
+        with col_eng:
+            ocr_engine = st.selectbox(
+                "OCR engine",
+                ["EasyOCR", "PaddleOCR", "OlmOCR", "GLM-OCR"],
+                index=0,
+                on_change=clear_results,
+                args=(True,),
+                key="legacy_engine_select",
+                help="Select the OCR backend. GLM-OCR is best for complex layouts and tables.",
+            )
+
+        glm_mode = "Text Recognition"
+        ocr_language = "en"
+        if ocr_engine == "GLM-OCR":
+            with col_mode:
+                glm_mode = st.selectbox(
+                    "GLM-OCR Mode",
+                    ["Text Recognition", "Table Recognition", "Figure Recognition"],
+                    key="legacy_glm_mode",
+                    help="Choose what specific aspect of the document you want to extract."
+                )
+        elif ocr_engine == "EasyOCR":
+            easyocr_language_labels = list(EASYOCR_LANGUAGE_MAPPING.keys())
+            easyocr_default_index = (
+                easyocr_language_labels.index("English")
+                if "English" in easyocr_language_labels
+                else 0
+            )
+            with col_mode:
+                easyocr_lang_label = st.selectbox(
+                    "Document Language",
+                    easyocr_language_labels,
+                    index=easyocr_default_index,
+                    on_change=clear_results,
+                    args=(True,),
+                    key="easyocr_language_select",
+                    help="Select the text language for EasyOCR.",
+                )
+            ocr_language = EASYOCR_LANGUAGE_MAPPING[easyocr_lang_label]
+        elif ocr_engine == "PaddleOCR":
+            with col_mode:
+                paddle_lang_label = st.selectbox(
+                    "Document Language",
+                    list(PADDLEOCR_LANGUAGE_MAPPING.keys()),
+                    index=0,
+                    on_change=clear_results,
+                    args=(True,),
+                    key="paddle_language_select",
+                    help="Select the text language for PaddleOCR.",
+                )
+            ocr_language = PADDLEOCR_LANGUAGE_MAPPING[paddle_lang_label]
+
+        if workflow_mode == "Single Document OCR":
+            legacy_single_flow(ocr_engine, ocr_language, glm_mode)
+        else:
+            legacy_batch_flow(ocr_engine, ocr_language, glm_mode)
+
+
+# ==========================================
+#                 PAGE LAYOUT
+# ==========================================
+
+workflow_mode = st.radio(
+    "Workflow",
+    ["Single Document OCR", "Batch OCR (ZIP)"],
+    index=0,
+    horizontal=True,
+    help="Choose to process a single file or batch process a ZIP archive",
+    on_change=clear_results,
+    args=(True,),
+)
+
+st.divider()
+
+if workflow_mode == "Single Document OCR":
+    auto_single_ui()
+else:
+    auto_batch_ui()
+
+st.divider()
+legacy_engines_expander(workflow_mode)

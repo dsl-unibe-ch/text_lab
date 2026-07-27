@@ -7,8 +7,22 @@ HOST_TEXT_LAB_DIR="${TEXT_LAB_DIR:-/storage/research/dsl_shared/solutions/ondema
 
 CONT_TEXT_LAB_DIR="/text_lab"
 
-#point to the apptainer containers on research storage
-TL_CONTAINER="$HOST_TEXT_LAB_DIR/container/text_lab_210526.sif"
+# App source served by Streamlit (read in-container via the /storage bind).
+# Defaults to THIS sandbox's dev tree so local edits appear immediately.
+# For production, set TEXT_LAB_SRC to a deployed tree, e.g.
+#   $HOST_TEXT_LAB_DIR/src_main280526/src
+TEXT_LAB_SRC="${TEXT_LAB_SRC:-/storage/homefs/mb24e866/ondemand/dev/text_lab/src}"
+
+#point to the apptainer containers
+# Defaults to the freshly built sandbox image, which is the only one carrying the
+# paddle_vl_backend env (paddleocr 3.7 + paddlex[ocr]) that the automatic OCR
+# pipeline's VL worker needs. The older research-storage image
+# ($HOST_TEXT_LAB_DIR/container/text_lab_210526.sif) lacks it: its paddle_backend
+# ships paddleocr 3.3.3, which contains the PaddleOCRVL class but not the
+# paddlex[ocr] extra, so the pipeline dies with a DependencyError.
+# For production, publish this .sif to $HOST_TEXT_LAB_DIR/container/ and set
+# TL_CONTAINER to it.
+TL_CONTAINER="${TL_CONTAINER:-/storage/homefs/mb24e866/ondemand/dev/text_lab/text_lab.sif}"
 
 #point to where the ollama models are stored on research storage
 HOST_OLLAMA_DIR="/storage/research/dsl_shared/solutions/ondemand/text_lab/container/models/ollama"
@@ -102,6 +116,7 @@ apptainer exec \
   --env OLLAMA_MODELS="$CONT_OLLAMA_DIR/models" \
   --env OLLAMA_FLASH_ATTENTION="true" \
   --env OLLAMA_HOST="$OLLAMA_HOST" \
+  --env TEXTLAB_VISION_MODEL="${TEXTLAB_VISION_MODEL:-qwen3-vl:30b}" \
   --env GROBID_PORT="$GROBID_PORT" \
   "$TL_CONTAINER" \
   bash -c "export OLLAMA_TMPDIR=/tmp/ollama_${USER}_${SLURM_JOB_ID:-unknown} && \
@@ -109,7 +124,7 @@ apptainer exec \
            mkdir -p \$OLLAMA_TMPDIR && \
            ollama serve > $CONT_TEXT_LAB_DIR/logs/ollama_server_${SLURM_JOB_ID:-unknown}.log 2>&1 & \
            while ! curl -s http://$OLLAMA_HOST/api/tags > /dev/null; do sleep 1; done && \
-           /opt/conda/envs/text_lab_main/bin/python -u -m streamlit run '/storage/research/dsl_shared/solutions/ondemand/text_lab/src_main280526/src/Home.py' \
+           /opt/conda/envs/text_lab_main/bin/python -u -m streamlit run '$TEXT_LAB_SRC/Home.py' \
              --server.address 0.0.0.0 \
              --server.port '$TEXT_LAB_PORT' \
              --server.baseUrlPath '$SERVER_BASEURLPATH' \

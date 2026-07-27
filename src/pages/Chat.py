@@ -538,6 +538,7 @@ def main():
     image_width, image_height = SIZE_OPTIONS[DEFAULT_SIZE]
     image_preset_key = DEFAULT_PRESET
     image_seed = 0
+    image_unload_chat_model = False
 
     if not image_gen_installed:
         st.sidebar.caption("Unavailable in this build (the `ideogram4` package is missing).")
@@ -546,7 +547,14 @@ def main():
     else:
         # Pick the weights repo for this GPU (fp8 on high-memory cards, nf4 else)
         # and hand it to the MCP subprocess, which inherits this process's env.
-        os.environ["TEXT_LAB_IMAGEGEN_MODEL_REPO"] = model_repo_for_gpu(current_gpu)
+        selected_image_repo = model_repo_for_gpu(current_gpu)
+        os.environ["TEXT_LAB_IMAGEGEN_MODEL_REPO"] = selected_image_repo
+        # On 80+ GB A100/H100 nodes, FP8 and the chat model can coexist. Keep the
+        # low-VRAM unload behavior for smaller cards, with an override for admins.
+        image_unload_chat_model = (
+            os.environ.get("TEXT_LAB_IMAGEGEN_UNLOAD_CHAT", "").strip() == "1"
+            or not is_high_memory_gpu(current_gpu)
+        )
         if is_high_memory_gpu(current_gpu):
             st.sidebar.caption(
                 "✨ Using the higher-quality Ideogram 4 (fp8) model, enabled by this "
@@ -765,7 +773,7 @@ def main():
                     last_msg_obj["content"] = original_content
                     _start_image_gen_thread(
                         payload, image_width, image_height, image_preset_key, image_seed,
-                        low_vram=not is_high_memory_gpu(current_gpu),
+                        low_vram=image_unload_chat_model,
                         active_model=model_name,
                     )
                     st.rerun()

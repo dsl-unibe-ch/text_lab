@@ -35,6 +35,7 @@ From: nvidia/cuda:12.8.0-cudnn-devel-ubuntu22.04
     export PATH="/opt/conda/envs/text_lab_main/bin:/opt/conda/bin:$PATH"
     export TEXT_LAB_PYTHON=/opt/conda/envs/text_lab_main/bin/python
     export PADDLE_BACKEND_PYTHON=/opt/conda/envs/paddle_backend/bin/python
+    export PADDLE_VL_BACKEND_PYTHON=/opt/conda/envs/paddle_vl_backend/bin/python
     export OLMOCR_BACKEND_PYTHON=/opt/conda/envs/olmocr_backend/bin/python
     export TEXT_LAB_IMAGEGEN_PYTHON=/opt/conda/envs/imagegen_backend/bin/python
 
@@ -122,7 +123,14 @@ EOF
 
     mkdir -p /opt/nltk_data
     chmod -R a+rX /opt/nltk_data
-    /opt/conda/envs/text_lab_main/bin/python -m nltk.downloader -d /opt/nltk_data stopwords punkt punkt_tab
+    # NLTK >= 3.10 rejects downloads to any dir not on nltk.data.path ("Security
+    # Violation: Unauthorized path ..."). NLTK_DATA is only exported in
+    # %environment (runtime), not during this build, so authorise it here.
+    # raise_on_error=True makes a failed download fail the build immediately
+    # instead of hitting the interactive "Retry? [n/y/e]" prompt (EOFError when
+    # stdin is closed during a non-interactive build).
+    export NLTK_DATA=/opt/nltk_data
+    /opt/conda/envs/text_lab_main/bin/python -c "import nltk; [nltk.download(p, download_dir='/opt/nltk_data', quiet=True, raise_on_error=True) for p in ('stopwords', 'punkt', 'punkt_tab')]"
 
     # ===================================================================
     # ENVIRONMENT 2: PADDLE OCR BACKEND (Paddle CUDA 12.6 wheel family)
@@ -136,6 +144,38 @@ EOF
     $PADDLE_PIP install --no-cache-dir paddlepaddle-gpu==3.3.1 \
         -i https://www.paddlepaddle.org.cn/packages/stable/cu126/
     $PADDLE_PIP install --no-cache-dir paddleocr==3.3.3 paddlex==3.3.13
+
+    # ===================================================================
+    # ENVIRONMENT 2B: PADDLEOCR-VL DOC-PARSER BACKEND (automatic OCR)
+    # Powers the default "Parse document" flow: PP-DocLayoutV3 layout +
+    # PaddleOCR-VL 0.9B recognition (tables, formulas, charts, checkboxes).
+    # Kept in its own env so the legacy paddle_backend above stays pinned.
+    # ===================================================================
+    conda create -y -n paddle_vl_backend python=3.11
+    export PADDLE_VL_PIP="/opt/conda/envs/paddle_vl_backend/bin/python -m pip"
+
+    $PADDLE_VL_PIP install --no-cache-dir "pip>=25" "setuptools<82" "wheel>=0.47.0"
+
+    # Same cu126 Paddle runtime family; the CUDA 12.8 base/driver runs it.
+    $PADDLE_VL_PIP install --no-cache-dir paddlepaddle-gpu==3.3.1 \
+        -i https://www.paddlepaddle.org.cn/packages/stable/cu126/
+    # PaddleOCR-VL is a PaddleX pipeline in the "ocr" plugin group. Installing
+    # paddleocr[doc-parser] alone pulls paddlex but NOT its [ocr] extra, so the
+    # pipeline fails at init with:
+    #   DependencyError: `PaddleOCR-VL` requires additional dependencies ...
+    #   run `pip install "paddlex[ocr]==<PADDLEX_VERSION>"`
+    # Install the paddlex[ocr] plugin explicitly (resolved jointly for a
+    # consistent paddlex version).
+    $PADDLE_VL_PIP install --no-cache-dir "paddleocr[doc-parser]>=3.6" "paddlex[ocr]"
+
+    # Pre-stage the PP-DocLayoutV3 + PaddleOCR-VL weights (~2-3 GB) into the
+    # shared model cache so the runtime is fully offline. Best-effort: if the
+    # build host has no GPU the weights are fetched on first use instead.
+    PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True DISABLE_MODEL_SOURCE_CHECK=True \
+    PADDLE_PDX_CACHE_HOME=/opt/paddlex CUDA_VISIBLE_DEVICES="" \
+        /opt/conda/envs/paddle_vl_backend/bin/python -c \
+        "from paddleocr import PaddleOCRVL; PaddleOCRVL()" \
+        || echo "PaddleOCR-VL weight pre-stage skipped (will download on first run)"
 
     # ===================================================================
     # ENVIRONMENT 3: OLMOCR BACKEND

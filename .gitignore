@@ -11,3 +11,13 @@ lib64
 pyvenv.cfg
 share/
 todo
+
+# Vendored test-only wheels (numpy/cv2/lxml) pulled in to run tests headlessly.
+.testdeps/
+
+# Completed real questionnaires used as survey-extraction fixtures. These are
+# scans of one respondent's answers and carry personal data (handwritten phone
+# number, gender, age band, home village), so they stay on research storage and
+# out of this public repo.
+split_1_2.pdf
+split_1_2.json
