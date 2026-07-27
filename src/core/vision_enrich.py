@@ -67,7 +67,9 @@ class OllamaVisionClient:
         lock_timeout: int = 120,
         audit_dir=None,
     ):
-        self.model = model or os.environ.get("TEXTLAB_VISION_MODEL", "qwen3-vl:30b")
+        self.model = model or os.environ.get(
+            "TEXTLAB_VISION_MODEL", "qwen3-vl:30b-a3b-instruct"
+        )
         self.base_url = _base_url(base_url)
         self.timeout = timeout
         self.keep_alive = keep_alive
@@ -75,11 +77,12 @@ class OllamaVisionClient:
         self.lock_timeout = lock_timeout
         self.audit_dir = Path(audit_dir) if audit_dir is not None else None
         self.num_ctx = int(os.environ.get("TEXTLAB_VISION_NUM_CTX", "8192"))
-        # qwen3-vl is a reasoning model whose "thinking" is not suppressed by
-        # think=False on this Ollama build; on dense sections (e.g. a 16-row
-        # rating matrix) it spends ~3k tokens thinking before emitting JSON, so
-        # a 3000-token budget starves the answer. 8000 leaves room for thinking
-        # plus the structured answer. Lower it again if thinking is disabled.
+        # The default model is the non-thinking Instruct build, so this budget
+        # is spent entirely on the answer. Ordinary sections need 177-949
+        # tokens, but a dense 16-row rating matrix legitimately needs ~6.8k, so
+        # the headroom is for that worst case rather than for reasoning. Do not
+        # lower this below ~7000 without re-checking the widest matrix in
+        # instruct-model-benchmark-results.md.
         self.num_predict = int(os.environ.get("TEXTLAB_VISION_NUM_PREDICT", "8000"))
         self._lock_file = None
         self._prepared = False

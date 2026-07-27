@@ -422,9 +422,19 @@ def _section_bbox(
             left, top, right, bottom = limits[:4]
             # Keep a tiny allowance for Paddle's bounding-box uncertainty, but
             # never let generic crop padding pull in the previous/next question.
-            bbox[0] = max(bbox[0], max(0, int(math.floor(left))))
+            #
+            # The column limits come from the midpoint between question-anchor
+            # centres, while regions are assigned to a column by their centre.
+            # A wide region (typically a rating matrix) can therefore sit in
+            # this column yet extend past the boundary, and clamping to it
+            # silently slices off the last response column. Never clamp inside
+            # the section's own content: the limits may only ever shrink the
+            # padding, not the regions themselves.
+            content_x1 = int(x1)
+            content_x2 = int(x2)
+            bbox[0] = min(content_x1, max(bbox[0], max(0, int(math.floor(left)))))
             bbox[1] = max(bbox[1], max(0, int(math.floor(top)) - 3))
-            bbox[2] = min(bbox[2], min(width, int(math.ceil(right))))
+            bbox[2] = max(content_x2, min(bbox[2], min(width, int(math.ceil(right)))))
             if math.isfinite(bottom):
                 bbox[3] = min(bbox[3], max(bbox[1] + 8, int(math.floor(bottom)) - 3))
     return bbox
@@ -1140,6 +1150,31 @@ def _paddle_mark_presence(page: "doc_ir.Page", bbox: List[int]) -> bool:
     return False
 
 
+def _question_defect(raw_question: dict) -> str:
+    """Return why this question is unusable, or "" when it is well formed.
+
+    Mirrors the per-question field validation performed while materializing the
+    IR, so an unusable question can be dropped on its own instead of raising and
+    discarding every other question in the same section.
+    """
+    question_text = _SPACE.sub(" ", str(raw_question.get("question_text") or "")).strip()
+    condition_text = _SPACE.sub(" ", str(raw_question.get("condition_text") or "")).strip()
+    if len(question_text) > 800 or len(condition_text) > 240:
+        return "schema-free response contains an overlong question field"
+    model_type = str(raw_question.get("response_type") or "unknown")
+    model_rule = str(raw_question.get("selection_rule") or "unknown")
+    if model_type not in _VALID_RESPONSE_TYPES or model_rule not in _VALID_SELECTION_RULES:
+        return "schema-free response contains an invalid question enum"
+    try:
+        choices = _choice_texts(raw_question.get("choices"), field_name="choices")
+    except ValueError as exc:
+        return str(exc)
+    raw_rows = raw_question.get("rows")
+    if not choices or not isinstance(raw_rows, list) or not raw_rows:
+        return "schema-free question must contain choices and rows"
+    return ""
+
+
 def _choice_texts(items: Any, *, field_name: str) -> List[str]:
     if not isinstance(items, list):
         raise ValueError(f"schema-free response {field_name} is not an array")
@@ -1183,23 +1218,42 @@ def _prune_section_groups(
         return groups
     referenced = {g.parent_question_id for g in groups if g.parent_question_id}
 
-    def signature(group: "doc_ir.FormGroup"):
-        return (
-            _normalized_label(group.question_text),
-            tuple(
-                (row.label, tuple((opt.label, opt.state) for opt in row.options))
-                for row in group.rows
-            ),
+    def body(group: "doc_ir.FormGroup"):
+        return tuple(
+            (row.label, tuple((opt.label, opt.state) for opt in row.options))
+            for row in group.rows
         )
 
+    def signature(group: "doc_ir.FormGroup"):
+        return (_normalized_label(group.question_text), body(group))
+
+    def body_signature(group: "doc_ir.FormGroup"):
+        """Text-independent identity, for matrix-like groups only.
+
+        A bounded model still re-emits a whole matrix under an invented title,
+        which the text-keyed signature cannot catch. Distinct row labels make
+        the body a reliable identity there. Restricting this to multi-row
+        groups with real row labels keeps two legitimately identical simple
+        questions (two Ja/Nein items in one section) from collapsing into one.
+        """
+        labelled = [row for row in group.rows if row.label.strip()]
+        if len(labelled) < 2:
+            return None
+        return body(group)
+
     seen: set = set()
+    seen_bodies: set = set()
     kept: List["doc_ir.FormGroup"] = []
     for group in groups:
         is_parent = group.id in referenced
         sig = signature(group)
-        if not is_parent and (sig in seen or not group.question_text.strip()):
+        body_sig = body_signature(group)
+        duplicate = sig in seen or (body_sig is not None and body_sig in seen_bodies)
+        if not is_parent and (duplicate or not group.question_text.strip()):
             continue
         seen.add(sig)
+        if body_sig is not None:
+            seen_bodies.add(body_sig)
         kept.append(group)
     return kept or groups
 
@@ -1244,6 +1298,7 @@ def _universal_to_form_groups(
     # second response group. Unnumbered conditional subquestions remain valid.
     kept_questions: List[Tuple[int, dict]] = []
     excluded_numbers: List[str] = []
+    malformed_questions: List[str] = []
     expected_number = str(expected_question_number or "").strip()
     for original_index, raw_question in enumerate(raw_questions, start=1):
         if not isinstance(raw_question, dict):
@@ -1252,7 +1307,18 @@ def _universal_to_form_groups(
         if expected_number and visible_number and visible_number != expected_number:
             excluded_numbers.append(visible_number)
             continue
+        # A single malformed question must not cost the whole section. The
+        # usual offender is printed prose the model mistook for a question (a
+        # legal/prize paragraph becoming a 240+ character "choice"), which is
+        # junk we would drop anyway -- while the real question sitting beside it
+        # is perfectly good. Only raise if nothing survives.
+        defect = _question_defect(raw_question)
+        if defect:
+            malformed_questions.append(defect)
+            continue
         kept_questions.append((original_index, raw_question))
+    if not kept_questions and malformed_questions:
+        raise ValueError(malformed_questions[0])
 
     question_ids = [
         f"{section_id}_q{index}" for index in range(1, len(kept_questions) + 1)
@@ -1560,6 +1626,14 @@ def _universal_to_form_groups(
             group.status = "needs_review"
             group.warnings.append(
                 f"numbered question(s) {excluded} were excluded as crop-boundary spill"
+            )
+
+    if malformed_questions:
+        for group in groups:
+            group.status = "needs_review"
+            group.warnings.append(
+                f"{len(malformed_questions)} unusable question(s) in this section were "
+                f"dropped ({malformed_questions[0]})"
             )
 
     if unmapped:

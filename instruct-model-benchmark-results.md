@@ -150,15 +150,48 @@ the `_table_schema` hint that is currently discarded) and keep the VLM for free-
 questions. Do **not** delete the Paddle-ID machinery — that recommendation from the earlier
 brainstorm is withdrawn.
 
-### Suggested next steps, in order
+### Final state after the follow-up changes
 
-1. Set `TEXTLAB_APPROVED_SURVEY_MODELS` in `script.sh.erb` and point `TEXTLAB_VISION_MODEL` at
-   `qwen3-vl:30b-a3b-instruct`, so groups can come out `accepted` instead of all-flagged.
-2. Drop `TEXTLAB_VISION_NUM_PREDICT` back from 8000 — ordinary sections use 177–949 tokens; only
-   the big matrix needs ~6.8k.
-3. Fix the crop clamp (§6) — cheap, model-independent, and required for `p2_s5` either way.
-4. Extend `_prune_section_groups` to dedupe on row/option structure, not just exact question text.
-5. Then re-do the Responses tab as summary-first, with editing only on genuinely flagged questions.
+| metric | baseline (thinking) | instruct alone | instruct + bounds | **+ the four changes** |
+|---|---|---|---|---|
+| groups | 17 | 18 | 20 | **17** |
+| rowless / failed | 1 | 5 | 1 | **1** (`p2_s5` only) |
+| big table `p2_s6` | FAIL | FAIL | OK | **OK** |
+| duplicate matrix | — | — | yes | **gone** |
+| groups needing review | 17 / 17 | 18 / 18 | 20 / 20 | **13 / 17** |
+| wall clock | — | 380 s | 233 s | **214 s** |
+
+Four groups now come out **`accepted` with zero warnings**; previously every group was flagged
+regardless of quality. The remaining 13 are flagged for substantive reasons, dominated by
+*geometric ink evidence disagrees with the OCR transcription* (8 of 17) — that heuristic is now the
+single largest source of review load and is the obvious next thing to measure.
+
+### Applied after the benchmark
+
+1. **Structure-aware dedupe** in `_prune_section_groups`. The text-keyed signature could not catch a
+   matrix re-emitted under an invented title, so a second body-only signature was added, scoped to
+   groups with **two or more labelled rows**. That targets duplicated matrices while leaving two
+   legitimately identical simple questions (e.g. two Ja/Nein items in one section) intact.
+2. **Crop clamp fixed** in `_section_bbox`: the column limits may now only shrink the *padding*,
+   never cut into the section's own regions. `p2_s5`'s crop goes from x2=645 back to x2=730.
+3. **Launcher** now defaults `TEXTLAB_VISION_MODEL` to `qwen3-vl:30b-a3b-instruct` and sets
+   `TEXTLAB_APPROVED_SURVEY_MODELS` to the same, so groups can come out `accepted`. The old
+   thinking tag deliberately stays unapproved, so overriding back to it still forces review.
+4. **`num_predict` stays at 8000** — this reverses the earlier suggestion to lower it. Ordinary
+   sections use 177–949 tokens, but the big matrix legitimately needs **6,834**, so 3000 would
+   re-break the very thing that was just fixed.
+5. **A malformed question no longer costs its whole section.** Widening the crop (change 2) made the
+   model see more of the prize/legal paragraph on `p1_s2` and emit it as a 240+ character "choice",
+   which raised and discarded *every* question in that section — including the good one. Per-question
+   field validation moved into `_question_defect()`, so an unusable question is dropped on its own
+   and recorded as a warning; the section only fails if nothing survives.
+
+### Remaining, in order
+
+1. Re-do the Responses tab as summary-first, with editing only on genuinely flagged questions.
+2. `p2_s5`'s newline-inside-a-string loop still needs a mitigation (`repeat_penalty`, or a differing
+   seed on retry) — array bounds cannot reach it.
+3. Consider the Paddle-owns-tables hybrid if matrix rows remain the dominant error source.
 
 Reproduction: `bench_survey.py` / `score_run.py` / `probe_bounded.py` and the full per-call audit
 dirs are in this session's scratchpad; `ground_truth_p2_s6.json` holds the hand-read ground truth.

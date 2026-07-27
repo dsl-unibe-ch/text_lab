@@ -116,7 +116,8 @@ apptainer exec \
   --env OLLAMA_MODELS="$CONT_OLLAMA_DIR/models" \
   --env OLLAMA_FLASH_ATTENTION="true" \
   --env OLLAMA_HOST="$OLLAMA_HOST" \
-  --env TEXTLAB_VISION_MODEL="${TEXTLAB_VISION_MODEL:-qwen3-vl:30b}" \
+  --env TEXTLAB_VISION_MODEL="${TEXTLAB_VISION_MODEL:-qwen3-vl:30b-a3b-instruct}" \
+  --env TEXTLAB_APPROVED_SURVEY_MODELS="${TEXTLAB_APPROVED_SURVEY_MODELS:-qwen3-vl:30b-a3b-instruct}" \
   --env GROBID_PORT="$GROBID_PORT" \
   "$TL_CONTAINER" \
   bash -c "export OLLAMA_TMPDIR=/tmp/ollama_${USER}_${SLURM_JOB_ID:-unknown} && \
