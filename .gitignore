@@ -15,6 +15,11 @@ todo
 # Vendored test-only wheels (numpy/cv2/lxml) pulled in to run tests headlessly.
 .testdeps/
 
+# Working scratch: experiment write-ups, handoffs, proposed plans, and the
+# one-off audit harnesses. Kept on disk for reference, deliberately out of the
+# repo, which holds code only.
+notes/
+
 # Completed real questionnaires used as survey-extraction fixtures. These are
 # scans of one respondent's answers and carry personal data (handwritten phone
 # number, gender, age band, home village), so they stay on research storage and
