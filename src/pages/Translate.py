@@ -55,8 +55,10 @@ from core.translation import (
     FORMALITY_CAPABLE_BACKENDS,
     FORMALITY_CHOICES,
     TRANSLATION_BACKENDS,
+    backend_load_signature,
     detect_language,
     make_translate_fn,
+    preload_backend,
     shielded_translate,
     translate_docx,
     translate_markdown,
@@ -100,6 +102,11 @@ _STATE_DEFAULTS = {
     # Persistent translation error (survives the st.rerun after Translate).
     "translate_error": None,
     "translate_traceback": None,
+    # Explicit "load model" state for the Text tab. Compared against the
+    # current (backend, langs, ollama_model) signature to gate translation.
+    "loaded_signature": None,
+    "load_error": None,
+    "load_traceback": None,
 }
 for _k, _v in _STATE_DEFAULTS.items():
     st.session_state.setdefault(_k, _v)
@@ -202,6 +209,17 @@ if backend_key in FORMALITY_CAPABLE_BACKENDS:
             "based on the source text."
         ),
     )
+
+# What needs to be resident in VRAM for the Text tab, given the current
+# controls above. Compared against ``st.session_state["loaded_signature"]``
+# to know whether the user still needs to hit "Load model".
+current_load_sig = backend_load_signature(
+    backend=backend_key,
+    src_lang=src_code,
+    tgt_lang=tgt_code,
+    ollama_model=ollama_model,
+)
+model_is_loaded = st.session_state["loaded_signature"] == current_load_sig
 
 # ---------------------------------------------------------------------------
 # Glossary editor (shared between Text and Document tabs)
@@ -539,11 +557,84 @@ with text_tab:
                 height=48,
             )
 
+    # -------------------------------------------------------------------
+    # Load-model gate (Text tab only)
+    #
+    # The first inference for any given (backend, model) pair pays the
+    # cost of a HF download (if not cached) plus moving weights to VRAM —
+    # anywhere from a few seconds to 1-2 min on a fresh Slurm allocation.
+    # We surface that cost explicitly so users know exactly when they're
+    # paying it. The Translate button stays disabled until the currently-
+    # selected backend/model matches what's already loaded.
+    # -------------------------------------------------------------------
+    if model_is_loaded:
+        st.success(
+            f"✅ **{backend_label}** is loaded on the GPU — you can translate."
+        )
+    else:
+        load_col, msg_col = st.columns([1, 3])
+        with load_col:
+            do_load = st.button(
+                "🚀 Load model",
+                type="primary",
+                key="load_model_btn",
+            )
+        with msg_col:
+            if st.session_state["loaded_signature"] is None:
+                st.info(
+                    "Text translation runs entirely on the GPU allocated to this "
+                    f"session. Click **Load model** to warm up **{backend_label}** "
+                    "before translating. First-time downloads can take 1-2 minutes; "
+                    "subsequent loads hit the shared cache and are seconds fast."
+                )
+            else:
+                st.info(
+                    "You changed the backend or the language pair. Click "
+                    f"**Load model** to warm up **{backend_label}** before "
+                    "translating again."
+                )
+
+        if do_load:
+            with st.spinner(
+                f"Loading {backend_label} onto the GPU… (first time can take 1-2 min)"
+            ):
+                try:
+                    preload_backend(
+                        backend=backend_key,
+                        src_lang=src_code,
+                        tgt_lang=tgt_code,
+                        ollama_model=ollama_model,
+                        src_lang_name=src_name,
+                        tgt_lang_name=tgt_name,
+                    )
+                    st.session_state["loaded_signature"] = current_load_sig
+                    st.session_state["load_error"] = None
+                    st.session_state["load_traceback"] = None
+                except Exception as exc:
+                    import traceback as _tb
+                    st.session_state["load_error"] = f"Model load failed: {exc}"
+                    st.session_state["load_traceback"] = _tb.format_exc()
+            st.rerun()
+
+    # Persisted load error, if any.
+    if st.session_state["load_error"]:
+        st.error(st.session_state["load_error"])
+        if st.session_state["load_traceback"]:
+            with st.expander("Show load traceback"):
+                st.code(st.session_state["load_traceback"])
+
     do_translate = st.button(
         "Translate →",
         type="primary",
-        disabled=not st.session_state["source_text"].strip(),
+        disabled=(
+            not st.session_state["source_text"].strip()
+            or not model_is_loaded
+        ),
         key="translate_btn",
+        help=(
+            None if model_is_loaded
+            else "Load the model first (button above)."
+        ),
     )
 
     # Show a persisted error from the previous translation attempt — must

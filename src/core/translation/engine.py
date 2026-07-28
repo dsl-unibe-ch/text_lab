@@ -527,3 +527,112 @@ def read_text_from_upload(name: str, data: bytes) -> str:
         d = docx.Document(_io.BytesIO(data))
         return "\n\n".join(p.text for p in d.paragraphs)
     raise ValueError(f"Unsupported file type: {name}")
+
+
+# ---------------------------------------------------------------------------
+# Explicit preload / warm-up
+#
+# Text Lab runs on Slurm-allocated GPU nodes where the first inference for
+# any given (backend, model) pair pays the full cost of downloading weights
+# (if not cached) and moving them to VRAM — anywhere from a few seconds to
+# a couple of minutes. Users interacting with the split-screen editor
+# expect near-instant responses, so the UI exposes an explicit "Load model"
+# gate that calls into these helpers.
+# ---------------------------------------------------------------------------
+
+
+def backend_load_signature(
+    backend: str,
+    src_lang: str = "",
+    tgt_lang: str = "",
+    ollama_model: Optional[str] = None,
+) -> tuple:
+    """
+    Return an opaque tuple identifying what needs to be resident in VRAM
+    for a given (backend, language-pair, ollama-model) combination.
+
+    * NLLB / MADLAD only depend on the backend: one model handles every
+      pair.
+    * OPUS-MT is per-pair, so the language codes participate in the
+      signature.
+    * Ollama depends on the selected LLM name.
+
+    The UI compares a stored "loaded" signature against the current one to
+    decide whether a fresh warm-up is required.
+    """
+    if backend in NLLB_MODEL_IDS or backend in MADLAD_MODEL_IDS:
+        return ("hf", backend)
+    if backend == "opus-mt":
+        return ("hf", backend, src_lang, tgt_lang)
+    if backend == "ollama":
+        return ("ollama", ollama_model or "")
+    return (backend,)
+
+
+def preload_backend(
+    backend: str,
+    src_lang: str = "",
+    tgt_lang: str = "",
+    ollama_model: Optional[str] = None,
+    src_lang_name: Optional[str] = None,
+    tgt_lang_name: Optional[str] = None,
+) -> None:
+    """
+    Warm up the given backend so the next :func:`translate` call is fast.
+
+    * For NLLB / MADLAD / OPUS-MT this triggers the transformers download
+      (if the wheels aren't already in ``HF_HOME``) and moves the weights
+      to the GPU.
+    * For Ollama this sends a one-token chat request so Ollama loads the
+      model into VRAM and keeps it there.
+
+    Idempotent — calling twice with the same arguments is essentially a
+    no-op because the underlying loaders are ``lru_cache``-d.
+    """
+    import torch
+
+    if backend in NLLB_MODEL_IDS:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        dtype_name = "float16" if device == "cuda" else "float32"
+        _load_nllb(NLLB_MODEL_IDS[backend], device, dtype_name)
+        return
+
+    if backend in MADLAD_MODEL_IDS:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        dtype_name = "float16" if device == "cuda" else "float32"
+        _load_madlad(MADLAD_MODEL_IDS[backend], device, dtype_name)
+        return
+
+    if backend == "opus-mt":
+        src_iso = flores_to_iso2(src_lang)
+        tgt_iso = flores_to_iso2(tgt_lang)
+        if not src_iso or not tgt_iso:
+            raise ValueError(
+                f"OPUS-MT has no direct ISO-2 mapping for {src_lang} → "
+                f"{tgt_lang}. Choose the NLLB backend for this pair."
+            )
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        try:
+            _load_marian(opus_mt_model_for(src_iso, tgt_iso), device)
+        except Exception as exc:
+            raise RuntimeError(
+                f"No OPUS-MT model available for {src_iso}→{tgt_iso}. "
+                "Try the NLLB backend instead."
+            ) from exc
+        return
+
+    if backend == "ollama":
+        if not ollama_model:
+            raise ValueError("The Ollama backend requires an ollama_model.")
+        import ollama
+
+        # A one-token request is enough for Ollama to page the model into
+        # VRAM. It stays resident for a while afterwards.
+        ollama.chat(
+            model=ollama_model,
+            messages=[{"role": "user", "content": "hi"}],
+            options={"num_predict": 1, "temperature": 0.0},
+        )
+        return
+
+    raise ValueError(f"Unknown backend: {backend}")
