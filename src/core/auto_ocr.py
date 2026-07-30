@@ -472,6 +472,8 @@ def _finalize_vl_page(
     vision_client=None,
     same_layout_template=None,
     survey_contract=None,
+    searchable_pdf: bool = False,
+    ocr_lang: str = "eng",
 ) -> "doc_ir.Page":
     page = doc_ir.from_paddle_vl(page_json)
     page.page_number = page_number
@@ -499,6 +501,16 @@ def _finalize_vl_page(
             same_layout_template=same_layout_template,
             contract=survey_contract,
         )
+    # The word-geometry pass also needs full-resolution boxes, so it runs before
+    # the preview downscale rewrites Region.bbox into preview coordinates.
+    if searchable_pdf and page_bgr is not None:
+        from core import searchable_pdf as _searchable_pdf
+
+        lang = ocr_lang
+        if lang == "auto":
+            lang = _searchable_pdf.page_language(page)
+        page.text_layer = _searchable_pdf.page_text_layer(page, page_bgr, lang=lang)
+        page.raster_size = (page_bgr.shape[1], page_bgr.shape[0])
     if debug_dir is not None:
         _write_mark_debug_overlay(page_bgr, page, debug_collect,
                                   Path(debug_dir) / f"page_{page_number}_marks.png")
@@ -547,6 +559,8 @@ def process_document(
     vision_client=None,
     same_layout_template=None,
     survey_contract=None,
+    searchable_pdf: bool = False,
+    ocr_lang: str = "eng",
 ) -> "doc_ir.Document":
     """Parse one document into a typed IR, choosing the route per page.
 
@@ -565,6 +579,12 @@ def process_document(
         still have their structure and response read independently from pixels.
     survey_contract : optional schema-free or repaired Paddle-ID contract name;
         omitted uses ``TEXTLAB_SURVEY_CONTRACT`` or the schema-free default.
+    searchable_pdf : build a PDF of the original pages with an invisible text
+        layer. Needs Tesseract for word geometry; the indexed text is still the
+        VL lane's. Born-digital pages skipped by the VL lane keep the text layer
+        they already have, because the original PDF is reused as the carrier.
+    ocr_lang : Tesseract language code for the word-geometry pass, or ``"auto"``
+        to detect it per page from the text the VL lane already extracted.
     progress : optional ``callback(fraction, text)`` for a Streamlit progress bar.
     debug_dir : when set, writes a ``page_N_marks.png`` overlay per page showing
         every located mark coloured by state (for validation/auditing only).
@@ -604,10 +624,15 @@ def process_document(
                     vision_client=_vision_client() if extract_survey else None,
                     same_layout_template=same_layout_template,
                     survey_contract=survey_contract,
+                    searchable_pdf=searchable_pdf,
+                    ocr_lang=ocr_lang,
                 )
                 document.pages.append(page)
                 if describe_images:
                     vision_enrich.describe_page_figures(page, _vision_client())
+                if searchable_pdf:
+                    _emit(progress, 0.95, "Building searchable PDF...")
+                    document.searchable_pdf = _build_searchable_pdf(document, input_path)
             _emit(progress, 1.0, "Done")
             return document
         finally:
@@ -668,6 +693,8 @@ def process_document(
                 vision_client=_vision_client() if extract_survey else None,
                 same_layout_template=same_layout_template,
                 survey_contract=survey_contract,
+                searchable_pdf=searchable_pdf,
+                ocr_lang=ocr_lang,
             )
 
         # ---- reassemble in page order ---------------------------------------
@@ -683,12 +710,58 @@ def process_document(
             for page in document.pages:
                 vision_enrich.describe_page_figures(page, client)
 
+        if searchable_pdf:
+            _emit(progress, 0.95, "Building searchable PDF...")
+            document.searchable_pdf = _build_searchable_pdf(
+                document, input_path, raster_dpi=SURVEY_DPI if extract_survey else VL_DPI
+            )
+
         _emit(progress, 1.0, "Done")
         return document
     finally:
         doc.close()
         if owned_client and vision_client is not None:
             vision_client.close(unload_model=True)
+
+
+def _build_searchable_pdf(
+    document: "doc_ir.Document", input_path, *, raster_dpi: int = VL_DPI
+) -> Optional[bytes]:
+    """Assemble the searchable PDF from the per-page layers, then drop them.
+
+    A PDF source is reused as the carrier so scan quality and any existing
+    born-digital text layer survive; an image source becomes a one-page PDF.
+    """
+    from core import searchable_pdf as _searchable_pdf
+
+    layers = {p.page_number: p.text_layer for p in document.pages if p.text_layer}
+    page_sizes = {
+        p.page_number: p.raster_size for p in document.pages if p.raster_size
+    }
+    input_path = Path(input_path)
+    try:
+        if input_path.suffix.lower() == ".pdf":
+            blob = _searchable_pdf.build_searchable_pdf(
+                layers, source_pdf=str(input_path), raster_dpi=raster_dpi,
+                page_sizes=page_sizes,
+            )
+        else:
+            from PIL import Image
+
+            buf = io.BytesIO()
+            Image.open(input_path).convert("RGB").save(buf, format="PNG")
+            blob = _searchable_pdf.build_searchable_pdf(
+                layers, rasters={1: buf.getvalue()}, page_sizes=page_sizes
+            )
+    except Exception:
+        blob = None
+    finally:
+        # Raster-space coordinates are meaningless once the job workspace is
+        # cleaned up, so they are not carried into session state.
+        for page in document.pages:
+            page.text_layer = None
+            page.raster_size = None
+    return blob
 
 
 # ==========================================
