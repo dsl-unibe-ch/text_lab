@@ -8,21 +8,18 @@ HOST_TEXT_LAB_DIR="${TEXT_LAB_DIR:-/storage/research/dsl_shared/solutions/ondema
 CONT_TEXT_LAB_DIR="/text_lab"
 
 # App source served by Streamlit (read in-container via the /storage bind).
-# Defaults to THIS sandbox's dev tree so local edits appear immediately.
-# For production, set TEXT_LAB_SRC to a deployed tree, e.g.
-#   $HOST_TEXT_LAB_DIR/src_main280526/src
-TEXT_LAB_SRC="${TEXT_LAB_SRC:-/storage/homefs/mb24e866/ondemand/dev/text_lab/src}"
+# Export TEXT_LAB_SRC to serve a development tree instead, e.g.
+#   TEXT_LAB_SRC=$HOME/ondemand/dev/text_lab/src
+TEXT_LAB_SRC="${TEXT_LAB_SRC:-$HOST_TEXT_LAB_DIR/src_main280526/src}"
 
 #point to the apptainer containers
-# Defaults to the freshly built sandbox image, which is the only one carrying the
-# paddle_vl_backend env (paddleocr 3.7 + paddlex[ocr]) that the automatic OCR
-# pipeline's VL worker needs. The older research-storage image
-# ($HOST_TEXT_LAB_DIR/container/text_lab_210526.sif) lacks it: its paddle_backend
-# ships paddleocr 3.3.3, which contains the PaddleOCRVL class but not the
-# paddlex[ocr] extra, so the pipeline dies with a DependencyError.
-# For production, publish this .sif to $HOST_TEXT_LAB_DIR/container/ and set
-# TL_CONTAINER to it.
-TL_CONTAINER="${TL_CONTAINER:-/storage/homefs/mb24e866/ondemand/dev/text_lab/text_lab.sif}"
+# The published image must carry the paddle_vl_backend env (paddleocr 3.7 +
+# paddlex[ocr]) that the automatic OCR pipeline's VL worker needs, and the
+# tesseract binary the searchable-PDF export uses for word geometry. An image
+# whose paddle_backend ships paddleocr 3.3.3 has the PaddleOCRVL class but not
+# the paddlex[ocr] extra, so the pipeline dies with a DependencyError.
+# Export TL_CONTAINER to test a locally built .sif before publishing it here.
+TL_CONTAINER="${TL_CONTAINER:-$HOST_TEXT_LAB_DIR/container/text_lab_210526.sif}"
 
 #point to where the ollama models are stored on research storage
 HOST_OLLAMA_DIR="/storage/research/dsl_shared/solutions/ondemand/text_lab/container/models/ollama"
