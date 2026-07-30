@@ -42,7 +42,7 @@ from core.ocr_engine import (
     render_layout_preview,
     LAYOUT_TYPE_COLORS,
 )
-from core import auto_ocr, doc_ir, form_extract, vision_enrich
+from core import auto_ocr, doc_ir, form_extract, searchable_pdf, vision_enrich
 
 try:
     from language_mappings import EASYOCR_LANGUAGE_MAPPING, PADDLEOCR_LANGUAGE_MAPPING
@@ -65,6 +65,12 @@ OCR_JOBS_BASE_DIR = pathlib.Path(HOST_HOME) / "ondemand_text_lab_ocr_jobs"
 OLMOCR_GPU_MEMORY_UTILIZATION = os.environ.get("OLMOCR_GPU_MEMORY_UTILIZATION", "0.6")
 
 AUTO_INPUT_TYPES = ["pdf", "png", "jpg", "jpeg", "bmp", "tiff", "tif"]
+
+# Survey/form response extraction is still being validated against the release
+# benchmark, so its controls and results tab are hidden from the UI. The backend
+# (auto_ocr/form_extract/markup_detect) is untouched and stays reachable through
+# ``process_document(..., extract_survey=True)``; flip this flag to expose it.
+SURVEY_EXTRACTION_UI_ENABLED = False
 
 
 @st.cache_resource(show_spinner=False)
@@ -160,6 +166,8 @@ def run_auto_single(
     *,
     describe_images=False,
     extract_survey=False,
+    searchable_pdf=False,
+    ocr_lang="eng",
 ):
     clear_results(reset_running=False)
     st.session_state.ocr_running = True
@@ -189,6 +197,8 @@ def run_auto_single(
             source_name=uploaded_file.name,
             describe_images=describe_images,
             extract_survey=extract_survey,
+            searchable_pdf=searchable_pdf,
+            ocr_lang=ocr_lang,
         )
 
         stem = pathlib.Path(uploaded_file.name).stem or "document"
@@ -197,6 +207,9 @@ def run_auto_single(
         st.session_state.auto_downloads = {
             "stem": stem,
             "markdown_zip": doc_ir.build_markdown_zip(document, stem),
+            "text": doc_ir.to_text(document).encode("utf-8"),
+            "docx": doc_ir.build_docx(document, stem),
+            "searchable_pdf": document.searchable_pdf,
             "json": doc_ir.to_json(document).encode("utf-8"),
             "tables_zip": doc_ir.build_tables_csv_zip(document),
             "responses_csv": doc_ir.build_form_responses_csv(document),
@@ -220,6 +233,8 @@ def run_auto_batch(
     describe_images=False,
     extract_survey=False,
     same_template=False,
+    searchable_pdf=False,
+    ocr_lang="eng",
 ):
     import zipfile
 
@@ -267,9 +282,21 @@ def run_auto_batch(
         progress_bar = st.progress(0.0)
         status_text = st.empty()
 
+        n_files = len(valid_files)
         for idx, file_path in enumerate(valid_files):
             rel_path = file_path.relative_to(INPUT_DIR)
-            status_text.text(f"Processing ({idx + 1}/{len(valid_files)}): {rel_path}")
+
+            def _file_progress(frac, text, _idx=idx, _rel=rel_path):
+                # Fold each file's own page-level progress into the batch bar,
+                # so a long document advances instead of sitting at one notch.
+                progress_bar.progress(
+                    min(1.0, (_idx + max(0.0, min(1.0, frac))) / n_files)
+                )
+                status_text.markdown(
+                    f"**File {_idx + 1} of {n_files}** · `{_rel}` — {text}"
+                )
+
+            _file_progress(0.0, "starting...")
 
             file_output_dir = RESULTS_DIR / rel_path.parent / file_path.stem
             file_output_dir.mkdir(parents=True, exist_ok=True)
@@ -278,9 +305,12 @@ def run_auto_batch(
             document = auto_ocr.process_document(
                 file_path, per_file_ws,
                 native_fast_lane=native_fast_lane,
+                progress=_file_progress,
                 source_name=file_path.name,
                 describe_images=describe_images,
                 extract_survey=extract_survey,
+                searchable_pdf=searchable_pdf,
+                ocr_lang=ocr_lang,
                 vision_client=shared_vision_client,
                 same_layout_template=same_layout_template,
             )
@@ -288,9 +318,19 @@ def run_auto_batch(
             (file_output_dir / "document.md").write_text(
                 doc_ir.to_markdown(document), encoding="utf-8"
             )
+            (file_output_dir / "document.txt").write_text(
+                doc_ir.to_text(document), encoding="utf-8"
+            )
             (file_output_dir / "document.json").write_text(
                 doc_ir.to_json(document), encoding="utf-8"
             )
+            docx_bytes = doc_ir.build_docx(document, "document")
+            if docx_bytes:
+                (file_output_dir / "document.docx").write_bytes(docx_bytes)
+            if document.searchable_pdf:
+                (file_output_dir / "document_searchable.pdf").write_bytes(
+                    document.searchable_pdf
+                )
 
             assets = doc_ir.collect_assets(document)
             if assets:
@@ -313,9 +353,9 @@ def run_auto_batch(
                 (file_output_dir / "form_responses.csv").write_bytes(responses_csv)
 
             shutil.rmtree(per_file_ws, ignore_errors=True)
-            progress_bar.progress((idx + 1) / len(valid_files))
+            progress_bar.progress((idx + 1) / n_files)
 
-        status_text.text("Batch OCR complete! Zipping results...")
+        status_text.markdown(f"**{n_files} file(s) parsed** — zipping results...")
 
         out_zip_buffer = io.BytesIO()
         with zipfile.ZipFile(out_zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -671,55 +711,97 @@ def render_auto_results():
     summary = st.session_state.get("auto_summary", {})
     downloads = st.session_state.get("auto_downloads", {})
 
-    st.success("🎉 Document parsed!")
-
+    n_pages = summary.get("n_pages", 0)
     counts = summary.get("region_counts", {})
     chips = " · ".join(f"{k}: {v}" for k, v in counts.items()) or "no regions"
-    st.caption(
-        f"{summary.get('n_pages', 0)} page(s) · "
-        f"route(s): {', '.join(summary.get('routes', [])) or '-'} · {chips}"
+    st.success(
+        f"🎉 Parsed {n_pages} page(s) · "
+        f"{', '.join(summary.get('routes', [])) or 'no route'} · {chips}"
     )
+
+    # One collapsed notice block rather than up to three stacked banners: the
+    # downloads are what people came for and should not be pushed off-screen.
+    notices = []
     if summary.get("n_form_groups"):
-        st.info(
+        notices.append(
             f"Extracted {summary['n_form_groups']} survey/form response group(s) — "
             "see the **Responses** tab."
         )
     if summary.get("n_markup_disagreements"):
-        st.warning(
+        notices.append(
             f"{summary['n_markup_disagreements']} OCR/geometric mark disagreement(s) "
             "were left unchanged and flagged for review."
         )
     if summary.get("n_uncertain_marks"):
-        st.warning(
-            f"⚠️ {summary['n_uncertain_marks']} checkbox/mark(s) flagged uncertain — "
+        notices.append(
+            f"{summary['n_uncertain_marks']} checkbox/mark(s) flagged uncertain — "
             "see the **Responses** tab."
         )
+    if notices:
+        with st.expander(f"⚠️ {len(notices)} thing(s) to check", expanded=False):
+            for notice in notices:
+                st.markdown(f"- {notice}")
 
     # --- Downloads ---
     stem = downloads.get("stem", "document")
+    # Grouped by what the file is *for*, and every slot is always rendered — a
+    # missing output greys out in place instead of reflowing the grid.
+    searchable = downloads.get("searchable_pdf")
+    text_bytes = downloads.get("text")
+    docx_bytes = downloads.get("docx")
+    md_zip = downloads.get("markdown_zip")
+    tables_zip = downloads.get("tables_zip")
+
+    st.caption("**Read and edit**")
     d1, d2, d3, d4 = st.columns(4)
     with d1:
-        md_zip = downloads.get("markdown_zip")
         st.download_button(
-            "⬇️ Markdown + assets", md_zip or b"", file_name=f"{stem}_markdown.zip",
-            mime="application/zip", disabled=not md_zip, use_container_width=True,
+            "⬇️ Plain text", text_bytes or b"", file_name=f"{stem}.txt",
+            mime="text/plain", disabled=not text_bytes, use_container_width=True,
         )
     with d2:
         st.download_button(
-            "⬇️ JSON", downloads.get("json") or b"{}", file_name=f"{stem}.json",
-            mime="application/json", use_container_width=True,
+            "⬇️ Word", docx_bytes or b"", file_name=f"{stem}.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            disabled=not docx_bytes, use_container_width=True,
+            help=None if docx_bytes else "Unavailable: python-docx is not installed.",
         )
     with d3:
-        tables_zip = downloads.get("tables_zip")
         st.download_button(
-            "⬇️ Tables (CSV)", tables_zip or b"", file_name=f"{stem}_tables.zip",
-            mime="application/zip", disabled=not tables_zip, use_container_width=True,
+            "⬇️ Markdown", md_zip or b"", file_name=f"{stem}_markdown.zip",
+            mime="application/zip", disabled=not md_zip, use_container_width=True,
+            help="Markdown plus an `assets/` folder of cropped figures.",
         )
     with d4:
         st.download_button(
-            "⬇️ Full bundle", downloads.get("full") or b"", file_name=f"{stem}_bundle.zip",
+            "⬇️ Searchable PDF", searchable or b"", file_name=f"{stem}_searchable.pdf",
+            mime="application/pdf", disabled=not searchable, use_container_width=True,
+            help=(
+                "The original pages with an invisible, selectable text layer."
+                if searchable else
+                "Tick **Searchable PDF** before parsing to produce this."
+            ),
+        )
+
+    st.caption("**Analyse**")
+    d5, d6, d7 = st.columns(3)
+    with d5:
+        st.download_button(
+            "⬇️ JSON", downloads.get("json") or b"{}", file_name=f"{stem}.json",
+            mime="application/json", use_container_width=True,
+            help="Regions, bounding boxes, confidence and markup states.",
+        )
+    with d6:
+        st.download_button(
+            "⬇️ Tables (CSV)", tables_zip or b"", file_name=f"{stem}_tables.zip",
+            mime="application/zip", disabled=not tables_zip, use_container_width=True,
+            help=None if tables_zip else "No tables were detected in this document.",
+        )
+    with d7:
+        st.download_button(
+            "⬇️ Everything", downloads.get("full") or b"", file_name=f"{stem}_bundle.zip",
             mime="application/zip", disabled=not downloads.get("full"), use_container_width=True,
-            type="primary",
+            type="primary", help="Every format above in one ZIP.",
         )
 
     responses_csv = downloads.get("responses_csv")
@@ -731,16 +813,24 @@ def render_auto_results():
             mime="text/csv",
         )
 
-    tabs = st.tabs(["📄 Document", "📊 Tables", "🖼️ Figures", "☑️ Responses", "🗺️ Layout preview"])
-    with tabs[0]:
+    # Without survey extraction there is never any mark/response content, so the
+    # Responses tab is dropped rather than shown permanently empty.
+    labels = ["📄 Document", "📊 Tables", "🖼️ Figures"]
+    if SURVEY_EXTRACTION_UI_ENABLED:
+        labels.append("☑️ Responses")
+    labels.append("🗺️ Layout preview")
+
+    tabs = dict(zip(labels, st.tabs(labels)))
+    with tabs["📄 Document"]:
         render_document_tab(document)
-    with tabs[1]:
+    with tabs["📊 Tables"]:
         render_tables_tab(document)
-    with tabs[2]:
+    with tabs["🖼️ Figures"]:
         render_figures_tab(document)
-    with tabs[3]:
-        render_markup_tab(document)
-    with tabs[4]:
+    if SURVEY_EXTRACTION_UI_ENABLED:
+        with tabs["☑️ Responses"]:
+            render_markup_tab(document)
+    with tabs["🗺️ Layout preview"]:
         render_layout_tab(document)
 
 
@@ -748,11 +838,144 @@ def render_auto_results():
 #      AUTOMATIC PIPELINE — UI
 # ==========================================
 
+def _searchable_pdf_language(key, enabled):
+    """Tesseract language for the word-positioning pass.
+
+    Only the word *positions* come from Tesseract, but the language still
+    matters: on a scanned German questionnaire, `deu` placed 87.6% of tokens on
+    their exact word box against 82.1% for `eng`. Mismatched tokens stay
+    searchable, they just highlight a wider span.
+    """
+    auto = "Detect automatically"
+    names = [auto, *searchable_pdf.TESSERACT_LANGUAGES]
+    # Rendered even when the searchable PDF is switched off, just greyed out, so
+    # ticking the box does not push everything below it down a row.
+    choice = st.selectbox(
+        "Document language",
+        names,
+        index=0,
+        key=key,
+        disabled=not enabled,
+        help=(
+            "Detection reads the text Text Lab already extracted, per page, so "
+            "mixed-language documents are handled page by page; pages with too "
+            "little text keep the English default. Set this explicitly if a "
+            "document is misdetected. Either way it only affects how precisely "
+            "each word is located — the text itself always comes from Text Lab's OCR."
+        ),
+    )
+    if not enabled:
+        return searchable_pdf.DEFAULT_TESSERACT_LANG
+    if choice == auto:
+        return "auto"
+    return searchable_pdf.TESSERACT_LANGUAGES[choice]
+
+
+#: Rough per-option cost, shown so a user knows what they are opting into
+#: before starting a job that may run for minutes with no way to cancel.
+_OPTION_COSTS = {
+    "highest_quality": "every page through the vision model",
+    "searchable_pdf": "a word-positioning pass per page",
+    "describe_images": "one vision-model call per figure",
+    "extract_survey": "one vision-model call per question",
+}
+
+
+def _parse_options(prefix, *, batch=False):
+    """Shared parse-option panel. Returns the settings as a dict.
+
+    Single-document and batch offered the same options in two diverging copies;
+    keeping one panel means an option added here reaches both.
+    """
+    options = {}
+    with st.container(border=True):
+        if batch:
+            # Batch multiplies the cost by the file count, so this stays a
+            # choice: someone queueing 200 documents should be able to decline.
+            c1, c2 = st.columns([1, 1])
+            with c1:
+                options["searchable_pdf"] = st.checkbox(
+                    "🔍 Searchable PDF for each file",
+                    value=True,
+                    key=f"{prefix}_searchable_pdf",
+                    help=(
+                        "Adds `document_searchable.pdf` per file: the original "
+                        "pages with an invisible, selectable text layer."
+                    ),
+                )
+        else:
+            # Always produced for a single document: it is the most useful
+            # output and costs a couple of seconds a page.
+            options["searchable_pdf"] = True
+            c2 = st.container()
+        with c2:
+            options["ocr_lang"] = _searchable_pdf_language(
+                f"{prefix}_pdf_lang", options["searchable_pdf"]
+            )
+
+        st.caption("**Quality and AI analysis**")
+        c3, c4 = st.columns([1, 1])
+        with c3:
+            options["highest_quality"] = st.checkbox(
+                "🔬 Highest quality",
+                value=False,
+                key=f"{prefix}_hq",
+                help=(
+                    "Sends every page through PaddleOCR-VL, even pages that "
+                    "already have a digital text layer. Best for equations, "
+                    "forms and complex layouts. Pages with detected math are "
+                    "routed to the vision model automatically either way."
+                ),
+            )
+        with c4:
+            options["describe_images"] = st.checkbox(
+                "🖼️ Describe figures",
+                value=False,
+                key=f"{prefix}_describe_images",
+                help=(
+                    "Adds a generated description and visible-text "
+                    "transcription to each detected figure."
+                ),
+            )
+
+        options["extract_survey"] = False
+        options["same_template"] = False
+        if SURVEY_EXTRACTION_UI_ENABLED:
+            options["extract_survey"] = st.checkbox(
+                "🧪 Extract survey/form responses (experimental)",
+                value=False,
+                key=f"{prefix}_extract_survey",
+                help=(
+                    "Question-level response extraction at 300 DPI. Original OCR "
+                    "text is preserved and every answer is flagged for review."
+                ),
+            )
+            if batch and options["extract_survey"]:
+                options["same_template"] = st.checkbox(
+                    "📐 All files use the same questionnaire layout",
+                    value=False,
+                    key=f"{prefix}_same_template",
+                )
+
+        # Only report what the user actually opted into. The searchable PDF is
+        # unconditional for a single document, so listing it there would be
+        # describing the baseline rather than a cost.
+        chargeable = dict(_OPTION_COSTS)
+        if not batch:
+            chargeable.pop("searchable_pdf", None)
+        enabled = [chargeable[name] for name in chargeable if options.get(name)]
+        if enabled:
+            st.caption(f"⏱️ Adds {'; '.join(enabled)}.")
+        else:
+            st.caption("⏱️ Fastest settings — scanned pages only go to the vision model.")
+    return options
+
+
 def auto_single_ui():
     st.markdown(
         "Upload a **PDF** or **image** and press **Parse document**. TextLab "
         "automatically detects layout, tables, figures and formulas. Optional "
-        "AI analysis can describe images or extract survey responses."
+        "AI analysis can describe detected figures and images."
     )
     uploaded_file = st.file_uploader(
         "Choose a PDF or image file",
@@ -762,49 +985,18 @@ def auto_single_ui():
         key="auto_single_upload",
     )
     if uploaded_file is not None:
-        highest_quality = st.checkbox(
-            "🔬 Highest quality — always use the AI vision model",
-            value=False,
-            key="auto_single_hq",
-            help=(
-                "Sends every page through PaddleOCR-VL, even pages that already "
-                "have a digital text layer. Slower, but best for equations, "
-                "forms, and complex layouts. Pages with detected math are "
-                "routed to the vision model automatically either way."
-            ),
-        )
-        c_desc, c_survey = st.columns(2)
-        with c_desc:
-            describe_images = st.checkbox(
-                "🖼️ Describe figures and images",
-                value=False,
-                key="auto_single_describe_images",
-                help=(
-                    "Uses the local vision-language model to add a generated "
-                    "description and visible-text transcription to detected figures."
-                ),
-            )
-        with c_survey:
-            extract_survey = st.checkbox(
-                "🧪 Extract survey/form responses (experimental)",
-                value=False,
-                key="auto_single_extract_survey",
-                help=(
-                    "Uses 300-DPI question crops and the local vision-language model. "
-                    "Original OCR text is preserved. This model has not passed the "
-                    "multi-document release benchmark, so extracted responses are "
-                    "flagged for review."
-                ),
-            )
+        opts = _parse_options("auto_single")
         if st.session_state.ocr_running:
             st.warning("⏳ A job is currently running. The button is disabled until completion.")
         if st.button("📑 Parse document", type="primary",
                      disabled=st.session_state.ocr_running, key="auto_single_btn"):
             run_auto_single(
                 uploaded_file,
-                native_fast_lane=not highest_quality,
-                describe_images=describe_images,
-                extract_survey=extract_survey,
+                native_fast_lane=not opts["highest_quality"],
+                describe_images=opts["describe_images"],
+                extract_survey=opts["extract_survey"],
+                searchable_pdf=opts["searchable_pdf"],
+                ocr_lang=opts["ocr_lang"],
             )
 
     if st.session_state.get("auto_complete"):
@@ -827,56 +1019,19 @@ def auto_batch_ui():
         key="auto_batch_upload",
     )
     if batch_zip is not None:
-        highest_quality = st.checkbox(
-            "🔬 Highest quality — always use the AI vision model",
-            value=False,
-            key="auto_batch_hq",
-            help=(
-                "Sends every page through PaddleOCR-VL, even pages that already "
-                "have a digital text layer. Slower, but best for equations, "
-                "forms, and complex layouts."
-            ),
-        )
-        c_desc, c_survey = st.columns(2)
-        with c_desc:
-            describe_images = st.checkbox(
-                "🖼️ Describe figures and images",
-                value=False,
-                key="auto_batch_describe_images",
-            )
-        with c_survey:
-            extract_survey = st.checkbox(
-                "🧪 Extract survey/form responses (experimental)",
-                value=False,
-                key="auto_batch_extract_survey",
-                help=(
-                    "Runs local, high-resolution response extraction for each form. "
-                    "Original OCR text remains unchanged. Results require review "
-                    "until the survey benchmark is complete."
-                ),
-            )
-        same_template = False
-        if extract_survey:
-            same_template = st.checkbox(
-                "📐 All files use the same questionnaire layout",
-                value=False,
-                key="auto_batch_same_template",
-                help=(
-                    "Learns normalized question crops and the printed option schema "
-                    "from the first document, then reuses them for the remaining "
-                    "files. Every answer is still read independently."
-                ),
-            )
+        opts = _parse_options("auto_batch", batch=True)
         if st.session_state.ocr_running:
             st.warning("⏳ A job is currently running. The button is disabled until completion.")
         if st.button("📦 Parse batch", type="primary",
                      disabled=st.session_state.ocr_running, key="auto_batch_btn"):
             run_auto_batch(
                 batch_zip,
-                native_fast_lane=not highest_quality,
-                describe_images=describe_images,
-                extract_survey=extract_survey,
-                same_template=same_template,
+                native_fast_lane=not opts["highest_quality"],
+                describe_images=opts["describe_images"],
+                extract_survey=opts["extract_survey"],
+                same_template=opts["same_template"],
+                searchable_pdf=opts["searchable_pdf"],
+                ocr_lang=opts["ocr_lang"],
             )
 
     if st.session_state.get("batch_auto_complete"):

@@ -1,6 +1,6 @@
 # Optical Character Recognition (OCR)
 
-The OCR tool extracts editable text, tables, figures, and formulas from scanned PDFs or images, and preserves the document's layout in a structured result. Optional local analysis can describe figures or extract question-level survey responses.
+The OCR tool extracts editable text, tables, figures, and formulas from scanned PDFs or images, and preserves the document's layout in a structured result. Optional local analysis can describe figures.
 
 ## Supported Input
 
@@ -18,31 +18,35 @@ Under the hood, Text Lab:
 * **Reads structure**, not just text: tables become spreadsheets, formulas become LaTeX, and figures are cropped out.
 * **Takes a fast lane for born-digital PDFs:** pages that already contain a real text layer are read directly (no AI vision needed); only scanned/image pages go through the vision model.
 * Optionally **describes detected figures/images** with Text Lab's local vision-language model. Generated descriptions and visible-text transcriptions remain separate from printed OCR content.
-* Optionally runs the **experimental survey/form response extractor** on complete 300-DPI question sections with the local vision-language model. Paddle-recognised controls and conservative option-pattern evidence determine which sections are submitted; ordinary tables and isolated circle-like shapes are excluded. The response model receives the section image, not Paddle's inferred answer schema, and returns one fixed structure for simple questions, conditional subquestions, ratings, and matrices. TextLab assigns IDs, verifies each marked position against an echoed choice label, derives selection constraints independently, and flags empty or inconsistent responses. OCR text and table HTML are immutable. Until a representative multi-document benchmark approves a model, all extracted groups are flagged for review.
 
 Results are shown in tabs:
 
 * **Document** — the full text rendered in reading order, with tables, figures, and formulas inline.
 * **Tables** — each detected table as an interactive spreadsheet, with a per-table CSV download.
 * **Figures** — cropped images, charts, and seals, plus generated descriptions when requested.
-* **Responses** — question/row-level selected, cancelled, or ambiguous responses and their evidence crops when survey extraction was requested. Review flags are shown instead of silently changing the OCR.
 * **Layout preview** — the page image with colour-coded boxes for each region type.
 
 ### Downloads
 
-* **Markdown + assets (.zip):** clean Markdown with the cropped figures alongside.
+* **Searchable PDF:** the original pages, unchanged to the eye, with an invisible text layer so the scan becomes selectable and searchable. Produced automatically for a single document; for a batch it is a tick-box, since the cost multiplies by the number of files. The indexed text is Text Lab's own OCR result — Tesseract runs a second pass purely to locate each word, and never overrides what was transcribed. Table cells are included, since they really are printed; formulas are left out, because the exported LaTeX is not what the reader sees. Tables align less precisely than prose — the reading order of a grid and of flowing text do not always agree — so a mis-set cell stays searchable but highlights a wider span.
+
+    The document language is detected automatically, per page, from the text Text Lab already extracted, so mixed-language documents are handled page by page. It only affects how precisely each word is positioned: on a scanned German questionnaire, using `deu` placed 87.6% of words on their exact box against 82.1% for `eng`. Pages with too little text keep the English default, and you can always set the language explicitly.
+* **Plain text (.txt):** the text in reading order, with tables rendered as aligned columns and no markup. Best for text analysis or pasting elsewhere.
+* **Word (.docx):** an editable document with real headings, Word tables, and embedded figures — for revising or citing the result.
+* **Markdown + assets (.zip):** clean Markdown with the cropped figures alongside. Best for LLM/RAG ingestion.
 * **JSON:** the canonical structured representation (regions, bounding boxes, confidence, markup states) for developers and further analysis.
 * **Tables (.csv .zip):** one CSV per detected table.
-* **Form responses (.csv):** one row per question or matrix row when survey responses were extracted.
-* **Full bundle (.zip):** Markdown, JSON, assets, table CSVs, and semantic form-response CSV together.
+* **Full bundle (.zip):** Markdown, plain text, `.docx`, JSON, assets, and table CSVs together.
+
+Formats are generated from the same structured result, so they always agree; nothing is re-OCR'd per download.
 
 ### Batch processing (ZIP)
 
-Choose **Batch OCR (ZIP)**, upload a `.zip` of PDFs/images, and press **Parse batch**. The result ZIP mirrors your original folder structure, with a `document.md`, `document.json`, a `tables/` folder, an `assets/` folder, and (when requested) `form_responses.csv` for each file.
+Choose **Batch OCR (ZIP)**, upload a `.zip` of PDFs/images, and press **Parse batch**. The result ZIP mirrors your original folder structure, with a `document.md`, `document.txt`, `document.docx`, `document.json`, a `tables/` folder, and an `assets/` folder for each file.
 
-When **Extract survey/form responses** is enabled, **All files use the same questionnaire layout** appears. This learns normalized question crop locations from the first document and reuses them for later files. Each response image is still reconstructed and analysed independently; answer states are never copied between respondents. A later optimization will freeze a validated first-document structure and use an ID-only mark pass for subsequent files, but that switch remains disabled until mandatory layout-drift checks are benchmarked.
+### Survey/form response extraction (not enabled)
 
-For reproducible A/B audits, `schema-free-v2` is the default survey contract and `paddle-id-v1` retains the repaired Paddle-derived baseline. Version 2 clamps crops to question boundaries, removes explicitly numbered adjacent-question spill, enforces one-row versus matrix structure, scopes printed multiple-answer cues to the current subquestion, and flags uncertain or missing matrix marks. The audit helper accepts `--contract` and saves exact crops, prompts, schemas, raw replies, generation settings, and a manual boundary/choice-clipping review template. The old `schema-free-v1` command spelling is accepted as an alias for v2 so it cannot silently run the weaker validator. Ranking questions and continuous mark-anywhere-on-a-line scales are currently out of scope.
+A question-level survey/form response extractor is present in the codebase but **switched off in the interface** while it is validated against a representative multi-document benchmark. It renders complete 300-DPI question sections to the local vision-language model, assigns its own IDs, verifies each marked position against an echoed choice label, derives selection constraints independently, and flags empty or inconsistent responses; OCR text and table HTML are never modified by it. Developers can reach it through `auto_ocr.process_document(..., extract_survey=True)`, or re-expose the UI controls, the **Responses** tab, and the form-responses CSV by setting `SURVEY_EXTRACTION_UI_ENABLED = True` in `src/pages/OCR.py`.
 
 ## Advanced: legacy engines
 
