@@ -8,6 +8,7 @@ import json
 import pathlib
 import sys
 import tempfile
+import time
 import zipfile
 
 import numpy as np
@@ -54,6 +55,75 @@ def test_adapter_and_exports():
     assert any(n.startswith("tables/") for n in names)
     assert any(n.startswith("assets/") for n in names)
     json.loads(doc_ir.to_json(doc))
+
+
+def test_text_export():
+    doc = doc_ir.Document(pages=[doc_ir.from_paddle_vl(PAGE_JSON)], source_name="s.pdf")
+    txt = doc_ir.to_text(doc)
+    assert "Survey Form" in txt and "E = mc^2" in txt
+    # Tables become readable columns, never raw markup.
+    assert "A" in txt and "1" in txt
+    assert "<table>" not in txt and "<td>" not in txt and "##" not in txt
+    # A checkbox keeps its state; the crop is named rather than embedded.
+    assert "[?]" in txt or "[x]" in txt or "[ ]" in txt
+
+    two = doc_ir.Document(pages=[
+        doc_ir.from_paddle_vl(PAGE_JSON), doc_ir.from_paddle_vl(PAGE_JSON)
+    ])
+    two.pages[1].page_number = 2
+    assert "--- page 2 ---" in doc_ir.to_text(two)
+    assert doc_ir.to_text(doc_ir.Document(pages=[])).strip() == ""
+
+
+def test_docx_export():
+    doc = doc_ir.Document(pages=[doc_ir.from_paddle_vl(PAGE_JSON)], source_name="s.pdf")
+    blob = doc_ir.build_docx(doc, "s")
+    if blob is None:  # python-docx absent: the caller hides the download
+        return
+    assert "word/document.xml" in zipfile.ZipFile(io.BytesIO(blob)).namelist()
+
+    # A figure carries its crop into the document; a checkbox stays a text
+    # marker, so embedding is checked on a page that actually has a figure.
+    with_figure = doc_ir.Document(pages=[doc_ir.Page(page_number=1, regions=[
+        doc_ir.Region("r1", doc_ir.FIGURE, [0, 0, 40, 40], 0, {"text": "Fig 1"},
+                      asset={"b64": crop_b64("checked"), "ext": "png"}),
+    ])])
+    fig_blob = doc_ir.build_docx(with_figure, "f")
+    fig_names = zipfile.ZipFile(io.BytesIO(fig_blob)).namelist()
+    assert any(n.startswith("word/media/") for n in fig_names), "figure crop not embedded"
+
+    import docx as _docx
+
+    # The caption is italic on its run. Setting ``Paragraph.italic`` instead is
+    # accepted silently by python-docx and formats nothing.
+    caption_runs = [
+        run
+        for paragraph in _docx.Document(io.BytesIO(fig_blob)).paragraphs
+        for run in paragraph.runs
+        if run.text == "Fig 1"
+    ]
+    assert caption_runs, "figure caption missing"
+    assert all(run.italic for run in caption_runs), "figure caption is not italic"
+
+    parsed = _docx.Document(io.BytesIO(blob))
+    assert parsed.paragraphs[0].style.name.startswith("Heading")
+    assert parsed.paragraphs[0].text == "Survey Form"
+    # The table must be a real Word table, not a pasted string.
+    assert len(parsed.tables) == 1
+    table = parsed.tables[0]
+    assert (len(table.rows), len(table.columns)) == (2, 2)
+    assert [c.text for c in table.rows[0].cells] == ["A", "B"]
+    assert [c.text for c in table.rows[1].cells] == ["1", "2"]
+    assert doc_ir.build_docx(doc_ir.Document(pages=[]), "empty") is not None
+
+
+def test_full_bundle_carries_every_format():
+    doc = doc_ir.Document(pages=[doc_ir.from_paddle_vl(PAGE_JSON)], source_name="s.pdf")
+    names = zipfile.ZipFile(io.BytesIO(doc_ir.build_full_bundle(doc, "s"))).namelist()
+    for expected in ("s.md", "s.txt", "s.json"):
+        assert expected in names, f"{expected} missing from bundle: {names}"
+    if doc_ir.build_docx(doc, "s") is not None:
+        assert "s.docx" in names
 
 
 def test_finalize_vl_page():

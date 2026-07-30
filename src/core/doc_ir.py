@@ -21,7 +21,7 @@ import json
 import re
 import zipfile
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
@@ -281,6 +281,13 @@ class Page:
     source: str = "paddleocr-vl-1.6"
     markdown: Optional[str] = None  # engine-native markdown, if any
     form_groups: List[FormGroup] = field(default_factory=list)
+    #: Invisible-PDF-layer entries in full-resolution raster pixels, produced by
+    #: :mod:`searchable_pdf`. Transient: valid only while the raster exists.
+    text_layer: Optional[List[Dict[str, Any]]] = None
+    #: ``(width, height)`` in pixels of the raster ``text_layer`` was measured
+    #: on, so the PDF writer can derive the pixel->point scale from real
+    #: geometry instead of assuming a DPI. Transient, like ``text_layer``.
+    raster_size: Optional[Tuple[int, int]] = None
 
     def ordered_regions(self) -> List[Region]:
         return sorted(self.regions, key=lambda r: (r.reading_order, r.id))
@@ -293,8 +300,9 @@ class Page:
             "source": self.source,
             "regions": [r.to_dict() for r in self.regions],
             "form_groups": [g.to_dict() for g in self.form_groups],
-            # image_b64 / markdown deliberately excluded from the canonical JSON
-            # to keep it compact; assets are exported separately.
+            # image_b64 / markdown / text_layer deliberately excluded from the
+            # canonical JSON to keep it compact; assets and the searchable PDF
+            # are exported separately.
         }
 
 
@@ -302,6 +310,9 @@ class Page:
 class Document:
     pages: List[Page] = field(default_factory=list)
     source_name: str = ""
+    #: Original pages plus an invisible text layer, when the export was
+    #: requested. Bytes, so deliberately not part of :meth:`to_dict`.
+    searchable_pdf: Optional[bytes] = None
 
     def all_regions(self):
         for page in self.pages:
@@ -553,6 +564,105 @@ def to_markdown(document: Document, asset_dir: str = "assets", embed_assets: boo
     return "\n\n".join(chunks).strip() + "\n"
 
 
+def _region_to_text(region: Region) -> str:
+    """Plain-text rendering: no markup, but structure kept legible."""
+    rtype = region.type
+    if rtype == TABLE:
+        df = extract_html_table(region.content.get("html", ""))
+        if df is None:
+            return region.text.strip()
+        return df.to_string(index=False)
+    if rtype == FORMULA:
+        return region.content.get("latex", "").strip()
+    if rtype == CHECKBOX:
+        state = (region.markup or {}).get("state", "uncertain")
+        marker = {"checked": "[x]", "unchecked": "[ ]", "uncertain": "[?]"}.get(state, "[?]")
+        return f"{marker} {region.text.strip()}".rstrip()
+    if rtype in ASSET_TYPES and region.asset:
+        caption = region.text.strip()
+        return f"[{rtype}: {caption}]" if caption else f"[{rtype}]"
+    return region.text.strip()
+
+
+def to_text(document: Document, page_separator: bool = True) -> str:
+    """Plain-text rendering of the whole document in reading order."""
+    chunks: List[str] = []
+    for page in document.pages:
+        if page_separator and len(document.pages) > 1:
+            chunks.append(f"--- page {page.page_number} ---")
+        for region in page.ordered_regions():
+            text = _region_to_text(region)
+            if text.strip():
+                chunks.append(text)
+    return "\n\n".join(chunks).strip() + "\n"
+
+
+def build_docx(document: Document, doc_stem: str = "document") -> Optional[bytes]:
+    """An editable .docx with headings, paragraphs, real tables and figures.
+
+    Returns ``None`` when ``python-docx`` is unavailable, so the caller can hide
+    the download instead of failing the whole export.
+    """
+    try:
+        import docx
+        from docx.shared import Inches, Pt
+    except ImportError:
+        return None
+
+    doc = docx.Document()
+    for page_index, page in enumerate(document.pages):
+        if page_index:
+            doc.add_page_break()
+        for region in page.ordered_regions():
+            rtype = region.type
+            if rtype == TITLE:
+                text = region.text.strip()
+                if text:
+                    doc.add_heading(text, level=2)
+            elif rtype == TABLE:
+                df = extract_html_table(region.content.get("html", ""))
+                if df is None:
+                    if region.text.strip():
+                        doc.add_paragraph(region.text.strip())
+                    continue
+                table = doc.add_table(rows=1, cols=max(len(df.columns), 1))
+                table.style = "Table Grid"
+                for cell, column in zip(table.rows[0].cells, df.columns):
+                    run = cell.paragraphs[0].add_run(str(column))
+                    run.bold = True
+                for record in df.itertuples(index=False):
+                    for cell, value in zip(table.add_row().cells, record):
+                        cell.text = "" if pd.isna(value) else str(value)
+            elif rtype == FORMULA:
+                latex = region.content.get("latex", "").strip()
+                if latex:
+                    run = doc.add_paragraph().add_run(latex)
+                    run.font.name = "Consolas"
+                    run.font.size = Pt(10)
+            elif rtype == CHECKBOX:
+                state = (region.markup or {}).get("state", "uncertain")
+                marker = {"checked": "☒", "unchecked": "☐", "uncertain": "☐?"}.get(state, "☐?")
+                doc.add_paragraph(f"{marker} {region.text.strip()}".rstrip())
+            elif rtype in ASSET_TYPES and region.asset and region.asset.get("b64"):
+                try:
+                    doc.add_picture(
+                        io.BytesIO(base64.b64decode(region.asset["b64"])), width=Inches(5.5)
+                    )
+                except Exception:
+                    doc.add_paragraph(f"[{rtype} could not be embedded]")
+                caption = region.text.strip()
+                if caption:
+                    # Italics live on the run, not the paragraph: assigning
+                    # ``Paragraph.italic`` is accepted silently and does nothing.
+                    doc.add_paragraph().add_run(caption).italic = True
+            elif region.text.strip():
+                doc.add_paragraph(region.text.strip())
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
+
+
 def collect_assets(document: Document) -> Dict[str, bytes]:
     """Return ``{filename: png_bytes}`` for every region that carries a crop."""
     out: Dict[str, bytes] = {}
@@ -667,11 +777,17 @@ def build_tables_csv_zip(document: Document) -> Optional[bytes]:
 
 
 def build_full_bundle(document: Document, doc_stem: str = "document") -> bytes:
-    """Everything: markdown, canonical JSON, assets, and per-table CSVs."""
+    """Everything: markdown, plain text, .docx, canonical JSON, assets, table CSVs."""
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr(f"{doc_stem}.md", to_markdown(document))
+        zf.writestr(f"{doc_stem}.txt", to_text(document))
         zf.writestr(f"{doc_stem}.json", to_json(document))
+        docx_bytes = build_docx(document, doc_stem)
+        if docx_bytes:
+            zf.writestr(f"{doc_stem}.docx", docx_bytes)
+        if document.searchable_pdf:
+            zf.writestr(f"{doc_stem}_searchable.pdf", document.searchable_pdf)
         for fname, data in collect_assets(document).items():
             zf.writestr(f"assets/{fname}", data)
         for entry in tables_to_dataframes(document):
