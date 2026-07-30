@@ -30,6 +30,12 @@ os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
 
 RESULT_MARKER = "TEXTLAB_PADDLEVL_RESULT_JSON="
 
+#: Emitted on stdout as each page finishes, so the parent can report real
+#: progress instead of one message for the whole batch. Recognition runs at
+#: roughly 25-50 s per page, so a multi-page document otherwise sits on a single
+#: unchanging line for minutes and reads as a hung app.
+PROGRESS_MARKER = "TEXTLAB_PADDLEVL_PROGRESS="
+
 # Layout labels whose regions we cut out as image crops (superset of the IR's
 # asset types so the parent can classify checkboxes and render figures).
 DEFAULT_ASSET_LABELS = {
@@ -242,6 +248,8 @@ def main():
         if lbl:
             asset_labels.add(lbl)
 
+    total = len(args.images)
+    print(f"{PROGRESS_MARKER}0/{total}", flush=True)
     pipeline = _build_pipeline()
 
     pages = []
@@ -249,6 +257,7 @@ def main():
         pages.append(
             process_image(pipeline, Path(image), asset_labels, args.crop_margin, idx)
         )
+        print(f"{PROGRESS_MARKER}{idx}/{total}", flush=True)
 
     print(RESULT_MARKER + json.dumps({"pages": pages}, ensure_ascii=False))
 

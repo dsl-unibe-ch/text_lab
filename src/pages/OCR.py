@@ -372,7 +372,9 @@ def run_auto_batch(
         st.exception(e)
     finally:
         if shared_vision_client is not None:
-            shared_vision_client.close(unload_model=True)
+            # Not evicted: it expires after keep_alive, and the next OCR worker
+            # frees the card itself. See vision_enrich.free_gpu.
+            shared_vision_client.close()
         st.session_state.ocr_running = False
         _cleanup_job_dir(JOB_DIR)
 

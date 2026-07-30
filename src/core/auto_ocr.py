@@ -22,6 +22,7 @@ import io
 import json
 import os
 import subprocess
+import time
 from pathlib import Path
 from typing import Callable, List, Optional, Tuple
 
@@ -43,6 +44,9 @@ MIN_CHARS_NATIVE = 20
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif", ".webp"}
 RESULT_MARKER = "TEXTLAB_PADDLEVL_RESULT_JSON="
+#: Kept in step with ``paddle_vl_worker.PROGRESS_MARKER`` by hand: the worker
+#: runs in a separate conda env, so it cannot be imported from here.
+PROGRESS_MARKER = "TEXTLAB_PADDLEVL_PROGRESS="
 
 ProgressFn = Callable[[float, str], None]
 
@@ -73,14 +77,30 @@ def _emit(progress: Optional[ProgressFn], frac: float, text: str):
 # ==========================================
 
 
+#: Kill the worker when it produces no output at all for this long.
+#:
+#: Deliberately a *stall* budget, not a total one: a 40-page scan legitimately
+#: runs for half an hour, so a total timeout would abort honest work. The worker
+#: reports every finished page, so silence this long means it is wedged — and a
+#: wedged worker used to leave the page on "Running PaddleOCR-VL..." forever,
+#: recoverable only by reloading the browser.
+VL_STALL_TIMEOUT = float(os.environ.get("TEXTLAB_VL_STALL_TIMEOUT", "900"))
+
+
 def run_vl_worker(
     image_paths: List[Path],
     *,
     backend_python: Optional[str] = None,
     worker_path: Optional[Path] = None,
     extra_labels: str = "",
+    on_page: Optional[Callable[[int, int], None]] = None,
+    stall_timeout: Optional[float] = None,
 ) -> List[dict]:
-    """Invoke the PaddleOCR-VL worker on *image_paths*; return per-page dicts."""
+    """Invoke the PaddleOCR-VL worker on *image_paths*; return per-page dicts.
+
+    ``on_page(done, total)`` is called as each page is recognised, so callers can
+    show real progress across what is by far the slowest stage.
+    """
     if not image_paths:
         return []
     backend_python = backend_python or _default_backend_python()
@@ -97,19 +117,94 @@ def run_vl_worker(
     if extra_labels:
         cmd += ["--extra-labels", extra_labels]
 
-    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", env=env)
-    if result.returncode != 0:
+    # The worker is a separate process allocating ~8.4 GiB, which does not fit
+    # beside a resident ~20 GiB vision model on a 23 GiB card. Ollama cannot
+    # account for a non-Ollama consumer, so free the card here -- and *wait* for
+    # it, because an unload request returns while the model is still resident.
+    try:
+        evicted = vision_enrich.free_gpu()
+        if evicted:
+            print(f"[auto_ocr] freed GPU for the OCR worker: {', '.join(evicted)}", flush=True)
+    except Exception:
+        pass
+
+    returncode, stdout, stderr = _run_streaming(
+        cmd, env, on_page, stall_timeout if stall_timeout is not None else VL_STALL_TIMEOUT
+    )
+    if returncode != 0:
         raise RuntimeError(
             "PaddleOCR-VL backend failed.\n"
-            f"stdout:\n{result.stdout[-4000:]}\n\nstderr:\n{result.stderr[-4000:]}"
+            f"stdout:\n{stdout[-4000:]}\n\nstderr:\n{stderr[-4000:]}"
         )
-    for line in reversed(result.stdout.splitlines()):
+    for line in reversed(stdout.splitlines()):
         if line.startswith(RESULT_MARKER):
             return json.loads(line[len(RESULT_MARKER):]).get("pages", [])
     raise RuntimeError(
         "PaddleOCR-VL backend did not return JSON.\n"
-        f"stdout:\n{result.stdout[-4000:]}\n\nstderr:\n{result.stderr[-4000:]}"
+        f"stdout:\n{stdout[-4000:]}\n\nstderr:\n{stderr[-4000:]}"
     )
+
+
+def _run_streaming(
+    cmd: List[str],
+    env: dict,
+    on_page: Optional[Callable[[int, int], None]],
+    stall_timeout: float,
+) -> Tuple[int, str, str]:
+    """Run *cmd*, forwarding page-progress markers, and guard against a stall.
+
+    Both pipes are drained by reader threads. That is not optional: the worker
+    writes progress lines while we wait, and a single-pipe read would deadlock as
+    soon as the other pipe's buffer filled.
+    """
+    import threading
+
+    proc = subprocess.Popen(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, encoding="utf-8", errors="replace", env=env,
+    )
+    out_lines: List[str] = []
+    err_lines: List[str] = []
+    last_output = [time.monotonic()]
+
+    def drain(stream, sink, watch_progress):
+        for line in stream:
+            last_output[0] = time.monotonic()
+            sink.append(line)
+            if not watch_progress or not line.startswith(PROGRESS_MARKER):
+                continue
+            try:
+                done, total = line[len(PROGRESS_MARKER):].strip().split("/")
+                if on_page is not None:
+                    on_page(int(done), int(total))
+            except Exception:
+                pass
+        stream.close()
+
+    threads = [
+        threading.Thread(target=drain, args=(proc.stdout, out_lines, True), daemon=True),
+        threading.Thread(target=drain, args=(proc.stderr, err_lines, False), daemon=True),
+    ]
+    for thread in threads:
+        thread.start()
+
+    while proc.poll() is None:
+        if stall_timeout and time.monotonic() - last_output[0] > stall_timeout:
+            proc.kill()
+            proc.wait()
+            for thread in threads:
+                thread.join(timeout=5)
+            raise RuntimeError(
+                f"PaddleOCR-VL backend produced no output for {stall_timeout:.0f}s "
+                "and was stopped. Re-run the document; if it happens again, the "
+                "page count or GPU memory may be the cause.\n"
+                f"stdout:\n{''.join(out_lines)[-4000:]}\n\n"
+                f"stderr:\n{''.join(err_lines)[-4000:]}"
+            )
+        time.sleep(0.5)
+    for thread in threads:
+        thread.join(timeout=10)
+    return proc.returncode, "".join(out_lines), "".join(err_lines)
 
 
 # ==========================================
@@ -613,8 +708,21 @@ def process_document(
     # ---- standalone image: always the VL lane -------------------------------
     if suffix in IMAGE_EXTS:
         _emit(progress, 0.1, "Analysing image...")
+
+        def _image_stage(done: int, total: int):
+            # The worker announces itself before loading its weights, which is
+            # the bulk of the wait on a single image (~30-45 s). Saying so beats
+            # leaving "Analysing image..." on screen looking wedged.
+            _emit(
+                progress,
+                0.15 if done == 0 else 0.7,
+                "Loading the recognition model..." if done == 0
+                else "Reading the image...",
+            )
+
         pages_json = run_vl_worker(
-            [input_path], backend_python=backend_python, worker_path=worker_path
+            [input_path], backend_python=backend_python, worker_path=worker_path,
+            on_page=_image_stage,
         )
         try:
             if pages_json:
@@ -629,6 +737,11 @@ def process_document(
                 )
                 document.pages.append(page)
                 if describe_images:
+                    _emit(
+                        progress, 0.85,
+                        "Describing figures and images "
+                        "(the vision model may take a minute to load)...",
+                    )
                     vision_enrich.describe_page_figures(page, _vision_client())
                 if searchable_pdf:
                     _emit(progress, 0.95, "Building searchable PDF...")
@@ -636,8 +749,12 @@ def process_document(
             _emit(progress, 1.0, "Done")
             return document
         finally:
+            # Left loaded on purpose: it expires by itself after ``keep_alive``,
+            # and the next stage that needs the card frees it (see the
+            # free_gpu call before the worker). Evicting a 20 GiB model here only
+            # to reload it for the next document costs ~60 s for nothing.
             if owned_client and vision_client is not None:
-                vision_client.close(unload_model=True)
+                vision_client.close()
 
     if suffix != ".pdf":
         raise RuntimeError(f"Unsupported input type: {suffix}")
@@ -672,18 +789,34 @@ def process_document(
     vl_pages: dict[int, doc_ir.Page] = {}
     if vl_jobs:
         _emit(progress, 0.45, f"Running PaddleOCR-VL on {len(vl_jobs)} page(s)...")
+
+        def _vl_page_done(done: int, total: int):
+            # 0.45 -> 0.65 across the recognised pages. Without this the slowest
+            # stage of all (~25-50 s per page) never updates its message.
+            _emit(
+                progress,
+                0.45 + 0.2 * (done / max(1, total)),
+                f"Running PaddleOCR-VL: page {min(done + 1, total)} of {total}..."
+                if done < total else f"Recognised {total} page(s)...",
+            )
+
         pages_json = run_vl_worker(
-            [p for _, p in vl_jobs], backend_python=backend_python, worker_path=worker_path
+            [p for _, p in vl_jobs], backend_python=backend_python, worker_path=worker_path,
+            on_page=_vl_page_done,
         )
     try:
         for idx, page_json in enumerate(pages_json if vl_jobs else []):
             page_number, raster_path = vl_jobs[idx]
-            if extract_survey:
-                _emit(
-                    progress,
-                    0.65 + 0.2 * (idx / max(1, len(vl_jobs))),
-                    f"Extracting survey responses from page {page_number}...",
-                )
+            # Always report: finalising also runs the word-geometry pass for the
+            # searchable PDF, which is seconds per page. Left silent, a long
+            # document sits on the previous message and looks wedged.
+            _emit(
+                progress,
+                0.65 + 0.2 * (idx / max(1, len(vl_jobs))),
+                f"Extracting survey responses from page {page_number}..."
+                if extract_survey
+                else f"Assembling page {page_number} of {n_pages}...",
+            )
             vl_pages[page_number] = _finalize_vl_page(
                 page_json,
                 page_number,
@@ -705,9 +838,18 @@ def process_document(
                 document.pages.append(vl_pages[page_number])
 
         if describe_images:
-            _emit(progress, 0.9, "Describing figures and images...")
+            # Per page, not once: the first call pays a ~60 s model load and each
+            # figure costs seconds more, so a single message here is indis-
+            # tinguishable from a hang on a document with several figures.
             client = _vision_client()
-            for page in document.pages:
+            n_pages_out = len(document.pages)
+            for index, page in enumerate(document.pages, start=1):
+                _emit(
+                    progress,
+                    0.85 + 0.05 * (index / max(1, n_pages_out)),
+                    f"Describing figures on page {index} of {n_pages_out} "
+                    "(the vision model may take a minute to load)...",
+                )
                 vision_enrich.describe_page_figures(page, client)
 
         if searchable_pdf:
@@ -720,8 +862,9 @@ def process_document(
         return document
     finally:
         doc.close()
+        # Kept warm deliberately; see the image lane's note above.
         if owned_client and vision_client is not None:
-            vision_client.close(unload_model=True)
+            vision_client.close()
 
 
 def _build_searchable_pdf(

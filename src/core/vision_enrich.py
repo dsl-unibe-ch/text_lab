@@ -26,6 +26,12 @@ except ImportError:  # pragma: no cover - standalone imports
     import doc_ir  # type: ignore
 
 
+#: How long to wait for Ollama to actually free a model's VRAM after being asked
+#: to unload it. Measured: the request returns instantly with all ~20 GiB still
+#: resident, and the runner takes a few seconds to exit.
+UNLOAD_WAIT_TIMEOUT = float(os.environ.get("TEXTLAB_UNLOAD_WAIT_TIMEOUT", "60"))
+
+
 class VisionModelError(RuntimeError):
     """A controlled local/remote vision-model failure."""
 
@@ -42,6 +48,69 @@ def _base_url(value: Optional[str] = None) -> str:
     if not host.startswith(("http://", "https://")):
         host = "http://" + host
     return host.rstrip("/")
+
+
+def _ollama_request(base_url: str, path: str, payload: Optional[dict] = None,
+                    timeout: float = 60.0) -> dict:
+    data = None if payload is None else json.dumps(payload).encode("utf-8")
+    request = urllib.request.Request(
+        base_url + path,
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="GET" if payload is None else "POST",
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return json.load(response)
+
+
+def loaded_models(base_url: Optional[str] = None) -> list:
+    """Names of the models Ollama currently holds in VRAM."""
+    try:
+        response = _ollama_request(_base_url(base_url), "/api/ps")
+    except Exception:
+        return []
+    return [
+        str(item.get("model") or item.get("name") or "")
+        for item in (response.get("models") or [])
+        if isinstance(item, dict)
+    ]
+
+
+def free_gpu(base_url: Optional[str] = None,
+             timeout: float = None) -> list:
+    """Evict every Ollama model and block until the VRAM is really released.
+
+    Ollama accounts for its own models, so it never needs this. A *non-Ollama*
+    GPU consumer does: TextLab's PaddleOCR-VL worker is a separate process that
+    allocates ~8.4 GiB, which does not fit beside the ~20 GiB vision model on a
+    23 GiB card. ``keep_alive: 0`` only *schedules* an unload -- it returns with
+    the whole model still resident and the runner takes seconds to exit -- so
+    without waiting here the worker starts against a nearly full card and dies
+    part-way through loading its own weights.
+
+    Called at the point of need rather than after each document, so a model that
+    is still useful stays warm (see ``OllamaVisionClient.keep_alive``).
+    """
+    if timeout is None:
+        timeout = UNLOAD_WAIT_TIMEOUT
+    url = _base_url(base_url)
+    resident = loaded_models(url)
+    if not resident:
+        return []
+    for name in resident:
+        try:
+            _ollama_request(
+                url, "/api/generate",
+                {"model": name, "prompt": "", "stream": False, "keep_alive": 0},
+            )
+        except Exception:
+            pass
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not loaded_models(url):
+            break
+        time.sleep(0.25)
+    return resident
 
 
 class OllamaVisionClient:
@@ -267,7 +336,14 @@ class OllamaVisionClient:
             )
         return result
 
-    def close(self, *, unload_model: bool = False):
+    def close(self, *, unload_model: bool = False, wait_for_unload: bool = True):
+        """Release the job lock; optionally evict the model from VRAM.
+
+        Eviction is *not* the default and callers rarely want it: the model
+        expires on its own after ``keep_alive``, and whatever needs the card next
+        frees it at the point of need (:func:`free_gpu`). Unloading here instead
+        would throw away a warm 20 GiB model that the next document may reuse.
+        """
         if unload_model and self._prepared:
             try:
                 self._request(
@@ -279,6 +355,8 @@ class OllamaVisionClient:
                         "keep_alive": 0,
                     },
                 )
+                if wait_for_unload:
+                    self._await_unload()
             except Exception:
                 pass
         self._prepared = False
@@ -288,6 +366,30 @@ class OllamaVisionClient:
                 self._lock_file.close()
             finally:
                 self._lock_file = None
+
+    def _await_unload(self, timeout: float = UNLOAD_WAIT_TIMEOUT):
+        """Block until Ollama has actually released the model's VRAM.
+
+        ``keep_alive: 0`` only *schedules* the unload: the request returns while
+        the whole model is still resident, and the runner needs seconds to exit.
+        The vision model is ~20 GiB of a 23 GiB card, so whatever runs next --
+        in practice the PaddleOCR-VL worker for the user's next document -- then
+        starts against a nearly full GPU and dies part-way through loading.
+        Waiting here costs a few seconds once and keeps that GPU handover clean.
+        """
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                loaded = {
+                    str(item.get("model") or item.get("name") or "")
+                    for item in (self._request("/api/ps").get("models") or [])
+                    if isinstance(item, dict)
+                }
+            except Exception:
+                return
+            if self.model not in loaded:
+                return
+            time.sleep(0.25)
 
     def __enter__(self):
         self.prepare()

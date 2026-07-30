@@ -205,6 +205,146 @@ def test_api_compat():
     assert md.classify_from_b64("☑", None)["state"] == "checked"
 
 
+def test_worker_reports_pages_as_they_finish():
+    """Page progress must arrive *during* the run, not after it."""
+    stub = WORK / "stub_progress.py"
+    stub.write_text(
+        "import json, sys, time\n"
+        "total = 3\n"
+        "print('TEXTLAB_PADDLEVL_PROGRESS=0/%d' % total, flush=True)\n"
+        "pages = []\n"
+        "for i in range(1, total + 1):\n"
+        "    time.sleep(0.2)\n"
+        "    pages.append({'page_number': i, 'parsing_res_list': [],\n"
+        "                  'layout_det_res': [], 'assets': {}})\n"
+        "    print('TEXTLAB_PADDLEVL_PROGRESS=%d/%d' % (i, total), flush=True)\n"
+        "print('TEXTLAB_PADDLEVL_RESULT_JSON=' + json.dumps({'pages': pages}))\n"
+    )
+    seen = []
+    pages = auto_ocr.run_vl_worker(
+        [pathlib.Path(f"p{i}.png") for i in range(3)],
+        backend_python=sys.executable, worker_path=stub,
+        on_page=lambda done, total: seen.append((done, total, time.time())),
+    )
+    assert len(pages) == 3
+    assert [(d, t) for d, t, _ in seen] == [(0, 3), (1, 3), (2, 3), (3, 3)], seen
+    # Streamed, not replayed at the end: the callbacks are spread over the run.
+    assert seen[-1][2] - seen[0][2] > 0.4, "progress arrived all at once"
+
+
+def test_wedged_worker_is_killed_instead_of_hanging():
+    """A worker that goes silent must fail loudly, not spin forever.
+
+    This is what left the OCR page on "Running PaddleOCR-VL..." with no way out
+    but reloading the browser.
+    """
+    stub = WORK / "stub_wedged.py"
+    stub.write_text("import time\ntime.sleep(600)\n")
+    started = time.time()
+    try:
+        auto_ocr.run_vl_worker(
+            [pathlib.Path("x.png")], backend_python=sys.executable,
+            worker_path=stub, stall_timeout=2.0,
+        )
+        raise AssertionError("a wedged worker should raise")
+    except RuntimeError as exc:
+        assert "no output" in str(exc)
+    elapsed = time.time() - started
+    assert elapsed < 30, f"took {elapsed:.1f}s to give up"
+
+
+def test_a_slow_but_talking_worker_is_not_killed():
+    """The guard is a stall budget, not a total one: slow pages are legitimate."""
+    stub = WORK / "stub_slow.py"
+    stub.write_text(
+        "import json, time\n"
+        "for i in range(1, 4):\n"
+        "    time.sleep(0.4)\n"
+        "    print('TEXTLAB_PADDLEVL_PROGRESS=%d/3' % i, flush=True)\n"
+        "print('TEXTLAB_PADDLEVL_RESULT_JSON=' + json.dumps({'pages': [\n"
+        "    {'page_number': 1, 'parsing_res_list': [], 'layout_det_res': [], 'assets': {}}]}))\n"
+    )
+    # Total runtime (~1.2s) exceeds the stall budget; no single gap does.
+    pages = auto_ocr.run_vl_worker(
+        [pathlib.Path("x.png")], backend_python=sys.executable,
+        worker_path=stub, stall_timeout=0.9,
+    )
+    assert len(pages) == 1
+
+
+def test_free_gpu_waits_for_the_vram_to_be_released():
+    """Regression: the next document's OCR started against a resident model.
+
+    ``keep_alive: 0`` only schedules the unload -- it returns with all ~20 GiB
+    still on the card, and the PaddleOCR-VL worker (a separate process needing
+    ~8.4 GiB) then died part-way through loading its own weights.
+    """
+    from core import vision_enrich
+
+    calls = {"unloaded": [], "polls": 0}
+    free_after = 3
+
+    def fake_request(base_url, path, payload=None, timeout=60.0):
+        if path == "/api/generate":
+            calls["unloaded"].append(payload["model"])
+            assert payload["keep_alive"] == 0
+            return {}
+        if path == "/api/ps":
+            calls["polls"] += 1
+            if calls["polls"] > free_after:
+                return {"models": []}
+            return {"models": [{"model": "vision:20b"}, {"model": "chat:8b"}]}
+        return {}
+
+    original = vision_enrich._ollama_request
+    vision_enrich._ollama_request = fake_request
+    try:
+        evicted = vision_enrich.free_gpu()
+        assert sorted(evicted) == ["chat:8b", "vision:20b"], evicted
+        assert sorted(calls["unloaded"]) == ["chat:8b", "vision:20b"]
+        # It kept polling until the card was actually clear.
+        assert calls["polls"] > free_after, calls
+
+        # Nothing resident: no unload requests, no waiting.
+        calls.update(unloaded=[], polls=0)
+        free_after = -1
+        assert vision_enrich.free_gpu() == []
+        assert calls["unloaded"] == []
+
+        # A model that never unloads must not block the app forever.
+        free_after = 10**9
+        calls.update(unloaded=[], polls=0)
+        started = time.time()
+        vision_enrich.free_gpu(timeout=0.5)
+        assert time.time() - started < 10
+    finally:
+        vision_enrich._ollama_request = original
+
+
+def test_document_run_leaves_the_vision_model_warm():
+    """The model must not be evicted at the end of a document.
+
+    It expires on its own after ``keep_alive`` and the next stage that needs the
+    card frees it, so evicting here would only pay a ~60 s reload for nothing.
+    """
+    from core import vision_enrich
+
+    class Client(vision_enrich.OllamaVisionClient):
+        def __init__(self):
+            super().__init__(model="vision:20b")
+            self._prepared = True
+            self.unload_requests = 0
+
+        def _request(self, path, payload=None):
+            if path == "/api/generate" and (payload or {}).get("keep_alive") == 0:
+                self.unload_requests += 1
+            return {}
+
+    client = Client()
+    client.close()
+    assert client.unload_requests == 0, "close() evicted a still-useful model"
+    assert client._prepared is False
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):
