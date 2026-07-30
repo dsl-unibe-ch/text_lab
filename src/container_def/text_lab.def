@@ -59,6 +59,17 @@ From: nvidia/cuda:12.8.0-cudnn-devel-ubuntu22.04
         msttcorefonts fonts-crosextra-caladea fonts-crosextra-carlito gsfonts \
         lcdf-typetools wget bzip2 gnupg
 
+    # Tesseract supplies word-level bounding boxes (image_to_data), which neither
+    # PaddleOCR-VL (block-level) nor PaddleOCR (text-line polygons) provide. It is
+    # used as a geometry-only second pass for the searchable-PDF text layer; the
+    # authoritative transcription still comes from the VL lane. Language packs are
+    # a targeted European set — `tesseract-ocr-all` would add several GB for
+    # scripts this pass does not currently align.
+    apt-get install -y --no-install-recommends \
+        tesseract-ocr tesseract-ocr-osd \
+        tesseract-ocr-eng tesseract-ocr-deu tesseract-ocr-fra \
+        tesseract-ocr-ita tesseract-ocr-spa
+
     # Apptainer is needed so Text Lab can auto-start the separate Grobid SIF.
     add-apt-repository -y ppa:apptainer/ppa
     apt-get update
@@ -109,7 +120,7 @@ EOF
         sentence-transformers \
         scikit-learn umap-learn matplotlib numpy pandas seaborn plotly \
         ipython jupyter polars pyarrow openpyxl datasets soundfile \
-        opencv-python-headless scikit-image "mcp[cli]" tabulate \
+        opencv-python-headless scikit-image "mcp[cli]" tabulate pytesseract \
         tqdm filelock evaluate librosa networkx pyvis \
         pymupdf pymupdf4llm "unstructured[all-docs]" ollama \
         gensim pyLDAvis spacy nltk wordcloud bertopic top2vec keybert stopwordsiso \
