@@ -20,6 +20,7 @@ import base64
 import cv2
 import ollama
 import io
+import pandas as pd
 from PIL import Image
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -465,14 +466,116 @@ def _group_is_multiselect(group):
     return group.question_type == "multiple" or group.selection_rule == "zero_or_more"
 
 
-def _render_form_review(document):
-    """Interactive answer-correction editor bound to ``FormOption.state``.
+REVIEW_REASON_LABELS = {
+    "answer_geometry_disagreement": "answer conflicts with geometric ink evidence",
+    "ambiguous_mark": "ambiguous response mark",
+    "extraction_failed": "response extraction failed",
+    "missing_answer": "expected answer was not found",
+    "selection_rule_violation": "answer violates the selection rule",
+    "source_disagreement": "answer evidence disagrees",
+    "structural_issue": "question structure needs checking",
+    "unbenchmarked_model": "model has not passed the release benchmark",
+    "unmapped_mark": "visible ink was not mapped to an answer",
+    "validation_warning": "validation warning",
+}
 
-    Each question is rendered as pre-filled widgets (radio for single/rating/matrix
-    rows, checkboxes for multi-answer questions). Saving writes the reviewer's
-    selections back onto the document and regenerates the CSV/JSON downloads; the
-    model's original answer is preserved in ``group.provenance``.
-    """
+
+def _option_labels(row):
+    """Unambiguous labels suitable for both widgets and correction mapping."""
+    labels = [
+        (option.label.strip() or f"option {index + 1}")
+        for index, option in enumerate(row.options)
+    ]
+    duplicates = {label for label in labels if labels.count(label) > 1}
+    return [
+        f"{label} [{index + 1}]" if label in duplicates else label
+        for index, label in enumerate(labels)
+    ]
+
+
+def _selected_answer(row):
+    labels = _option_labels(row)
+    selected = [
+        labels[index]
+        for index, option in enumerate(row.options)
+        if option.state == "selected"
+    ]
+    return " | ".join(selected) if selected else "— no answer —"
+
+
+def _group_answer_summary(group):
+    answers = []
+    for row in group.rows:
+        answer = _selected_answer(row)
+        answers.append(f"{row.label}: {answer}" if row.label else answer)
+    return "; ".join(answers) if answers else "— extraction failed —"
+
+
+def _matrix_uses_shared_single_choice_options(group):
+    """Whether a matrix can be edited safely as one compact answer column."""
+    if (
+        group.question_type != "matrix"
+        or not group.rows
+        or _group_is_multiselect(group)
+    ):
+        return False
+    first = _option_labels(group.rows[0])
+    return bool(first) and all(
+        _option_labels(row) == first
+        and sum(option.state == "selected" for option in row.options) <= 1
+        for row in group.rows
+    )
+
+
+def _render_matrix_editor(group):
+    """Render a whole matrix as one table and return row -> selected position."""
+    labels = _option_labels(group.rows[0])
+    choices = ["— none —", *labels]
+    records = []
+    for row in group.rows:
+        selected_position = next(
+            (
+                index + 1
+                for index, option in enumerate(row.options)
+                if option.state == "selected"
+            ),
+            0,
+        )
+        reasons = [
+            REVIEW_REASON_LABELS.get(reason, reason.replace("_", " "))
+            for reason in row.review_reasons
+        ]
+        records.append(
+            {
+                "Row": row.label or row.id,
+                "Answer": choices[selected_position],
+                "Review": " · ".join(reasons),
+            }
+        )
+    edited = st.data_editor(
+        pd.DataFrame(records),
+        key=f"rev_matrix_{group.id}",
+        hide_index=True,
+        use_container_width=True,
+        disabled=["Row", "Review"],
+        column_config={
+            "Row": st.column_config.TextColumn(width="large"),
+            "Answer": st.column_config.SelectboxColumn(
+                options=choices,
+                required=True,
+                width="medium",
+            ),
+            "Review": st.column_config.TextColumn(width="large"),
+        },
+    )
+    return {
+        row.id: choices.index(answer) if answer in choices else 0
+        for row, answer in zip(group.rows, edited["Answer"].tolist())
+    }
+
+
+def _render_form_review(document):
+    """Summary-first response review with compact question-level editors."""
     form_groups = [(page, g) for page in document.pages for g in page.form_groups]
     if not form_groups:
         return
@@ -480,79 +583,147 @@ def _render_form_review(document):
     if n_review:
         st.warning(
             f"⚠️ {n_review} of {len(form_groups)} question(s) were flagged for review. "
-            "Correct any answer below and press **Save corrections** — the downloads update "
-            "to your edits and the model's original answer is kept in the JSON."
+            "Flagged questions are open below; accepted questions stay collapsed. "
+            "Saving updates the downloads and retains the original model answer in JSON."
         )
     else:
         st.success(
-            f"Extracted {len(form_groups)} question(s). You can still correct any answer below."
+            f"Extracted {len(form_groups)} question(s). Expand any row below to make a correction."
         )
 
+    summary_records = [
+        {
+            "Question": group.question_text or group.id,
+            "Answer": _group_answer_summary(group),
+            "Status": "Needs review" if group.status == "needs_review" else "Accepted",
+            "Page": page.page_number,
+        }
+        for page, group in form_groups
+    ]
+    st.dataframe(
+        pd.DataFrame(summary_records),
+        hide_index=True,
+        use_container_width=True,
+        column_config={
+            "Question": st.column_config.TextColumn(width="large"),
+            "Answer": st.column_config.TextColumn(width="large"),
+            "Status": st.column_config.TextColumn(width="small"),
+            "Page": st.column_config.NumberColumn(width="small"),
+        },
+    )
+
+    matrix_edits = {}
     with st.form("survey_review_form"):
         for page, group in form_groups:
             multi = _group_is_multiselect(group)
             flag = "⚠️ " if group.status == "needs_review" else ""
-            st.markdown(f"**{flag}{group.question_text or group.id}**")
-            st.caption(
-                f"`{group.question_type}` · `{group.selection_rule}` · page {page.page_number}"
-            )
-            if group.condition_text:
-                st.caption(f"↳ conditional: {group.condition_text}")
-            for w in group.warnings:
-                st.caption(f"⚠️ {w}")
-            if not group.rows or not any(r.options for r in group.rows):
-                st.info(
-                    "Options for this question could not be extracted automatically. "
-                    "Open the scan below; if there is an answer, enter it from the export. "
-                    "(This often means the vision model's response failed validation.)"
-                )
-            for row in group.rows:
-                key_base = f"rev_{group.id}_{row.id}"
-                labels = [
-                    (o.label.strip() or f"option {i + 1}") for i, o in enumerate(row.options)
-                ]
-                if not row.options:
-                    st.caption(f"_{row.label or 'row'}: no options detected_")
-                    continue
-                if multi:
-                    if row.label:
-                        st.markdown(f"*{row.label}*")
-                    n_cols = min(len(row.options), 4)
-                    cols = st.columns(n_cols)
-                    for i, o in enumerate(row.options):
-                        cols[i % n_cols].checkbox(
-                            labels[i], value=(o.state == "selected"), key=f"{key_base}_{o.id}"
-                        )
-                else:
-                    sel_idx = next(
-                        (i + 1 for i, o in enumerate(row.options) if o.state == "selected"), 0
+            question = group.question_text or group.id
+            answer = _group_answer_summary(group)
+            expander_label = f"{flag}{question} — {answer}"
+            if len(expander_label) > 180:
+                expander_label = f"{expander_label[:177]}…"
+            with st.expander(
+                expander_label,
+                expanded=(group.status == "needs_review"),
+            ):
+                needs_review = group.status == "needs_review"
+                layout = st.columns([3, 2]) if needs_review else [st.container()]
+                with layout[0]:
+                    st.caption(
+                        f"`{group.question_type}` · `{group.selection_rule}` · "
+                        f"page {page.page_number}"
                     )
-                    st.radio(
-                        row.label or "Answer",
-                        options=list(range(len(row.options) + 1)),
-                        index=sel_idx,
-                        format_func=lambda x, _l=labels: "— none —" if x == 0 else _l[x - 1],
-                        key=key_base,
-                        horizontal=(len(row.options) <= 6),
-                    )
-                for i, o in enumerate(row.options):
-                    if o.associated_text:
-                        st.text_input(
-                            f"✍️ handwriting near “{labels[i]}”",
-                            value=o.associated_text,
-                            key=f"{key_base}_{o.id}_txt",
+                    if group.condition_text:
+                        st.caption(f"↳ conditional: {group.condition_text}")
+                    if group.review_reasons:
+                        reasons = [
+                            REVIEW_REASON_LABELS.get(reason, reason.replace("_", " "))
+                            for reason in group.review_reasons
+                        ]
+                        st.caption(f"Review because: {'; '.join(reasons)}")
+                    for warning in group.warnings:
+                        st.caption(f"⚠️ {warning}")
+                    if not group.rows or not any(row.options for row in group.rows):
+                        st.info(
+                            "Options for this question could not be extracted automatically. "
+                            "This item remains flagged after saving because there is no safe "
+                            "correction control."
                         )
-            with st.expander("🔍 Show scan of this question"):
-                crop = _b64_bytes(group.source_crop_b64)
-                if crop:
-                    st.image(crop, use_container_width=True)
-                else:
-                    st.caption("No crop available for this question.")
-            st.divider()
+                    elif _matrix_uses_shared_single_choice_options(group):
+                        matrix_edits[group.id] = _render_matrix_editor(group)
+                    else:
+                        for row in group.rows:
+                            key_base = f"rev_{group.id}_{row.id}"
+                            labels = _option_labels(row)
+                            if not row.options:
+                                st.caption(f"_{row.label or 'row'}: no options detected_")
+                                continue
+                            if row.review_reasons:
+                                reasons = [
+                                    REVIEW_REASON_LABELS.get(
+                                        reason, reason.replace("_", " ")
+                                    )
+                                    for reason in row.review_reasons
+                                ]
+                                st.caption(
+                                    f"⚠️ {row.label or 'Answer'}: {'; '.join(reasons)}"
+                                )
+                            if multi:
+                                if row.label:
+                                    st.markdown(f"*{row.label}*")
+                                n_cols = min(len(row.options), 4)
+                                cols = st.columns(n_cols)
+                                for index, option in enumerate(row.options):
+                                    cols[index % n_cols].checkbox(
+                                        labels[index],
+                                        value=(option.state == "selected"),
+                                        key=f"{key_base}_{option.id}",
+                                    )
+                            else:
+                                selected_index = next(
+                                    (
+                                        index + 1
+                                        for index, option in enumerate(row.options)
+                                        if option.state == "selected"
+                                    ),
+                                    0,
+                                )
+                                st.radio(
+                                    row.label or "Answer",
+                                    options=list(range(len(row.options) + 1)),
+                                    index=selected_index,
+                                    format_func=lambda value, _labels=labels: (
+                                        "— none —" if value == 0 else _labels[value - 1]
+                                    ),
+                                    key=key_base,
+                                    horizontal=(len(row.options) <= 6),
+                                )
+                            for index, option in enumerate(row.options):
+                                if option.associated_text:
+                                    st.text_input(
+                                        f"✍️ handwriting near “{labels[index]}”",
+                                        value=option.associated_text,
+                                        key=f"{key_base}_{option.id}_txt",
+                                    )
+                if needs_review:
+                    with layout[1]:
+                        st.caption("Source section")
+                        crop = _b64_bytes(group.source_crop_b64)
+                        if crop:
+                            st.image(
+                                crop,
+                                caption=f"Page {page.page_number}",
+                                use_container_width=True,
+                            )
+                        else:
+                            st.warning(
+                                "The source crop is unavailable; this item cannot be "
+                                "verified visually."
+                            )
         submitted = st.form_submit_button("💾 Save corrections", type="primary")
 
     if submitted:
-        _apply_form_corrections(document)
+        _apply_form_corrections(document, matrix_edits)
         downloads = st.session_state.setdefault("auto_downloads", {})
         stem = downloads.get("stem", "document")
         downloads["json"] = doc_ir.to_json(document).encode("utf-8")
@@ -562,12 +733,13 @@ def _render_form_review(document):
         st.success("✅ Corrections saved. The downloads above now reflect your edits.")
 
 
-def _apply_form_corrections(document):
+def _apply_form_corrections(document, matrix_edits=None):
     """Write reviewer selections back into the document, preserving model originals."""
+    matrix_edits = matrix_edits or {}
     for page in document.pages:
         for group in page.form_groups:
             multi = _group_is_multiselect(group)
-            if not group.provenance.get("human_reviewed"):
+            if "model_answer" not in group.provenance:
                 group.provenance["model_answer"] = [
                     {
                         "row": row.label or row.id,
@@ -576,11 +748,28 @@ def _apply_form_corrections(document):
                     }
                     for row in group.rows
                 ]
+                group.provenance["pre_review_reasons"] = {
+                    "group": list(group.review_reasons),
+                    "rows": {
+                        row.id: list(row.review_reasons)
+                        for row in group.rows
+                    },
+                }
+            reviewed_rows = 0
+            unresolved_rows = 0
             for row in group.rows:
                 key_base = f"rev_{group.id}_{row.id}"
                 if not row.options:
+                    unresolved_rows += 1
                     continue
-                if multi:
+                previous_states = {option.id: option.state for option in row.options}
+                if group.id in matrix_edits:
+                    selected_position = matrix_edits[group.id].get(row.id, 0)
+                    for index, option in enumerate(row.options):
+                        option.state = (
+                            "selected" if selected_position == index + 1 else "unselected"
+                        )
+                elif multi:
                     for o in row.options:
                         chosen = st.session_state.get(
                             f"{key_base}_{o.id}", o.state == "selected"
@@ -594,9 +783,23 @@ def _apply_form_corrections(document):
                     tkey = f"{key_base}_{o.id}_txt"
                     if tkey in st.session_state:
                         o.associated_text = st.session_state[tkey]
+                    o.observations.append(
+                        doc_ir.Observation(
+                            source="human-review",
+                            value=o.state,
+                            method="responses-tab",
+                            raw={"previous_state": previous_states[o.id]},
+                        )
+                    )
                 row.status = "accepted"
-            group.status = "accepted"
-            group.provenance["human_reviewed"] = True
+                row.review_reasons.clear()
+                reviewed_rows += 1
+            if reviewed_rows and not unresolved_rows:
+                group.status = "accepted"
+                group.review_reasons.clear()
+                group.provenance["human_reviewed"] = True
+            elif unresolved_rows or not group.rows:
+                group.status = "needs_review"
 
 
 def _render_legacy_mark_summary(glyph_regions, checkbox_marks):

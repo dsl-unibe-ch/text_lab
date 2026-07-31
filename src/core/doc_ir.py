@@ -181,6 +181,7 @@ class FormRow:
     label: str = ""
     options: List[FormOption] = field(default_factory=list)
     status: str = "accepted"  # accepted|recovered|needs_review|failed
+    review_reasons: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -189,6 +190,7 @@ class FormRow:
             "label": self.label,
             "options": [o.to_dict() for o in self.options],
             "status": self.status,
+            "review_reasons": list(self.review_reasons),
             "warnings": list(self.warnings),
         }
 
@@ -204,6 +206,7 @@ class FormGroup:
     selection_rule: str = "zero_or_more"
     rows: List[FormRow] = field(default_factory=list)
     status: str = "accepted"
+    review_reasons: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
     parent_question_id: str = ""
     condition_text: str = ""
@@ -219,6 +222,7 @@ class FormGroup:
             "selection_rule": self.selection_rule,
             "rows": [r.to_dict() for r in self.rows],
             "status": self.status,
+            "review_reasons": list(self.review_reasons),
             "warnings": list(self.warnings),
             "parent_question_id": self.parent_question_id,
             "condition_text": self.condition_text,
@@ -733,6 +737,17 @@ def form_responses_to_dataframe(document: Document) -> Optional[pd.DataFrame]:
                             "needs_review"
                             if "needs_review" in (group.status, row.status)
                             else row.status
+                        ),
+                        "review_reasons": " | ".join(
+                            dict.fromkeys(group.review_reasons + row.review_reasons)
+                        ),
+                        "evidence_sources": " | ".join(
+                            dict.fromkeys(
+                                observation.source
+                                for option in row.options
+                                for observation in option.observations
+                                if option.state == "selected"
+                            )
                         ),
                     }
                 )
