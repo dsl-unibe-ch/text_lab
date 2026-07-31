@@ -1,5 +1,6 @@
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from .bertopic_engine import (
@@ -33,6 +34,8 @@ def run_topic_modeling_pipeline(
     df: pd.DataFrame,
     config: TopicModelingConfig,
     timestamps: list[Any] | None = None,
+    embedding_model: Any = None,
+    precomputed_embeddings: np.ndarray | None = None,
 ) -> TopicModelingRunResult:
     """
     Execute the selected topic modeling pipeline.
@@ -42,6 +45,11 @@ def run_topic_modeling_pipeline(
         config: The topic modeling configuration.
         timestamps: Optional parsed timestamps used for BERTopic
             topics-over-time analysis.
+        embedding_model: Optional pre-instantiated SentenceTransformer instance
+            (BERTopic only).
+        precomputed_embeddings: Optional precomputed document embeddings
+            (BERTopic only). When provided, the embedding step is skipped and
+            the same matrix can be reused across stability runs.
 
     Returns:
         A dictionary containing the generated topic table, document table,
@@ -56,7 +64,14 @@ def run_topic_modeling_pipeline(
     if "Top2Vec" in config.algorithm:
         return _run_top2vec_pipeline(df, raw_texts, config)
 
-    return _run_bertopic_pipeline(df, raw_texts, config, timestamps=timestamps)
+    return _run_bertopic_pipeline(
+        df,
+        raw_texts,
+        config,
+        timestamps=timestamps,
+        embedding_model=embedding_model,
+        precomputed_embeddings=precomputed_embeddings,
+    )
 
 
 def _run_lda_pipeline(
@@ -92,6 +107,7 @@ def _run_lda_pipeline(
         },
         "lda_model": lda_model,  # Added for Perplexity Calculation
         "corpus": corpus,        # Added for Perplexity Calculation
+        "tokenized_texts": processed_texts,
     }
 
 
@@ -129,6 +145,8 @@ def _run_bertopic_pipeline(
     raw_texts: list[str],
     config: TopicModelingConfig,
     timestamps: list[Any] | None = None,
+    embedding_model: Any = None,
+    precomputed_embeddings: np.ndarray | None = None,
 ) -> TopicModelingRunResult:
     """
     Execute the BERTopic topic modeling pipeline.
@@ -148,7 +166,9 @@ def _run_bertopic_pipeline(
         min_df=config.min_df,
         reduce_outliers=config.reduce_outliers,
         reduce_frequent_words=config.reduce_frequent,
-        random_state=config.random_state
+        random_state=config.random_state,
+        embedding_model=embedding_model,
+        precomputed_embeddings=precomputed_embeddings,
     )
 
     topic_df = generate_bertopic_keywords_df(topic_model)

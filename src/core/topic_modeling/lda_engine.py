@@ -48,7 +48,13 @@ def train_lda_model(
         )
 
     id2word = corpora.Dictionary(non_empty_docs)
-    id2word.filter_extremes(no_below=2, no_above=0.9)
+    # Scale ``no_below`` with the corpus size so tiny datasets aren't wiped out
+    # by the default (which requires each token to appear in >=2 documents).
+    if len(non_empty_docs) < 20:
+        no_below = 1
+    else:
+        no_below = 2
+    id2word.filter_extremes(no_below=no_below, no_above=0.9)
 
     if len(id2word) == 0:
         raise ValueError(

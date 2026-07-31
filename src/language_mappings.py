@@ -50,6 +50,81 @@ TRANSCRIBE_LANGUAGE_CODE_TO_NAME = {
     code: name for name, code in TRANSCRIBE_LANGUAGE_MAPPING.items()
 }
 
+# ---------------------------------------------------------------------------
+# Translation language mapping.
+#
+# Keys are user-facing display names.
+# Values are the NLLB / FLORES-200 BCP-47 codes used by facebook/nllb-200-*.
+# For other backends (MarianMT / OPUS-MT, MADLAD-400, Ollama-LLM) a small
+# adapter converts these codes into whatever the backend expects.
+# ---------------------------------------------------------------------------
+TRANSLATE_LANGUAGE_MAPPING = {
+    "English": "eng_Latn",
+    "German": "deu_Latn",
+    "French": "fra_Latn",
+    "Italian": "ita_Latn",
+    "Spanish": "spa_Latn",
+    "Portuguese": "por_Latn",
+    "Dutch": "nld_Latn",
+    "Danish": "dan_Latn",
+    "Swedish": "swe_Latn",
+    "Norwegian Bokmål": "nob_Latn",
+    "Finnish": "fin_Latn",
+    "Polish": "pol_Latn",
+    "Czech": "ces_Latn",
+    "Slovak": "slk_Latn",
+    "Slovenian": "slv_Latn",
+    "Croatian": "hrv_Latn",
+    "Serbian (Cyrillic)": "srp_Cyrl",
+    "Bosnian": "bos_Latn",
+    "Bulgarian": "bul_Cyrl",
+    "Romanian": "ron_Latn",
+    "Hungarian": "hun_Latn",
+    "Greek": "ell_Grek",
+    "Turkish": "tur_Latn",
+    "Russian": "rus_Cyrl",
+    "Ukrainian": "ukr_Cyrl",
+    "Belarusian": "bel_Cyrl",
+    "Arabic (MSA)": "arb_Arab",
+    "Hebrew": "heb_Hebr",
+    "Persian": "pes_Arab",
+    "Urdu": "urd_Arab",
+    "Hindi": "hin_Deva",
+    "Bengali": "ben_Beng",
+    "Tamil": "tam_Taml",
+    "Telugu": "tel_Telu",
+    "Chinese (Simplified)": "zho_Hans",
+    "Chinese (Traditional)": "zho_Hant",
+    "Japanese": "jpn_Jpan",
+    "Korean": "kor_Hang",
+    "Vietnamese": "vie_Latn",
+    "Thai": "tha_Thai",
+    "Indonesian": "ind_Latn",
+    "Malay": "zsm_Latn",
+    "Swahili": "swh_Latn",
+    "Basque": "eus_Latn",
+    "Catalan": "cat_Latn",
+    "Galician": "glg_Latn",
+    "Latvian": "lvs_Latn",
+    "Lithuanian": "lit_Latn",
+    "Estonian": "est_Latn",
+    "Icelandic": "isl_Latn",
+    "Irish": "gle_Latn",
+    "Welsh": "cym_Latn",
+    "Maltese": "mlt_Latn",
+    "Albanian": "als_Latn",
+    "Macedonian": "mkd_Cyrl",
+    "Armenian": "hye_Armn",
+    "Georgian": "kat_Geor",
+    "Azerbaijani": "azj_Latn",
+    "Kazakh": "kaz_Cyrl",
+}
+
+TRANSLATE_LANGUAGE_CODE_TO_NAME = {
+    code: name for name, code in TRANSLATE_LANGUAGE_MAPPING.items()
+}
+
+
 # Display name -> EasyOCR language code.
 EASYOCR_LANGUAGE_MAPPING = {
     "Afrikaans": "af",

@@ -124,7 +124,28 @@ EOF
         tqdm filelock evaluate librosa networkx pyvis \
         pymupdf pymupdf4llm "unstructured[all-docs]" ollama \
         gensim pyLDAvis spacy nltk wordcloud bertopic top2vec keybert stopwordsiso \
-        scipy statsmodels pingouin arch \
+        jieba scipy statsmodels pingouin arch \
+        --constraint /tmp/main_constraints.txt
+
+    # ------------------------------------------------------------------
+    # Translation feature dependencies.
+    #
+    #   sentencepiece  -- required by NLLB-200 and MarianMT tokenizers
+    #                     (usually pulled transitively but pinned here
+    #                     so a slim transformers upgrade cannot drop it).
+    #   python-docx    -- .docx fallback reader in translate_engine.py
+    #                     and future intra-run styling improvements in
+    #                     translate_format.py.
+    #   python-pptx    -- required by core.translate_format.translate_pptx.
+    #   unbabel-comet  -- reference-free MT quality estimation
+    #                     (CometKiwi wmt22-cometkiwi-da) for the target-
+    #                     pane confidence badge.
+    # ------------------------------------------------------------------
+    $MAIN_PIP install --no-cache-dir \
+        sentencepiece \
+        python-docx \
+        python-pptx \
+        unbabel-comet \
         --constraint /tmp/main_constraints.txt
 
     # Offline NLP assets.
@@ -134,12 +155,10 @@ EOF
 
     mkdir -p /opt/nltk_data
     chmod -R a+rX /opt/nltk_data
-    # NLTK >= 3.10 rejects downloads to any dir not on nltk.data.path ("Security
-    # Violation: Unauthorized path ..."). NLTK_DATA is only exported in
-    # %environment (runtime), not during this build, so authorise it here.
-    # raise_on_error=True makes a failed download fail the build immediately
-    # instead of hitting the interactive "Retry? [n/y/e]" prompt (EOFError when
-    # stdin is closed during a non-interactive build).
+    # NLTK >= 3.9 refuses to write to a directory not already on nltk.data.path,
+    # and NLTK_DATA is only exported at runtime, not during this build.
+    # raise_on_error fails the build instead of hitting the interactive retry
+    # prompt, which EOFErrors on a closed stdin.
     export NLTK_DATA=/opt/nltk_data
     /opt/conda/envs/text_lab_main/bin/python -c "import nltk; [nltk.download(p, download_dir='/opt/nltk_data', quiet=True, raise_on_error=True) for p in ('stopwords', 'punkt', 'punkt_tab')]"
 

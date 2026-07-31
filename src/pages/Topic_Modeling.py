@@ -25,13 +25,18 @@ from core.topic_modeling.evaluation import (
 )
 from core.topic_modeling.topic_utils import (
     SUPPORTED_LANGUAGES,
+    DEFAULT_EMBEDDING_MODEL_ENGLISH,
+    DEFAULT_EMBEDDING_MODEL_MULTILINGUAL,
     build_results_zip,
+    count_docs_exceeding_context,
     drop_empty_text_rows,
     generate_metadata_report,
     get_embedding_model_name,
+    load_sentence_transformer,
     load_zip_texts,
     prepare_timestamps,
     read_uploaded_table,
+    resolve_bertopic_embedding_model_id,
 )
 
 
@@ -180,6 +185,7 @@ def _render_model_configuration(
     passes = 10
     custom_stopwords = ""
     num_topics: int | str = 10
+    embedding_model_id: str | None = None
 
     with col_basic:
         st.subheader("Core Settings")
@@ -319,6 +325,46 @@ def _render_model_configuration(
             )
 
             if "BERTopic" in algorithm:
+                with st.expander("Embedding Model", expanded=False):
+                    default_label = (
+                        f"Default for language "
+                        f"({DEFAULT_EMBEDDING_MODEL_ENGLISH if language == 'English' else DEFAULT_EMBEDDING_MODEL_MULTILINGUAL})"
+                    )
+                    embedding_choice = st.radio(
+                        "Which sentence-transformer should embed documents?",
+                        [
+                            default_label,
+                            f"English only – {DEFAULT_EMBEDDING_MODEL_ENGLISH} (256 tokens)",
+                            f"Multilingual – {DEFAULT_EMBEDDING_MODEL_MULTILINGUAL} (128 tokens)",
+                            "Custom HuggingFace model",
+                        ],
+                        help=(
+                            "The default MiniLM models are already cached on the "
+                            "cluster. Custom models are downloaded to your own "
+                            "HuggingFace cache under ~/.cache/huggingface. "
+                            "For long documents pick a model with a larger "
+                            "context window (e.g. jinaai/jina-embeddings-v2-base-en, "
+                            "BAAI/bge-m3, nomic-ai/nomic-embed-text-v1.5)."
+                        ),
+                    )
+                    if embedding_choice.startswith("Default"):
+                        embedding_model_id = None
+                    elif embedding_choice.startswith("English only"):
+                        embedding_model_id = DEFAULT_EMBEDDING_MODEL_ENGLISH
+                    elif embedding_choice.startswith("Multilingual"):
+                        embedding_model_id = DEFAULT_EMBEDDING_MODEL_MULTILINGUAL
+                    else:
+                        custom_id = st.text_input(
+                            "HuggingFace model ID",
+                            placeholder="e.g. jinaai/jina-embeddings-v2-base-en",
+                            help=(
+                                "First-time use will download the model into "
+                                "your home cache. Requires network access from "
+                                "the compute node."
+                            ),
+                        )
+                        embedding_model_id = custom_id.strip() or None
+
                 with st.expander("Text Extraction & Vocabulary", expanded=True):
                     extract_phrases = st.checkbox(
                         "Extract Phrases (N-grams)",
@@ -443,6 +489,7 @@ def _render_model_configuration(
         top2vec_speed=top2vec_speed,
         use_bigrams=use_bigrams,
         passes=passes,
+        embedding_model_id=embedding_model_id,
     )
     
     return config, run_stability
@@ -458,7 +505,52 @@ def _render_results(res: dict[str, Any]) -> None:
     if "evaluation_metrics" in res and res["evaluation_metrics"]:
         st.subheader("Model Evaluation Metrics")
         st.caption("Quantitative metrics to compare hyperparameter performance.")
-        
+
+        with st.expander("How are these scores computed?", expanded=False):
+            st.markdown(
+                """
+                **Topic Diversity** — the proportion of unique words across
+                the top-10 keywords of every topic. It is computed directly
+                from the *Topic Dictionary* above; no re-processing of the
+                corpus is involved. Higher values mean topics share fewer
+                keywords.
+
+                **Coherence (C_v, C_npmi, U_mass)** — computed with
+                Gensim's `CoherenceModel`. To do this, the raw corpus is
+                re-tokenized into a reference vocabulary that co-occurrence
+                statistics are read from:
+
+                - For **LDA**, the same lemmatized tokens used to train
+                  the model are reused, so keywords (which are lemmas)
+                  match the reference dictionary exactly.
+                - For **BERTopic** and **Top2Vec**, the corpus is
+                  tokenized to *surface forms* (lowercased, alphabetic,
+                  stopword-filtered, no lemmatization) because those
+                  models' keywords are surface tokens from the original
+                  text. Keywords not present in the reference dictionary
+                  (e.g. multi-word phrases when n-grams are enabled) are
+                  skipped, and topics with fewer than 2 remaining
+                  keywords do not contribute to the score.
+
+                Because coherence values depend on the reference
+                tokenization, they are best used to compare runs on the
+                **same dataset and language**, not as absolute quality
+                scores.
+
+                **LDA Perplexity** (LDA only) — held-out likelihood of
+                the training corpus under the fitted model
+                (`2^(−log_perplexity)`). Lower is better; useful only for
+                comparing LDA runs on the same data.
+
+                **Topic Stability** (when enabled) — the average Jaccard
+                similarity of the best-matching topics across three
+                independent runs with unlocked random seeds. Embeddings
+                (BERTopic) are computed once and reused, so only the
+                dimensionality-reduction / clustering variance is
+                measured.
+                """
+            )
+
         metrics = res["evaluation_metrics"]
         
         # Base Coherence Metrics
@@ -622,6 +714,52 @@ def main() -> None:
             raw_texts = prepared_df[config.text_column].astype(str).tolist()
             embedding_model_name = get_embedding_model_name(config)
 
+            # BERTopic-only pre-flight: load the embedding model, warn about
+            # documents that exceed its context window, and compute embeddings
+            # once so we can reuse them for the optional 3-run stability check.
+            st_embedding_model = None
+            precomputed_embeddings = None
+            if "BERTopic" in config.algorithm:
+                resolved_model_id = resolve_bertopic_embedding_model_id(config)
+                try:
+                    with st.spinner(f"Loading embedding model '{resolved_model_id}'..."):
+                        st_embedding_model = load_sentence_transformer(resolved_model_id)
+                except Exception as embed_err:
+                    st.error(
+                        f"Failed to load embedding model '{resolved_model_id}': "
+                        f"{embed_err}"
+                    )
+                    st.stop()
+
+                over_count, total_count, max_seq_length = count_docs_exceeding_context(
+                    st_embedding_model, raw_texts
+                )
+                if total_count and over_count / total_count > 0.10:
+                    st.warning(
+                        f"**{over_count} of {total_count} documents "
+                        f"({over_count / total_count:.0%}) exceed the "
+                        f"{max_seq_length}-token context window of "
+                        f"`{resolved_model_id}`.** Only the leading portion of "
+                        "each of those documents will be used to generate the "
+                        "topic embedding, which may bias topic assignments toward "
+                        "document openings.\n\n"
+                        "To capture the full content of long documents, pick a "
+                        "sentence-transformer with a larger context window from "
+                        "the *Embedding Model* section — for example "
+                        "`jinaai/jina-embeddings-v2-base-en` (8192 tokens), "
+                        "`BAAI/bge-m3` (8192 tokens) or "
+                        "`nomic-ai/nomic-embed-text-v1.5` (8192 tokens). "
+                        "Custom models are downloaded to your own home cache "
+                        "(`~/.cache/huggingface`)."
+                    )
+
+                with st.spinner("Encoding documents with the embedding model..."):
+                    precomputed_embeddings = st_embedding_model.encode(
+                        raw_texts,
+                        show_progress_bar=False,
+                        convert_to_numpy=True,
+                    )
+
             # Phase 1: Base Extraction
             spinner_msg = "Running topic extraction (Run 1/3)..." if run_stability else "Running topic extraction..."
             with st.spinner(spinner_msg):
@@ -629,6 +767,8 @@ def main() -> None:
                     prepared_df,
                     config,
                     timestamps=timestamps,
+                    embedding_model=st_embedding_model,
+                    precomputed_embeddings=precomputed_embeddings,
                 )
 
             # Phase 2: Base Mathematical Evaluation
@@ -642,36 +782,53 @@ def main() -> None:
                     topic_keywords=topic_keywords,
                     raw_texts=raw_texts,
                     language=config.language,
-                    custom_stopwords_str=config.custom_stopwords
+                    custom_stopwords_str=config.custom_stopwords,
+                    tokenized_texts=run_result.get("tokenized_texts"),
+                    use_lemmatization="LDA" in config.algorithm,
                 )
 
                 # Append LDA Perplexity if applicable
                 if "LDA" in config.algorithm and "lda_model" in run_result and "corpus" in run_result:
                     perplexity = calculate_lda_perplexity(run_result["lda_model"], run_result["corpus"])
-                    evaluation_metrics["LDA Perplexity"] = perplexity
+                    if perplexity is not None:
+                        evaluation_metrics["LDA Perplexity"] = perplexity
 
             # Phase 3: Stability Check (If requested)
             if run_stability:
-                
+
                 # Create copies of the config with un-locked (random) seeds for pure variance testing
                 config_run2 = copy.deepcopy(config)
                 config_run3 = copy.deepcopy(config)
-                
+
                 config_run2.random_state = None
                 config_run3.random_state = None
-                if config_run2.dim_params.get("random_state") is not None:
-                    config_run2.dim_params["random_state"] = None
-                    config_run3.dim_params["random_state"] = None
+                # Always clear the dim-params seed regardless of its current value —
+                # otherwise a locked UMAP seed would silently defeat the stability
+                # measurement (both extra runs would be identical to run 1).
+                config_run2.dim_params.pop("random_state", None)
+                config_run3.dim_params.pop("random_state", None)
 
                 with st.spinner("Running Stability Iteration 2/3 (Unlocked Seed)..."):
-                    run_2_result = run_topic_modeling_pipeline(prepared_df, config_run2, timestamps=timestamps)
+                    run_2_result = run_topic_modeling_pipeline(
+                        prepared_df,
+                        config_run2,
+                        timestamps=timestamps,
+                        embedding_model=st_embedding_model,
+                        precomputed_embeddings=precomputed_embeddings,
+                    )
                     run_2_keywords = [
                         [word.strip() for word in keywords.split(",")]
                         for keywords in run_2_result["topic_df"]["Keywords"].tolist()
                     ]
-                
+
                 with st.spinner("Running Stability Iteration 3/3 (Unlocked Seed)..."):
-                    run_3_result = run_topic_modeling_pipeline(prepared_df, config_run3, timestamps=timestamps)
+                    run_3_result = run_topic_modeling_pipeline(
+                        prepared_df,
+                        config_run3,
+                        timestamps=timestamps,
+                        embedding_model=st_embedding_model,
+                        precomputed_embeddings=precomputed_embeddings,
+                    )
                     run_3_keywords = [
                         [word.strip() for word in keywords.split(",")]
                         for keywords in run_3_result["topic_df"]["Keywords"].tolist()
