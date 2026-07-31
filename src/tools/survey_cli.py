@@ -46,6 +46,35 @@ def _write_overlays(template, blanks, out_dir) -> None:
         cv2.imwrite(str(out_dir / f"template_page{page.page_index + 1}.png"), vis)
 
 
+def _label(template, blanks) -> None:
+    """Name the controls by running layout+OCR over the synthesized blanks.
+
+    Kept optional because it needs the PaddleOCR-VL backend environment, while
+    everything else in this tool is OpenCV only.
+    """
+    import tempfile
+
+    import cv2
+
+    from core import auto_ocr, survey_label
+
+    print("Labelling controls from the blank form...")
+    with tempfile.TemporaryDirectory() as tmp:
+        images = []
+        for page, blank in zip(template.pages, blanks):
+            path = pathlib.Path(tmp) / f"blank_page{page.page_index + 1}.png"
+            cv2.imwrite(str(path), blank.image)
+            images.append(path)
+        page_jsons = auto_ocr.run_vl_worker(images)
+    labelled = survey_label.label_template(template, page_jsons)
+    questions = {
+        control.question_id
+        for page in template.pages for control in page.controls if control.question_id
+    }
+    print(f"  {labelled}/{template.control_count} controls labelled "
+          f"in {len(questions)} question groups")
+
+
 def _build(args) -> None:
     paths = _documents(args.input)
     print(f"Synthesizing the blank form from {len(paths)} document(s)...")
@@ -54,6 +83,9 @@ def _build(args) -> None:
         failed = ", ".join(name for name, _ in blank.failures) or "none"
         print(f"  page {page.page_index + 1}: {len(page.controls)} controls "
               f"from {len(blank.contributors)} copies (failed: {failed})")
+    if getattr(args, "labels", False):
+        _label(template, blanks)
+
     template.save(args.template)
     print(f"Template -> {args.template} ({template.control_count} controls)")
     if args.overlay:
@@ -73,7 +105,7 @@ def _read(args) -> None:
         progress=lambda _frac, text: print(f"  {text}"),
     )
 
-    survey_batch.to_wide(results).to_csv(out / "responses_matrix.csv", index=False)
+    survey_batch.to_wide(results, template).to_csv(out / "responses_matrix.csv", index=False)
     survey_batch.to_long(results, template).to_csv(out / "responses_long.csv", index=False)
     queue = survey_batch.review_queue(results, template)
     queue.to_csv(out / "review_queue.csv", index=False)
@@ -108,6 +140,8 @@ def main(argv=None) -> None:
     build.add_argument("--template", required=True, help="template JSON to write")
     build.add_argument("--overlay", help="folder for the audit overlay PNGs")
     build.add_argument("--dpi", type=int, default=survey_template.DEFAULT_DPI)
+    build.add_argument("--labels", action="store_true",
+                       help="name the controls with PaddleOCR-VL (needs the VL backend)")
     build.set_defaults(func=_build)
 
     read = sub.add_parser("read", help="read a batch against an existing template")
@@ -124,6 +158,8 @@ def main(argv=None) -> None:
     run.add_argument("--overlay", help="folder for template overlays (default: <out>/template)")
     run.add_argument("--overlays", action="store_true", help="write per-document overlays")
     run.add_argument("--dpi", type=int, default=survey_template.DEFAULT_DPI)
+    run.add_argument("--labels", action="store_true",
+                     help="name the controls with PaddleOCR-VL (needs the VL backend)")
     run.set_defaults(func=_run)
 
     args = parser.parse_args(argv)

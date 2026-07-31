@@ -176,14 +176,35 @@ def read_batch(
 # ==========================================
 
 
-def to_wide(results: Sequence[DocumentReading]):
+def _column_names(template: Optional[survey_template.SurveyTemplate]) -> Dict[str, str]:
+    """Readable, unique column name per control id."""
+    if template is None:
+        return {}
+    names: Dict[str, str] = {}
+    used: Dict[str, int] = {}
+    for page in template.pages:
+        for control in page.controls:
+            parts = [part for part in (control.question_id, control.label) if part]
+            if not parts:
+                continue
+            name = " | ".join(parts)
+            used[name] = used.get(name, 0) + 1
+            if used[name] > 1:
+                name = f"{name} ({used[name]})"
+            names[control.id] = name
+    return names
+
+
+def to_wide(results: Sequence[DocumentReading],
+            template: Optional[survey_template.SurveyTemplate] = None):
     """One row per respondent, one column per control."""
     import pandas as pd
 
+    names = _column_names(template)
     records = []
     for result in results:
         row: Dict[str, Any] = {"document": result.document}
-        row.update({r.control_id: r.state for r in result.readings})
+        row.update({names.get(r.control_id, r.control_id): r.state for r in result.readings})
         records.append(row)
     return pd.DataFrame(records)
 
