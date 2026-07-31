@@ -236,6 +236,98 @@ def to_long(results: Sequence[DocumentReading], template: survey_template.Survey
     return pd.DataFrame(records)
 
 
+CERTAINTY_SUFFIX = " [certainty]"
+
+
+def _unique(name: str, used: Dict[str, int]) -> str:
+    used[name] = used.get(name, 0) + 1
+    return name if used[name] == 1 else f"{name} ({used[name]})"
+
+
+def _row_plan(template: survey_template.SurveyTemplate):
+    """Ordered (row_id, rule, [(control, column name)]) for the whole form."""
+    rows: Dict[str, List[survey_template.TemplateControl]] = {}
+    for page in template.pages:
+        for control in page.controls:
+            rows.setdefault(control.row_id or control.question_id or "ungrouped", []).append(
+                control
+            )
+
+    plan, used = [], {}
+    for row_id, controls in rows.items():
+        # Left-to-right, then top-to-bottom, so a scale reads in printed order.
+        controls = sorted(controls, key=lambda c: (round(c.bbox[1], 3), c.bbox[0]))
+        columns = [
+            (control, _unique(f"{row_id} | {control.label or control.id}", used))
+            for control in controls
+        ]
+        plan.append((row_id, template.rules.get(row_id, "single"), columns))
+    return plan
+
+
+def to_checkbox_table(
+    results: Sequence[DocumentReading],
+    template: survey_template.SurveyTemplate,
+):
+    """One row per respondent in the requested export shape.
+
+    Every checkbox gets a TRUE/FALSE column, and every single-choice answer
+    additionally gets a column naming the option that was chosen. Each data
+    column is followed by its certainty, so a reviewer can sort on it and only
+    open the questionnaires that need a human.
+
+    Certainty is the geometric margin of the read (how far the measured ink sits
+    from the decision thresholds), not a validated probability. 1.0 means the
+    control was unambiguously empty or unambiguously marked.
+    """
+    import pandas as pd
+
+    plan = _row_plan(template)
+    records = []
+    for result in results:
+        readings = {r.control_id: r for r in result.readings}
+        record: Dict[str, Any] = {"document": result.document}
+
+        for row_id, rule, columns in plan:
+            states = []
+            for control, name in columns:
+                reading = readings.get(control.id)
+                state = reading.state if reading else UNCERTAIN
+                states.append((control, state, reading.score if reading else 0.0))
+                record[name] = {"checked": True, "unchecked": False}.get(state, "")
+                record[name + CERTAINTY_SUFFIX] = round(reading.score if reading else 0.0, 3)
+
+            if rule != "single":
+                continue
+
+            chosen = [(c, score) for c, state, score in states if state == "checked"]
+            unread = [s for _, state, s in states if state == UNCERTAIN]
+            if len(chosen) == 1 and not unread:
+                value, certainty = chosen[0][0].label or chosen[0][0].id, min(
+                    score for _, _, score in states
+                )
+            elif not chosen and not unread:
+                value, certainty = "", min(score for _, _, score in states)
+            else:
+                # Contradictory or unreadable: say so rather than pick one.
+                value = "MULTIPLE" if len(chosen) > 1 else "UNCERTAIN"
+                certainty = 0.0
+            record[row_id] = value
+            record[row_id + CERTAINTY_SUFFIX] = round(float(certainty), 3)
+
+        records.append(record)
+
+    frame = pd.DataFrame(records)
+    # value column first, then its checkboxes, each followed by its certainty
+    order = ["document"]
+    for row_id, rule, columns in plan:
+        if rule == "single" and row_id in frame.columns:
+            order += [row_id, row_id + CERTAINTY_SUFFIX]
+        for _, name in columns:
+            order += [name, name + CERTAINTY_SUFFIX]
+    return frame[[c for c in order if c in frame.columns]]
+
+
 def review_queue(results: Sequence[DocumentReading], template: survey_template.SurveyTemplate):
     """Every cell a human should look at, most doubtful first."""
     long = to_long(results, template)

@@ -131,7 +131,7 @@ def _scale_tokens(text: str) -> List[str]:
     return _SCALE_TOKEN.findall(text or "")
 
 
-def _label_horizontal_runs(template_page, width: int, height: int) -> None:
+def _label_horizontal_runs(controls, width: int, height: int) -> None:
     """Split a shared header across a row of controls.
 
     A rating scale or a matrix column band gives every control in the row the
@@ -139,13 +139,16 @@ def _label_horizontal_runs(template_page, width: int, height: int) -> None:
     point per control the scale can be recovered positionally; otherwise the
     control keeps an index, which the template review pass can correct.
     """
-    for run in _horizontal_runs(template_page.controls, width, height):
-        labels = {template_page.controls[i].label for i in run}
-        if len(labels) != 1:
+    for run in _horizontal_runs(controls, width, height):
+        labels = [controls[i].label for i in run]
+        if len(set(labels)) == len(run):
             continue  # each control already has its own text
-        tokens = _scale_tokens(labels.pop())
+        # Some controls in the run may have latched onto a neighbouring block;
+        # the shared majority label is the one holding the scale.
+        shared = max(set(labels), key=labels.count)
+        tokens = _scale_tokens(shared)
         for position, index in enumerate(run):
-            control = template_page.controls[index]
+            control = controls[index]
             control.label = (
                 tokens[position] if len(tokens) == len(run) else f"option {position + 1}"
             )
@@ -176,7 +179,14 @@ def label_page(
         if control.label:
             labelled += 1
 
-    _label_horizontal_runs(template_page, width, height)
+    # Per question, not per page: an A3 spread holds two columns of questions
+    # whose rows share a baseline, and grouping across them merges unrelated
+    # controls into one run.
+    by_question: Dict[str, List[Any]] = {}
+    for control in template_page.controls:
+        by_question.setdefault(control.question_id, []).append(control)
+    for group in by_question.values():
+        _label_horizontal_runs(group, width, height)
     return labelled
 
 

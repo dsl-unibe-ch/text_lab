@@ -86,6 +86,11 @@ def _build(args) -> None:
     if getattr(args, "labels", False):
         _label(template, blanks)
 
+    rules = survey_template.infer_structure(template)
+    singles = sum(1 for rule in rules.values() if rule == "single")
+    print(f"  {len(rules)} answer groups: {singles} single-choice, "
+          f"{len(rules) - singles} multi-select")
+
     template.save(args.template)
     print(f"Template -> {args.template} ({template.control_count} controls)")
     if args.overlay:
@@ -105,6 +110,9 @@ def _read(args) -> None:
         progress=lambda _frac, text: print(f"  {text}"),
     )
 
+    survey_batch.to_checkbox_table(results, template).to_csv(
+        out / "responses_checkboxes.csv", index=False
+    )
     survey_batch.to_wide(results, template).to_csv(out / "responses_matrix.csv", index=False)
     survey_batch.to_long(results, template).to_csv(out / "responses_long.csv", index=False)
     queue = survey_batch.review_queue(results, template)
@@ -117,7 +125,8 @@ def _read(args) -> None:
     for result in results:
         for warning in result.warnings:
             print(f"  ! {result.document}: {warning}")
-    print(f"\nWrote responses_matrix.csv, responses_long.csv, review_queue.csv to {out}")
+    print(f"\nWrote responses_checkboxes.csv, responses_matrix.csv, "
+          f"responses_long.csv, review_queue.csv to {out}")
 
 
 def _run(args) -> None:

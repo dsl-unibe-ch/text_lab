@@ -23,6 +23,7 @@ from core import markup_detect
 
 DEFAULT_DPI = 300  # matches auto_ocr.SURVEY_DPI
 MIN_REGISTRATION_QUALITY = 0.30
+CIRCLE_MAX_EXTENT = 0.85  # bbox fill below this is a ring, above it a square
 _ORB_FEATURES = 8000
 _ORB_SCALE = 0.25
 _MEDIAN_STRIP = 400  # rows per pass, so a 4960x3507 stack stays off the heap
@@ -237,21 +238,25 @@ def find_controls(
             continue
         if not (0.72 <= w / float(h) <= 1.39):
             continue
-        if cv2.contourArea(cnt) / float(w * h) < 0.55:
+        extent = cv2.contourArea(cnt) / float(w * h)
+        if extent < 0.55:
             continue
         interior = ink[y + h // 4: y + 3 * h // 4, x + w // 4: x + 3 * w // 4]
         if interior.size == 0 or interior.mean() > 40:
             continue
         if not markup_detect._is_isolated(ink, x, y, w, h, page_width):
             continue
-        # Circle first: a ring's bbox also has ink on all four sides, so the
-        # box test alone would claim every ○ as a checkbox.
-        is_circle = markup_detect._looks_like_circle(cnt)
-        if not (is_circle or markup_detect._looks_like_box(ink, x, y, w, h)):
+        if not (
+            markup_detect._looks_like_circle(cnt)
+            or markup_detect._looks_like_box(ink, x, y, w, h)
+        ):
             continue
+        # Shape decides single-choice (○) from multi-select (□) downstream, and
+        # the two separate cleanly on how much of the bbox the outline encloses:
+        # a ring reaches pi/4, a square outline nearly 1.
         candidates.append({
             "bbox": [int(x), int(y), int(x + w), int(y + h)],
-            "shape": "circle" if is_circle else "box",
+            "shape": "circle" if extent < CIRCLE_MAX_EXTENT else "box",
             "w": int(w),
         })
 
@@ -363,6 +368,7 @@ class TemplateControl:
     shape: str = "circle"
     label: str = ""
     question_id: str = ""
+    row_id: str = ""  # the answer group this control competes in
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -371,6 +377,7 @@ class TemplateControl:
             "shape": self.shape,
             "label": self.label,
             "question_id": self.question_id,
+            "row_id": self.row_id,
         }
 
     def pixel_bbox(self, width: int, height: int) -> List[int]:
@@ -413,6 +420,7 @@ class SurveyTemplate:
     pages: List[TemplatePage] = field(default_factory=list)
     dpi: int = DEFAULT_DPI
     provenance: Dict[str, Any] = field(default_factory=dict)
+    rules: Dict[str, str] = field(default_factory=dict)  # row_id -> single|multiple
 
     @property
     def control_count(self) -> int:
@@ -422,6 +430,7 @@ class SurveyTemplate:
         return {
             "dpi": self.dpi,
             "provenance": dict(self.provenance),
+            "rules": dict(self.rules),
             "pages": [page.to_dict(stem) for page in self.pages],
         }
 
@@ -454,6 +463,7 @@ class SurveyTemplate:
         template = cls(
             dpi=int(raw.get("dpi", DEFAULT_DPI)),
             provenance=dict(raw.get("provenance") or {}),
+            rules=dict(raw.get("rules") or {}),
             pages=[
                 TemplatePage(
                     page_index=int(page["page_index"]),
@@ -466,6 +476,7 @@ class SurveyTemplate:
                             shape=str(control.get("shape") or "circle"),
                             label=str(control.get("label") or ""),
                             question_id=str(control.get("question_id") or ""),
+                            row_id=str(control.get("row_id") or ""),
                         )
                         for control in page.get("controls") or []
                     ],
@@ -484,6 +495,71 @@ class SurveyTemplate:
                     blank_path.read_bytes()
                 ).decode("ascii")
         return template
+
+
+def _rows_of(controls, width: int, height: int) -> List[List[Any]]:
+    """Split controls into left-to-right runs sharing a baseline."""
+    rows: Dict[int, List[Any]] = {}
+    for control in controls:
+        x1, y1, x2, y2 = control.pixel_bbox(width, height)
+        tolerance = max(6, (y2 - y1) // 2)
+        centre = (y1 + y2) // 2
+        key = next((k for k in rows if abs(k - centre) <= tolerance), centre)
+        rows.setdefault(key, []).append(control)
+    return [
+        sorted(members, key=lambda c: c.pixel_bbox(width, height)[0])
+        for _, members in sorted(rows.items())
+    ]
+
+
+def _answer_groups(controls, width: int, height: int) -> List[List[Any]]:
+    """Partition one question's controls into the sets that compete together.
+
+    A row holding several controls is one answer (a matrix row, a rating scale,
+    a "Ja / Nein" pair). A run of consecutive rows holding one control each is a
+    vertical option list, which is also one answer.
+    """
+    groups: List[List[Any]] = []
+    pending: List[Any] = []
+    for row in _rows_of(controls, width, height):
+        if len(row) >= 2:
+            if pending:
+                groups.append(pending)
+                pending = []
+            groups.append(row)
+        else:
+            pending.append(row[0])
+    if pending:
+        groups.append(pending)
+    return groups
+
+
+def infer_structure(template: "SurveyTemplate") -> Dict[str, str]:
+    """Work out what each control competes with, and under which rule.
+
+    Controls are split by printed shape before anything else: this form, like
+    most, draws single choice as ○ and multi-select as □, and the two are often
+    laid out side by side within one question. Each resulting answer group then
+    takes its rule from that shape.
+    """
+    template.rules = {}
+    for page in template.pages:
+        by_question: Dict[str, List[TemplateControl]] = {}
+        for control in page.controls:
+            key = (control.question_id or f"p{page.page_index + 1}", control.shape)
+            by_question.setdefault(key, []).append(control)
+
+        counters: Dict[str, int] = {}
+        for (question_id, shape), controls in by_question.items():
+            for group in _answer_groups(controls, page.width, page.height):
+                counters[question_id] = counters.get(question_id, 0) + 1
+                row_id = question_id
+                if len(by_question) > 1 or counters[question_id] > 1:
+                    row_id = f"{question_id}_r{counters[question_id]:02d}"
+                for control in group:
+                    control.row_id = row_id
+                template.rules[row_id] = "multiple" if shape == "box" else "single"
+    return template.rules
 
 
 def build_template(

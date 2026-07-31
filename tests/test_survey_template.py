@@ -8,6 +8,7 @@ import tempfile
 import cv2
 import numpy as np
 
+from core import survey_batch as sb
 from core import survey_template as st
 
 W, H = 1800, 1400
@@ -187,3 +188,118 @@ def test_template_round_trips_through_json():
     assert copy.label == original.label
     # normalized coordinates survive the trip back to pixels
     assert copy.pixel_bbox(W, H) == original.pixel_bbox(W, H)
+
+
+# ==========================================
+#     STRUCTURE INFERENCE AND CSV EXPORT
+# ==========================================
+
+
+def _template_with(controls, rules=None):
+    """A one-page template from (x, y, shape, label, question) tuples."""
+    template = st.SurveyTemplate(dpi=300)
+    page = st.TemplatePage(page_index=0, width=W, height=H)
+    for index, (x, y, shape, label, question) in enumerate(controls, start=1):
+        page.controls.append(
+            st.TemplateControl(
+                id=f"p1_c{index:03d}",
+                bbox=[(x - RADIUS) / W, (y - RADIUS) / H,
+                      (x + RADIUS) / W, (y + RADIUS) / H],
+                shape=shape, label=label, question_id=question,
+            )
+        )
+    template.pages.append(page)
+    if rules is None:
+        st.infer_structure(template)
+    else:
+        template.rules = rules
+    return template
+
+
+def test_matrix_rows_become_one_single_choice_answer_each():
+    grid = [
+        (200 + col * 300, 380 + row * 220, "circle", str(col), "q1")
+        for row in range(3) for col in range(4)
+    ]
+    template = _template_with(grid)
+    rows = {c.row_id for c in template.pages[0].controls}
+    assert len(rows) == 3, f"expected one answer group per matrix row, got {rows}"
+    assert set(template.rules.values()) == {"single"}
+
+
+def test_vertical_checkbox_list_is_one_multi_select_answer():
+    column = [(200, 380 + i * 120, "box", f"option {i}", "q2") for i in range(5)]
+    template = _template_with(column)
+    rows = {c.row_id for c in template.pages[0].controls}
+    assert len(rows) == 1
+    assert set(template.rules.values()) == {"multiple"}
+
+
+def test_shape_splits_a_question_holding_both_kinds():
+    """A Ja/Nein pair beside a checkbox list must not become one answer."""
+    controls = [
+        (200, 380, "circle", "Ja", "q3"), (400, 380, "circle", "Nein", "q3"),
+        (200, 560, "box", "a", "q3"), (200, 680, "box", "b", "q3"),
+    ]
+    template = _template_with(controls)
+    by_row = {}
+    for control in template.pages[0].controls:
+        by_row.setdefault(control.row_id, []).append(control.shape)
+    assert len(by_row) == 2
+    assert {"circle"} in [set(v) for v in by_row.values()]
+    assert {"box"} in [set(v) for v in by_row.values()]
+    assert sorted(template.rules.values()) == ["multiple", "single"]
+
+
+def _reading(document, states, template):
+    controls = [c for page in template.pages for c in page.controls]
+    return sb.DocumentReading(
+        document=document,
+        readings=[
+            sb.ControlReading(control.id, 0, state=state, score=1.0 if state != "uncertain" else 0.1)
+            for control, state in zip(controls, states)
+        ],
+    )
+
+
+def test_checkbox_export_has_a_certainty_beside_every_data_column():
+    template = _template_with(
+        [(200 + i * 300, 380, "circle", str(i), "q1") for i in range(4)]
+    )
+    row_id = template.pages[0].controls[0].row_id
+    results = [
+        _reading("a.pdf", ["unchecked", "checked", "unchecked", "unchecked"], template),
+        _reading("b.pdf", ["checked", "unchecked", "unchecked", "checked"], template),
+        _reading("c.pdf", ["unchecked", "unchecked", "uncertain", "unchecked"], template),
+    ]
+    frame = sb.to_checkbox_table(results, template)
+
+    data_columns = [c for c in frame.columns
+                    if c != "document" and not c.endswith(sb.CERTAINTY_SUFFIX)]
+    for column in data_columns:
+        assert column + sb.CERTAINTY_SUFFIX in frame.columns, f"{column} has no certainty"
+
+    # single choice: a value column naming the chosen option
+    assert frame.loc[0, row_id] == "1"
+    assert frame.loc[0, row_id + sb.CERTAINTY_SUFFIX] == 1.0
+    # two marks is a contradiction, reported as such rather than resolved
+    assert frame.loc[1, row_id] == "MULTIPLE"
+    assert frame.loc[1, row_id + sb.CERTAINTY_SUFFIX] == 0.0
+    # an unreadable control makes the whole answer unreadable
+    assert frame.loc[2, row_id] == "UNCERTAIN"
+    # every checkbox is TRUE/FALSE
+    assert bool(frame.loc[0, f"{row_id} | 1"]) is True
+    assert bool(frame.loc[0, f"{row_id} | 0"]) is False
+
+
+def test_checkbox_export_orders_a_scale_left_to_right():
+    template = _template_with(
+        [(200 + i * 300, 380, "circle", str(i), "q1") for i in range(4)]
+    )
+    row_id = template.pages[0].controls[0].row_id
+    frame = sb.to_checkbox_table(
+        [_reading("a.pdf", ["checked"] + ["unchecked"] * 3, template)], template
+    )
+    checkboxes = [c for c in frame.columns
+                  if c.startswith(f"{row_id} | ") and not c.endswith(sb.CERTAINTY_SUFFIX)]
+    assert checkboxes == [f"{row_id} | {i}" for i in range(4)]
