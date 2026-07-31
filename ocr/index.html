@@ -1,0 +1,999 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Documentation for the Text Lab NLP Service at University of Bern">
+      
+      
+      
+        <link rel="canonical" href="https://text-lab.dsl.unibe.ch/ocr/">
+      
+      
+        <link rel="prev" href="../transcription/">
+      
+      
+        <link rel="next" href="../knowledge_graph/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/icon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>OCR - Text Lab Guide</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="red" data-md-color-accent="red">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#optical-character-recognition-ocr" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Text Lab Guide" class="md-header__button md-logo" aria-label="Text Lab Guide" data-md-component="logo">
+      
+  <img src="../assets/text_lab_logo.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Text Lab Guide
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              OCR
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="red" data-md-color-accent="red"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="red" data-md-color-accent="red"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/dsl-unibe-ch/text_lab" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    dsl-unibe-ch/text_lab
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../launch/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Launching Text Lab
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../transcription/" class="md-tabs__link">
+          
+  
+  
+  Features
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Text Lab Guide" class="md-nav__button md-logo" aria-label="Text Lab Guide" data-md-component="logo">
+      
+  <img src="../assets/text_lab_logo.png" alt="logo">
+
+    </a>
+    Text Lab Guide
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/dsl-unibe-ch/text_lab" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    dsl-unibe-ch/text_lab
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../launch/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Launching Text Lab
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Features
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Features
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../transcription/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Transcription
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OCR
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OCR
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#supported-input" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Supported Input
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#automatic-mode-default" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Automatic mode (default)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Automatic mode (default)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#downloads" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Downloads
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#which-models-produced-the-result-for-citation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Which models produced the result (for citation)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#batch-processing-zip" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Batch processing (ZIP)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#surveyform-response-extraction-not-enabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Survey/form response extraction (not enabled)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#advanced-legacy-engines" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Advanced: legacy engines
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-privacy-security" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data Privacy &amp; Security
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../knowledge_graph/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Knowledge Graph
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../topic_modeling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Topic Modeling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../other_tools/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Chat & Viz
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#supported-input" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Supported Input
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#automatic-mode-default" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Automatic mode (default)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Automatic mode (default)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#downloads" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Downloads
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#which-models-produced-the-result-for-citation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Which models produced the result (for citation)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#batch-processing-zip" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Batch processing (ZIP)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#surveyform-response-extraction-not-enabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Survey/form response extraction (not enabled)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#advanced-legacy-engines" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Advanced: legacy engines
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-privacy-security" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data Privacy &amp; Security
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="optical-character-recognition-ocr">Optical Character Recognition (OCR)</h1>
+<p>The OCR tool extracts editable text, tables, figures, and formulas from scanned PDFs or images, and preserves the document's layout in a structured result. Optional local analysis can describe figures.</p>
+<h2 id="supported-input">Supported Input</h2>
+<ul>
+<li><strong>Documents:</strong> PDF (<code>.pdf</code>). <em>Note: For multi-page PDFs, processing may take a while per page depending on layout density.</em></li>
+<li><strong>Images:</strong> PNG, JPG, JPEG, BMP, TIFF</li>
+<li><strong>Archives:</strong> ZIP (<code>.zip</code>) <em>(for batch processing multiple documents or images at once).</em></li>
+</ul>
+<h2 id="automatic-mode-default">Automatic mode (default)</h2>
+<p>The recommended workflow is fully automatic — <strong>there is no engine, language, or mode to choose.</strong> Just upload a file and press <strong>Parse document</strong>.</p>
+<p>Under the hood, Text Lab:</p>
+<ul>
+<li><strong>Detects layout</strong> with a single multilingual model (PaddleOCR-VL, 109 languages), classifying every region as text, title, table, image/chart, formula, footnote, header/footer, seal, or <strong>checkbox</strong>.</li>
+<li><strong>Reads structure</strong>, not just text: tables become spreadsheets, formulas become LaTeX, and figures are cropped out.</li>
+<li><strong>Takes a fast lane for born-digital PDFs:</strong> pages that already contain a real text layer are read directly (no AI vision needed); only scanned/image pages go through the vision model.</li>
+<li>Optionally <strong>describes detected figures/images</strong> with Text Lab's local vision-language model. Generated descriptions and visible-text transcriptions remain separate from printed OCR content.</li>
+</ul>
+<p>Results are shown in tabs:</p>
+<ul>
+<li><strong>Document</strong> — the full text rendered in reading order, with tables, figures, and formulas inline.</li>
+<li><strong>Tables</strong> — each detected table as an interactive spreadsheet, with a per-table CSV download.</li>
+<li><strong>Figures</strong> — cropped images, charts, and seals, plus generated descriptions when requested.</li>
+<li><strong>Layout preview</strong> — the page image with colour-coded boxes for each region type.</li>
+</ul>
+<h3 id="downloads">Downloads</h3>
+<ul>
+<li>
+<p><strong>Searchable PDF:</strong> the original pages, unchanged to the eye, with an invisible text layer so the scan becomes selectable and searchable. Produced automatically for a single document; for a batch it is a tick-box, since the cost multiplies by the number of files. The indexed text is Text Lab's own OCR result — Tesseract runs a second pass purely to locate each word, and never overrides what was transcribed. Table cells are included, since they really are printed; formulas are left out, because the exported LaTeX is not what the reader sees. Tables align less precisely than prose — the reading order of a grid and of flowing text do not always agree — so a mis-set cell stays searchable but highlights a wider span.</p>
+<p>The document language is detected automatically, per page, from the text Text Lab already extracted, so mixed-language documents are handled page by page. It only affects how precisely each word is positioned: on a scanned German questionnaire, using <code>deu</code> placed 87.6% of words on their exact box against 82.1% for <code>eng</code>. Pages with too little text keep the English default, and you can always set the language explicitly.
+* <strong>Plain text (.txt):</strong> the text in reading order, with tables rendered as aligned columns and no markup. Best for text analysis or pasting elsewhere.
+* <strong>Word (.docx):</strong> an editable document with real headings, Word tables, and embedded figures — for revising or citing the result.
+* <strong>Markdown + assets (.zip):</strong> clean Markdown with the cropped figures alongside. Best for LLM/RAG ingestion.
+* <strong>JSON:</strong> the canonical structured representation (regions, bounding boxes, confidence, markup states) for developers and further analysis.
+* <strong>Tables (.csv .zip):</strong> one CSV per detected table.
+* <strong>Full bundle (.zip):</strong> Markdown, plain text, <code>.docx</code>, JSON, assets, and table CSVs together.</p>
+</li>
+</ul>
+<p>Formats are generated from the same structured result, so they always agree; nothing is re-OCR'd per download.</p>
+<h3 id="which-models-produced-the-result-for-citation">Which models produced the result (for citation)</h3>
+<p>Expand <strong>Models used (for citation)</strong> under the downloads to see exactly which models ran on your document. The same summary is written as <code>models_used.txt</code> in the bundle, once at the root of a batch result, and as a <code>models</code> block in each document's JSON. It is read off what actually ran rather than restated, so it stays correct if the configured models change:</p>
+<ul>
+<li><strong>Text recognition</strong> — <code>PaddleOCR-VL 1.6 (PaddleOCR 3.7 / PaddleX 3.7)</code> for scanned pages and images. Born-digital pages taken by the fast lane report <code>PyMuPDF text extraction (no recognition model)</code>, because no recognition model is involved in reading an existing text layer.</li>
+<li><strong>Figure descriptions</strong> — the local vision-language model, by name and tag (by default <code>qwen3-vl:30b-a3b-instruct</code>, served through Ollama), listed only when descriptions were actually generated.</li>
+<li><strong>Searchable-PDF word geometry</strong> — <code>Tesseract</code>, with its version and the language pack used. It supplies word positions only and never contributes text.</li>
+</ul>
+<p>When quoting results in a publication, keep the distinction: printed text is <em>transcribed</em> by the recognition model, while figure descriptions are <em>generated</em> by a vision-language model and are not part of the source document.</p>
+<h3 id="batch-processing-zip">Batch processing (ZIP)</h3>
+<p>Choose <strong>Batch OCR (ZIP)</strong>, upload a <code>.zip</code> of PDFs/images, and press <strong>Parse batch</strong>. The result ZIP mirrors your original folder structure and each file gets every format the single-document page offers, written by the same code: <code>document.md</code>, <code>document.txt</code>, <code>document.docx</code>, <code>document.json</code>, <code>document_searchable.pdf</code> (when the tick-box is set), plus <code>tables/</code> and <code>assets/</code> folders. A single <code>models_used.txt</code> sits at the root of the result rather than in every folder, listing every model that ran anywhere in the batch — a batch can mix scans and born-digital PDFs, which take different lanes.</p>
+<h3 id="surveyform-response-extraction-not-enabled">Survey/form response extraction (not enabled)</h3>
+<p>A question-level survey/form response extractor is present in the codebase but <strong>switched off in the interface</strong> while it is validated against a representative multi-document benchmark. It renders complete 300-DPI question sections to the local vision-language model, assigns its own IDs, verifies each marked position against an echoed choice label, derives selection constraints independently, and flags empty or inconsistent responses; OCR text and table HTML are never modified by it. Developers can reach it through <code>auto_ocr.process_document(..., extract_survey=True)</code>, or re-expose the UI controls, the <strong>Responses</strong> tab, and the form-responses CSV by setting <code>SURVEY_EXTRACTION_UI_ENABLED = True</code> in <code>src/pages/OCR.py</code>.</p>
+<h2 id="advanced-legacy-engines">Advanced: legacy engines</h2>
+<p>The previous engine-picker workflow is still available under the <strong>“Advanced: legacy engines”</strong> expander for cases where you want a specific engine's plain-text output:</p>
+<ol>
+<li><strong>EasyOCR:</strong> general-purpose text across many languages.</li>
+<li><strong>PaddleOCR:</strong> strong on complex or multi-column layouts.</li>
+<li><strong>OlmOCR:</strong> tuned for converting scientific PDFs into clean Markdown.</li>
+<li><strong>GLM-OCR:</strong> a large vision model with selectable Text / Table / Figure extraction modes.</li>
+</ol>
+<p>Each legacy engine returns a single plain-text (or Markdown) string per page, exactly as before. For most documents — and for anything with tables or checkboxes — the automatic mode above is recommended.</p>
+<blockquote>
+<p><em>Warning:</em> Do not close the tab while a "Running" indicator is active.</p>
+</blockquote>
+<hr />
+<h2 id="data-privacy-security">Data Privacy &amp; Security</h2>
+<p>Text Lab is designed to handle highly sensitive, confidential, and proprietary documents (including unredacted PDFs, medical records, or unpublished manuscripts). We utilize a strict <strong>"Local-Only, Self-Cleaning"</strong> architecture to ensure your documents remain secure.</p>
+<p>Here is exactly what happens to your data when you use the OCR tool:</p>
+<ul>
+<li><strong>100% Local Processing:</strong> Your documents are <strong>never</strong> sent to external cloud services or APIs (like Adobe, Google Cloud Vision, or AWS). All text extraction is performed entirely on the University of Bern's secure UBELIX high-performance computing nodes.</li>
+<li><strong>Isolated User Workspaces:</strong> The automatic pipeline, advanced AI vision models (like OlmOCR), and Batch ZIP processing all need to read files from disk (uploads, rasterised pages, cropped regions). To accommodate this, Text Lab generates a unique, temporary workspace located strictly within your private University home directory (<code>$HOME/ondemand_text_lab_ocr_jobs</code>). Other users on the cluster cannot access this space.</li>
+<li><strong>Instant Auto-Deletion (Self-Cleaning):</strong> The exact moment the AI finishes extracting the text (or if the process encounters an error), the application runs an aggressive <code>shutil.rmtree()</code> command. <strong>This guarantees that the entire temporary workspace—including your original documents, intermediate images, and raw data files—is instantly and permanently deleted from the hard drive.</strong></li>
+<li><strong>Ephemeral Results:</strong> The final extracted text and tables presented on your screen are stored strictly in your browser's volatile memory (<code>st.session_state</code>). When you close the tab, refresh the page, or your HPC job ends, all traces of the document and its extracted text are destroyed by Python's garbage collector.</li>
+<li><strong>No AI Training:</strong> The vision models only perform <em>inference</em> (looking at the image to extract text). They do not learn from your documents, and your data is never used to train or improve the AI.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
