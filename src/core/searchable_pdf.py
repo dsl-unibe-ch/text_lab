@@ -349,6 +349,16 @@ def tesseract_available() -> bool:
         return False
 
 
+def engine_citation(lang: str = DEFAULT_TESSERACT_LANG) -> str:
+    """Name and version of the geometry engine, for the provenance summary."""
+    try:
+        import pytesseract
+
+        return f"Tesseract {pytesseract.get_tesseract_version()} ({lang}), word geometry only"
+    except Exception:
+        return f"Tesseract ({lang}), word geometry only"
+
+
 def tesseract_words(image_bgr, lang: str = DEFAULT_TESSERACT_LANG) -> List[Dict[str, Any]]:
     """Per-word boxes for a crop, in the crop's own pixel coordinates."""
     import pytesseract

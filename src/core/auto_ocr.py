@@ -606,6 +606,7 @@ def _finalize_vl_page(
             lang = _searchable_pdf.page_language(page)
         page.text_layer = _searchable_pdf.page_text_layer(page, page_bgr, lang=lang)
         page.raster_size = (page_bgr.shape[1], page_bgr.shape[0])
+        page.text_layer_engine = _searchable_pdf.engine_citation(lang)
     if debug_dir is not None:
         _write_mark_debug_overlay(page_bgr, page, debug_collect,
                                   Path(debug_dir) / f"page_{page_number}_marks.png")
@@ -900,7 +901,11 @@ def _build_searchable_pdf(
         blob = None
     finally:
         # Raster-space coordinates are meaningless once the job workspace is
-        # cleaned up, so they are not carried into session state.
+        # cleaned up, so they are not carried into session state. The engine
+        # name is kept: it belongs in the citable provenance summary.
+        engines = [p.text_layer_engine for p in document.pages if p.text_layer_engine]
+        if blob and engines:
+            document.extra_tools["text_layer"] = engines[0]
         for page in document.pages:
             page.text_layer = None
             page.raster_size = None

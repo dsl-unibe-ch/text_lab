@@ -40,9 +40,19 @@ Results are shown in tabs:
 
 Formats are generated from the same structured result, so they always agree; nothing is re-OCR'd per download.
 
+### Which models produced the result (for citation)
+
+Expand **Models used (for citation)** under the downloads to see exactly which models ran on your document. The same summary is written as `models_used.txt` in the bundle and batch results, and as a `models` block in the JSON. It is read off what actually ran rather than restated, so it stays correct if the configured models change:
+
+* **Text recognition** — `PaddleOCR-VL 1.6 (PaddleOCR 3.7 / PaddleX 3.7)` for scanned pages and images. Born-digital pages taken by the fast lane report `PyMuPDF text extraction (no recognition model)`, because no recognition model is involved in reading an existing text layer.
+* **Figure descriptions** — the local vision-language model, by name and tag (by default `qwen3-vl:30b-a3b-instruct`, served through Ollama), listed only when descriptions were actually generated.
+* **Searchable-PDF word geometry** — `Tesseract`, with its version and the language pack used. It supplies word positions only and never contributes text.
+
+When quoting results in a publication, keep the distinction: printed text is *transcribed* by the recognition model, while figure descriptions are *generated* by a vision-language model and are not part of the source document.
+
 ### Batch processing (ZIP)
 
-Choose **Batch OCR (ZIP)**, upload a `.zip` of PDFs/images, and press **Parse batch**. The result ZIP mirrors your original folder structure, with a `document.md`, `document.txt`, `document.docx`, `document.json`, a `tables/` folder, and an `assets/` folder for each file.
+Choose **Batch OCR (ZIP)**, upload a `.zip` of PDFs/images, and press **Parse batch**. The result ZIP mirrors your original folder structure and each file gets every format the single-document page offers, written by the same code: `document.md`, `document.txt`, `document.docx`, `document.json`, `document_searchable.pdf` (when the tick-box is set), `models_used.txt`, plus `tables/` and `assets/` folders.
 
 ### Survey/form response extraction (not enabled)
 

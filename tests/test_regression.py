@@ -126,6 +126,63 @@ def test_full_bundle_carries_every_format():
         assert "s.docx" in names
 
 
+def test_batch_outputs_match_the_single_document_downloads():
+    """A batch result must carry every format the single-file page offers."""
+    doc = doc_ir.Document(pages=[doc_ir.from_paddle_vl(PAGE_JSON)], source_name="s.pdf")
+    doc.searchable_pdf = b"%PDF-1.7 fake"
+    out = WORK / "batch_out"
+    written = doc_ir.write_document_outputs(doc, out, "document")
+
+    bundle = zipfile.ZipFile(io.BytesIO(doc_ir.build_full_bundle(doc, "document")))
+    def kinds(names):
+        return {
+            pathlib.PurePath(n).suffix or pathlib.PurePath(n).name
+            for n in names if not n.endswith("/")
+        }
+    missing = kinds(bundle.namelist()) - kinds(written)
+    assert not missing, f"batch is missing formats the bundle has: {missing}"
+
+    for expected in ("document.md", "document.txt", "document.json",
+                     "document_searchable.pdf", "models_used.txt"):
+        assert (out / expected).exists(), f"{expected} not written: {written}"
+    assert any(n.startswith("tables/") for n in written), written
+    assert any(n.startswith("assets/") for n in written), written
+    if doc_ir.build_docx(doc, "document") is not None:
+        assert (out / "document.docx").exists()
+    # Written where they are claimed, and not empty.
+    assert (out / "document.txt").read_text(encoding="utf-8").strip()
+    assert (out / "document_searchable.pdf").read_bytes() == b"%PDF-1.7 fake"
+
+
+def test_model_provenance_is_citable_and_derived():
+    """The citation summary must come from what ran, not a restated constant."""
+    page = doc_ir.from_paddle_vl(PAGE_JSON)
+    doc = doc_ir.Document(pages=[page], source_name="s.pdf")
+    models = doc_ir.model_provenance(doc)
+    assert "PaddleOCR-VL 1.6" in " ".join(models["text_recognition"])
+    # No figure was described, so no description model may be claimed.
+    assert "figure_descriptions" not in models
+
+    figure = doc_ir.Region("f1", doc_ir.FIGURE, [0, 0, 10, 10], 9, {"text": ""},
+                           asset={"b64": crop_b64("checked"), "ext": "png"})
+    figure.visual_description = doc_ir.VisualDescription(
+        description="a chart", source="ollama-local", model="qwen3-vl:30b-a3b-instruct")
+    page.regions.append(figure)
+    doc.extra_tools["text_layer"] = "Tesseract 4.1.1 (deu), word geometry only"
+    models = doc_ir.model_provenance(doc)
+    assert models["figure_descriptions"] == ["qwen3-vl:30b-a3b-instruct (ollama-local)"]
+    assert "Tesseract 4.1.1" in models["text_layer"]
+
+    # A born-digital page names no recognition model, because none ran.
+    native = doc_ir.Document(pages=[doc_ir.Page(page_number=1, source="native")])
+    assert "no recognition model" in " ".join(doc_ir.model_provenance(native)["text_recognition"])
+
+    # It travels with the canonical JSON and as readable lines.
+    assert "models" in json.loads(doc_ir.to_json(doc))
+    text = doc_ir.model_provenance_text(doc)
+    assert "Text recognition:" in text and "Figure descriptions:" in text
+
+
 def test_finalize_vl_page():
     raster = WORK / "p1.png"
     cv2.imwrite(str(raster), np.full((1000, 800, 3), 255, np.uint8))

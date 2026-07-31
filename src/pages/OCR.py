@@ -315,42 +315,9 @@ def run_auto_batch(
                 same_layout_template=same_layout_template,
             )
 
-            (file_output_dir / "document.md").write_text(
-                doc_ir.to_markdown(document), encoding="utf-8"
-            )
-            (file_output_dir / "document.txt").write_text(
-                doc_ir.to_text(document), encoding="utf-8"
-            )
-            (file_output_dir / "document.json").write_text(
-                doc_ir.to_json(document), encoding="utf-8"
-            )
-            docx_bytes = doc_ir.build_docx(document, "document")
-            if docx_bytes:
-                (file_output_dir / "document.docx").write_bytes(docx_bytes)
-            if document.searchable_pdf:
-                (file_output_dir / "document_searchable.pdf").write_bytes(
-                    document.searchable_pdf
-                )
-
-            assets = doc_ir.collect_assets(document)
-            if assets:
-                assets_dir = file_output_dir / "assets"
-                assets_dir.mkdir(parents=True, exist_ok=True)
-                for fname, data in assets.items():
-                    (assets_dir / fname).write_bytes(data)
-
-            tables = doc_ir.tables_to_dataframes(document)
-            if tables:
-                tables_dir = file_output_dir / "tables"
-                tables_dir.mkdir(parents=True, exist_ok=True)
-                for entry in tables:
-                    (tables_dir / f"table_{entry['region_id']}.csv").write_text(
-                        entry["dataframe"].to_csv(index=False), encoding="utf-8"
-                    )
-
-            responses_csv = doc_ir.build_form_responses_csv(document)
-            if responses_csv:
-                (file_output_dir / "form_responses.csv").write_bytes(responses_csv)
+            # Same writer as the single-document downloads, so a batch result
+            # carries every format the single-file page offers.
+            doc_ir.write_document_outputs(document, file_output_dir, "document")
 
             shutil.rmtree(per_file_ws, ignore_errors=True)
             progress_bar.progress((idx + 1) / n_files)
@@ -814,6 +781,26 @@ def render_auto_results():
             file_name=f"{stem}_form_responses.csv",
             mime="text/csv",
         )
+
+    # Which models produced this result, so it can be cited. Read off the
+    # document rather than restated here, so it cannot drift from what ran.
+    provenance = doc_ir.model_provenance(document)
+    if provenance:
+        with st.expander("🔬 Models used (for citation)", expanded=False):
+            labels = {
+                "text_recognition": "**Text recognition**",
+                "figure_descriptions": "**Figure descriptions**",
+                "text_layer": "**Searchable-PDF word geometry**",
+            }
+            for key, value in provenance.items():
+                joined = ", ".join(value) if isinstance(value, list) else str(value)
+                st.markdown(f"- {labels.get(key, key)}: {joined}")
+            st.caption(
+                "Printed text is transcribed by the recognition model; figure "
+                "descriptions are *generated* by a vision-language model and are "
+                "not part of the document. The same summary ships as "
+                "`models_used.txt` in the bundle and under `models` in the JSON."
+            )
 
     # Without survey extraction there is never any mark/response content, so the
     # Responses tab is dropped rather than shown permanently empty.

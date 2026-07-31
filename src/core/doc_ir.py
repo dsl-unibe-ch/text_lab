@@ -288,6 +288,9 @@ class Page:
     #: on, so the PDF writer can derive the pixel->point scale from real
     #: geometry instead of assuming a DPI. Transient, like ``text_layer``.
     raster_size: Optional[Tuple[int, int]] = None
+    #: Engine that supplied the word geometry, kept for the citable summary
+    #: after ``text_layer`` itself is dropped.
+    text_layer_engine: str = ""
 
     def ordered_regions(self) -> List[Region]:
         return sorted(self.regions, key=lambda r: (r.reading_order, r.id))
@@ -313,6 +316,10 @@ class Document:
     #: Original pages plus an invisible text layer, when the export was
     #: requested. Bytes, so deliberately not part of :meth:`to_dict`.
     searchable_pdf: Optional[bytes] = None
+    #: Tools that cannot be inferred from the regions themselves, e.g.
+    #: ``{"text_layer": "Tesseract 4.1.1 (deu)"}``. Merged into the citable
+    #: summary by :func:`model_provenance`.
+    extra_tools: Dict[str, str] = field(default_factory=dict)
 
     def all_regions(self):
         for page in self.pages:
@@ -323,6 +330,7 @@ class Document:
         return {
             "source_name": self.source_name,
             "n_pages": len(self.pages),
+            "models": model_provenance(self),
             "pages": [p.to_dict() for p in self.pages],
         }
 
@@ -744,6 +752,62 @@ def build_form_responses_csv(document: Document) -> Optional[bytes]:
     return df.to_csv(index=False).encode("utf-8")
 
 
+#: Human-readable, citable names for the ``Page.source`` tags the lanes record.
+_SOURCE_CITATIONS = {
+    "paddleocr-vl-1.6": "PaddleOCR-VL 1.6 (PaddleOCR 3.7 / PaddleX 3.7)",
+    "native": "PyMuPDF text extraction (no recognition model)",
+}
+
+
+def model_provenance(document: Document) -> Dict[str, Any]:
+    """Which models produced this result, for citation in a publication.
+
+    Read off what the pipeline already recorded -- the per-page lane tag and the
+    model named on each generated description -- so it cannot drift from what
+    actually ran. A researcher quoting the OCR needs the recogniser; one quoting
+    a generated figure description needs that model too, and needs to be able to
+    tell the two apart.
+    """
+    recognition: List[str] = []
+    for page in document.pages:
+        name = _SOURCE_CITATIONS.get(page.source, page.source)
+        if name and name not in recognition:
+            recognition.append(name)
+
+    descriptions: List[str] = []
+    for _, region in document.all_regions():
+        described = region.visual_description
+        if described is None or not described.model:
+            continue
+        name = f"{described.model} ({described.source})" if described.source else described.model
+        if name not in descriptions:
+            descriptions.append(name)
+
+    models: Dict[str, Any] = {"text_recognition": recognition}
+    if descriptions:
+        models["figure_descriptions"] = descriptions
+    for key, value in (document.extra_tools or {}).items():
+        if value:
+            models[key] = value
+    return models
+
+
+def model_provenance_text(document: Document) -> str:
+    """The provenance summary as lines suitable for a README or a caption."""
+    labels = {
+        "text_recognition": "Text recognition",
+        "figure_descriptions": "Figure descriptions",
+        "text_layer": "Searchable-PDF word geometry",
+    }
+    lines = []
+    for key, value in model_provenance(document).items():
+        if not value:
+            continue
+        joined = ", ".join(value) if isinstance(value, list) else str(value)
+        lines.append(f"{labels.get(key, key.replace('_', ' ').capitalize())}: {joined}")
+    return "\n".join(lines)
+
+
 def to_json(document: Document, indent: int = 2) -> str:
     return json.dumps(document.to_dict(), ensure_ascii=False, indent=indent)
 
@@ -796,4 +860,51 @@ def build_full_bundle(document: Document, doc_stem: str = "document") -> bytes:
         form_csv = build_form_responses_csv(document)
         if form_csv:
             zf.writestr("responses/form_responses.csv", form_csv)
+        provenance = model_provenance_text(document)
+        if provenance:
+            zf.writestr("models_used.txt", provenance + "\n")
     return buf.getvalue()
+
+
+def write_document_outputs(document: Document, out_dir, stem: str = "document") -> List[str]:
+    """Write every export format for one document into *out_dir*.
+
+    Shared with the batch runner so a format added to the single-document
+    downloads cannot silently go missing from a batch result: both go through
+    the same list. Returns the relative names written.
+    """
+    import os
+
+    out_dir = str(out_dir)
+    os.makedirs(out_dir, exist_ok=True)
+    written: List[str] = []
+
+    def _write(name: str, data, binary: bool = False):
+        path = os.path.join(out_dir, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb" if binary else "w", **({} if binary else {"encoding": "utf-8"})) as fh:
+            fh.write(data)
+        written.append(name)
+
+    _write(f"{stem}.md", to_markdown(document))
+    _write(f"{stem}.txt", to_text(document))
+    _write(f"{stem}.json", to_json(document))
+    docx_bytes = build_docx(document, stem)
+    if docx_bytes:
+        _write(f"{stem}.docx", docx_bytes, binary=True)
+    if document.searchable_pdf:
+        _write(f"{stem}_searchable.pdf", document.searchable_pdf, binary=True)
+    for fname, data in collect_assets(document).items():
+        _write(os.path.join("assets", fname), data, binary=True)
+    for entry in tables_to_dataframes(document):
+        _write(
+            os.path.join("tables", f"table_{entry['region_id']}.csv"),
+            entry["dataframe"].to_csv(index=False),
+        )
+    form_csv = build_form_responses_csv(document)
+    if form_csv:
+        _write("form_responses.csv", form_csv, binary=True)
+    provenance = model_provenance_text(document)
+    if provenance:
+        _write("models_used.txt", provenance + "\n")
+    return written
