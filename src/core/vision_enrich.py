@@ -26,9 +26,9 @@ except ImportError:  # pragma: no cover - standalone imports
     import doc_ir  # type: ignore
 
 
-#: How long to wait for Ollama to actually free a model's VRAM after being asked
-#: to unload it. Measured: the request returns instantly with all ~20 GiB still
-#: resident, and the runner takes a few seconds to exit.
+#: How long to wait for Ollama to actually free a model's VRAM: the unload
+#: request returns while the model is still resident, and the runner takes
+#: seconds to exit.
 UNLOAD_WAIT_TIMEOUT = float(os.environ.get("TEXTLAB_UNLOAD_WAIT_TIMEOUT", "60"))
 
 
@@ -80,16 +80,10 @@ def free_gpu(base_url: Optional[str] = None,
              timeout: float = None) -> list:
     """Evict every Ollama model and block until the VRAM is really released.
 
-    Ollama accounts for its own models, so it never needs this. A *non-Ollama*
-    GPU consumer does: TextLab's PaddleOCR-VL worker is a separate process that
-    allocates ~8.4 GiB, which does not fit beside the ~20 GiB vision model on a
-    23 GiB card. ``keep_alive: 0`` only *schedules* an unload -- it returns with
-    the whole model still resident and the runner takes seconds to exit -- so
-    without waiting here the worker starts against a nearly full card and dies
-    part-way through loading its own weights.
-
-    Called at the point of need rather than after each document, so a model that
-    is still useful stays warm (see ``OllamaVisionClient.keep_alive``).
+    For non-Ollama GPU consumers -- the PaddleOCR-VL worker allocates ~8.4 GiB
+    in its own process, which does not fit beside the ~20 GiB vision model on a
+    23 GiB card, and starting against a resident model kills it part-way through
+    loading. Called at the point of need, so a still-useful model stays warm.
     """
     if timeout is None:
         timeout = UNLOAD_WAIT_TIMEOUT
@@ -339,10 +333,9 @@ class OllamaVisionClient:
     def close(self, *, unload_model: bool = False, wait_for_unload: bool = True):
         """Release the job lock; optionally evict the model from VRAM.
 
-        Eviction is *not* the default and callers rarely want it: the model
-        expires on its own after ``keep_alive``, and whatever needs the card next
-        frees it at the point of need (:func:`free_gpu`). Unloading here instead
-        would throw away a warm 20 GiB model that the next document may reuse.
+        Eviction is rarely wanted: the model expires after ``keep_alive`` and
+        whatever needs the card next calls :func:`free_gpu`, so unloading here
+        would discard a warm 20 GiB model the next document may reuse.
         """
         if unload_model and self._prepared:
             try:
@@ -368,15 +361,7 @@ class OllamaVisionClient:
                 self._lock_file = None
 
     def _await_unload(self, timeout: float = UNLOAD_WAIT_TIMEOUT):
-        """Block until Ollama has actually released the model's VRAM.
-
-        ``keep_alive: 0`` only *schedules* the unload: the request returns while
-        the whole model is still resident, and the runner needs seconds to exit.
-        The vision model is ~20 GiB of a 23 GiB card, so whatever runs next --
-        in practice the PaddleOCR-VL worker for the user's next document -- then
-        starts against a nearly full GPU and dies part-way through loading.
-        Waiting here costs a few seconds once and keeps that GPU handover clean.
-        """
+        """Block until Ollama has actually released this model's VRAM."""
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             try:

@@ -281,15 +281,13 @@ class Page:
     source: str = "paddleocr-vl-1.6"
     markdown: Optional[str] = None  # engine-native markdown, if any
     form_groups: List[FormGroup] = field(default_factory=list)
-    #: Invisible-PDF-layer entries in full-resolution raster pixels, produced by
-    #: :mod:`searchable_pdf`. Transient: valid only while the raster exists.
+    #: Invisible-PDF-layer entries in raster pixels, from :mod:`searchable_pdf`.
+    #: Transient: valid only while that raster exists.
     text_layer: Optional[List[Dict[str, Any]]] = None
-    #: ``(width, height)`` in pixels of the raster ``text_layer`` was measured
-    #: on, so the PDF writer can derive the pixel->point scale from real
-    #: geometry instead of assuming a DPI. Transient, like ``text_layer``.
+    #: Pixel ``(width, height)`` of that raster, so the PDF writer derives the
+    #: pixel->point scale from geometry rather than an assumed DPI. Transient.
     raster_size: Optional[Tuple[int, int]] = None
-    #: Engine that supplied the word geometry, kept for the citable summary
-    #: after ``text_layer`` itself is dropped.
+    #: Engine that supplied the geometry, kept for the citable summary.
     text_layer_engine: str = ""
 
     def ordered_regions(self) -> List[Region]:
@@ -303,9 +301,8 @@ class Page:
             "source": self.source,
             "regions": [r.to_dict() for r in self.regions],
             "form_groups": [g.to_dict() for g in self.form_groups],
-            # image_b64 / markdown / text_layer deliberately excluded from the
-            # canonical JSON to keep it compact; assets and the searchable PDF
-            # are exported separately.
+            # image_b64 / markdown / text_layer excluded to keep the JSON
+            # compact; assets and the searchable PDF are exported separately.
         }
 
 
@@ -313,12 +310,11 @@ class Page:
 class Document:
     pages: List[Page] = field(default_factory=list)
     source_name: str = ""
-    #: Original pages plus an invisible text layer, when the export was
-    #: requested. Bytes, so deliberately not part of :meth:`to_dict`.
+    #: Original pages plus an invisible text layer, when requested. Bytes, so
+    #: not part of :meth:`to_dict`.
     searchable_pdf: Optional[bytes] = None
-    #: Tools that cannot be inferred from the regions themselves, e.g.
-    #: ``{"text_layer": "Tesseract 4.1.1 (deu)"}``. Merged into the citable
-    #: summary by :func:`model_provenance`.
+    #: Tools not inferable from the regions, e.g. ``{"text_layer": "Tesseract"}``;
+    #: merged in by :func:`model_provenance`.
     extra_tools: Dict[str, str] = field(default_factory=dict)
 
     def all_regions(self):
@@ -660,8 +656,7 @@ def build_docx(document: Document, doc_stem: str = "document") -> Optional[bytes
                     doc.add_paragraph(f"[{rtype} could not be embedded]")
                 caption = region.text.strip()
                 if caption:
-                    # Italics live on the run, not the paragraph: assigning
-                    # ``Paragraph.italic`` is accepted silently and does nothing.
+                    # Italics live on the run; ``Paragraph.italic`` silently does nothing.
                     doc.add_paragraph().add_run(caption).italic = True
             elif region.text.strip():
                 doc.add_paragraph(region.text.strip())
@@ -762,11 +757,9 @@ _SOURCE_CITATIONS = {
 def model_provenance(document: Document) -> Dict[str, Any]:
     """Which models produced this result, for citation in a publication.
 
-    Read off what the pipeline already recorded -- the per-page lane tag and the
-    model named on each generated description -- so it cannot drift from what
-    actually ran. A researcher quoting the OCR needs the recogniser; one quoting
-    a generated figure description needs that model too, and needs to be able to
-    tell the two apart.
+    Read off the per-page lane tag and the model named on each generated
+    description, so it cannot drift from what ran; transcription and generated
+    descriptions stay distinguishable.
     """
     recognition: List[str] = []
     for page in document.pages:
@@ -793,12 +786,10 @@ def model_provenance(document: Document) -> Dict[str, Any]:
 
 
 def merge_provenance(summaries) -> Dict[str, Any]:
-    """Union of several documents' summaries, for one file covering a batch.
+    """Union of several documents' summaries, in first-seen order.
 
-    A batch is not uniform: a born-digital PDF and a scan take different lanes,
-    and only files that actually contain figures involve the description model.
-    The merged summary therefore lists every model that ran somewhere in the
-    batch, in first-seen order.
+    A batch is not uniform -- a scan and a born-digital PDF take different lanes,
+    and only files with figures involve the description model.
     """
     merged: Dict[str, Any] = {}
     for summary in summaries:
@@ -895,12 +886,9 @@ def write_document_outputs(
 ) -> List[str]:
     """Write every export format for one document into *out_dir*.
 
-    Shared with the batch runner so a format added to the single-document
-    downloads cannot silently go missing from a batch result: both go through
-    the same list. Returns the relative names written.
-
-    ``provenance=False`` omits ``models_used.txt``, for a batch that writes one
-    merged copy at the root of the result instead of repeating it per file.
+    Shared with the batch runner, so a format cannot reach one path and not the
+    other. ``provenance=False`` omits ``models_used.txt``, for a batch writing
+    one merged copy at its root. Returns the relative names written.
     """
     import os
 

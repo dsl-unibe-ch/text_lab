@@ -66,10 +66,8 @@ OLMOCR_GPU_MEMORY_UTILIZATION = os.environ.get("OLMOCR_GPU_MEMORY_UTILIZATION", 
 
 AUTO_INPUT_TYPES = ["pdf", "png", "jpg", "jpeg", "bmp", "tiff", "tif"]
 
-# Survey/form response extraction is still being validated against the release
-# benchmark, so its controls and results tab are hidden from the UI. The backend
-# (auto_ocr/form_extract/markup_detect) is untouched and stays reachable through
-# ``process_document(..., extract_survey=True)``; flip this flag to expose it.
+# Hides the survey/form controls and Responses tab while the extractor is being
+# validated; the backend stays reachable via process_document(extract_survey=True).
 SURVEY_EXTRACTION_UI_ENABLED = False
 
 
@@ -288,8 +286,7 @@ def run_auto_batch(
             rel_path = file_path.relative_to(INPUT_DIR)
 
             def _file_progress(frac, text, _idx=idx, _rel=rel_path):
-                # Fold each file's own page-level progress into the batch bar,
-                # so a long document advances instead of sitting at one notch.
+                # Each file's own page progress, folded into the batch bar.
                 progress_bar.progress(
                     min(1.0, (_idx + max(0.0, min(1.0, frac))) / n_files)
                 )
@@ -316,8 +313,7 @@ def run_auto_batch(
                 same_layout_template=same_layout_template,
             )
 
-            # Same writer as the single-document downloads, so a batch result
-            # carries every format the single-file page offers. The provenance
+            # Same writer as the single-document downloads; the provenance
             # summary is collected instead, and written once at the root.
             doc_ir.write_document_outputs(
                 document, file_output_dir, "document", provenance=False
@@ -329,9 +325,7 @@ def run_auto_batch(
 
         status_text.markdown(f"**{n_files} file(s) parsed** — zipping results...")
 
-        # One summary for the whole batch, at the root: a batch is not uniform
-        # (a born-digital PDF and a scan take different lanes, and only files
-        # with figures involve the description model), so it is the union.
+        # One summary at the root, the union over files: a batch can mix lanes.
         merged_provenance = doc_ir.provenance_to_text(
             doc_ir.merge_provenance(batch_provenance)
         )
@@ -704,8 +698,7 @@ def render_auto_results():
         f"{', '.join(summary.get('routes', [])) or 'no route'} · {chips}"
     )
 
-    # One collapsed notice block rather than up to three stacked banners: the
-    # downloads are what people came for and should not be pushed off-screen.
+    # One collapsed block, so notices cannot push the downloads off-screen.
     notices = []
     if summary.get("n_form_groups"):
         notices.append(
@@ -729,8 +722,8 @@ def render_auto_results():
 
     # --- Downloads ---
     stem = downloads.get("stem", "document")
-    # Grouped by what the file is *for*, and every slot is always rendered — a
-    # missing output greys out in place instead of reflowing the grid.
+    # Grouped by purpose; every slot always renders, so a missing output greys
+    # out in place instead of reflowing the grid.
     searchable = downloads.get("searchable_pdf")
     text_bytes = downloads.get("text")
     docx_bytes = downloads.get("docx")
@@ -798,8 +791,7 @@ def render_auto_results():
             mime="text/csv",
         )
 
-    # Which models produced this result, so it can be cited. Read off the
-    # document rather than restated here, so it cannot drift from what ran.
+    # Read off the document, so the citation cannot drift from what ran.
     provenance = doc_ir.model_provenance(document)
     if provenance:
         with st.expander("🔬 Models used (for citation)", expanded=False):
@@ -818,8 +810,7 @@ def render_auto_results():
                 "`models_used.txt` in the bundle and under `models` in the JSON."
             )
 
-    # Without survey extraction there is never any mark/response content, so the
-    # Responses tab is dropped rather than shown permanently empty.
+    # Without survey extraction the Responses tab would always be empty.
     labels = ["📄 Document", "📊 Tables", "🖼️ Figures"]
     if SURVEY_EXTRACTION_UI_ENABLED:
         labels.append("☑️ Responses")
@@ -846,15 +837,13 @@ def render_auto_results():
 def _searchable_pdf_language(key, enabled):
     """Tesseract language for the word-positioning pass.
 
-    Only the word *positions* come from Tesseract, but the language still
-    matters: on a scanned German questionnaire, `deu` placed 87.6% of tokens on
-    their exact word box against 82.1% for `eng`. Mismatched tokens stay
-    searchable, they just highlight a wider span.
+    Only positions come from Tesseract, but the language still matters: on a
+    scanned German questionnaire `deu` placed 87.6% of tokens on their exact box
+    against 82.1% for `eng`. Mismatched tokens just highlight a wider span.
     """
     auto = "Detect automatically"
     names = [auto, *searchable_pdf.TESSERACT_LANGUAGES]
-    # Rendered even when the searchable PDF is switched off, just greyed out, so
-    # ticking the box does not push everything below it down a row.
+    # Greyed out rather than hidden, so ticking the box shifts nothing below it.
     choice = st.selectbox(
         "Document language",
         names,
@@ -876,8 +865,7 @@ def _searchable_pdf_language(key, enabled):
     return searchable_pdf.TESSERACT_LANGUAGES[choice]
 
 
-#: Rough per-option cost, shown so a user knows what they are opting into
-#: before starting a job that may run for minutes with no way to cancel.
+#: Rough per-option cost, shown before a job that may run for minutes.
 _OPTION_COSTS = {
     "highest_quality": "every page through the vision model",
     "searchable_pdf": "a word-positioning pass per page",
@@ -887,16 +875,11 @@ _OPTION_COSTS = {
 
 
 def _parse_options(prefix, *, batch=False):
-    """Shared parse-option panel. Returns the settings as a dict.
-
-    Single-document and batch offered the same options in two diverging copies;
-    keeping one panel means an option added here reaches both.
-    """
+    """Shared parse-option panel for single and batch. Returns the settings."""
     options = {}
     with st.container(border=True):
         if batch:
-            # Batch multiplies the cost by the file count, so this stays a
-            # choice: someone queueing 200 documents should be able to decline.
+            # A choice for batch, where the cost multiplies by the file count.
             c1, c2 = st.columns([1, 1])
             with c1:
                 options["searchable_pdf"] = st.checkbox(
@@ -909,8 +892,7 @@ def _parse_options(prefix, *, batch=False):
                     ),
                 )
         else:
-            # Always produced for a single document: it is the most useful
-            # output and costs a couple of seconds a page.
+            # Always on for a single document: seconds a page, and the most useful output.
             options["searchable_pdf"] = True
             c2 = st.container()
         with c2:
@@ -962,9 +944,8 @@ def _parse_options(prefix, *, batch=False):
                     key=f"{prefix}_same_template",
                 )
 
-        # Only report what the user actually opted into. The searchable PDF is
-        # unconditional for a single document, so listing it there would be
-        # describing the baseline rather than a cost.
+        # Only what was opted into: the searchable PDF is the baseline for a
+        # single document, not a cost.
         chargeable = dict(_OPTION_COSTS)
         if not batch:
             chargeable.pop("searchable_pdf", None)

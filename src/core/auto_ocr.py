@@ -44,8 +44,7 @@ MIN_CHARS_NATIVE = 20
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif", ".webp"}
 RESULT_MARKER = "TEXTLAB_PADDLEVL_RESULT_JSON="
-#: Kept in step with ``paddle_vl_worker.PROGRESS_MARKER`` by hand: the worker
-#: runs in a separate conda env, so it cannot be imported from here.
+#: Mirrors ``paddle_vl_worker.PROGRESS_MARKER``; the worker is a separate env.
 PROGRESS_MARKER = "TEXTLAB_PADDLEVL_PROGRESS="
 
 ProgressFn = Callable[[float, str], None]
@@ -77,13 +76,9 @@ def _emit(progress: Optional[ProgressFn], frac: float, text: str):
 # ==========================================
 
 
-#: Kill the worker when it produces no output at all for this long.
-#:
-#: Deliberately a *stall* budget, not a total one: a 40-page scan legitimately
-#: runs for half an hour, so a total timeout would abort honest work. The worker
-#: reports every finished page, so silence this long means it is wedged — and a
-#: wedged worker used to leave the page on "Running PaddleOCR-VL..." forever,
-#: recoverable only by reloading the browser.
+#: Kill the worker after this long with no output at all. A stall budget, not a
+#: total one: a 40-page scan legitimately runs for half an hour, but the worker
+#: reports every finished page, so silence this long means it is wedged.
 VL_STALL_TIMEOUT = float(os.environ.get("TEXTLAB_VL_STALL_TIMEOUT", "900"))
 
 
@@ -98,8 +93,7 @@ def run_vl_worker(
 ) -> List[dict]:
     """Invoke the PaddleOCR-VL worker on *image_paths*; return per-page dicts.
 
-    ``on_page(done, total)`` is called as each page is recognised, so callers can
-    show real progress across what is by far the slowest stage.
+    ``on_page(done, total)`` fires as each page is recognised.
     """
     if not image_paths:
         return []
@@ -117,10 +111,9 @@ def run_vl_worker(
     if extra_labels:
         cmd += ["--extra-labels", extra_labels]
 
-    # The worker is a separate process allocating ~8.4 GiB, which does not fit
-    # beside a resident ~20 GiB vision model on a 23 GiB card. Ollama cannot
-    # account for a non-Ollama consumer, so free the card here -- and *wait* for
-    # it, because an unload request returns while the model is still resident.
+    # The worker allocates ~8.4 GiB, which does not fit beside a resident
+    # ~20 GiB vision model on a 23 GiB card, and Ollama cannot account for a
+    # non-Ollama consumer.
     try:
         evicted = vision_enrich.free_gpu()
         if evicted:
@@ -153,9 +146,8 @@ def _run_streaming(
 ) -> Tuple[int, str, str]:
     """Run *cmd*, forwarding page-progress markers, and guard against a stall.
 
-    Both pipes are drained by reader threads. That is not optional: the worker
-    writes progress lines while we wait, and a single-pipe read would deadlock as
-    soon as the other pipe's buffer filled.
+    Both pipes need reader threads: a single-pipe read deadlocks once the
+    other's buffer fills.
     """
     import threading
 
@@ -596,8 +588,8 @@ def _finalize_vl_page(
             same_layout_template=same_layout_template,
             contract=survey_contract,
         )
-    # The word-geometry pass also needs full-resolution boxes, so it runs before
-    # the preview downscale rewrites Region.bbox into preview coordinates.
+    # Before the preview downscale rewrites Region.bbox: the geometry pass needs
+    # full-resolution boxes.
     if searchable_pdf and page_bgr is not None:
         from core import searchable_pdf as _searchable_pdf
 
@@ -711,9 +703,8 @@ def process_document(
         _emit(progress, 0.1, "Analysing image...")
 
         def _image_stage(done: int, total: int):
-            # The worker announces itself before loading its weights, which is
-            # the bulk of the wait on a single image (~30-45 s). Saying so beats
-            # leaving "Analysing image..." on screen looking wedged.
+            # The worker reports in before loading its weights, which is the
+            # bulk of the wait on a single image (~30-45 s).
             _emit(
                 progress,
                 0.15 if done == 0 else 0.7,
@@ -750,10 +741,8 @@ def process_document(
             _emit(progress, 1.0, "Done")
             return document
         finally:
-            # Left loaded on purpose: it expires by itself after ``keep_alive``,
-            # and the next stage that needs the card frees it (see the
-            # free_gpu call before the worker). Evicting a 20 GiB model here only
-            # to reload it for the next document costs ~60 s for nothing.
+            # Left loaded: it expires after keep_alive, and the next stage that
+            # needs the card frees it. Evicting costs a ~60 s reload for nothing.
             if owned_client and vision_client is not None:
                 vision_client.close()
 
@@ -792,8 +781,7 @@ def process_document(
         _emit(progress, 0.45, f"Running PaddleOCR-VL on {len(vl_jobs)} page(s)...")
 
         def _vl_page_done(done: int, total: int):
-            # 0.45 -> 0.65 across the recognised pages. Without this the slowest
-            # stage of all (~25-50 s per page) never updates its message.
+            # 0.45 -> 0.65 across the pages; recognition is ~25-50 s each.
             _emit(
                 progress,
                 0.45 + 0.2 * (done / max(1, total)),
@@ -808,9 +796,7 @@ def process_document(
     try:
         for idx, page_json in enumerate(pages_json if vl_jobs else []):
             page_number, raster_path = vl_jobs[idx]
-            # Always report: finalising also runs the word-geometry pass for the
-            # searchable PDF, which is seconds per page. Left silent, a long
-            # document sits on the previous message and looks wedged.
+            # Finalising also runs the word-geometry pass, seconds per page.
             _emit(
                 progress,
                 0.65 + 0.2 * (idx / max(1, len(vl_jobs))),
@@ -839,9 +825,7 @@ def process_document(
                 document.pages.append(vl_pages[page_number])
 
         if describe_images:
-            # Per page, not once: the first call pays a ~60 s model load and each
-            # figure costs seconds more, so a single message here is indis-
-            # tinguishable from a hang on a document with several figures.
+            # Per page: the first call pays a ~60 s model load, each figure more.
             client = _vision_client()
             n_pages_out = len(document.pages)
             for index, page in enumerate(document.pages, start=1):
@@ -863,7 +847,7 @@ def process_document(
         return document
     finally:
         doc.close()
-        # Kept warm deliberately; see the image lane's note above.
+        # Kept warm; see the image lane above.
         if owned_client and vision_client is not None:
             vision_client.close()
 
@@ -873,8 +857,8 @@ def _build_searchable_pdf(
 ) -> Optional[bytes]:
     """Assemble the searchable PDF from the per-page layers, then drop them.
 
-    A PDF source is reused as the carrier so scan quality and any existing
-    born-digital text layer survive; an image source becomes a one-page PDF.
+    A PDF source is reused as the carrier, keeping scan quality and any existing
+    text layer; an image becomes a one-page PDF.
     """
     from core import searchable_pdf as _searchable_pdf
 
@@ -900,9 +884,8 @@ def _build_searchable_pdf(
     except Exception:
         blob = None
     finally:
-        # Raster-space coordinates are meaningless once the job workspace is
-        # cleaned up, so they are not carried into session state. The engine
-        # name is kept: it belongs in the citable provenance summary.
+        # Raster coordinates are meaningless once the workspace is gone; the
+        # engine name stays, for the provenance summary.
         engines = [p.text_layer_engine for p in document.pages if p.text_layer_engine]
         if blob and engines:
             document.extra_tools["text_layer"] = engines[0]

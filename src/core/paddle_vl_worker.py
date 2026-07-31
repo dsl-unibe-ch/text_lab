@@ -30,10 +30,8 @@ os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
 
 RESULT_MARKER = "TEXTLAB_PADDLEVL_RESULT_JSON="
 
-#: Emitted on stdout as each page finishes, so the parent can report real
-#: progress instead of one message for the whole batch. Recognition runs at
-#: roughly 25-50 s per page, so a multi-page document otherwise sits on a single
-#: unchanging line for minutes and reads as a hung app.
+#: Emitted on stdout as each page finishes, so the parent can report progress
+#: through a stage that runs ~25-50 s per page.
 PROGRESS_MARKER = "TEXTLAB_PADDLEVL_PROGRESS="
 
 # Layout labels whose regions we cut out as image crops (superset of the IR's

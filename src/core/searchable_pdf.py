@@ -1,21 +1,12 @@
 """Searchable-PDF export: the original pages with an invisible text layer.
 
-PaddleOCR-VL returns one bounding box per laid-out *block*, which is too coarse
-to drive a usable text layer — selecting a word would highlight a whole
-paragraph. Tesseract's ``image_to_data`` is the only engine in the container
-that reports per-word geometry, so it runs here as a **geometry-only second
-pass**: its boxes are used, its transcription is not.
+Tesseract runs as a geometry-only second pass, supplying the per-word boxes the
+VL lane's block-level output cannot; the indexed text stays the VL lane's, so
+the PDF agrees with the .md/.docx/.txt/.json exports. :func:`align_tokens` maps
+VL tokens onto those boxes and widens the highlight where the two disagree.
 
-The authoritative text stays the VL lane's, matching the rest of the exports
-(``.md`` / ``.docx`` / ``.txt`` / ``.json`` all agree with the PDF). The two
-transcriptions never match character-for-character, so :func:`align_tokens`
-maps VL tokens onto Tesseract boxes and falls back to a coarser box wherever
-the two disagree — search always works, only the highlight gets less precise.
-
-The pass runs during ``auto_ocr.process_document`` because it needs the
-full-resolution rasters, which live in the job workspace and are deleted
-afterwards; ``Region.bbox`` is rescaled to preview space once the page is
-finalised.
+Runs inside ``auto_ocr.process_document``, which still holds the
+full-resolution rasters the boxes are measured on.
 """
 
 from __future__ import annotations
@@ -45,13 +36,8 @@ DEFAULT_TESSERACT_LANG = "eng"
 #: Word boxes below this Tesseract confidence are treated as noise.
 MIN_WORD_CONFIDENCE = 30.0
 
-#: Region types whose text belongs in the searchable layer.
-#:
-#: Formulas are excluded: the VL lane exports LaTeX, which is not what is
-#: printed, so aligning ``E = mc^2`` to a rendered equation would index text the
-#: reader cannot see. Tables *are* included — their cell values genuinely appear
-#: on the page — but via :func:`region_layer_text`, which reads the cells rather
-#: than the HTML wrapper.
+#: Region types whose text belongs in the layer. Formulas are out: the exported
+#: LaTeX is not what is printed. Table cells are in, via :func:`region_layer_text`.
 LAYER_TYPES = {
     doc_ir.TEXT,
     doc_ir.TITLE,
@@ -65,11 +51,7 @@ LAYER_TYPES = {
 
 
 def region_layer_text(region: "doc_ir.Region") -> str:
-    """The printed text of *region*, as it should appear in the layer.
-
-    Tables carry HTML, so the cells are flattened in reading order; every other
-    layer type is already plain text.
-    """
+    """Printed text of *region*: table HTML flattened to cells, else plain text."""
     if region.type != doc_ir.TABLE:
         return region.text
     try:
@@ -85,12 +67,9 @@ def region_layer_text(region: "doc_ir.Region") -> str:
 
 
 def _printed_header(frame) -> List[str]:
-    """Column names, but only when they were really printed on the page.
-
-    A table without ``<th>`` gets pandas' positional column names (``0``, ``1``,
-    ... or ``Unnamed: 0``). Emitting those as layer tokens injects text that
-    exists nowhere in the image, and because alignment is positional it shifts
-    every following cell onto the wrong box — the whole table lands misplaced.
+    """Column names, but only real ones: a table without ``<th>`` gets pandas'
+    positional names, which appear nowhere on the page and, since alignment is
+    positional, would push every following cell onto the wrong box.
     """
     columns = list(frame.columns)
     if not columns:
@@ -114,20 +93,13 @@ def _normalise(token: str) -> str:
     return re.sub(r"[^\w]", "", token, flags=re.UNICODE).lower()
 
 
-#: Mark/box glyphs the VL lane transcribes inline on forms. They are not words,
-#: nobody searches for them, and the base-14 PDF fonts cannot encode them — so
-#: they are stripped from the layer rather than silently dropped by the writer.
+#: Mark/box glyphs the VL lane transcribes inline on forms: not words, and
+#: unencodable in the base-14 PDF fonts.
 _GLYPH_CHARS = "□■○●◯☐☑☒✓✔✗✘"
 
 
 def tokenize(text: str) -> List[str]:
-    """Split VL text into searchable tokens.
-
-    Whitespace-delimited, with mark glyphs stripped and tokens that carry no
-    word characters at all discarded: indexing "□" helps nobody, and a token the
-    PDF font cannot encode would be dropped by the writer anyway, taking its
-    box with it.
-    """
+    """Whitespace-split VL text, dropping mark glyphs and word-character-free tokens."""
     tokens = []
     for raw in re.split(r"\s+", text or ""):
         cleaned = raw.strip(_GLYPH_CHARS).strip()
@@ -141,18 +113,11 @@ def align_tokens(
     tess_words: Sequence[Dict[str, Any]],
     fallback_bbox: Optional[Sequence[float]] = None,
 ) -> List[Dict[str, Any]]:
-    """Map VL tokens onto Tesseract word boxes.
+    """Map VL tokens onto Tesseract word boxes (dicts of ``text`` and ``bbox``).
 
-    ``tess_words`` are dicts with ``text`` and ``bbox`` ``[x1, y1, x2, y2]``.
-    Matching runs on normalised keys via :class:`difflib.SequenceMatcher`, so
-    ordinary OCR differences (``rn``/``m``, dropped umlauts, stray punctuation)
-    only cost precision, never correctness:
-
-    * equal runs   -> VL token placed at its Tesseract box (exact highlight);
-    * replacements -> VL tokens spread across the boxes they displaced;
-    * insertions   -> VL tokens with no ink to anchor to fall back to the
-      surrounding box, so the text is still searchable.
-
+    Matched on normalised keys, so ordinary OCR differences cost precision, not
+    correctness: equal runs get their own box, replacements share the boxes they
+    displaced, and unanchored tokens fall back to a neighbour or the region.
     Returns ``[{"text", "bbox", "exact"}]``; ``exact`` marks a one-to-one box.
     """
     vl_tokens = list(vl_tokens)
@@ -184,9 +149,7 @@ def align_tokens(
                     }
                 )
         elif tag in ("replace", "delete"):
-            # VL says something the boxes disagree with (or Tesseract missed the
-            # ink entirely). Emit the VL text across whatever boxes it displaced,
-            # or the surrounding region when there are none.
+            # The VL text wins; it spans whatever boxes it displaced.
             boxes = [w["bbox"] for w in tess_words[j1:j2]]
             span = _union(boxes) if boxes else _neighbour_box(tess_words, j1, fallback_bbox)
             if span is not None:
@@ -199,8 +162,7 @@ def align_tokens(
                         "line": line,
                     }
                 )
-        # 'insert' = Tesseract found ink the VL lane did not transcribe. The VL
-        # text is authoritative, so that ink is deliberately left unindexed.
+        # 'insert' = ink the VL lane never transcribed, left unindexed.
     return placed
 
 
@@ -268,13 +230,9 @@ def _stopword_scores(tokens: Sequence[str]) -> Dict[str, float]:
 def detect_language(text: str, default: str = DEFAULT_TESSERACT_LANG) -> str:
     """Pick a Tesseract language code from the VL text.
 
-    Deliberately constrained to the packs installed in the container: this is a
-    five-way choice, not open-set language ID, which makes a stopword-frequency
-    vote both accurate and deterministic. ``langdetect`` is consulted only to
-    break a close call, and is ignored when it names a language we cannot run.
-
-    Falls back to *default* on short or unrecognisable text, where guessing
-    wrong costs more precision than the default does.
+    A five-way choice over the installed packs, so a stopword-frequency vote is
+    accurate and deterministic; ``langdetect`` only breaks a close call. Short or
+    unrecognisable text keeps *default*.
     """
     tokens = [t for t in re.findall(r"[^\W\d_]+", (text or "").lower(), re.UNICODE) if t]
     if len(tokens) < 20:  # too little evidence to beat the default
@@ -304,8 +262,8 @@ def detect_language(text: str, default: str = DEFAULT_TESSERACT_LANG) -> str:
     return best
 
 
-#: Language detection reads running prose only. Table cells are mostly numbers,
-#: codes and one-word labels — weak evidence that skews a stopword vote.
+#: Detection reads prose only: table cells are numbers and labels, which skew a
+#: stopword vote.
 PROSE_TYPES = LAYER_TYPES - {doc_ir.TABLE}
 
 
@@ -320,12 +278,7 @@ def document_language(document: "doc_ir.Document", default: str = DEFAULT_TESSER
 
 
 def page_language(page: "doc_ir.Page", default: str = DEFAULT_TESSERACT_LANG) -> str:
-    """Detect from one page's own text.
-
-    Detection runs per page because the word-geometry pass is per page: a
-    sparse page simply keeps *default* rather than dragging a whole document
-    onto one page's guess.
-    """
+    """Detect from one page's own text, so a sparse page cannot skew the rest."""
     parts = [
         region.text
         for region in page.ordered_regions()
@@ -365,10 +318,8 @@ def tesseract_words(image_bgr, lang: str = DEFAULT_TESSERACT_LANG) -> List[Dict[
     from PIL import Image
 
     rgb = image_bgr[:, :, ::-1] if getattr(image_bgr, "ndim", 0) == 3 else image_bgr
-    # psm 4 ("single column of variable-sized text") rather than psm 6 ("one
-    # uniform block"): psm 6 collapses a ruled table into a few bogus lines,
-    # reading the rules themselves as text. On a real ruled table psm 6 found
-    # 4 of 20 cell tokens where psm 4 found all 20, at no cost to prose.
+    # psm 4 (single column of variable-sized text): psm 6 reads a ruled table's
+    # rules as text and collapses its rows.
     data = pytesseract.image_to_data(
         Image.fromarray(rgb),
         lang=lang,
@@ -379,8 +330,7 @@ def tesseract_words(image_bgr, lang: str = DEFAULT_TESSERACT_LANG) -> List[Dict[
     for index, text in enumerate(data.get("text", [])):
         if not str(text).strip():
             continue
-        # Table rules read as "|" or "_". They are not words, and letting them
-        # act as anchors drags real cell text onto the ruling line.
+        # Table rules read as "|" or "_"; as anchors they drag cells onto them.
         if not _normalise(str(text)):
             continue
         try:
@@ -400,10 +350,8 @@ def tesseract_words(image_bgr, lang: str = DEFAULT_TESSERACT_LANG) -> List[Dict[
                     float(top + data["height"][index]),
                 ],
                 "conf": conf,
-                # Tesseract's own line grouping. Font size and baseline are
-                # derived per line: a word's own ink box is the wrong basis,
-                # because "we" (no ascender or descender) is much shorter than
-                # "Frühjahr" on the very same line.
+                # Tesseract's line grouping: size and baseline are per line,
+                # since "we" has a far shorter ink box than "Frühjahr" beside it.
                 "line": (
                     data.get("block_num", [0] * len(data["text"]))[index],
                     data.get("par_num", [0] * len(data["text"]))[index],
@@ -420,21 +368,17 @@ def page_text_layer(
     lang: str = DEFAULT_TESSERACT_LANG,
     word_provider: Optional[Callable[[Any, str], List[Dict[str, Any]]]] = None,
 ) -> List[Dict[str, Any]]:
-    """Build the invisible-layer entries for one page, in raster pixel space.
+    """Invisible-layer entries for one page, in raster pixel space.
 
-    ``word_provider`` is injectable so the alignment can be tested without a
-    Tesseract binary present.
+    ``word_provider`` is injectable so alignment is testable without Tesseract.
     """
     provider = word_provider or tesseract_words
     if page_bgr is None:
         return []
     height, width = page_bgr.shape[:2]
 
-    # One engine call for the whole page, not one per region: pytesseract spawns
-    # the tesseract binary on every call, so per-region cost scaled with layout
-    # complexity (35 calls on a dense page). Whole-page is ~2x faster *and*
-    # slightly more accurate — the engine gets full-page context for line
-    # modelling, and region crops sometimes clip glyphs at their edges.
+    # One engine call for the whole page: ~2x faster than cropping per region
+    # (each call spawns the binary) and more accurate, with full-page context.
     try:
         all_words = provider(page_bgr, lang)
     except Exception:
@@ -456,17 +400,14 @@ def page_text_layer(
             continue
         text = region_layer_text(region).strip()
         placed = align_tokens(tokenize(text), words, fallback_bbox=[x1, y1, x2, y2])
-        # Line metrics are scoped to the region on purpose. Applied to raw
-        # whole-page output they would be wrong: on a two-column page most
-        # engine "lines" merge both columns, so a shared baseline derived from
-        # that union suits neither. Bucketing first removes the merge entirely.
+        # Scoped to the region: on a two-column page the engine's own "lines"
+        # merge both columns, and no shared baseline suits that union.
         _apply_line_metrics(placed, words)
         entries.extend(placed)
     return entries
 
 
-#: Slack when testing whether a word belongs to a region, as a fraction of the
-#: region's size: layout boxes often sit a hair inside the glyphs they contain.
+#: Slack for region membership: layout boxes sit a hair inside their glyphs.
 _BUCKET_MARGIN = 0.02
 
 
@@ -478,10 +419,9 @@ def _bucket_words(
 ) -> List[List[Dict[str, Any]]]:
     """Assign each word to the first region (reading order) holding its centre.
 
-    First-match-wins so overlapping layout boxes cannot index the same word
-    twice. Words outside every region are dropped, which is intended: the VL
-    lane did not transcribe that area, so there is nothing to align them to.
-    Engine order is preserved within a region, since alignment is positional.
+    First match wins, so overlapping boxes cannot index a word twice; words in
+    no region are dropped, the VL lane having never transcribed there. Engine
+    order is kept within a region, since alignment is positional.
     """
     buckets: List[List[Dict[str, Any]]] = [[] for _ in regions]
     if not words:
@@ -504,14 +444,9 @@ def _bucket_words(
     return buckets
 
 
-#: How far Helvetica's *ink* reaches above and below the baseline, as em
-#: fractions (cap/ascender height and descender depth).
-#:
-#: These deliberately are not the font's bbox metrics (``fitz.Font("helv")``
-#: reports 1.075/-0.299): those describe the font's design envelope, while a
-#: Tesseract line box measures the ink actually printed. Sizing ink with bbox
-#: metrics makes the font ~30% too small and drops every baseline. Measured
-#: against known glyph positions, the ink ratios below land within ~0.3pt.
+#: Helvetica's *ink* extent above and below the baseline, in em fractions. Not
+#: the font's bbox metrics (1.075/-0.299), which describe its design envelope
+#: and mis-size printed ink by ~30%.
 _ASCENT, _DESCENT = 0.718, 0.207
 
 
@@ -521,11 +456,10 @@ def _font_metrics() -> Tuple[float, float]:
 
 
 def _apply_line_metrics(placed: List[Dict[str, Any]], words: Sequence[Dict[str, Any]]):
-    """Attach a per-line font size and baseline to each placed entry.
+    """Attach a per-line font size and baseline, so a highlight tracks the line.
 
-    A text line's ink box spans ascender to descender across *all* its words, so
-    it yields one consistent font size and one shared baseline — which is what
-    makes a selection highlight track the line instead of jittering word to word.
+    A line's ink box spans ascender to descender across all its words, giving
+    one size and one baseline rather than a per-word jitter.
     """
     line_boxes: Dict[Any, List[float]] = {}
     for word in words:
@@ -556,8 +490,8 @@ def _apply_line_metrics(placed: List[Dict[str, Any]], words: Sequence[Dict[str, 
 # ==========================================
 
 
-#: Typographic characters that have a safe Latin-1 equivalent. Anything else
-#: outside Latin-1 is dropped per-character rather than losing the whole word.
+#: Typographic characters with a safe Latin-1 equivalent; anything else outside
+#: Latin-1 is dropped per character rather than losing the word.
 _LATIN1_SUBSTITUTIONS = {
     "‘": "'", "’": "'", "‚": "'",
     "“": '"', "”": '"', "„": '"',
@@ -581,17 +515,14 @@ def build_searchable_pdf(
 ) -> Optional[bytes]:
     """Write the invisible text layer onto the pages and return PDF bytes.
 
-    ``layers`` maps 1-based page number to entries from :func:`page_text_layer`
-    (raster pixel coordinates). When ``source_pdf`` is given the original file is
-    reused, preserving scan quality; otherwise pages are built from ``rasters``.
+    ``layers`` maps 1-based page number to :func:`page_text_layer` entries in
+    raster pixels. ``source_pdf`` is reused as the carrier when given, keeping
+    scan quality; otherwise pages are built from ``rasters``.
 
-    ``page_sizes`` gives the pixel dimensions of the raster each layer was
-    measured on. When present the pixel->point scale is derived from real
-    geometry per page, which is the only reliable way: a PNG carrying a dpi tag
-    (screenshots are usually 96) makes PyMuPDF build a page at 72/96 of its
-    pixel size, and a raster rendered at a different DPI than assumed shifts
-    every word progressively further from the origin. ``raster_dpi`` is only the
-    fallback when the true size is unknown.
+    ``page_sizes`` gives each raster's true pixel size, from which the
+    pixel->point scale is derived per page. That is the only reliable source: an
+    embedded dpi tag or a wrong assumed DPI shifts every word progressively
+    further from the origin. ``raster_dpi`` is the fallback.
     """
     import fitz
 
@@ -602,8 +533,7 @@ def build_searchable_pdf(
         for page_number in sorted(rasters):
             data = rasters[page_number]
             pix = fitz.Pixmap(data)
-            # Build the page at the raster's true pixel size rather than letting
-            # an embedded dpi tag decide it, so pixels are points 1:1.
+            # Sized from the raster's pixels, not its dpi tag, so pixels are points.
             page = doc.new_page(width=pix.width, height=pix.height)
             page.insert_image(page.rect, stream=data)
     else:
@@ -626,15 +556,12 @@ def build_searchable_pdf(
                 rect = fitz.Rect(x1 * scale_x, y1 * scale_y, x2 * scale_x, y2 * scale_y)
                 if rect.is_empty or rect.height <= 0 or rect.width <= 0:
                     continue
-                # The base-14 fonts are Latin-1. A character outside it makes
-                # PyMuPDF drop the whole string — and its box with it — so
-                # sanitise here rather than lose the surrounding words.
+                # Base-14 fonts are Latin-1; one stray character drops the
+                # whole string and its box.
                 text = _encodable(entry["text"])
                 if not text:
                     continue
-                # Size and baseline come from the whole text line (see
-                # _apply_line_metrics); only fall back to this entry's own box
-                # when the line is unknown.
+                # Per-line size and baseline; the entry's own box is a fallback.
                 if entry.get("fontsize") and entry.get("baseline") is not None:
                     fontsize = max(1.0, entry["fontsize"] * scale_y)
                     baseline = entry["baseline"] * scale_y
@@ -642,14 +569,12 @@ def build_searchable_pdf(
                     ascent, descent = _font_metrics()
                     fontsize = max(1.0, rect.height / (ascent + descent))
                     baseline = rect.y1 - descent * fontsize
-                # Condense to the measured width so the highlight matches the
-                # printed word. insert_textbox is not usable here: it drops the
-                # string entirely when it does not fit its rect.
+                # Condensed to the measured width so the highlight matches the
+                # word; insert_textbox would drop a string that does not fit.
                 width = fitz.get_text_length(text, fontname="helv", fontsize=fontsize)
                 if width > rect.width and width > 0:
                     fontsize = max(1.0, fontsize * rect.width / width)
-                # render_mode=3 -> drawn but invisible: selectable and
-                # searchable, never covering the scan underneath.
+                # render_mode=3: selectable and searchable, never visible.
                 page.insert_text(
                     fitz.Point(rect.x0, baseline),
                     text,

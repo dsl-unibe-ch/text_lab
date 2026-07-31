@@ -82,8 +82,7 @@ def test_docx_export():
         return
     assert "word/document.xml" in zipfile.ZipFile(io.BytesIO(blob)).namelist()
 
-    # A figure carries its crop into the document; a checkbox stays a text
-    # marker, so embedding is checked on a page that actually has a figure.
+    # Checked on a page with a figure: a checkbox stays a text marker.
     with_figure = doc_ir.Document(pages=[doc_ir.Page(page_number=1, regions=[
         doc_ir.Region("r1", doc_ir.FIGURE, [0, 0, 40, 40], 0, {"text": "Fig 1"},
                       asset={"b64": crop_b64("checked"), "ext": "png"}),
@@ -94,8 +93,7 @@ def test_docx_export():
 
     import docx as _docx
 
-    # The caption is italic on its run. Setting ``Paragraph.italic`` instead is
-    # accepted silently by python-docx and formats nothing.
+    # Italic lives on the run; Paragraph.italic is silently ignored.
     caption_runs = [
         run
         for paragraph in _docx.Document(io.BytesIO(fig_blob)).paragraphs
@@ -146,8 +144,7 @@ def test_batch_outputs_match_the_single_document_downloads():
                      "document_searchable.pdf", "models_used.txt"):
         assert (out / expected).exists(), f"{expected} not written: {written}"
 
-    # Batch writes one merged summary at the root instead of repeating it in
-    # every per-file folder.
+    # Batch writes one merged summary at its root instead of one per folder.
     per_file = doc_ir.write_document_outputs(
         doc, WORK / "batch_no_prov", "document", provenance=False)
     assert "models_used.txt" not in per_file, per_file
@@ -162,7 +159,7 @@ def test_batch_outputs_match_the_single_document_downloads():
 
 
 def test_model_provenance_is_citable_and_derived():
-    """The citation summary must come from what ran, not a restated constant."""
+    """The citation summary comes from what ran, not a restated constant."""
     page = doc_ir.from_paddle_vl(PAGE_JSON)
     doc = doc_ir.Document(pages=[page], source_name="s.pdf")
     models = doc_ir.model_provenance(doc)
@@ -322,11 +319,7 @@ def test_worker_reports_pages_as_they_finish():
 
 
 def test_wedged_worker_is_killed_instead_of_hanging():
-    """A worker that goes silent must fail loudly, not spin forever.
-
-    This is what left the OCR page on "Running PaddleOCR-VL..." with no way out
-    but reloading the browser.
-    """
+    """A worker that goes silent must fail loudly, not spin forever."""
     stub = WORK / "stub_wedged.py"
     stub.write_text("import time\ntime.sleep(600)\n")
     started = time.time()
@@ -362,12 +355,7 @@ def test_a_slow_but_talking_worker_is_not_killed():
 
 
 def test_free_gpu_waits_for_the_vram_to_be_released():
-    """Regression: the next document's OCR started against a resident model.
-
-    ``keep_alive: 0`` only schedules the unload -- it returns with all ~20 GiB
-    still on the card, and the PaddleOCR-VL worker (a separate process needing
-    ~8.4 GiB) then died part-way through loading its own weights.
-    """
+    """free_gpu must not return while the model is still on the card."""
     from core import vision_enrich
 
     calls = {"unloaded": [], "polls": 0}
@@ -411,11 +399,7 @@ def test_free_gpu_waits_for_the_vram_to_be_released():
 
 
 def test_document_run_leaves_the_vision_model_warm():
-    """The model must not be evicted at the end of a document.
-
-    It expires on its own after ``keep_alive`` and the next stage that needs the
-    card frees it, so evicting here would only pay a ~60 s reload for nothing.
-    """
+    """close() leaves the model warm; the next stage needing the card frees it."""
     from core import vision_enrich
 
     class Client(vision_enrich.OllamaVisionClient):

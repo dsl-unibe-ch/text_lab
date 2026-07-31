@@ -70,9 +70,8 @@ def test_no_words_falls_back_to_region_box():
 
 
 def test_form_glyphs_are_not_indexed():
-    # The VL lane transcribes box/circle glyphs inline on questionnaires. They
-    # are not words, and the base-14 PDF fonts cannot encode them — writing one
-    # made PyMuPDF drop the whole entry, box included.
+    # Box/circle glyphs are not words, and are unencodable in the base-14 fonts,
+    # which drops the whole entry.
     assert sp.tokenize("□ Ja ○ Nein") == ["Ja", "Nein"]
     assert sp.tokenize("☒Zutreffend") == ["Zutreffend"]
     assert sp.tokenize("□ ○ ☐") == []
@@ -119,11 +118,8 @@ def test_table_cells_are_indexed_but_not_the_html():
 
 
 def test_unprinted_table_headers_are_not_indexed():
-    """Regression: tables landed misplaced because of invented header tokens.
-
-    Without ``<th>`` pandas names the columns ``0, 1, ...``. Emitting those put
-    tokens in the layer that appear nowhere on the page, and since alignment is
-    positional every following cell was pushed onto the wrong box.
+    """Positional pandas column names must not be indexed: they appear nowhere
+    on the page, and alignment being positional they displace every later cell.
     """
     plain = doc_ir.Region(
         "r", doc_ir.TABLE, [0, 0, 1, 1], 0,
@@ -288,12 +284,8 @@ def test_pdf_is_searchable_and_text_is_invisible():
 
 
 def test_png_dpi_tag_does_not_rescale_the_layer():
-    """Regression: a screenshot PNG tagged 96 dpi shifted every word.
-
-    PyMuPDF sizes a page from an embedded dpi tag (72/96 = 0.75x the pixels),
-    so writing the layer at raw pixel coordinates pushed each word 1.333x too
-    far right and down — worsening toward the bottom-right, with words falling
-    off the page edge entirely.
+    """An embedded dpi tag must not rescale the layer: PyMuPDF would size the
+    page from it and push every word progressively off the bottom-right.
     """
     import io
 
@@ -324,11 +316,8 @@ def test_png_dpi_tag_does_not_rescale_the_layer():
 
 
 def test_line_metrics_are_shared_across_a_line():
-    """Regression: font size came from each word's own ink box.
-
-    "we" has neither ascender nor descender, so its box is far shorter than
-    "preliminary" on the same line — which gave it a smaller font and a lower
-    baseline, making the highlight jitter word to word.
+    """One size and baseline per line: "we" has no ascender or descender, so its
+    own ink box would give it a smaller font and a jittering highlight.
     """
     line = (0, 0, 1)
     tess = [
@@ -358,11 +347,8 @@ def test_separate_lines_keep_separate_baselines():
 
 
 def test_live_ruled_table_rows_stay_separate():
-    """Regression: a ruled table collapsed onto the header separator line.
-
-    ``--psm 6`` treats a crop as one uniform text block, so on a ruled table it
-    read the rules themselves as "|" words and merged every data row into a
-    couple of bogus lines. All the cells then shared one tiny baseline.
+    """Ruled table rows stay on separate lines: psm 6 reads the rules as "|"
+    words and merges every row onto one baseline.
     """
     if not sp.tesseract_available():
         print("   (skipped: tesseract not installed)")
