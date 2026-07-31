@@ -792,20 +792,44 @@ def model_provenance(document: Document) -> Dict[str, Any]:
     return models
 
 
-def model_provenance_text(document: Document) -> str:
-    """The provenance summary as lines suitable for a README or a caption."""
+def merge_provenance(summaries) -> Dict[str, Any]:
+    """Union of several documents' summaries, for one file covering a batch.
+
+    A batch is not uniform: a born-digital PDF and a scan take different lanes,
+    and only files that actually contain figures involve the description model.
+    The merged summary therefore lists every model that ran somewhere in the
+    batch, in first-seen order.
+    """
+    merged: Dict[str, Any] = {}
+    for summary in summaries:
+        for key, value in (summary or {}).items():
+            values = value if isinstance(value, list) else [value]
+            bucket = merged.setdefault(key, [])
+            for item in values:
+                if item and item not in bucket:
+                    bucket.append(item)
+    return merged
+
+
+def provenance_to_text(provenance: Dict[str, Any]) -> str:
+    """A provenance summary as lines suitable for a README or a caption."""
     labels = {
         "text_recognition": "Text recognition",
         "figure_descriptions": "Figure descriptions",
         "text_layer": "Searchable-PDF word geometry",
     }
     lines = []
-    for key, value in model_provenance(document).items():
+    for key, value in (provenance or {}).items():
         if not value:
             continue
         joined = ", ".join(value) if isinstance(value, list) else str(value)
         lines.append(f"{labels.get(key, key.replace('_', ' ').capitalize())}: {joined}")
     return "\n".join(lines)
+
+
+def model_provenance_text(document: Document) -> str:
+    """The provenance summary for one document, as readable lines."""
+    return provenance_to_text(model_provenance(document))
 
 
 def to_json(document: Document, indent: int = 2) -> str:
@@ -866,12 +890,17 @@ def build_full_bundle(document: Document, doc_stem: str = "document") -> bytes:
     return buf.getvalue()
 
 
-def write_document_outputs(document: Document, out_dir, stem: str = "document") -> List[str]:
+def write_document_outputs(
+    document: Document, out_dir, stem: str = "document", *, provenance: bool = True
+) -> List[str]:
     """Write every export format for one document into *out_dir*.
 
     Shared with the batch runner so a format added to the single-document
     downloads cannot silently go missing from a batch result: both go through
     the same list. Returns the relative names written.
+
+    ``provenance=False`` omits ``models_used.txt``, for a batch that writes one
+    merged copy at the root of the result instead of repeating it per file.
     """
     import os
 
@@ -904,7 +933,8 @@ def write_document_outputs(document: Document, out_dir, stem: str = "document") 
     form_csv = build_form_responses_csv(document)
     if form_csv:
         _write("form_responses.csv", form_csv, binary=True)
-    provenance = model_provenance_text(document)
     if provenance:
-        _write("models_used.txt", provenance + "\n")
+        summary = model_provenance_text(document)
+        if summary:
+            _write("models_used.txt", summary + "\n")
     return written

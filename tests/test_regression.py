@@ -145,6 +145,13 @@ def test_batch_outputs_match_the_single_document_downloads():
     for expected in ("document.md", "document.txt", "document.json",
                      "document_searchable.pdf", "models_used.txt"):
         assert (out / expected).exists(), f"{expected} not written: {written}"
+
+    # Batch writes one merged summary at the root instead of repeating it in
+    # every per-file folder.
+    per_file = doc_ir.write_document_outputs(
+        doc, WORK / "batch_no_prov", "document", provenance=False)
+    assert "models_used.txt" not in per_file, per_file
+    assert not (WORK / "batch_no_prov" / "models_used.txt").exists()
     assert any(n.startswith("tables/") for n in written), written
     assert any(n.startswith("assets/") for n in written), written
     if doc_ir.build_docx(doc, "document") is not None:
@@ -181,6 +188,31 @@ def test_model_provenance_is_citable_and_derived():
     assert "models" in json.loads(doc_ir.to_json(doc))
     text = doc_ir.model_provenance_text(doc)
     assert "Text recognition:" in text and "Figure descriptions:" in text
+
+
+def test_batch_provenance_is_the_union_over_the_files():
+    """A batch is not uniform, so its one summary must cover every file."""
+    scanned = {"text_recognition": ["PaddleOCR-VL 1.6"],
+               "figure_descriptions": ["qwen3-vl:30b-a3b-instruct (ollama-local)"],
+               "text_layer": "Tesseract 4.1.1 (deu), word geometry only"}
+    born_digital = {"text_recognition": ["PyMuPDF text extraction (no recognition model)"]}
+    another_scan = {"text_recognition": ["PaddleOCR-VL 1.6"],
+                    "text_layer": "Tesseract 4.1.1 (eng), word geometry only"}
+
+    merged = doc_ir.merge_provenance([scanned, born_digital, another_scan])
+    # Every lane that ran is named, once, in first-seen order.
+    assert merged["text_recognition"] == [
+        "PaddleOCR-VL 1.6", "PyMuPDF text extraction (no recognition model)"]
+    assert merged["figure_descriptions"] == ["qwen3-vl:30b-a3b-instruct (ollama-local)"]
+    # A scalar from one file and a different one from another both survive.
+    assert merged["text_layer"] == [
+        "Tesseract 4.1.1 (deu), word geometry only",
+        "Tesseract 4.1.1 (eng), word geometry only"]
+
+    text = doc_ir.provenance_to_text(merged)
+    assert "Text recognition: PaddleOCR-VL 1.6, PyMuPDF" in text
+    assert doc_ir.merge_provenance([]) == {}
+    assert doc_ir.provenance_to_text({}) == ""
 
 
 def test_finalize_vl_page():

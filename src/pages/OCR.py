@@ -283,6 +283,7 @@ def run_auto_batch(
         status_text = st.empty()
 
         n_files = len(valid_files)
+        batch_provenance = []
         for idx, file_path in enumerate(valid_files):
             rel_path = file_path.relative_to(INPUT_DIR)
 
@@ -316,13 +317,28 @@ def run_auto_batch(
             )
 
             # Same writer as the single-document downloads, so a batch result
-            # carries every format the single-file page offers.
-            doc_ir.write_document_outputs(document, file_output_dir, "document")
+            # carries every format the single-file page offers. The provenance
+            # summary is collected instead, and written once at the root.
+            doc_ir.write_document_outputs(
+                document, file_output_dir, "document", provenance=False
+            )
+            batch_provenance.append(doc_ir.model_provenance(document))
 
             shutil.rmtree(per_file_ws, ignore_errors=True)
             progress_bar.progress((idx + 1) / n_files)
 
         status_text.markdown(f"**{n_files} file(s) parsed** — zipping results...")
+
+        # One summary for the whole batch, at the root: a batch is not uniform
+        # (a born-digital PDF and a scan take different lanes, and only files
+        # with figures involve the description model), so it is the union.
+        merged_provenance = doc_ir.provenance_to_text(
+            doc_ir.merge_provenance(batch_provenance)
+        )
+        if merged_provenance:
+            (RESULTS_DIR / "models_used.txt").write_text(
+                merged_provenance + "\n", encoding="utf-8"
+            )
 
         out_zip_buffer = io.BytesIO()
         with zipfile.ZipFile(out_zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:

@@ -42,7 +42,7 @@ Formats are generated from the same structured result, so they always agree; not
 
 ### Which models produced the result (for citation)
 
-Expand **Models used (for citation)** under the downloads to see exactly which models ran on your document. The same summary is written as `models_used.txt` in the bundle and batch results, and as a `models` block in the JSON. It is read off what actually ran rather than restated, so it stays correct if the configured models change:
+Expand **Models used (for citation)** under the downloads to see exactly which models ran on your document. The same summary is written as `models_used.txt` in the bundle, once at the root of a batch result, and as a `models` block in each document's JSON. It is read off what actually ran rather than restated, so it stays correct if the configured models change:
 
 * **Text recognition** — `PaddleOCR-VL 1.6 (PaddleOCR 3.7 / PaddleX 3.7)` for scanned pages and images. Born-digital pages taken by the fast lane report `PyMuPDF text extraction (no recognition model)`, because no recognition model is involved in reading an existing text layer.
 * **Figure descriptions** — the local vision-language model, by name and tag (by default `qwen3-vl:30b-a3b-instruct`, served through Ollama), listed only when descriptions were actually generated.
@@ -52,7 +52,7 @@ When quoting results in a publication, keep the distinction: printed text is *tr
 
 ### Batch processing (ZIP)
 
-Choose **Batch OCR (ZIP)**, upload a `.zip` of PDFs/images, and press **Parse batch**. The result ZIP mirrors your original folder structure and each file gets every format the single-document page offers, written by the same code: `document.md`, `document.txt`, `document.docx`, `document.json`, `document_searchable.pdf` (when the tick-box is set), `models_used.txt`, plus `tables/` and `assets/` folders.
+Choose **Batch OCR (ZIP)**, upload a `.zip` of PDFs/images, and press **Parse batch**. The result ZIP mirrors your original folder structure and each file gets every format the single-document page offers, written by the same code: `document.md`, `document.txt`, `document.docx`, `document.json`, `document_searchable.pdf` (when the tick-box is set), plus `tables/` and `assets/` folders. A single `models_used.txt` sits at the root of the result rather than in every folder, listing every model that ran anywhere in the batch — a batch can mix scans and born-digital PDFs, which take different lanes.
 
 ### Survey/form response extraction (not enabled)
 
