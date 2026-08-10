@@ -562,3 +562,16 @@ def test_an_untouched_control_stays_confidently_empty():
             residual[box[1]:box[3], box[0]:box[2]], st.halo_crop(residual, box)
         )
         assert verdict["state"] == "unchecked", f"control {index}: {verdict}"
+
+
+def test_block_text_keeps_its_line_breaks():
+    """Paddle returns an option and a nearby caption as two lines of one block.
+
+    Collapsing them into one string merged "Ja" with the caption printed above
+    and right of it, and gave the per-line pick nothing to work with.
+    """
+    assert sl._plain_lines("Ja\nFalls ja, E-Mail oder Telefonnummer") == (
+        "Ja\nFalls ja, E-Mail oder Telefonnummer"
+    )
+    assert sl._plain_lines("  Ja \n\n <b>Nein</b>  ") == "Ja\nNein"
+    assert sl._plain_lines("one   two") == "one two"

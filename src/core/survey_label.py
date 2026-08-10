@@ -32,10 +32,25 @@ def sanitize(text: str) -> str:
     return text
 
 
+def _plain_lines(value: str) -> str:
+    """Strip markup but keep line breaks.
+
+    ``form_extract._plain`` collapses newlines into spaces, which would merge a
+    block like "Ja\\nFalls ja, E-Mail oder Telefonnummer" into one label and
+    leave nothing for the per-line pick below to work with.
+    """
+    import re
+    from html import unescape
+
+    text = unescape(form_extract._TAG.sub(" ", str(value or "")))
+    lines = [re.sub(r"[^\S\n]+", " ", line).strip() for line in text.splitlines()]
+    return "\n".join(line for line in lines if line)
+
+
 def _blocks(page: "doc_ir.Page") -> List[Tuple[List[float], str]]:
     out = []
     for region in page.ordered_regions():
-        text = form_extract._plain(region.text)
+        text = _plain_lines(region.text)
         if text and len(region.bbox) >= 4:
             out.append(([float(v) for v in region.bbox[:4]], text))
     return out
