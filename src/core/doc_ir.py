@@ -21,7 +21,7 @@ import json
 import re
 import zipfile
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import pandas as pd
 
@@ -897,7 +897,12 @@ def build_full_bundle(document: Document, doc_stem: str = "document") -> bytes:
 
 
 def write_document_outputs(
-    document: Document, out_dir, stem: str = "document", *, provenance: bool = True
+    document: Document,
+    out_dir,
+    stem: str = "document",
+    *,
+    provenance: bool = True,
+    skip_tables: Optional[Set[str]] = None,
 ) -> List[str]:
     """Write every export format for one document into *out_dir*.
 
@@ -929,6 +934,8 @@ def write_document_outputs(
     for fname, data in collect_assets(document).items():
         _write(os.path.join("assets", fname), data, binary=True)
     for entry in tables_to_dataframes(document):
+        if entry["region_id"] in (skip_tables or ()):
+            continue
         _write(
             os.path.join("tables", f"table_{entry['region_id']}.csv"),
             entry["dataframe"].to_csv(index=False),

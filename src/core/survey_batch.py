@@ -857,5 +857,103 @@ def write_batch_outputs(
 def answers_for_document(
     result: DocumentReading, template: survey_template.SurveyTemplate
 ):
-    """The one-row table for a single respondent, for that file's own folder."""
-    return to_checkbox_table([result], template)
+    """One respondent's answers, one row per question.
+
+    The batch table is wide by necessity -- a row per respondent means a column
+    per checkbox. A single file's own folder is better served the other way up:
+    ~35 readable lines instead of one 400-column line.
+    """
+    import pandas as pd
+
+    readings = {r.control_id: r for r in result.readings}
+    scan_page = {
+        control.row_id: page.page_index
+        for page in template.pages for control in page.controls
+    }
+    records = []
+    for row_id, controls in sorted(
+        template.rows().items(),
+        key=lambda item: (
+            scan_page.get(item[0], 0), item[1][0].column, item[1][0].bbox[1]
+        ),
+    ):
+        states = [
+            (
+                control,
+                readings[control.id].state if control.id in readings else UNCERTAIN,
+                readings[control.id].score if control.id in readings else 0.0,
+            )
+            for control in controls
+        ]
+        rule = template.rules.get(row_id, "single")
+        if rule == "single":
+            answer, certainty = resolve_single(states)
+        else:
+            chosen = [c.label or c.id for c, state, _ in states if state == "checked"]
+            unread = any(state == UNCERTAIN for _, state, _ in states)
+            answer = UNCERTAIN.upper() if unread else MULTI_SEPARATOR.join(sorted(chosen))
+            certainty = min((score for _, _, score in states), default=0.0)
+
+        number = controls[0].question_id.rsplit("_q", 1)[-1]
+        records.append({
+            "document": result.document,
+            "sheet_page": controls[0].sheet_page,
+            "question": f"Q{number}" if number else "",
+            "row": template.row_labels.get(row_id, ""),
+            "type": rule,
+            "answer": answer,
+            "certainty": round(float(certainty), 3),
+            "marked": MULTI_SEPARATOR.join(
+                (c.label or c.id) for c, state, _ in states if state == "checked"
+            ),
+            "options": " | ".join(c.label or c.id for c in controls),
+            "answer_id": row_id,
+        })
+    return pd.DataFrame(records)
+
+
+def survey_table_regions(document, template) -> set:
+    """Table regions that are really questionnaire grids, not data tables.
+
+    A rating scale or a matrix reads as a table to the layout model, and
+    exporting it as a CSV of empty cells is noise next to the response tables.
+    Region boxes are in preview pixels and template controls in page fractions,
+    so both are normalized before they are compared.
+    """
+    import base64
+    import io as _io
+
+    from core import doc_ir
+
+    grids = set()
+    for page, template_page in zip(document.pages, template.pages):
+        size = None
+        if page.image_b64:
+            try:
+                from PIL import Image
+
+                with Image.open(_io.BytesIO(base64.b64decode(page.image_b64))) as preview:
+                    size = preview.size
+            except Exception:
+                size = None
+        if not size:
+            size = (page.width, page.height)
+        width, height = size
+        if not width or not height:
+            continue
+
+        centres = [
+            ((c.bbox[0] + c.bbox[2]) / 2, (c.bbox[1] + c.bbox[3]) / 2)
+            for c in template_page.controls
+        ]
+        for region in page.regions:
+            if region.type != doc_ir.TABLE or len(region.bbox) < 4:
+                continue
+            x1, y1, x2, y2 = (
+                region.bbox[0] / width, region.bbox[1] / height,
+                region.bbox[2] / width, region.bbox[3] / height,
+            )
+            inside = sum(1 for cx, cy in centres if x1 <= cx <= x2 and y1 <= cy <= y2)
+            if inside >= 2:
+                grids.add(region.id)
+    return grids

@@ -341,11 +341,7 @@ def run_auto_batch(
 
             # Same writer as the single-document downloads; the provenance
             # summary is collected instead, and written once at the root.
-            doc_ir.write_document_outputs(
-                document, file_output_dir, "document", provenance=False
-            )
-            batch_provenance.append(doc_ir.model_provenance(document))
-
+            skip_tables = None
             if template is not None:
                 # Same file, second pass: the text extraction above is
                 # unchanged, this adds the questionnaire answers.
@@ -354,6 +350,16 @@ def run_auto_batch(
                 survey_batch.answers_for_document(reading, template).to_csv(
                     file_output_dir / "survey_answers.csv", index=False
                 )
+                # A rating scale reads as a table to the layout model. Once the
+                # responses are extracted properly, exporting the grid again as
+                # a CSV of empty cells is only noise.
+                skip_tables = survey_batch.survey_table_regions(document, template)
+
+            doc_ir.write_document_outputs(
+                document, file_output_dir, "document", provenance=False,
+                skip_tables=skip_tables,
+            )
+            batch_provenance.append(doc_ir.model_provenance(document))
 
             shutil.rmtree(per_file_ws, ignore_errors=True)
             progress_bar.progress((idx + 1) / n_files)

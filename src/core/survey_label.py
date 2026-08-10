@@ -490,12 +490,17 @@ def name_answer_rows(template, *, lang: str = OCR_LANG) -> int:
     Paddle merges a matrix's row stems into one block, so they are recovered by
     cropping the strip left of each row and running Tesseract on that alone.
     Requires ``infer_structure`` to have assigned row ids.
+
+    Every name is recomputed from scratch: row ids are positional, so removing
+    a control renumbers them, and a leftover entry would attach one row's
+    printed name to a different row.
     """
     import base64
 
     import cv2
     import numpy as np
 
+    template.row_labels = {}
     named = 0
     for page in template.pages:
         if not page.blank_png_b64:

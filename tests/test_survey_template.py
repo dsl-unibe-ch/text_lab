@@ -683,15 +683,22 @@ def test_batch_orchestration_produces_the_survey_tables():
         assert all(c == 2 for c in counts), f"marks per respondent: {counts}"
 
 
-def test_single_document_answers_are_written_beside_its_text_output():
+def test_single_document_answers_are_one_row_per_question():
+    """The batch table is wide; a single file's own answers read better long."""
     with tempfile.TemporaryDirectory() as tmp:
         folder = pathlib.Path(tmp)
         paths = _write_batch(folder, count=5)
         template, _ = sb.prepare_template(paths, label=False, dpi=FIXTURE_DPI)
         reading = sb.read_document(paths[0], template)
         frame = sb.answers_for_document(reading, template)
-        assert len(frame) == 1
-        assert frame.iloc[0]["document"] == paths[0].name
+
+        assert len(frame) == len(template.rules), "one line per answer"
+        assert set(frame["document"]) == {paths[0].name}
+        assert {"question", "answer", "certainty", "options", "answer_id"} <= set(
+            frame.columns
+        )
+        # the respondent's marks show up as answers
+        assert (frame["answer"].astype(str).str.strip() != "").any()
 
 
 def test_the_blank_is_built_from_a_bounded_sample():
@@ -774,3 +781,30 @@ def test_answer_overview_counts_who_answered_each_question():
         # never_marked and answered_by must agree
         for _, row in overview.iterrows():
             assert row["never_marked"] == (row["answered_by"] == 0)
+
+
+def test_dropping_a_row_does_not_leave_a_stale_name_on_another_row():
+    """Row ids are positional, so removing one renumbers the rest.
+
+    A leftover row_labels entry would then attach one row's printed name to a
+    different row -- a wrong label on real data, not a missing one.
+    """
+    template = _template_with(
+        [(200 + i * 300, 380 + r * 220, "circle", str(i), "p1_q9")
+         for r in range(3) for i in range(4)]
+    )
+    rows = sorted(template.rows())
+    assert len(rows) == 3
+    template.row_labels = {
+        rows[0]: "first row", rows[1]: "second row", rows[2]: "third row",
+    }
+    # no blanks on this synthetic template, so naming cannot re-derive anything
+    victim = [c.id for c in template.rows()[rows[0]]]
+    sb.drop_controls(template, victim)
+
+    assert len(template.rows()) == 2
+    for row_id in template.rows():
+        assert template.row_labels.get(row_id, "") == "", (
+            f"{row_id} kept a name from the old numbering: "
+            f"{template.row_labels.get(row_id)!r}"
+        )
