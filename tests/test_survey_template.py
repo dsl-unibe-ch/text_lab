@@ -9,6 +9,7 @@ import cv2
 import numpy as np
 
 from core import survey_batch as sb
+from core import survey_label as sl
 from core import survey_template as st
 
 W, H = 1800, 1400
@@ -274,8 +275,10 @@ def test_checkbox_export_has_a_certainty_beside_every_data_column():
     ]
     frame = sb.to_checkbox_table(results, template)
 
+    # "registration" is scan metadata, not an answer, so it has no certainty
     data_columns = [c for c in frame.columns
-                    if c != "document" and not c.endswith(sb.CERTAINTY_SUFFIX)]
+                    if c not in ("document", "registration")
+                    and not c.endswith(sb.CERTAINTY_SUFFIX)]
     for column in data_columns:
         assert column + sb.CERTAINTY_SUFFIX in frame.columns, f"{column} has no certainty"
 
@@ -303,3 +306,95 @@ def test_checkbox_export_orders_a_scale_left_to_right():
     checkboxes = [c for c in frame.columns
                   if c.startswith(f"{row_id} | ") and not c.endswith(sb.CERTAINTY_SUFFIX)]
     assert checkboxes == [f"{row_id} | {i}" for i in range(4)]
+
+
+# ==========================================
+#      ROW STEM NAMING AND AUDIT OUTPUT
+# ==========================================
+
+
+def two_column_page():
+    """Two content columns separated by a gutter, as in a two-up A3 scan."""
+    img = np.full((900, 2000), 255, np.uint8)
+    for x0 in (100, 1200):
+        for row in range(6):
+            cv2.putText(img, "Naturpark Diemtigtal Umfrage", (x0, 120 + row * 90),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, 0, 2)
+    return img
+
+
+def test_content_columns_finds_the_gutter():
+    ink = md_ink(two_column_page())
+    columns = sl._content_columns(ink)
+    assert len(columns) == 2, f"expected two content columns, got {columns}"
+    left, right = columns
+    assert left[1] < 1200 <= right[0]
+
+
+def md_ink(gray):
+    from core import markup_detect
+
+    return markup_detect._ink_mask(cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR))
+
+
+def test_stem_span_ignores_a_table_rule():
+    """A full-width row rule must not hide the gap before the controls."""
+    img = np.full((200, 1400), 255, np.uint8)
+    cv2.putText(img, "Nachhaltige Landwirtschaft", (60, 110),
+                cv2.FONT_HERSHEY_SIMPLEX, 1.0, 0, 2)
+    cv2.line(img, (0, 170), (1399, 170), 0, 2)          # the table rule
+    ink = md_ink(img)
+    columns = [(0, 1400)]
+    span = sl._stem_span(ink, columns, x_limit=1200, y1=40, y2=190)
+    assert span is not None, "the rule swallowed the gap"
+    x1, x2 = span
+    assert 40 <= x1 <= 80, span
+    assert x2 < 1200
+
+
+def test_stem_span_stays_inside_its_content_column():
+    ink = md_ink(two_column_page())
+    columns = sl._content_columns(ink)
+    # controls in the right column must not pick up the left column's text
+    span = sl._stem_span(ink, columns, x_limit=1190, y1=80, y2=140)
+    assert span is None or span[0] >= columns[1][0]
+
+
+def test_row_naming_is_skipped_without_tesseract_rather_than_crashing():
+    template = _template_with(
+        [(200 + i * 300, 380, "circle", str(i), "q1") for i in range(4)]
+    )
+    template.pages[0].blank_png_b64 = None
+    assert sl.name_answer_rows(template) == 0
+
+
+def test_unused_controls_separates_dead_rows_from_unpopular_options():
+    template = _template_with(
+        [(200 + i * 300, 380, "circle", str(i), "q1") for i in range(3)]
+        + [(200 + i * 300, 700, "circle", str(i), "q2") for i in range(3)]
+    )
+    controls = [c for page in template.pages for c in page.controls]
+    # first row: option 0 chosen every time; second row: nobody marked anything
+    results = [
+        _reading("a.pdf", ["checked", "unchecked", "unchecked",
+                           "unchecked", "unchecked", "unchecked"], template),
+    ]
+    unused = sb.unused_controls(results, template)
+    dead = unused[unused["whole_row_unused"]]
+    assert set(dead["row_id"]) == {controls[3].row_id}
+    assert len(dead) == 3
+    # the unpopular options in the answered row are listed but not flagged
+    assert set(unused[~unused["whole_row_unused"]]["control_id"]) == {
+        controls[1].id, controls[2].id
+    }
+
+
+def test_export_carries_registration_quality():
+    template = _template_with(
+        [(200 + i * 300, 380, "circle", str(i), "q1") for i in range(3)]
+    )
+    result = _reading("a.pdf", ["checked", "unchecked", "unchecked"], template)
+    result.registration = {0: 0.91, 1: 0.44}
+    frame = sb.to_checkbox_table([result], template)
+    # the worst page is what a reviewer needs to see
+    assert frame.loc[0, "registration"] == 0.44

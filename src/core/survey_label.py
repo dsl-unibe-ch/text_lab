@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from core import doc_ir, form_extract, survey_template
+from core import doc_ir, form_extract, markup_detect, survey_template
 
 MAX_LABEL_GAP = 0.16   # fraction of page width a label may sit from its control
 _BAND_TOLERANCE = 0.6  # share of control height a label must vertically overlap
@@ -188,6 +188,189 @@ def label_page(
     for group in by_question.values():
         _label_horizontal_runs(group, width, height)
     return labelled
+
+
+# ==========================================
+#            ROW STEM NAMING
+# ==========================================
+
+MIN_GUTTER = 120       # px of blank columns that separate content columns
+MIN_STEM_GAP = 20      # px of blank columns between a stem and its controls
+MIN_TEXT_HEIGHT = 6    # px of ink in a column before it counts as text, not a rule
+MIN_OCR_CONFIDENCE = 65  # mean Tesseract word confidence below which a stem is dropped
+OCR_LANG = "deu"
+
+
+def _content_columns(ink, min_gutter: int = MIN_GUTTER) -> List[Tuple[int, int]]:
+    """Column bands separated by full-height vertical whitespace.
+
+    A two-up A3 scan holds two pages side by side; without this bound a row
+    stem search runs off the edge of one page and reads the other one.
+    """
+    empty = (ink > 0).sum(axis=0) == 0
+    gutters, start = [], None
+    for x, is_empty in enumerate(empty):
+        if is_empty and start is None:
+            start = x
+        elif not is_empty and start is not None:
+            if x - start >= min_gutter:
+                gutters.append((start, x))
+            start = None
+    if start is not None and len(empty) - start >= min_gutter:
+        gutters.append((start, len(empty)))
+
+    columns, left = [], 0
+    for a, b in gutters:
+        if a > left:
+            columns.append((left, a))
+        left = b
+    if left < len(empty):
+        columns.append((left, len(empty)))
+    return columns
+
+
+def _stem_span(ink, columns, x_limit: int, y1: int, y2: int) -> Optional[Tuple[int, int]]:
+    """Horizontal span of the text block immediately left of a row's controls.
+
+    Walks left from the controls: skip the whitespace separating them from the
+    stem, take the ink that follows, and stop at the next wide gap.
+    """
+    column = next((c for c in columns if c[0] <= x_limit <= c[1]), None)
+    if column is None:
+        return None
+    left_bound = column[0]
+    band = ink[max(0, y1):y2, left_bound:x_limit]
+    if band.size == 0:
+        return None
+    # Count ink height per column rather than presence: a table's horizontal
+    # row rule spans the full width and would otherwise leave no gap anywhere.
+    has_ink = (band > 0).sum(axis=0) >= MIN_TEXT_HEIGHT
+
+    x = len(has_ink) - 1
+    while x >= 0 and not has_ink[x]:          # gap between stem and controls
+        x -= 1
+    if x < 0 or (len(has_ink) - 1 - x) < MIN_STEM_GAP:
+        return None
+    end = x
+    gap = 0
+    while x >= 0:
+        if has_ink[x]:
+            gap = 0
+        else:
+            gap += 1
+            if gap >= MIN_GUTTER:
+                break
+        x -= 1
+    return left_bound + x + gap + 1, left_bound + end + 1
+
+
+def _row_bands(groups, width: int, height: int) -> Dict[str, Tuple[int, int]]:
+    """Vertical extent to read for each row: up to its neighbours' midpoints.
+
+    A matrix stem often wraps onto a second line, so reading only the control's
+    own height would clip it.
+    """
+    centres = []
+    for row_id, controls in groups.items():
+        boxes = [c.pixel_bbox(width, height) for c in controls]
+        centres.append((sum((b[1] + b[3]) / 2 for b in boxes) / len(boxes), row_id, boxes))
+    centres.sort()
+
+    bands = {}
+    for index, (centre, row_id, boxes) in enumerate(centres):
+        above = centres[index - 1][0] if index else centre - (centre - min(b[1] for b in boxes)) * 4
+        below = centres[index + 1][0] if index + 1 < len(centres) else (
+            centre + (max(b[3] for b in boxes) - centre) * 4
+        )
+        bands[row_id] = (
+            int(max(0, (above + centre) / 2 + 2)),
+            int(min(height, (centre + below) / 2 - 2)),
+        )
+    return bands
+
+
+def _ocr(crop, lang: str) -> str:
+    """Read a stem strip, refusing the read when Tesseract is not confident.
+
+    A garbled stem is worse than none: it would go straight into a column
+    header and read as though the form said that.
+    """
+    try:
+        import pytesseract
+    except Exception:
+        return ""
+    try:
+        data = pytesseract.image_to_data(
+            crop, lang=lang, config="--psm 6",
+            output_type=pytesseract.Output.DICT,
+        )
+    except Exception:
+        return ""
+
+    words, confidences = [], []
+    for text, confidence in zip(data.get("text", []), data.get("conf", [])):
+        try:
+            confidence = float(confidence)
+        except (TypeError, ValueError):
+            continue
+        if confidence < 0 or not str(text).strip():
+            continue
+        words.append(str(text).strip())
+        confidences.append(confidence)
+
+    if not words or sum(confidences) / len(confidences) < MIN_OCR_CONFIDENCE:
+        return ""
+    return sanitize(" ".join(words))
+
+
+def name_answer_rows(template, *, lang: str = OCR_LANG) -> int:
+    """Read the row stem beside each multi-control answer row.
+
+    Paddle merges a matrix's row stems into one block, so they are recovered by
+    cropping the strip left of each row and running Tesseract on that alone.
+    Requires ``infer_structure`` to have assigned row ids.
+    """
+    import base64
+
+    import cv2
+    import numpy as np
+
+    named = 0
+    for page in template.pages:
+        if not page.blank_png_b64:
+            continue
+        blank = cv2.imdecode(
+            np.frombuffer(base64.b64decode(page.blank_png_b64), np.uint8),
+            cv2.IMREAD_GRAYSCALE,
+        )
+        ink = markup_detect._ink_mask(cv2.cvtColor(blank, cv2.COLOR_GRAY2BGR))
+        columns = _content_columns(ink)
+
+        by_question: Dict[str, Dict[str, List[Any]]] = {}
+        for control in page.controls:
+            by_question.setdefault(control.question_id, {}).setdefault(
+                control.row_id, []
+            ).append(control)
+
+        for groups in by_question.values():
+            bands = _row_bands(groups, page.width, page.height)
+            for row_id, controls in groups.items():
+                if len(controls) < 2:
+                    continue
+                boxes = [c.pixel_bbox(page.width, page.height) for c in controls]
+                # Only a horizontal run has a stem beside it; a vertical option
+                # list is already named by the text against each option.
+                if max(b[1] for b in boxes) >= min(b[3] for b in boxes):
+                    continue
+                y1, y2 = bands[row_id]
+                span = _stem_span(ink, columns, min(b[0] for b in boxes), y1, y2)
+                if span is None:
+                    continue
+                stem = _ocr(blank[y1:y2, span[0]:span[1]], lang)
+                if stem:
+                    template.row_labels[row_id] = stem
+                    named += 1
+    return named
 
 
 def label_template(

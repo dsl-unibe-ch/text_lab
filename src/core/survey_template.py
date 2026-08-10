@@ -421,6 +421,7 @@ class SurveyTemplate:
     dpi: int = DEFAULT_DPI
     provenance: Dict[str, Any] = field(default_factory=dict)
     rules: Dict[str, str] = field(default_factory=dict)  # row_id -> single|multiple
+    row_labels: Dict[str, str] = field(default_factory=dict)  # row_id -> printed stem
 
     @property
     def control_count(self) -> int:
@@ -431,6 +432,7 @@ class SurveyTemplate:
             "dpi": self.dpi,
             "provenance": dict(self.provenance),
             "rules": dict(self.rules),
+            "row_labels": dict(self.row_labels),
             "pages": [page.to_dict(stem) for page in self.pages],
         }
 
@@ -464,6 +466,7 @@ class SurveyTemplate:
             dpi=int(raw.get("dpi", DEFAULT_DPI)),
             provenance=dict(raw.get("provenance") or {}),
             rules=dict(raw.get("rules") or {}),
+            row_labels=dict(raw.get("row_labels") or {}),
             pages=[
                 TemplatePage(
                     page_index=int(page["page_index"]),

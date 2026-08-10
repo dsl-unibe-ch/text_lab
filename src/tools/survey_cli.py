@@ -67,12 +67,14 @@ def _label(template, blanks) -> None:
             images.append(path)
         page_jsons = auto_ocr.run_vl_worker(images)
     labelled = survey_label.label_template(template, page_jsons)
+    survey_template.infer_structure(template)
+    named = survey_label.name_answer_rows(template)
     questions = {
         control.question_id
         for page in template.pages for control in page.controls if control.question_id
     }
     print(f"  {labelled}/{template.control_count} controls labelled "
-          f"in {len(questions)} question groups")
+          f"in {len(questions)} question groups; {named} answer rows named")
 
 
 def _build(args) -> None:
@@ -117,16 +119,24 @@ def _read(args) -> None:
     survey_batch.to_long(results, template).to_csv(out / "responses_long.csv", index=False)
     queue = survey_batch.review_queue(results, template)
     queue.to_csv(out / "review_queue.csv", index=False)
+    unused = survey_batch.unused_controls(results, template)
+    unused.to_csv(out / "unused_controls.csv", index=False)
 
     summary = survey_batch.summarize(results)
     print(f"\n{summary['documents']} documents x {summary['controls_per_document']} controls")
     print(f"  marked        : {summary['checked']}")
     print(f"  needs a look  : {summary['uncertain']} ({summary['uncertain_rate'] * 100:.2f}%)")
+    print(f"  worst page registration: {summary['worst_registration']}")
+    if len(unused):
+        rows = int(unused["whole_row_unused"].sum())
+        print(f"  {len(unused)} control(s) nobody marked"
+              + (f", {rows} in answer rows nobody touched (likely false positives)" if rows else "")
+              + " - see unused_controls.csv")
     for result in results:
         for warning in result.warnings:
             print(f"  ! {result.document}: {warning}")
     print(f"\nWrote responses_checkboxes.csv, responses_matrix.csv, "
-          f"responses_long.csv, review_queue.csv to {out}")
+          f"responses_long.csv, review_queue.csv, unused_controls.csv to {out}")
 
 
 def _run(args) -> None:

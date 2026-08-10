@@ -214,18 +214,20 @@ def to_long(results: Sequence[DocumentReading], template: survey_template.Survey
     import pandas as pd
 
     labels = {
-        control.id: (control.question_id, control.label)
+        control.id: (control.question_id, control.row_id, control.label)
         for page in template.pages
         for control in page.controls
     }
     records = []
     for result in results:
         for reading in result.readings:
-            question_id, label = labels.get(reading.control_id, ("", ""))
+            question_id, row_id, label = labels.get(reading.control_id, ("", "", ""))
             records.append({
                 "document": result.document,
                 "control_id": reading.control_id,
                 "question_id": question_id,
+                "row_id": row_id,
+                "row_label": template.row_labels.get(row_id, ""),
                 "label": label,
                 "page": reading.page_index + 1,
                 "state": reading.state,
@@ -255,13 +257,15 @@ def _row_plan(template: survey_template.SurveyTemplate):
 
     plan, used = [], {}
     for row_id, controls in rows.items():
+        # The printed row stem when it was recovered, else the positional id.
+        name = template.row_labels.get(row_id) or row_id
         # Left-to-right, then top-to-bottom, so a scale reads in printed order.
         controls = sorted(controls, key=lambda c: (round(c.bbox[1], 3), c.bbox[0]))
         columns = [
-            (control, _unique(f"{row_id} | {control.label or control.id}", used))
+            (control, _unique(f"{name} | {control.label or control.id}", used))
             for control in controls
         ]
-        plan.append((row_id, template.rules.get(row_id, "single"), columns))
+        plan.append((row_id, name, template.rules.get(row_id, "single"), columns))
     return plan
 
 
@@ -286,16 +290,19 @@ def to_checkbox_table(
     records = []
     for result in results:
         readings = {r.control_id: r for r in result.readings}
-        record: Dict[str, Any] = {"document": result.document}
+        record: Dict[str, Any] = {
+            "document": result.document,
+            "registration": round(min(result.registration.values(), default=0.0), 3),
+        }
 
-        for row_id, rule, columns in plan:
+        for _row_id, row_name, rule, columns in plan:
             states = []
-            for control, name in columns:
+            for control, column in columns:
                 reading = readings.get(control.id)
                 state = reading.state if reading else UNCERTAIN
                 states.append((control, state, reading.score if reading else 0.0))
-                record[name] = {"checked": True, "unchecked": False}.get(state, "")
-                record[name + CERTAINTY_SUFFIX] = round(reading.score if reading else 0.0, 3)
+                record[column] = {"checked": True, "unchecked": False}.get(state, "")
+                record[column + CERTAINTY_SUFFIX] = round(reading.score if reading else 0.0, 3)
 
             if rule != "single":
                 continue
@@ -312,17 +319,17 @@ def to_checkbox_table(
                 # Contradictory or unreadable: say so rather than pick one.
                 value = "MULTIPLE" if len(chosen) > 1 else "UNCERTAIN"
                 certainty = 0.0
-            record[row_id] = value
-            record[row_id + CERTAINTY_SUFFIX] = round(float(certainty), 3)
+            record[row_name] = value
+            record[row_name + CERTAINTY_SUFFIX] = round(float(certainty), 3)
 
         records.append(record)
 
     frame = pd.DataFrame(records)
     # value column first, then its checkboxes, each followed by its certainty
-    order = ["document"]
-    for row_id, rule, columns in plan:
-        if rule == "single" and row_id in frame.columns:
-            order += [row_id, row_id + CERTAINTY_SUFFIX]
+    order = ["document", "registration"]
+    for _row_id, name, rule, columns in plan:
+        if rule == "single" and name in frame.columns:
+            order += [name, name + CERTAINTY_SUFFIX]
         for _, name in columns:
             order += [name, name + CERTAINTY_SUFFIX]
     return frame[[c for c in order if c in frame.columns]]
@@ -337,6 +344,50 @@ def review_queue(results: Sequence[DocumentReading], template: survey_template.S
     return flagged.sort_values(["score", "document", "control_id"]).reset_index(drop=True)
 
 
+def unused_controls(
+    results: Sequence[DocumentReading],
+    template: survey_template.SurveyTemplate,
+):
+    """Controls no respondent ever marked.
+
+    A single unmarked control is usually just an unpopular option. A whole
+    answer row that nobody touched is the interesting case: it is normally a
+    detection false positive -- printed text that passed the shape filters --
+    so ``whole_row_unused`` is the column to sort on in the template pass.
+    """
+    import pandas as pd
+
+    marked = {
+        reading.control_id
+        for result in results for reading in result.readings
+        if reading.state == "checked"
+    }
+    rows_marked = {
+        control.row_id
+        for page in template.pages for control in page.controls
+        if control.id in marked
+    }
+    records = [
+        {
+            "control_id": control.id,
+            "page": page.page_index + 1,
+            "row_id": control.row_id,
+            "row_label": template.row_labels.get(control.row_id, ""),
+            "label": control.label,
+            "shape": control.shape,
+            "whole_row_unused": control.row_id not in rows_marked,
+        }
+        for page in template.pages for control in page.controls
+        if control.id not in marked
+    ]
+    frame = pd.DataFrame(records)
+    if not frame.empty:
+        frame = frame.sort_values(
+            ["whole_row_unused", "page", "row_id"], ascending=[False, True, True]
+        ).reset_index(drop=True)
+    return frame
+
+
 def summarize(results: Sequence[DocumentReading]) -> Dict[str, Any]:
     total = sum(len(r.readings) for r in results)
     checked = sum(r.checked for r in results)
@@ -348,4 +399,7 @@ def summarize(results: Sequence[DocumentReading]) -> Dict[str, Any]:
         "uncertain": uncertain,
         "uncertain_rate": round(uncertain / max(1, total), 4),
         "documents_with_warnings": sum(1 for r in results if r.warnings),
+        "worst_registration": round(
+            min((min(r.registration.values(), default=0.0) for r in results), default=0.0), 3
+        ),
     }
