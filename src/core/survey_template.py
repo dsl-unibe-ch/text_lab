@@ -297,6 +297,61 @@ def residual_ink(blank_gray, registered_gray):
     return cv2.subtract(cv2.erode(blank_gray, kernel), registered_gray)
 
 
+MARK_CLOSE = 7      # px, bridges gaps the erosion leaves where a stroke crosses print
+MIN_MARK_AREA = 40  # px, below this a residual blob is scanner noise, not a mark
+
+
+def dominant_control(residual, boxes: Sequence[Sequence[int]]) -> Optional[int]:
+    """Which control a single stroke spanning several of them belongs to.
+
+    A respondent whose X carries a long tail leaves ink inside the neighbouring
+    control too. If all of it is one connected stroke then it is one mark, and
+    it belongs to the control holding most of it. Returns None when the
+    controls hold separate strokes -- that is a real multi-mark and has to stay
+    flagged rather than be resolved away.
+    """
+    import cv2
+
+    if len(boxes) < 2:
+        return None
+    pad = max(4, max(b[3] - b[1] for b in boxes) // 2)
+    height, width = residual.shape[:2]
+    x1 = max(0, min(b[0] for b in boxes) - pad)
+    y1 = max(0, min(b[1] for b in boxes) - pad)
+    x2 = min(width, max(b[2] for b in boxes) + pad)
+    y2 = min(height, max(b[3] for b in boxes) + pad)
+    region = residual[y1:y2, x1:x2]
+    if region.size == 0:
+        return None
+
+    mask = (region > RESIDUAL_INK).astype(np.uint8)
+    mask = cv2.morphologyEx(
+        mask, cv2.MORPH_CLOSE, np.ones((MARK_CLOSE, MARK_CLOSE), np.uint8)
+    )
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(mask, 8)
+    if count < 2:
+        return None
+
+    share: Dict[int, Dict[int, int]] = {}
+    for index, box in enumerate(boxes):
+        bx1, by1, bx2, by2 = box
+        my = int((by2 - by1) * _RESIDUAL_MARGIN)
+        mx = int((bx2 - bx1) * _RESIDUAL_MARGIN)
+        inner = labels[by1 - y1 + my: by2 - y1 - my, bx1 - x1 + mx: bx2 - x1 - mx]
+        if inner.size == 0:
+            continue
+        values, counts = np.unique(inner, return_counts=True)
+        for value, pixels in zip(values, counts):
+            if value == 0 or stats[value, cv2.CC_STAT_AREA] < MIN_MARK_AREA:
+                continue
+            share.setdefault(int(value), {})[index] = int(pixels)
+
+    if len(share) != 1:
+        return None  # separate strokes, or nothing worth calling a mark
+    holders = next(iter(share.values()))
+    return max(holders, key=holders.get) if holders else None
+
+
 def halo_crop(residual, bbox: Sequence[int], grow: float = HALO_GROW):
     """The control's box widened by *grow* on each side, clipped to the page."""
     x1, y1, x2, y2 = [int(v) for v in bbox]

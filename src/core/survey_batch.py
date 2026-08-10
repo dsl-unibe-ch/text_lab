@@ -143,6 +143,8 @@ def read_document(
             )
             states.append(result.readings[-1].state)
 
+        _resolve_shared_marks(result, page, template, residual)
+
         if debug_dir is not None:
             out = pathlib.Path(debug_dir)
             out.mkdir(parents=True, exist_ok=True)
@@ -155,6 +157,41 @@ def read_document(
             cv2.imwrite(str(out / f"{path.stem}_page{page.page_index + 1}.png"), vis)
 
     return result
+
+
+SHARED_MARK_SCORE = 0.5  # answered, but the contest stays visible in the export
+
+
+def _resolve_shared_marks(result, page, template, residual) -> None:
+    """Undo a double read caused by one stroke covering two controls.
+
+    Only single-choice answers that came back with more than one mark are
+    touched, so this can turn a flagged answer into a definite one but cannot
+    change an answer that was already unambiguous.
+    """
+    by_id = {reading.control_id: reading for reading in result.readings}
+    groups: Dict[str, List[survey_template.TemplateControl]] = {}
+    for control in page.controls:
+        groups.setdefault(control.row_id or control.id, []).append(control)
+
+    for row_id, controls in groups.items():
+        if template.rules.get(row_id, "single") != "single":
+            continue
+        checked = [
+            control for control in controls
+            if control.id in by_id and by_id[control.id].state == "checked"
+        ]
+        if len(checked) < 2:
+            continue
+
+        boxes = [c.pixel_bbox(page.width, page.height) for c in checked]
+        winner = survey_template.dominant_control(residual, boxes)
+        if winner is None:
+            continue
+        for index, control in enumerate(checked):
+            reading = by_id[control.id]
+            reading.state = "checked" if index == winner else "unchecked"
+            reading.score = SHARED_MARK_SCORE
 
 
 def read_batch(

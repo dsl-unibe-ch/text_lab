@@ -575,3 +575,40 @@ def test_block_text_keeps_its_line_breaks():
     )
     assert sl._plain_lines("  Ja \n\n <b>Nein</b>  ") == "Ja\nNein"
     assert sl._plain_lines("one   two") == "one two"
+
+
+def test_one_stroke_across_two_controls_belongs_to_the_one_holding_it():
+    """A long X tail reaching into the neighbour is not a second answer."""
+    blank = blank_form()
+    x0, y = CENTRES[0]
+    x1 = CENTRES[1][0]
+    marked = blank.copy()
+    # X centred on the first control, tail sweeping up-right into the second
+    d = RADIUS
+    cv2.line(marked, (x0 - d, y - d), (x0 + d, y + d), 0, 5)
+    cv2.line(marked, (x0 - d, y + d), (x1 + d, y - d - 10), 0, 5)
+
+    residual = st.residual_ink(blank, marked)
+    boxes = [
+        (cx - RADIUS, y - RADIUS, cx + RADIUS, y + RADIUS) for cx in (x0, x1)
+    ]
+    assert st.dominant_control(residual, boxes) == 0
+
+
+def test_two_separate_marks_are_not_resolved_away():
+    """A real double answer must stay flagged, not be silently reduced to one."""
+    blank = blank_form()
+    marked = blank.copy()
+    for index in (0, 1):
+        cx, cy = CENTRES[index]
+        d = int(RADIUS * 0.7)
+        cv2.line(marked, (cx - d, cy - d), (cx + d, cy + d), 0, 4)
+        cv2.line(marked, (cx + d, cy - d), (cx - d, cy + d), 0, 4)
+
+    residual = st.residual_ink(blank, marked)
+    boxes = [
+        (CENTRES[i][0] - RADIUS, CENTRES[i][1] - RADIUS,
+         CENTRES[i][0] + RADIUS, CENTRES[i][1] + RADIUS)
+        for i in (0, 1)
+    ]
+    assert st.dominant_control(residual, boxes) is None
