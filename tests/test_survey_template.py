@@ -398,3 +398,83 @@ def test_export_carries_registration_quality():
     frame = sb.to_checkbox_table([result], template)
     # the worst page is what a reviewer needs to see
     assert frame.loc[0, "registration"] == 0.44
+
+
+# ==========================================
+#      GROUND-TRUTH SHEET AND SCORING
+# ==========================================
+
+
+def test_reading_order_keeps_a_row_left_to_right_despite_jitter():
+    """Scanned controls on one line differ by a few pixels vertically."""
+    template = _template_with([
+        (200, 380, "circle", "0", "q1"), (500, 383, "circle", "1", "q1"),
+        (800, 377, "circle", "2", "q1"), (1100, 381, "circle", "3", "q1"),
+    ])
+    ordered = st.reading_order(template.pages[0].controls)
+    assert [c.label for c in ordered] == ["0", "1", "2", "3"]
+
+
+def test_reading_order_keeps_a_vertical_list_top_to_bottom():
+    template = _template_with(
+        [(200, 380 + i * 120, "circle", str(i), "q1") for i in range(4)]
+    )
+    ordered = st.reading_order(template.pages[0].controls)
+    assert [c.label for c in ordered] == ["0", "1", "2", "3"]
+
+
+def test_answer_sheet_is_one_blank_line_per_answer():
+    template = _template_with(
+        [(200 + i * 300, 380, "circle", str(i), "q1") for i in range(4)]
+        + [(200, 700 + i * 120, "box", f"box {i}", "q2") for i in range(3)]
+    )
+    sheet = sb.answer_sheet(template, ["a.pdf", "b.pdf"])
+    rows = {c.row_id for c in template.pages[0].controls}
+    assert len(sheet) == 2 * len(rows)
+    assert (sheet["answer"] == "").all(), "the sheet must not be pre-filled"
+    single = sheet[sheet["type"] == "single"].iloc[0]
+    assert single["options"] == "0 | 1 | 2 | 3"
+    assert set(sheet["document"]) == {"a.pdf", "b.pdf"}
+
+
+def test_scoring_finds_a_wrong_answer_and_excludes_the_unsure_ones():
+    template = _template_with(
+        [(200 + i * 300, 380, "circle", str(i), "q1") for i in range(4)]
+    )
+    row_id = template.pages[0].controls[0].row_id
+    results = [
+        _reading("a.pdf", ["unchecked", "checked", "unchecked", "unchecked"], template),
+        _reading("b.pdf", ["checked", "unchecked", "unchecked", "unchecked"], template),
+        _reading("c.pdf", ["checked", "unchecked", "unchecked", "checked"], template),
+    ]
+    sheet = sb.answer_sheet(template, ["a.pdf", "b.pdf", "c.pdf"])
+    truth = {"a.pdf": "1", "b.pdf": "2", "c.pdf": sb.AMBIGUOUS_MARK}
+    sheet["answer"] = [truth[d] for d in sheet["document"]]
+
+    per_answer, summary = sb.score_sheet(sheet, results, template)
+    assert summary["answers_scored"] == 2      # the "?" row is not scorable
+    assert summary["human_unsure"] == 1
+    assert summary["auto_accepted"] == 2
+    assert summary["silent_errors"] == 1       # b.pdf: read 0, truth 2
+    assert summary["auto_accepted_accuracy"] == 0.5
+
+    wrong = per_answer[(~per_answer["correct"]) & (~per_answer["human_unsure"])]
+    assert list(wrong["document"]) == ["b.pdf"]
+    assert wrong.iloc[0]["predicted"] == "0"
+    assert wrong.iloc[0]["truth"] == "2"
+    assert row_id in set(per_answer["answer_id"])
+
+
+def test_scoring_counts_a_flagged_answer_separately_from_an_error():
+    """A MULTIPLE the pipeline refused to resolve is not a silent error."""
+    template = _template_with(
+        [(200 + i * 300, 380, "circle", str(i), "q1") for i in range(3)]
+    )
+    results = [_reading("a.pdf", ["checked", "checked", "unchecked"], template)]
+    sheet = sb.answer_sheet(template, ["a.pdf"])
+    sheet["answer"] = "0;1"
+
+    _per_answer, summary = sb.score_sheet(sheet, results, template)
+    assert summary["flagged_for_review"] == 1
+    assert summary["auto_accepted"] == 0
+    assert summary["silent_errors"] == 0

@@ -190,6 +190,31 @@ def label_page(
     return labelled
 
 
+def disambiguate_labels(template) -> int:
+    """Force option labels to be distinct within each answer.
+
+    Where Paddle merged an option list into one block every control in it
+    inherits the same text. Identical labels make duplicate spreadsheet
+    headers and give a human nothing to label against, so they are replaced
+    by their printed position. Requires ``infer_structure`` to have run.
+    """
+    rows: Dict[str, List[Any]] = {}
+    for page in template.pages:
+        for control in page.controls:
+            rows.setdefault(control.row_id or control.id, []).append((page, control))
+
+    fixed = 0
+    for members in rows.values():
+        labels = [c.label for _, c in members]
+        if len(set(labels)) == len(labels):
+            continue
+        ordered = survey_template.reading_order([c for _, c in members])
+        for position, control in enumerate(ordered, start=1):
+            control.label = f"option {position}"
+        fixed += 1
+    return fixed
+
+
 # ==========================================
 #            ROW STEM NAMING
 # ==========================================

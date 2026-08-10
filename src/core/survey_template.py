@@ -500,6 +500,24 @@ class SurveyTemplate:
         return template
 
 
+def reading_order(controls) -> List[Any]:
+    """Printed order within one answer group.
+
+    Left-to-right for a row, top-to-bottom for a vertical list. The vertical
+    key is quantized by control height: controls printed on one line still
+    differ by a few pixels, and a finer quantum lets y outrank x and scrambles
+    the row.
+    """
+    if not controls:
+        return []
+    heights = sorted(c.bbox[3] - c.bbox[1] for c in controls)
+    quantum = max(1e-6, heights[len(heights) // 2])
+    return sorted(
+        controls,
+        key=lambda c: (round(((c.bbox[1] + c.bbox[3]) / 2) / quantum), c.bbox[0]),
+    )
+
+
 def _rows_of(controls, width: int, height: int) -> List[List[Any]]:
     """Split controls into left-to-right runs sharing a baseline."""
     rows: Dict[int, List[Any]] = {}

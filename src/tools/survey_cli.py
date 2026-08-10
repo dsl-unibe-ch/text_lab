@@ -68,6 +68,7 @@ def _label(template, blanks) -> None:
         page_jsons = auto_ocr.run_vl_worker(images)
     labelled = survey_label.label_template(template, page_jsons)
     survey_template.infer_structure(template)
+    survey_label.disambiguate_labels(template)
     named = survey_label.name_answer_rows(template)
     questions = {
         control.question_id
@@ -139,6 +140,91 @@ def _read(args) -> None:
           f"responses_long.csv, review_queue.csv, unused_controls.csv to {out}")
 
 
+LABEL_INSTRUCTIONS = """# How to label these questionnaires
+
+Fill in the **answer** column of `answer_sheet.csv`. One line per answer, so a
+questionnaire is about 35 lines rather than 184 checkboxes.
+
+**Work from the original PDFs, and do not open the pipeline's output first.**
+The point is to measure what the pipeline gets wrong; if you start from its
+answers you will measure whether you notice its mistakes instead.
+
+## What to write
+
+| Situation | Write |
+|---|---|
+| One option marked | that option's text, copied from the `options` column |
+| Nothing marked | leave the cell empty |
+| Several marked (`type` = multiple) | the options separated by `;` |
+| Several marked where only one was allowed | the options separated by `;` |
+| You cannot tell what the respondent meant | `?` |
+
+Rows marked `?` are excluded from scoring -- there is no ground truth to score
+against, and that is a fair answer for a genuinely ambiguous mark.
+
+## Reading the columns
+
+- `page` -- which page of the PDF (this scan is two-up, so one PDF page holds
+  two questionnaire pages side by side).
+- `row` -- the printed row name, for matrix questions.
+- `options` -- exactly the choices available, in printed order.
+- `option 1`, `option 2`, ... appear where the form's own wording could not be
+  read reliably. Count in printed order: left-to-right for a row of choices,
+  top-to-bottom for a vertical list.
+
+Spelling and capitalisation do not matter; order within a `;` list does not
+matter either.
+"""
+
+
+def _sheet(args) -> None:
+    template = survey_template.SurveyTemplate.load(args.template)
+    names = (
+        [n.strip() for n in args.documents.split(",") if n.strip()]
+        if args.documents else [p.name for p in _documents(args.input)]
+    )
+    sheet = survey_batch.answer_sheet(template, names)
+    out = pathlib.Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    sheet.to_csv(out, index=False)
+    (out.parent / "HOW_TO_LABEL.md").write_text(LABEL_INSTRUCTIONS, encoding="utf-8")
+    print(f"Blank answer sheet -> {out}")
+    print(f"Instructions       -> {out.parent / 'HOW_TO_LABEL.md'}")
+    print(f"  {len(names)} document(s) x {len(sheet) // max(1, len(names))} answers each "
+          f"= {len(sheet)} lines to fill in")
+
+
+def _score(args) -> None:
+    import pandas as pd
+
+    template = survey_template.SurveyTemplate.load(args.template)
+    sheet = pd.read_csv(args.sheet).fillna("")
+    names = sorted({str(d) for d in sheet["document"]})
+    paths = [p for p in _documents(args.input) if p.name in names]
+    missing = set(names) - {p.name for p in paths}
+    if missing:
+        raise SystemExit(f"Documents named in the sheet but not found: {sorted(missing)}")
+
+    results = survey_batch.read_batch(paths, template)
+    per_answer, summary = survey_batch.score_sheet(sheet, results, template)
+
+    out = pathlib.Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    per_answer.to_csv(out / "score_per_answer.csv", index=False)
+    wrong = per_answer[(~per_answer["correct"]) & (~per_answer["flagged"])
+                       & (~per_answer["human_unsure"])]
+    wrong.to_csv(out / "score_disagreements.csv", index=False)
+
+    print()
+    for key, value in summary.items():
+        print(f"  {key:34s} {value}")
+    if len(wrong):
+        print(f"\n  {len(wrong)} silent error(s) -> score_disagreements.csv")
+        print(wrong[["document", "answer_id", "row", "truth",
+                     "predicted", "certainty"]].to_string(index=False))
+    print(f"\nWrote score_per_answer.csv, score_disagreements.csv to {out}")
+
+
 def _run(args) -> None:
     out = pathlib.Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -180,6 +266,20 @@ def main(argv=None) -> None:
     run.add_argument("--labels", action="store_true",
                      help="name the controls with PaddleOCR-VL (needs the VL backend)")
     run.set_defaults(func=_run)
+
+    sheet = sub.add_parser("answer-sheet", help="blank sheet for hand-labelling ground truth")
+    sheet.add_argument("--template", required=True, help="template JSON to read")
+    sheet.add_argument("--input", help="folder of questionnaires (for the document names)")
+    sheet.add_argument("--documents", help="comma-separated filenames to label instead")
+    sheet.add_argument("--out", required=True, help="CSV to write")
+    sheet.set_defaults(func=_sheet)
+
+    score = sub.add_parser("score", help="score a filled answer sheet against the pipeline")
+    score.add_argument("--template", required=True, help="template JSON to read")
+    score.add_argument("--sheet", required=True, help="the filled-in answer sheet CSV")
+    score.add_argument("--input", required=True, help="folder holding the questionnaires")
+    score.add_argument("--out", required=True, help="folder for the score report")
+    score.set_defaults(func=_score)
 
     args = parser.parse_args(argv)
     args.func(args)

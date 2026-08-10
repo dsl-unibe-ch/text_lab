@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pathlib
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from core import markup_detect, survey_template
 
@@ -239,6 +239,27 @@ def to_long(results: Sequence[DocumentReading], template: survey_template.Survey
 
 
 CERTAINTY_SUFFIX = " [certainty]"
+MULTIPLE = "MULTIPLE"
+
+
+def resolve_single(states) -> Tuple[str, float]:
+    """Collapse one single-choice answer's controls into a value.
+
+    *states* is ``[(control, state, score), ...]``. Returns the chosen option's
+    label, or ``""`` when the respondent left the answer blank, or a marker
+    when the answer cannot be resolved. Shared by the export and the scorer so
+    the two can never disagree about what the pipeline answered.
+    """
+    chosen = [control for control, state, _ in states if state == "checked"]
+    unread = [s for _, state, s in states if state == UNCERTAIN]
+    weakest = min((score for _, _, score in states), default=0.0)
+
+    if unread or len(chosen) > 1:
+        # Contradictory or unreadable: say so rather than pick one.
+        return (MULTIPLE if len(chosen) > 1 else UNCERTAIN.upper()), 0.0
+    if len(chosen) == 1:
+        return (chosen[0].label or chosen[0].id), weakest
+    return "", weakest
 
 
 def _unique(name: str, used: Dict[str, int]) -> str:
@@ -259,8 +280,7 @@ def _row_plan(template: survey_template.SurveyTemplate):
     for row_id, controls in rows.items():
         # The printed row stem when it was recovered, else the positional id.
         name = template.row_labels.get(row_id) or row_id
-        # Left-to-right, then top-to-bottom, so a scale reads in printed order.
-        controls = sorted(controls, key=lambda c: (round(c.bbox[1], 3), c.bbox[0]))
+        controls = survey_template.reading_order(controls)
         columns = [
             (control, _unique(f"{name} | {control.label or control.id}", used))
             for control in controls
@@ -307,18 +327,7 @@ def to_checkbox_table(
             if rule != "single":
                 continue
 
-            chosen = [(c, score) for c, state, score in states if state == "checked"]
-            unread = [s for _, state, s in states if state == UNCERTAIN]
-            if len(chosen) == 1 and not unread:
-                value, certainty = chosen[0][0].label or chosen[0][0].id, min(
-                    score for _, _, score in states
-                )
-            elif not chosen and not unread:
-                value, certainty = "", min(score for _, _, score in states)
-            else:
-                # Contradictory or unreadable: say so rather than pick one.
-                value = "MULTIPLE" if len(chosen) > 1 else "UNCERTAIN"
-                certainty = 0.0
+            value, certainty = resolve_single(states)
             record[row_name] = value
             record[row_name + CERTAINTY_SUFFIX] = round(float(certainty), 3)
 
@@ -403,3 +412,143 @@ def summarize(results: Sequence[DocumentReading]) -> Dict[str, Any]:
             min((min(r.registration.values(), default=0.0) for r in results), default=0.0), 3
         ),
     }
+
+
+# ==========================================
+#          GROUND TRUTH AND SCORING
+# ==========================================
+
+BLANK_MARK = ""          # respondent left the answer empty
+AMBIGUOUS_MARK = "?"     # a human could not tell either
+MULTI_SEPARATOR = ";"
+
+
+def answer_sheet(template: survey_template.SurveyTemplate, documents: Sequence[str]):
+    """A blank sheet for a human to fill in, one line per answer.
+
+    Deliberately blank rather than pre-filled with the pipeline's reads: a
+    corrected copy of the output would measure whether a reviewer notices
+    mistakes, not whether the pipeline makes them.
+    """
+    import pandas as pd
+
+    rows: Dict[str, List[survey_template.TemplateControl]] = {}
+    pages: Dict[str, int] = {}
+    for page in template.pages:
+        for control in page.controls:
+            rows.setdefault(control.row_id, []).append(control)
+            pages.setdefault(control.row_id, page.page_index + 1)
+
+    records = []
+    for document in documents:
+        for row_id, controls in rows.items():
+            controls = survey_template.reading_order(controls)
+            records.append({
+                "document": document,
+                "answer_id": row_id,
+                "page": pages[row_id],
+                "question": controls[0].question_id,
+                "row": template.row_labels.get(row_id, ""),
+                "type": template.rules.get(row_id, "single"),
+                "options": " | ".join(c.label or c.id for c in controls),
+                "answer": "",
+            })
+    return pd.DataFrame(records)
+
+
+def _pipeline_answers(
+    results: Sequence[DocumentReading],
+    template: survey_template.SurveyTemplate,
+) -> Dict[Tuple[str, str], Tuple[str, float]]:
+    """(document, answer_id) -> (value, certainty), matching the export."""
+    rows: Dict[str, List[survey_template.TemplateControl]] = {}
+    for page in template.pages:
+        for control in page.controls:
+            rows.setdefault(control.row_id, []).append(control)
+
+    answers = {}
+    for result in results:
+        readings = {r.control_id: r for r in result.readings}
+        for row_id, controls in rows.items():
+            controls = survey_template.reading_order(controls)
+            states = [
+                (
+                    control,
+                    readings[control.id].state if control.id in readings else UNCERTAIN,
+                    readings[control.id].score if control.id in readings else 0.0,
+                )
+                for control in controls
+            ]
+            if template.rules.get(row_id, "single") == "single":
+                answers[(result.document, row_id)] = resolve_single(states)
+            else:
+                chosen = sorted(
+                    (c.label or c.id) for c, state, _ in states if state == "checked"
+                )
+                unread = any(state == UNCERTAIN for _, state, _ in states)
+                answers[(result.document, row_id)] = (
+                    UNCERTAIN.upper() if unread else MULTI_SEPARATOR.join(chosen),
+                    min((score for _, _, score in states), default=0.0),
+                )
+    return answers
+
+
+def _normalize(value: str) -> str:
+    parts = [p.strip() for p in str(value or "").split(MULTI_SEPARATOR) if p.strip()]
+    return MULTI_SEPARATOR.join(sorted(parts)).casefold()
+
+
+def score_sheet(
+    sheet,
+    results: Sequence[DocumentReading],
+    template: survey_template.SurveyTemplate,
+):
+    """Compare a filled answer sheet with what the pipeline read.
+
+    Returns ``(per_answer, summary)``. Rows the human marked ambiguous are
+    excluded from accuracy: there is no ground truth to score against.
+    """
+    import pandas as pd
+
+    predicted = _pipeline_answers(results, template)
+    records = []
+    for row in sheet.to_dict("records"):
+        key = (str(row["document"]), str(row["answer_id"]))
+        if key not in predicted:
+            continue
+        value, certainty = predicted[key]
+        truth = str(row.get("answer") or "").strip()
+        flagged = value in {MULTIPLE, UNCERTAIN.upper()}
+        records.append({
+            "document": key[0],
+            "answer_id": key[1],
+            "row": row.get("row", ""),
+            "truth": truth,
+            "predicted": value,
+            "certainty": certainty,
+            "flagged": flagged,
+            "correct": (not flagged) and _normalize(truth) == _normalize(value),
+            "human_unsure": truth == AMBIGUOUS_MARK,
+        })
+
+    per_answer = pd.DataFrame(records)
+    if per_answer.empty:
+        return per_answer, {"scored": 0}
+
+    scorable = per_answer[~per_answer["human_unsure"]]
+    auto = scorable[~scorable["flagged"]]
+    wrong = auto[~auto["correct"]]
+    summary = {
+        "answers_scored": int(len(scorable)),
+        "flagged_for_review": int(scorable["flagged"].sum()),
+        "auto_accepted": int(len(auto)),
+        "auto_accepted_correct": int(auto["correct"].sum()),
+        "auto_accepted_accuracy": round(auto["correct"].mean(), 4) if len(auto) else None,
+        "silent_errors": int(len(wrong)),
+        "human_unsure": int(per_answer["human_unsure"].sum()),
+    }
+    if len(wrong):
+        # The number that matters: does certainty actually rank the mistakes?
+        summary["max_certainty_of_a_silent_error"] = round(wrong["certainty"].max(), 3)
+        summary["median_certainty_of_a_silent_error"] = round(wrong["certainty"].median(), 3)
+    return per_answer, summary
