@@ -278,8 +278,7 @@ def _row_plan(template: survey_template.SurveyTemplate):
 
     plan, used = [], {}
     for row_id, controls in rows.items():
-        # The printed row stem when it was recovered, else the positional id.
-        name = template.row_labels.get(row_id) or row_id
+        name = template.display_name(row_id)
         controls = survey_template.reading_order(controls)
         columns = [
             (control, _unique(f"{name} | {control.label or control.id}", used))
@@ -432,23 +431,44 @@ def answer_sheet(template: survey_template.SurveyTemplate, documents: Sequence[s
     """
     import pandas as pd
 
-    rows: Dict[str, List[survey_template.TemplateControl]] = {}
-    pages: Dict[str, int] = {}
-    for page in template.pages:
-        for control in page.controls:
-            rows.setdefault(control.row_id, []).append(control)
-            pages.setdefault(control.row_id, page.page_index + 1)
+    scan_page = {
+        control.row_id: page.page_index
+        for page in template.pages for control in page.controls
+    }
+    rows = template.rows()
+
+    # Reading order across the whole form: scan page, then the column of the
+    # two-up spread, then down the page.
+    ordered = sorted(
+        rows.items(),
+        key=lambda item: (
+            scan_page.get(item[0], 0), item[1][0].column, item[1][0].bbox[1]
+        ),
+    )
+
+    # Where a question has several answers and no printed row name, say which
+    # one this is: otherwise two rows of "option 1..4" are indistinguishable.
+    siblings: Dict[str, int] = {}
+    for row_id, controls in ordered:
+        siblings[controls[0].question_id] = siblings.get(controls[0].question_id, 0) + 1
+    position: Dict[str, int] = {}
 
     records = []
     for document in documents:
-        for row_id, controls in rows.items():
-            controls = survey_template.reading_order(controls)
+        position.clear()
+        for row_id, controls in ordered:
+            question = controls[0].question_id
+            position[question] = position.get(question, 0) + 1
+            row = template.row_labels.get(row_id, "")
+            if not row and siblings[question] > 1:
+                row = f"row {position[question]} of {siblings[question]} (top to bottom)"
+            number = question.rsplit("_q", 1)[-1]
             records.append({
                 "document": document,
                 "answer_id": row_id,
-                "page": pages[row_id],
-                "question": controls[0].question_id,
-                "row": template.row_labels.get(row_id, ""),
+                "sheet_page": controls[0].sheet_page or "?",
+                "question": f"Q{number}" if number else "",
+                "row": row,
                 "type": template.rules.get(row_id, "single"),
                 "options": " | ".join(c.label or c.id for c in controls),
                 "answer": "",

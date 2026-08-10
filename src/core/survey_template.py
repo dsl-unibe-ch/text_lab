@@ -368,7 +368,9 @@ class TemplateControl:
     shape: str = "circle"
     label: str = ""
     question_id: str = ""
-    row_id: str = ""  # the answer group this control competes in
+    row_id: str = ""      # the answer group this control competes in
+    sheet_page: str = ""  # printed page of the questionnaire, e.g. "1/4"
+    column: int = 0       # content column on the scan, left to right
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -378,6 +380,8 @@ class TemplateControl:
             "label": self.label,
             "question_id": self.question_id,
             "row_id": self.row_id,
+            "sheet_page": self.sheet_page,
+            "column": self.column,
         }
 
     def pixel_bbox(self, width: int, height: int) -> List[int]:
@@ -436,6 +440,44 @@ class SurveyTemplate:
             "pages": [page.to_dict(stem) for page in self.pages],
         }
 
+    def rows(self) -> Dict[str, List[TemplateControl]]:
+        """Controls of each answer group, in printed order."""
+        grouped: Dict[str, List[TemplateControl]] = {}
+        for page in self.pages:
+            for control in page.controls:
+                grouped.setdefault(control.row_id or control.id, []).append(control)
+        return {key: reading_order(value) for key, value in grouped.items()}
+
+    def display_name(self, row_id: str) -> str:
+        """Human anchor for one answer: questionnaire page, question, row.
+
+        The internal id counts scan pages, but a two-up scan holds two
+        questionnaire pages per scan page, so the id alone cannot tell anyone
+        where to look on the paper.
+        """
+        controls = self.rows().get(row_id) or []
+        if not controls:
+            return row_id
+        first = controls[0]
+        parts = []
+        if first.sheet_page:
+            parts.append(f"p{first.sheet_page}")
+        number = first.question_id.rsplit("_q", 1)[-1] if "_q" in first.question_id else ""
+        if number:
+            parts.append(f"Q{number}")
+
+        label = self.row_labels.get(row_id, "")
+        if label:
+            parts.append(label)
+        elif row_id.rsplit("_r", 1)[-1].isdigit():
+            siblings = [
+                key for key in self.rows()
+                if key.rsplit("_r", 1)[0] == row_id.rsplit("_r", 1)[0]
+            ]
+            if len(siblings) > 1:
+                parts.append(f"row {int(row_id.rsplit('_r', 1)[-1])}")
+        return " ".join(parts) or row_id
+
     def save(self, path) -> None:
         """Write the template JSON plus one blank raster per page beside it.
 
@@ -480,6 +522,8 @@ class SurveyTemplate:
                             label=str(control.get("label") or ""),
                             question_id=str(control.get("question_id") or ""),
                             row_id=str(control.get("row_id") or ""),
+                            sheet_page=str(control.get("sheet_page") or ""),
+                            column=int(control.get("column") or 0),
                         )
                         for control in page.get("controls") or []
                     ],

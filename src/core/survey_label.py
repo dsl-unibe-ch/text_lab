@@ -22,7 +22,10 @@ def sanitize(text: str) -> str:
     import re
 
     text = re.sub(r"\s+", " ", str(text or "")).strip()
-    text = text.lstrip("○☐□☑☒●◯O0 \t.-–—|")
+    # Drop a leading control glyph. "O" and "0" are only glyphs when they stand
+    # alone -- stripping them unconditionally turns "Oey" into "ey".
+    text = re.sub(r"^(?:[○☐□☑☒●◯]\s*)+", "", text)
+    text = re.sub(r"^[O0](?=\s)\s*", "", text)
     text = text.strip(" \t|,.;:-–—")
     if len(text) > MAX_LABEL_CHARS:
         text = text[:MAX_LABEL_CHARS].rsplit(" ", 1)[0] + "…"
@@ -188,6 +191,124 @@ def label_page(
     for group in by_question.values():
         _label_horizontal_runs(group, width, height)
     return labelled
+
+
+FOOTER_BAND = 0.94  # crop below this fraction of the page to find "1 / 4"
+
+
+def assign_sheet_pages(template) -> int:
+    """Tag each control with its content column and printed page number.
+
+    A two-up scan puts two questionnaire pages on one scan page, so "page 1"
+    is useless to a human labeller. The form prints its own page number in the
+    footer of each side, which is what the questionnaire actually says.
+    """
+    import base64
+    import re
+
+    import cv2
+    import numpy as np
+
+    tagged = 0
+    for page in template.pages:
+        if not page.blank_png_b64:
+            continue
+        blank = cv2.imdecode(
+            np.frombuffer(base64.b64decode(page.blank_png_b64), np.uint8),
+            cv2.IMREAD_GRAYSCALE,
+        )
+        columns = _content_columns(markup_detect._ink_mask(
+            cv2.cvtColor(blank, cv2.COLOR_GRAY2BGR)
+        ))
+        if not columns:
+            continue
+
+        footers = []
+        for x1, x2 in columns:
+            strip = blank[int(page.height * FOOTER_BAND):page.height, x1:x2]
+            text = _ocr_plain(strip)
+            match = re.search(r"(\d+)\s*/\s*(\d+)", text)
+            footers.append(f"{match.group(1)}/{match.group(2)}" if match else "")
+
+        for control in page.controls:
+            centre = (control.bbox[0] + control.bbox[2]) / 2 * page.width
+            index = next(
+                (i for i, (x1, x2) in enumerate(columns) if x1 <= centre <= x2),
+                0,
+            )
+            control.column = index
+            control.sheet_page = footers[index] if index < len(footers) else ""
+            if control.sheet_page:
+                tagged += 1
+    return tagged
+
+
+def _ocr_plain(crop) -> str:
+    try:
+        import pytesseract
+    except Exception:
+        return ""
+    try:
+        return pytesseract.image_to_string(crop, lang=OCR_LANG, config="--psm 7").strip()
+    except Exception:
+        return ""
+
+
+def name_options(template) -> int:
+    """Read each option's own text off the blank, where Paddle merged them.
+
+    Mirror of the row-stem crop: the label sits to the right of its control,
+    bounded by the next control on the same line or the edge of the content
+    column. Only used for controls left with a positional placeholder.
+    """
+    import base64
+    import re
+
+    import cv2
+    import numpy as np
+
+    placeholder = re.compile(r"^option \d+$")
+    named = 0
+    for page in template.pages:
+        if not page.blank_png_b64:
+            continue
+        blank = cv2.imdecode(
+            np.frombuffer(base64.b64decode(page.blank_png_b64), np.uint8),
+            cv2.IMREAD_GRAYSCALE,
+        )
+        columns = _content_columns(markup_detect._ink_mask(
+            cv2.cvtColor(blank, cv2.COLOR_GRAY2BGR)
+        ))
+        boxes = {
+            control.id: control.pixel_bbox(page.width, page.height)
+            for control in page.controls
+        }
+        for control in page.controls:
+            if not placeholder.match(control.label or ""):
+                continue
+            x1, y1, x2, y2 = boxes[control.id]
+            centre = (y1 + y2) / 2
+
+            right = next(
+                (c[1] for c in columns if c[0] <= (x1 + x2) / 2 <= c[1]), page.width
+            )
+            for other in page.controls:
+                ox1, oy1, ox2, oy2 = boxes[other.id]
+                if other.id == control.id or ox1 <= x2:
+                    continue
+                if oy2 < centre or oy1 > centre:
+                    continue
+                right = min(right, ox1)
+
+            pad = (y2 - y1) // 3
+            crop = blank[max(0, y1 - pad):y2 + pad, x2 + 2:right]
+            if crop.size == 0 or crop.shape[1] < 20:
+                continue
+            text = _ocr(crop, OCR_LANG)
+            if text and not placeholder.match(text):
+                control.label = text
+                named += 1
+    return named
 
 
 def disambiguate_labels(template) -> int:

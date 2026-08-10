@@ -69,13 +69,17 @@ def _label(template, blanks) -> None:
     labelled = survey_label.label_template(template, page_jsons)
     survey_template.infer_structure(template)
     survey_label.disambiguate_labels(template)
+    survey_label.assign_sheet_pages(template)
+    options = survey_label.name_options(template)
+    survey_label.disambiguate_labels(template)
     named = survey_label.name_answer_rows(template)
     questions = {
         control.question_id
         for page in template.pages for control in page.controls if control.question_id
     }
     print(f"  {labelled}/{template.control_count} controls labelled "
-          f"in {len(questions)} question groups; {named} answer rows named")
+          f"in {len(questions)} question groups; {named} answer rows and "
+          f"{options} options named from the blank")
 
 
 def _build(args) -> None:
@@ -143,11 +147,26 @@ def _read(args) -> None:
 LABEL_INSTRUCTIONS = """# How to label these questionnaires
 
 Fill in the **answer** column of `answer_sheet.csv`. One line per answer, so a
-questionnaire is about 35 lines rather than 184 checkboxes.
+questionnaire is around 35 lines rather than 184 checkboxes.
 
 **Work from the original PDFs, and do not open the pipeline's output first.**
 The point is to measure what the pipeline gets wrong; if you start from its
 answers you will measure whether you notice its mistakes instead.
+
+## Finding the question on the paper
+
+The scans are two-up: one PDF page holds two questionnaire pages side by side,
+so the PDF page number is not much help. Use these instead:
+
+- `sheet_page` -- the questionnaire's own printed page number, as it appears in
+  the footer ("1/4", "2/4", ...). PDF page 1 holds sheets 4/4 and 1/4; PDF
+  page 2 holds sheets 2/4 and 3/4.
+- `question` -- the number printed on the form ("Q10" is the question printed
+  as "10)").
+- `row` -- for a question with several answers: the printed row name, or
+  "row 2 of 3 (top to bottom)" when the row has no name of its own.
+
+The lines are in reading order: down each questionnaire page in turn.
 
 ## What to write
 
@@ -162,19 +181,38 @@ answers you will measure whether you notice its mistakes instead.
 Rows marked `?` are excluded from scoring -- there is no ground truth to score
 against, and that is a fair answer for a genuinely ambiguous mark.
 
-## Reading the columns
-
-- `page` -- which page of the PDF (this scan is two-up, so one PDF page holds
-  two questionnaire pages side by side).
-- `row` -- the printed row name, for matrix questions.
-- `options` -- exactly the choices available, in printed order.
-- `option 1`, `option 2`, ... appear where the form's own wording could not be
-  read reliably. Count in printed order: left-to-right for a row of choices,
-  top-to-bottom for a vertical list.
+`option 1`, `option 2`, ... appear where the form's own wording could not be
+read off the page reliably. Count in printed order: left-to-right for a row of
+choices, top-to-bottom for a vertical list.
 
 Spelling and capitalisation do not matter; order within a `;` list does not
 matter either.
 """
+
+
+def _prune(args) -> None:
+    """Delete controls from a template -- the template review pass.
+
+    unused_controls.csv flags answer rows nobody ever marked; those are almost
+    always detection false positives, and removing them keeps them out of the
+    export and out of the row numbering on the answer sheet.
+    """
+    template = survey_template.SurveyTemplate.load(args.template)
+    drop = {c.strip() for c in args.controls.split(",") if c.strip()}
+    before = template.control_count
+    for page in template.pages:
+        page.controls = [c for c in page.controls if c.id not in drop]
+    removed = before - template.control_count
+
+    survey_template.infer_structure(template)
+    from core import survey_label
+
+    survey_label.disambiguate_labels(template)
+    template.save(args.template)
+    print(f"Removed {removed} control(s); {template.control_count} remain "
+          f"in {len(template.rules)} answer groups")
+    if removed != len(drop):
+        print(f"  note: {len(drop) - removed} id(s) were not in the template")
 
 
 def _sheet(args) -> None:
@@ -280,6 +318,11 @@ def main(argv=None) -> None:
     score.add_argument("--input", required=True, help="folder holding the questionnaires")
     score.add_argument("--out", required=True, help="folder for the score report")
     score.set_defaults(func=_score)
+
+    prune = sub.add_parser("prune-template", help="delete controls from a template")
+    prune.add_argument("--template", required=True, help="template JSON to edit in place")
+    prune.add_argument("--controls", required=True, help="comma-separated control ids")
+    prune.set_defaults(func=_prune)
 
     args = parser.parse_args(argv)
     args.func(args)

@@ -478,3 +478,45 @@ def test_scoring_counts_a_flagged_answer_separately_from_an_error():
     assert summary["flagged_for_review"] == 1
     assert summary["auto_accepted"] == 0
     assert summary["silent_errors"] == 0
+
+
+def test_answer_sheet_locates_each_answer_on_the_printed_page():
+    """A two-up scan makes the PDF page useless; the sheet must say more."""
+    template = _template_with(
+        [(200 + i * 300, 380, "circle", str(i), "p1_q4") for i in range(3)]
+        + [(200 + i * 300, 700, "circle", str(i), "p1_q7") for i in range(3)]
+        + [(200 + i * 300, 1000, "circle", str(i), "p1_q7") for i in range(3)]
+    )
+    for control in template.pages[0].controls:
+        control.sheet_page = "2/4"
+    sheet = sb.answer_sheet(template, ["a.pdf"])
+
+    assert set(sheet["sheet_page"]) == {"2/4"}
+    assert set(sheet["question"]) == {"Q4", "Q7"}
+    # the single-answer question needs no row hint; the two-answer one does
+    q4 = sheet[sheet["question"] == "Q4"]
+    q7 = sheet[sheet["question"] == "Q7"]
+    assert list(q4["row"]) == [""]
+    assert sorted(q7["row"]) == [
+        "row 1 of 2 (top to bottom)", "row 2 of 2 (top to bottom)"
+    ]
+
+
+def test_answer_sheet_is_ordered_down_the_printed_page():
+    template = _template_with(
+        [(2000, 300, "circle", "a", "p1_q9")]      # right column, top
+        + [(200, 900, "circle", "b", "p1_q2")]     # left column, lower
+        + [(200, 300, "circle", "c", "p1_q1")]     # left column, top
+    )
+    controls = {c.label: c for c in template.pages[0].controls}
+    controls["a"].column = 1
+    for name in ("b", "c"):
+        controls[name].column = 0
+    sheet = sb.answer_sheet(template, ["a.pdf"])
+    assert list(sheet["question"]) == ["Q1", "Q2", "Q9"]
+
+
+def test_sanitize_keeps_a_leading_letter_o():
+    assert sl.sanitize("Oey") == "Oey"
+    assert sl.sanitize("○ Ja") == "Ja"
+    assert sl.sanitize("O Nein") == "Nein"
