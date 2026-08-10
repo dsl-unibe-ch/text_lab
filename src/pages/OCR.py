@@ -119,6 +119,9 @@ def clear_results(reset_running=False):
         # automatic pipeline
         "auto_complete", "auto_document", "auto_summary", "auto_downloads",
         "auto_error", "batch_auto_complete", "batch_auto_zip",
+        # questionnaire batch: kept so the detected form can be reviewed and
+        # the tables rebuilt without parsing everything again
+        "survey_template", "survey_readings",
     ]
     for key in keys_to_clear:
         if key in st.session_state:
@@ -358,7 +361,7 @@ def run_auto_batch(
         if template is not None:
             status_text.markdown("**Collecting questionnaire responses...**")
             survey_batch.write_batch_outputs(
-                readings, template, RESULTS_DIR / "survey", blanks=blanks
+                readings, template, RESULTS_DIR / "survey"
             )
 
         status_text.markdown(f"**{n_files} file(s) parsed** — zipping results...")
@@ -381,6 +384,9 @@ def run_auto_batch(
 
         st.session_state.batch_auto_zip = out_zip_buffer.getvalue()
         st.session_state.batch_auto_complete = True
+        if template is not None:
+            st.session_state.survey_template = template
+            st.session_state.survey_readings = readings
 
     except Exception as e:
         st.session_state.auto_error = f"Batch automatic OCR failed: {e}"
@@ -392,6 +398,111 @@ def run_auto_batch(
             shared_vision_client.close()
         st.session_state.ocr_running = False
         _cleanup_job_dir(JOB_DIR)
+
+
+def _rebuild_survey_zip(zip_bytes, template, readings):
+    """Swap the survey/ folder in an existing result ZIP for a fresh one.
+
+    Dropping a control changes only how answers are grouped and exported, not
+    what was read off the page, so the questionnaires do not have to be parsed
+    again.
+    """
+    import tempfile
+    import zipfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out = pathlib.Path(tmp) / "survey"
+        summary = survey_batch.write_batch_outputs(readings, template, out)
+        replacements = {
+            f"survey/{path.name}": path.read_bytes() for path in out.iterdir()
+        }
+        per_file = survey_batch.to_checkbox_table(readings, template)
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as source:
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as target:
+            for item in source.namelist():
+                if item.startswith("survey/"):
+                    continue
+                if item.endswith("/survey_answers.csv"):
+                    # Folder names are the file stems, so match on the stem
+                    # rather than a prefix: "split_1_2" must not claim
+                    # "split_1_20".
+                    folder = pathlib.PurePosixPath(item).parent.name
+                    rows = per_file[
+                        per_file["document"].map(
+                            lambda name: pathlib.PurePosixPath(str(name)).stem == folder
+                        )
+                    ]
+                    target.writestr(item, rows.to_csv(index=False))
+                    continue
+                target.writestr(item, source.read(item))
+            for name, data in replacements.items():
+                target.writestr(name, data)
+    return buffer.getvalue(), summary
+
+
+def render_survey_review():
+    """Let the user check the detected form and drop anything spurious."""
+    template = st.session_state.get("survey_template")
+    readings = st.session_state.get("survey_readings")
+    if not template or not readings:
+        return
+
+    st.markdown("### 📋 The questionnaire TextLab detected")
+    st.caption(
+        f"{template.control_count} response controls in {len(template.rules)} "
+        f"answers, learned from the batch itself. Check the outlines below: "
+        "printed text can occasionally be mistaken for an empty checkbox."
+    )
+    overlays = survey_batch.template_overlays(template)
+    if overlays:
+        tabs = st.tabs([f"Page {i + 1}" for i in range(len(overlays))])
+        for tab, (name, data) in zip(tabs, sorted(overlays.items())):
+            with tab:
+                st.image(data, caption=name, use_container_width=True)
+
+    overview = survey_batch.answer_overview(readings, template)
+    dead = overview[overview["never_marked"]]
+    if len(dead):
+        st.warning(
+            f"{len(dead)} answer(s) nobody in this batch marked (shown as "
+            "`never_marked` below). That is either a question they all skipped, "
+            "or printed text mistaken for a control — the image above settles "
+            "which."
+        )
+    st.dataframe(
+        overview.drop(columns=["control_ids"]),
+        use_container_width=True, hide_index=True,
+    )
+
+    labels = {row["answer"]: row["control_ids"] for _, row in overview.iterrows()}
+    chosen = st.multiselect(
+        "Remove answers that are not really on the form",
+        options=list(labels),
+        # Deliberately not pre-selected: an answer nobody marked is just as
+        # likely a question the whole batch skipped as a false positive, and
+        # only the image above settles it.
+        key="survey_drop",
+        help=(
+            "Removes them from the response tables and renumbers the rest. "
+            "The questionnaires are not parsed again."
+        ),
+    )
+    if chosen and st.button("♻️ Rebuild the response tables", key="survey_rebuild"):
+        ids = [i for name in chosen for i in labels[name].split(",") if i]
+        removed = survey_batch.drop_controls(template, ids)
+        zip_bytes, summary = _rebuild_survey_zip(
+            st.session_state.batch_auto_zip, template, readings
+        )
+        st.session_state.batch_auto_zip = zip_bytes
+        st.session_state.survey_template = template
+        st.success(
+            f"Removed {removed} control(s); {summary['controls']} remain in "
+            f"{summary['answer_groups']} answers. Download again for the "
+            "updated tables."
+        )
+        st.rerun()
 
 
 # ==========================================
@@ -1290,6 +1401,7 @@ def auto_batch_ui():
             use_container_width=True,
             type="primary",
         )
+        render_survey_review()
     elif st.session_state.get("auto_error"):
         st.error(st.session_state.auto_error)
 

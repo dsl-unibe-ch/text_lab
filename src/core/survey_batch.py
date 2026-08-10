@@ -746,16 +746,90 @@ def _blank_layout(template, blanks):
         return auto_ocr.run_vl_worker(images)
 
 
+def template_overlays(template: survey_template.SurveyTemplate) -> Dict[str, bytes]:
+    """Audit PNG per page: the synthesized blank with every control outlined.
+
+    Drawn from the blank the template already carries, so a template that has
+    been refined can be re-rendered without the original questionnaires.
+    """
+    import cv2
+
+    images = {}
+    for page in template.pages:
+        blank = _blank_gray(page)
+        if blank is None:
+            continue
+        vis = survey_template.overlay(
+            blank,
+            [{"bbox": c.pixel_bbox(page.width, page.height), "shape": c.shape}
+             for c in page.controls],
+        )
+        ok, encoded = cv2.imencode(".png", vis)
+        if ok:
+            images[f"template_page{page.page_index + 1}.png"] = encoded.tobytes()
+    return images
+
+
+def drop_controls(
+    template: survey_template.SurveyTemplate, control_ids: Sequence[str]
+) -> int:
+    """Remove controls and re-derive the structure that depended on them."""
+    from core import survey_label
+
+    drop = {str(c) for c in control_ids}
+    before = template.control_count
+    for page in template.pages:
+        page.controls = [c for c in page.controls if c.id not in drop]
+    survey_template.infer_structure(template)
+    survey_label.disambiguate_labels(template)
+    survey_label.name_answer_rows(template)
+    return before - template.control_count
+
+
+def answer_overview(
+    results: Sequence[DocumentReading],
+    template: survey_template.SurveyTemplate,
+):
+    """One line per answer group: what it is, and how often anyone marked it.
+
+    The review table for the batch page. An answer nobody in the batch touched
+    is either a question they all skipped or a detection false positive, and
+    only a human looking at the overlay can tell which.
+    """
+    import pandas as pd
+
+    marked = {
+        reading.control_id
+        for result in results for reading in result.readings
+        if reading.state == "checked"
+    }
+    records = []
+    for row_id, controls in template.rows().items():
+        respondents = {
+            result.document
+            for result in results for reading in result.readings
+            if reading.state == "checked"
+            and reading.control_id in {c.id for c in controls}
+        }
+        records.append({
+            "answer": template.display_name(row_id),
+            "answer_id": row_id,
+            "sheet_page": controls[0].sheet_page,
+            "type": template.rules.get(row_id, "single"),
+            "options": len(controls),
+            "answered_by": len(respondents),
+            "never_marked": not any(c.id in marked for c in controls),
+            "control_ids": ",".join(c.id for c in controls),
+        })
+    return pd.DataFrame(records)
+
+
 def write_batch_outputs(
     results: Sequence[DocumentReading],
     template: survey_template.SurveyTemplate,
     out_dir,
-    *,
-    blanks=None,
 ) -> Dict[str, Any]:
     """Write the questionnaire tables and audit artifacts for one batch."""
-    import cv2
-
     out = pathlib.Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
 
@@ -767,16 +841,11 @@ def write_batch_outputs(
     review_queue(results, template).to_csv(out / "review_queue.csv", index=False)
     unused = unused_controls(results, template)
     unused.to_csv(out / "unused_controls.csv", index=False)
+    answer_overview(results, template).to_csv(out / "answers_overview.csv", index=False)
     template.save(out / "survey_template.json")
 
-    if blanks:
-        for page, blank in zip(template.pages, blanks):
-            vis = survey_template.overlay(
-                blank.image,
-                [{"bbox": c.pixel_bbox(page.width, page.height), "shape": c.shape}
-                 for c in page.controls],
-            )
-            cv2.imwrite(str(out / f"template_page{page.page_index + 1}.png"), vis)
+    for name, data in template_overlays(template).items():
+        (out / name).write_bytes(data)
 
     summary = summarize(results)
     summary["controls"] = template.control_count

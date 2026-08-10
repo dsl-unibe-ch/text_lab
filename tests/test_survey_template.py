@@ -652,7 +652,7 @@ def test_batch_orchestration_produces_the_survey_tables():
 
         # label=False keeps this off the PaddleOCR-VL backend; the geometry,
         # grouping and export are what this exercises.
-        template, blanks = sb.prepare_template(paths, label=False, dpi=FIXTURE_DPI)
+        template, _blanks = sb.prepare_template(paths, label=False, dpi=FIXTURE_DPI)
         assert template.control_count == len(CENTRES)
         assert template.rules, "structure inference produced no answer groups"
 
@@ -660,14 +660,15 @@ def test_batch_orchestration_produces_the_survey_tables():
         assert len(results) == len(paths)
 
         out = folder / "survey"
-        summary = sb.write_batch_outputs(results, template, out, blanks=blanks)
+        summary = sb.write_batch_outputs(results, template, out)
         assert summary["documents"] == len(paths)
         assert summary["controls"] == len(CENTRES)
 
         for name in (
             "responses_checkboxes.csv", "responses_matrix.csv",
             "responses_long.csv", "review_queue.csv", "unused_controls.csv",
-            "survey_template.json",
+            "answers_overview.csv", "survey_template.json",
+            "template_page1.png",
         ):
             assert (out / name).exists(), f"{name} was not written"
 
@@ -732,3 +733,44 @@ def test_a_small_batch_says_the_blank_may_be_unreliable():
         many = _write_batch(folder, count=st.MIN_BLANK_DOCUMENTS + 1)
         template, _ = sb.prepare_template(many, label=False, dpi=FIXTURE_DPI)
         assert "small_batch_warning" not in template.provenance
+
+
+def test_dropping_a_control_regroups_without_rereading():
+    """The batch page's refine step: fix the form, keep the readings."""
+    with tempfile.TemporaryDirectory() as tmp:
+        folder = pathlib.Path(tmp)
+        paths = _write_batch(folder, count=6)
+        template, _ = sb.prepare_template(paths, label=False, dpi=FIXTURE_DPI)
+        results = sb.read_batch(paths, template)
+
+        overview = sb.answer_overview(results, template)
+        assert len(overview) == len(template.rules)
+        assert {"answer", "answered_by", "never_marked", "control_ids"} <= set(
+            overview.columns
+        )
+
+        victim = template.pages[0].controls[0].id
+        before = template.control_count
+        removed = sb.drop_controls(template, [victim])
+        assert removed == 1
+        assert template.control_count == before - 1
+        assert victim not in {c.id for p in template.pages for c in p.controls}
+
+        # the export rebuilds from the readings already taken
+        table = sb.to_checkbox_table(results, template)
+        assert len(table) == len(paths)
+        assert all(victim not in str(c) for c in table.columns)
+
+
+def test_answer_overview_counts_who_answered_each_question():
+    with tempfile.TemporaryDirectory() as tmp:
+        folder = pathlib.Path(tmp)
+        paths = _write_batch(folder, count=6)
+        template, _ = sb.prepare_template(paths, label=False, dpi=FIXTURE_DPI)
+        results = sb.read_batch(paths, template)
+        overview = sb.answer_overview(results, template)
+        assert overview["answered_by"].max() >= 1
+        assert overview["answered_by"].max() <= len(paths)
+        # never_marked and answered_by must agree
+        for _, row in overview.iterrows():
+            assert row["never_marked"] == (row["answered_by"] == 0)
