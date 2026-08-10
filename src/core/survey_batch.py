@@ -118,7 +118,10 @@ def read_document(
         states: List[str] = []
         for control in page.controls:
             x1, y1, x2, y2 = control.pixel_bbox(page.width, page.height)
-            verdict = survey_template.classify_residual(residual[y1:y2, x1:x2])
+            verdict = survey_template.classify_residual(
+                residual[y1:y2, x1:x2],
+                survey_template.halo_crop(residual, (x1, y1, x2, y2)),
+            )
             # Stroke geometry is not needed to decide, but it is cheap evidence
             # for a human adjudicating an uncertain cell.
             strike = None
@@ -513,9 +516,51 @@ def _pipeline_answers(
     return answers
 
 
-def _normalize(value: str) -> str:
+def _norm_text(value: str) -> str:
+    import re
+
+    value = re.sub(r"\s+", " ", str(value or "")).strip()
+    return re.sub(r"[^\w\s]", "", value, flags=re.UNICODE).casefold().strip()
+
+
+def match_option(text: str, options: Sequence[str]) -> Optional[str]:
+    """Resolve a hand-written answer to one of the printed options.
+
+    A labeller copying a long option shortens it ("Ja Falls ja" for "Ja Falls
+    ja, E-Mail oder Telefonnummer"), and scoring that as a pipeline error would
+    be measuring transcription, not extraction. Returns None when the text
+    cannot be pinned to exactly one option, so it can be reported rather than
+    silently counted against either side.
+    """
+    wanted = _norm_text(text)
+    if not wanted:
+        return ""
+    lookup = {_norm_text(option): option for option in options}
+    if wanted in lookup:
+        return lookup[wanted]
+    for test in (
+        lambda a, b: a.startswith(b) or b.startswith(a),
+        lambda a, b: a in b or b in a,
+    ):
+        hits = [option for norm, option in lookup.items() if test(norm, wanted)]
+        if len(hits) == 1:
+            return hits[0]
+    return None
+
+
+def _resolve_answer(value: str, options: Sequence[str]):
+    """(canonical answer, unresolved parts) for a possibly multi-part answer."""
     parts = [p.strip() for p in str(value or "").split(MULTI_SEPARATOR) if p.strip()]
-    return MULTI_SEPARATOR.join(sorted(parts)).casefold()
+    if not parts:
+        return "", []
+    resolved, unresolved = [], []
+    for part in parts:
+        match = match_option(part, options)
+        if match is None:
+            unresolved.append(part)
+        elif match:
+            resolved.append(match)
+    return MULTI_SEPARATOR.join(sorted(resolved)).casefold(), unresolved
 
 
 def score_sheet(
@@ -531,6 +576,10 @@ def score_sheet(
     import pandas as pd
 
     predicted = _pipeline_answers(results, template)
+    options = {
+        row_id: [c.label or c.id for c in controls]
+        for row_id, controls in template.rows().items()
+    }
     records = []
     for row in sheet.to_dict("records"):
         key = (str(row["document"]), str(row["answer_id"]))
@@ -539,6 +588,9 @@ def score_sheet(
         value, certainty = predicted[key]
         truth = str(row.get("answer") or "").strip()
         flagged = value in {MULTIPLE, UNCERTAIN.upper()}
+        choices = options.get(key[1], [])
+        truth_canonical, unresolved = _resolve_answer(truth, choices)
+        value_canonical, _ = _resolve_answer(value, choices)
         records.append({
             "document": key[0],
             "answer_id": key[1],
@@ -547,15 +599,19 @@ def score_sheet(
             "predicted": value,
             "certainty": certainty,
             "flagged": flagged,
-            "correct": (not flagged) and _normalize(truth) == _normalize(value),
+            "correct": (not flagged) and not unresolved
+            and truth_canonical == value_canonical,
             "human_unsure": truth == AMBIGUOUS_MARK,
+            "unmatched_label": MULTI_SEPARATOR.join(unresolved),
         })
 
     per_answer = pd.DataFrame(records)
     if per_answer.empty:
         return per_answer, {"scored": 0}
 
-    scorable = per_answer[~per_answer["human_unsure"]]
+    scorable = per_answer[
+        (~per_answer["human_unsure"]) & (per_answer["unmatched_label"] == "")
+    ]
     auto = scorable[~scorable["flagged"]]
     wrong = auto[~auto["correct"]]
     summary = {
@@ -566,6 +622,7 @@ def score_sheet(
         "auto_accepted_accuracy": round(auto["correct"].mean(), 4) if len(auto) else None,
         "silent_errors": int(len(wrong)),
         "human_unsure": int(per_answer["human_unsure"].sum()),
+        "labels_not_matched_to_an_option": int((per_answer["unmatched_label"] != "").sum()),
     }
     if len(wrong):
         # The number that matters: does certainty actually rank the mistakes?

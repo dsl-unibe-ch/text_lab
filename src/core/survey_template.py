@@ -280,6 +280,8 @@ RESIDUAL_CHECKED = 0.08   # >= this fraction of the interior inked -> checked
 RESIDUAL_EMPTY = 0.025    # <= this fraction -> unchecked
 _RESIDUAL_TOLERANCE = 9   # px of registration slack absorbed before differencing
 _RESIDUAL_MARGIN = 0.26   # fraction trimmed per side, clearing the printed outline
+HALO_GROW = 0.5           # how far beyond the control the halo reaches, as a fraction
+HALO_INK = 0.05           # halo ink that makes an empty interior doubtful
 
 
 def residual_ink(blank_gray, registered_gray):
@@ -295,7 +297,16 @@ def residual_ink(blank_gray, registered_gray):
     return cv2.subtract(cv2.erode(blank_gray, kernel), registered_gray)
 
 
-def classify_residual(residual_crop) -> Dict[str, Any]:
+def halo_crop(residual, bbox: Sequence[int], grow: float = HALO_GROW):
+    """The control's box widened by *grow* on each side, clipped to the page."""
+    x1, y1, x2, y2 = [int(v) for v in bbox]
+    gx, gy = int((x2 - x1) * grow), int((y2 - y1) * grow)
+    height, width = residual.shape[:2]
+    return residual[max(0, y1 - gy):min(height, y2 + gy),
+                    max(0, x1 - gx):min(width, x2 + gx)]
+
+
+def classify_residual(residual_crop, halo=None) -> Dict[str, Any]:
     """Mark state from the residual inside one control.
 
     Takes the residual over the control's full bbox and measures its interior.
@@ -315,9 +326,23 @@ def classify_residual(residual_crop) -> Dict[str, Any]:
 
     fill = float(np.count_nonzero(interior > RESIDUAL_INK)) / interior.size
 
+    # Ink around the control but not inside it: a stroke that clipped the
+    # circle instead of filling it. Measured outside the box because the
+    # erosion that makes differencing robust also suppresses the ring itself.
+    halo_fill = 0.0
+    if halo is not None and halo.size > residual_crop.size:
+        outside = np.count_nonzero(halo > RESIDUAL_INK) - np.count_nonzero(
+            residual_crop > RESIDUAL_INK
+        )
+        halo_fill = max(0.0, outside / float(halo.size - residual_crop.size))
+
     if fill >= RESIDUAL_CHECKED:
         state = "checked"
         score = min(1.0, 0.6 + (fill - RESIDUAL_CHECKED) * 4.0)
+    elif fill <= RESIDUAL_EMPTY and halo_fill >= HALO_INK:
+        # Not "empty": something was written across this control.
+        state = "uncertain"
+        score = 0.2
     elif fill <= RESIDUAL_EMPTY:
         state = "unchecked"
         score = min(1.0, 0.6 + (RESIDUAL_EMPTY - fill) * 20.0)
@@ -331,6 +356,7 @@ def classify_residual(residual_crop) -> Dict[str, Any]:
         "method": "residual",
         "score": round(score, 3),
         "fill_ratio": round(fill, 4),
+        "halo_ratio": round(halo_fill, 4),
     }
 
 

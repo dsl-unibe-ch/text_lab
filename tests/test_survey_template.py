@@ -520,3 +520,45 @@ def test_sanitize_keeps_a_leading_letter_o():
     assert sl.sanitize("Oey") == "Oey"
     assert sl.sanitize("○ Ja") == "Ja"
     assert sl.sanitize("O Nein") == "Nein"
+
+
+def test_a_stroke_clipping_the_control_is_doubted_not_called_empty():
+    """The failure mode found by hand-labelling: a mark that misses the box.
+
+    Respondents sometimes strike across a circle's edge rather than through
+    it, leaving the interior clean. Reading that as a confident "unchecked" is
+    a silent error, so the halo around the control has to raise doubt.
+    """
+    blank = blank_form()
+    x, y = CENTRES[6]
+    marked = blank.copy()
+    # An X the respondent centred beside the control instead of on it, so it
+    # clips the edge and lands mostly outside. Sized to reproduce the real
+    # case found by hand-labelling: interior fill 0.0, halo ratio ~0.07.
+    cx, d = x + RADIUS + 8, int(RADIUS * 1.8)
+    cv2.line(marked, (cx - d, y - d), (cx + d, y + d), 0, 5)
+    cv2.line(marked, (cx + d, y - d), (cx - d, y + d), 0, 5)
+
+    residual = st.residual_ink(blank, marked)
+    box = (x - RADIUS, y - RADIUS, x + RADIUS, y + RADIUS)
+    crop = residual[box[1]:box[3], box[0]:box[2]]
+
+    assert st.classify_residual(crop)["state"] == "unchecked", (
+        "the interior really is empty; the halo is what carries the signal"
+    )
+    verdict = st.classify_residual(crop, st.halo_crop(residual, box))
+    assert verdict["state"] == "uncertain"
+    assert verdict["halo_ratio"] >= st.HALO_INK
+
+
+def test_an_untouched_control_stays_confidently_empty():
+    blank = blank_form()
+    residual = st.residual_ink(blank, filled_form([6]))
+    for index, (x, y) in enumerate(CENTRES):
+        if index == 6:
+            continue
+        box = (x - RADIUS, y - RADIUS, x + RADIUS, y + RADIUS)
+        verdict = st.classify_residual(
+            residual[box[1]:box[3], box[0]:box[2]], st.halo_crop(residual, box)
+        )
+        assert verdict["state"] == "unchecked", f"control {index}: {verdict}"
