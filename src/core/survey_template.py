@@ -22,6 +22,8 @@ import numpy as np
 from core import markup_detect
 
 DEFAULT_DPI = 300  # matches auto_ocr.SURVEY_DPI
+BLANK_SAMPLE = 15  # copies stacked for the median; more adds cost, not accuracy
+MIN_BLANK_DOCUMENTS = 6  # below this the median stops reliably cancelling the ink
 MIN_REGISTRATION_QUALITY = 0.30
 CIRCLE_MAX_EXTENT = 0.85  # bbox fill below this is a ring, above it a square
 _ORB_FEATURES = 8000
@@ -154,13 +156,21 @@ def build_blank(
     *,
     dpi: int = DEFAULT_DPI,
     min_quality: float = MIN_REGISTRATION_QUALITY,
+    max_documents: Optional[int] = BLANK_SAMPLE,
 ) -> BlankPage:
-    """Register every copy of one page onto the first and median them."""
+    """Register copies of one page onto the first and median them.
+
+    Only *max_documents* copies are stacked: the median needs a handful to
+    cancel the ink, and holding every page of a large batch at 300 DPI costs
+    ~17 MB each.
+    """
     import cv2
 
     paths = [pathlib.Path(p) for p in pdf_paths]
     if not paths:
         raise ValueError("build_blank needs at least one document")
+    if max_documents:
+        paths = paths[:max_documents]
 
     reference = render_gray(paths[0], page_index, dpi)
     stack = [reference]
@@ -713,8 +723,14 @@ def build_template(
     *,
     dpi: int = DEFAULT_DPI,
     keep_blanks: bool = True,
+    max_blank_documents: Optional[int] = BLANK_SAMPLE,
+    progress=None,
 ) -> Tuple[SurveyTemplate, List[BlankPage]]:
-    """Synthesize the blank form from a batch and locate its controls."""
+    """Synthesize the blank form from a batch and locate its controls.
+
+    Documents whose page count differs from the majority are left out of the
+    template: they are not the same form, and stacking them would blur it.
+    """
     import base64
 
     import cv2
@@ -723,12 +739,28 @@ def build_template(
     if not paths:
         raise ValueError("build_template needs at least one document")
 
-    n_pages = page_count(paths[0])
+    counts = {}
+    for path in paths:
+        try:
+            counts.setdefault(page_count(path), []).append(path)
+        except Exception:
+            continue
+    if not counts:
+        raise ValueError("None of the documents could be opened")
+    n_pages = max(counts, key=lambda k: len(counts[k]))
+    usable = counts[n_pages]
+    skipped = [p.name for p in paths if p not in usable]
+
     template = SurveyTemplate(dpi=dpi)
     blanks: List[BlankPage] = []
 
     for page_index in range(n_pages):
-        blank = build_blank(paths, page_index, dpi=dpi)
+        if progress is not None:
+            progress(page_index / max(1, n_pages),
+                     f"Synthesizing the blank form, page {page_index + 1} of {n_pages}...")
+        blank = build_blank(
+            usable, page_index, dpi=dpi, max_documents=max_blank_documents
+        )
         blanks.append(blank)
         height, width = blank.shape
         controls = find_controls(blank.image)
@@ -750,7 +782,8 @@ def build_template(
         template.pages.append(page)
 
     template.provenance = {
-        "documents": [p.name for p in paths],
+        "documents": [p.name for p in usable],
+        "skipped_wrong_page_count": skipped,
         "dpi": dpi,
         "registration": {
             f"page_{b.page_index + 1}": {

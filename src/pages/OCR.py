@@ -43,7 +43,7 @@ from core.ocr_engine import (
     render_layout_preview,
     LAYOUT_TYPE_COLORS,
 )
-from core import auto_ocr, doc_ir, form_extract, searchable_pdf, vision_enrich
+from core import auto_ocr, doc_ir, form_extract, searchable_pdf, survey_batch, vision_enrich
 
 try:
     from language_mappings import EASYOCR_LANGUAGE_MAPPING, PADDLEOCR_LANGUAGE_MAPPING
@@ -232,6 +232,7 @@ def run_auto_batch(
     describe_images=False,
     extract_survey=False,
     same_template=False,
+    survey_batch_mode=False,
     searchable_pdf=False,
     ocr_lang="eng",
 ):
@@ -281,6 +282,27 @@ def run_auto_batch(
         progress_bar = st.progress(0.0)
         status_text = st.empty()
 
+        # One questionnaire template for the whole batch, learned before any
+        # file is parsed: the blank is the median of the copies, so it needs
+        # them all up front.
+        template, blanks, readings = None, None, []
+        if survey_batch_mode:
+            def _template_progress(fraction, text):
+                progress_bar.progress(min(0.99, max(0.0, fraction)))
+                status_text.markdown(f"**Questionnaire layout** — {text}")
+
+            _template_progress(0.0, f"reading {len(valid_files)} file(s)...")
+            template, blanks = survey_batch.prepare_template(
+                valid_files, label=True, progress=_template_progress
+            )
+            status_text.markdown(
+                f"**Questionnaire layout** — {template.control_count} response "
+                f"controls in {len(template.rules)} answers"
+            )
+            small_batch = template.provenance.get("small_batch_warning")
+            if small_batch:
+                st.warning(small_batch)
+
         n_files = len(valid_files)
         batch_provenance = []
         for idx, file_path in enumerate(valid_files):
@@ -321,8 +343,23 @@ def run_auto_batch(
             )
             batch_provenance.append(doc_ir.model_provenance(document))
 
+            if template is not None:
+                # Same file, second pass: the text extraction above is
+                # unchanged, this adds the questionnaire answers.
+                reading = survey_batch.read_document(file_path, template)
+                readings.append(reading)
+                survey_batch.answers_for_document(reading, template).to_csv(
+                    file_output_dir / "survey_answers.csv", index=False
+                )
+
             shutil.rmtree(per_file_ws, ignore_errors=True)
             progress_bar.progress((idx + 1) / n_files)
+
+        if template is not None:
+            status_text.markdown("**Collecting questionnaire responses...**")
+            survey_batch.write_batch_outputs(
+                readings, template, RESULTS_DIR / "survey", blanks=blanks
+            )
 
         status_text.markdown(f"**{n_files} file(s) parsed** — zipping results...")
 
@@ -1074,6 +1111,7 @@ _OPTION_COSTS = {
     "searchable_pdf": "a word-positioning pass per page",
     "describe_images": "one vision-model call per figure",
     "extract_survey": "one vision-model call per question",
+    "survey_batch_mode": "one pass to learn the form, then a second read per file",
 }
 
 
@@ -1125,6 +1163,22 @@ def _parse_options(prefix, *, batch=False):
                 help=(
                     "Adds a generated description and visible-text "
                     "transcription to each detected figure."
+                ),
+            )
+
+        options["survey_batch_mode"] = False
+        if batch:
+            options["survey_batch_mode"] = st.checkbox(
+                "📋 Extract questionnaire responses",
+                value=False,
+                key=f"{prefix}_survey_batch",
+                help=(
+                    "For a batch of the **same** paper questionnaire filled in by "
+                    "different people. TextLab learns the blank form from the "
+                    "batch itself, then reads every respondent against it and "
+                    "adds a survey/ folder: one row per respondent, TRUE/FALSE "
+                    "per checkbox, and a certainty beside every answer. The "
+                    "normal text extraction still runs for each file."
                 ),
             )
 
@@ -1198,7 +1252,9 @@ def auto_batch_ui():
     st.markdown(
         "Upload a **ZIP archive** of PDFs or images. Each file is parsed with the "
         "automatic pipeline; the result ZIP mirrors your folder structure with a "
-        "`document.md`, `document.json`, `tables/` and `assets/` per file."
+        "`document.md`, `document.json`, `tables/` and `assets/` per file. For a "
+        "batch of the same filled-in questionnaire, tick **Extract questionnaire "
+        "responses** to also get a `survey/` folder with one row per respondent."
     )
     batch_zip = st.file_uploader(
         "Upload ZIP file",
@@ -1219,6 +1275,7 @@ def auto_batch_ui():
                 describe_images=opts["describe_images"],
                 extract_survey=opts["extract_survey"],
                 same_template=opts["same_template"],
+                survey_batch_mode=opts["survey_batch_mode"],
                 searchable_pdf=opts["searchable_pdf"],
                 ocr_lang=opts["ocr_lang"],
             )

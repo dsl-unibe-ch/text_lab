@@ -46,57 +46,27 @@ def _write_overlays(template, blanks, out_dir) -> None:
         cv2.imwrite(str(out_dir / f"template_page{page.page_index + 1}.png"), vis)
 
 
-def _label(template, blanks) -> None:
-    """Name the controls by running layout+OCR over the synthesized blanks.
-
-    Kept optional because it needs the PaddleOCR-VL backend environment, while
-    everything else in this tool is OpenCV only.
-    """
-    import tempfile
-
-    import cv2
-
-    from core import auto_ocr, survey_label
-
-    print("Labelling controls from the blank form...")
-    with tempfile.TemporaryDirectory() as tmp:
-        images = []
-        for page, blank in zip(template.pages, blanks):
-            path = pathlib.Path(tmp) / f"blank_page{page.page_index + 1}.png"
-            cv2.imwrite(str(path), blank.image)
-            images.append(path)
-        page_jsons = auto_ocr.run_vl_worker(images)
-    labelled = survey_label.label_template(template, page_jsons)
-    survey_template.infer_structure(template)
-    survey_label.disambiguate_labels(template)
-    survey_label.assign_sheet_pages(template)
-    options = survey_label.name_options(template)
-    survey_label.disambiguate_labels(template)
-    named = survey_label.name_answer_rows(template)
-    questions = {
-        control.question_id
-        for page in template.pages for control in page.controls if control.question_id
-    }
-    print(f"  {labelled}/{template.control_count} controls labelled "
-          f"in {len(questions)} question groups; {named} answer rows and "
-          f"{options} options named from the blank")
-
-
 def _build(args) -> None:
     paths = _documents(args.input)
-    print(f"Synthesizing the blank form from {len(paths)} document(s)...")
-    template, blanks = survey_template.build_template(paths, dpi=args.dpi)
+    print(f"Learning the questionnaire from {len(paths)} document(s)...")
+    template, blanks = survey_batch.prepare_template(
+        paths,
+        label=getattr(args, "labels", False),
+        dpi=args.dpi,
+        progress=lambda _fraction, text: print(f"  {text}"),
+    )
     for page, blank in zip(template.pages, blanks):
         failed = ", ".join(name for name, _ in blank.failures) or "none"
         print(f"  page {page.page_index + 1}: {len(page.controls)} controls "
               f"from {len(blank.contributors)} copies (failed: {failed})")
-    if getattr(args, "labels", False):
-        _label(template, blanks)
+    singles = sum(1 for rule in template.rules.values() if rule == "single")
+    named = sum(1 for value in template.row_labels.values() if value)
+    print(f"  {len(template.rules)} answer groups: {singles} single-choice, "
+          f"{len(template.rules) - singles} multi-select; {named} rows named")
 
-    rules = survey_template.infer_structure(template)
-    singles = sum(1 for rule in rules.values() if rule == "single")
-    print(f"  {len(rules)} answer groups: {singles} single-choice, "
-          f"{len(rules) - singles} multi-select")
+    warning = template.provenance.get("small_batch_warning")
+    if warning:
+        print(f"  ! {warning}")
 
     template.save(args.template)
     print(f"Template -> {args.template} ({template.control_count} controls)")
@@ -109,39 +79,25 @@ def _read(args) -> None:
     template = survey_template.SurveyTemplate.load(args.template)
     paths = _documents(args.input)
     out = pathlib.Path(args.out)
-    out.mkdir(parents=True, exist_ok=True)
 
     results = survey_batch.read_batch(
         paths, template,
         debug_dir=(out / "overlays") if args.overlays else None,
-        progress=lambda _frac, text: print(f"  {text}"),
+        progress=lambda _fraction, text: print(f"  {text}"),
     )
+    summary = survey_batch.write_batch_outputs(results, template, out)
 
-    survey_batch.to_checkbox_table(results, template).to_csv(
-        out / "responses_checkboxes.csv", index=False
-    )
-    survey_batch.to_wide(results, template).to_csv(out / "responses_matrix.csv", index=False)
-    survey_batch.to_long(results, template).to_csv(out / "responses_long.csv", index=False)
-    queue = survey_batch.review_queue(results, template)
-    queue.to_csv(out / "review_queue.csv", index=False)
-    unused = survey_batch.unused_controls(results, template)
-    unused.to_csv(out / "unused_controls.csv", index=False)
-
-    summary = survey_batch.summarize(results)
     print(f"\n{summary['documents']} documents x {summary['controls_per_document']} controls")
     print(f"  marked        : {summary['checked']}")
     print(f"  needs a look  : {summary['uncertain']} ({summary['uncertain_rate'] * 100:.2f}%)")
     print(f"  worst page registration: {summary['worst_registration']}")
-    if len(unused):
-        rows = int(unused["whole_row_unused"].sum())
-        print(f"  {len(unused)} control(s) nobody marked"
-              + (f", {rows} in answer rows nobody touched (likely false positives)" if rows else "")
-              + " - see unused_controls.csv")
+    if summary["unused_controls"]:
+        print(f"  {summary['unused_controls']} control(s) nobody marked "
+              f"- see unused_controls.csv")
     for result in results:
         for warning in result.warnings:
             print(f"  ! {result.document}: {warning}")
-    print(f"\nWrote responses_checkboxes.csv, responses_matrix.csv, "
-          f"responses_long.csv, review_queue.csv, unused_controls.csv to {out}")
+    print(f"\nWrote the questionnaire tables to {out}")
 
 
 LABEL_INSTRUCTIONS = """# How to label these questionnaires

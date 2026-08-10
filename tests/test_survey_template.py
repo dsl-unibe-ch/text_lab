@@ -612,3 +612,123 @@ def test_two_separate_marks_are_not_resolved_away():
         for i in (0, 1)
     ]
     assert st.dominant_control(residual, boxes) is None
+
+
+# ==========================================
+#          BATCH ORCHESTRATION
+# ==========================================
+
+
+# The fixture PNGs carry no DPI metadata, so PyMuPDF gives the PDF a 96 DPI
+# page box; rendering it back at that DPI reproduces the original pixels.
+FIXTURE_DPI = 96
+
+
+def _write_batch(folder, count=6):
+    """A folder of one-page 'scans', each a different respondent."""
+    import fitz
+
+    paths = []
+    for index in range(count):
+        marked = [index % len(CENTRES), (index * 7 + 3) % len(CENTRES)]
+        image = filled_form(marked, angle=0.3 * (index % 3 - 1), shift=(index, -index))
+        png = folder / f"respondent_{index:02d}.png"
+        cv2.imwrite(str(png), image)
+        pdf = folder / f"respondent_{index:02d}.pdf"
+        with fitz.open(str(png)) as doc:
+            pdf.write_bytes(doc.convert_to_pdf())
+        png.unlink()
+        paths.append(pdf)
+    return paths
+
+
+def test_batch_orchestration_produces_the_survey_tables():
+    """The path the TextLab batch page runs: learn, read, aggregate."""
+    import pandas as pd
+
+    with tempfile.TemporaryDirectory() as tmp:
+        folder = pathlib.Path(tmp)
+        paths = _write_batch(folder)
+
+        # label=False keeps this off the PaddleOCR-VL backend; the geometry,
+        # grouping and export are what this exercises.
+        template, blanks = sb.prepare_template(paths, label=False, dpi=FIXTURE_DPI)
+        assert template.control_count == len(CENTRES)
+        assert template.rules, "structure inference produced no answer groups"
+
+        results = sb.read_batch(paths, template)
+        assert len(results) == len(paths)
+
+        out = folder / "survey"
+        summary = sb.write_batch_outputs(results, template, out, blanks=blanks)
+        assert summary["documents"] == len(paths)
+        assert summary["controls"] == len(CENTRES)
+
+        for name in (
+            "responses_checkboxes.csv", "responses_matrix.csv",
+            "responses_long.csv", "review_queue.csv", "unused_controls.csv",
+            "survey_template.json",
+        ):
+            assert (out / name).exists(), f"{name} was not written"
+
+        table = pd.read_csv(out / "responses_checkboxes.csv")
+        assert len(table) == len(paths), "one row per respondent"
+        assert "registration" in table.columns
+        # each respondent's two marks come back
+        counts = [
+            sum(1 for value in row if str(value) == "True")
+            for row in table.drop(columns=["document"]).values
+        ]
+        assert all(c == 2 for c in counts), f"marks per respondent: {counts}"
+
+
+def test_single_document_answers_are_written_beside_its_text_output():
+    with tempfile.TemporaryDirectory() as tmp:
+        folder = pathlib.Path(tmp)
+        paths = _write_batch(folder, count=5)
+        template, _ = sb.prepare_template(paths, label=False, dpi=FIXTURE_DPI)
+        reading = sb.read_document(paths[0], template)
+        frame = sb.answers_for_document(reading, template)
+        assert len(frame) == 1
+        assert frame.iloc[0]["document"] == paths[0].name
+
+
+def test_the_blank_is_built_from_a_bounded_sample():
+    """A large batch must not hold every page at 300 DPI at once."""
+    with tempfile.TemporaryDirectory() as tmp:
+        folder = pathlib.Path(tmp)
+        paths = _write_batch(folder, count=8)
+        blank = st.build_blank(paths, 0, max_documents=3)
+        assert len(blank.contributors) <= 3
+
+
+def test_documents_with_a_different_page_count_are_left_out():
+    import fitz
+
+    with tempfile.TemporaryDirectory() as tmp:
+        folder = pathlib.Path(tmp)
+        paths = _write_batch(folder, count=5)
+        odd = folder / "two_pager.pdf"
+        with fitz.open(str(paths[0])) as source, fitz.open() as doubled:
+            doubled.insert_pdf(source)
+            doubled.insert_pdf(source)
+            doubled.save(str(odd))
+
+        template, _ = sb.prepare_template(paths + [odd], label=False, dpi=FIXTURE_DPI)
+        assert len(template.pages) == 1, "the majority page count wins"
+        assert odd.name in template.provenance["skipped_wrong_page_count"]
+
+
+def test_a_small_batch_says_the_blank_may_be_unreliable():
+    """Below a handful of copies the median stops cancelling popular marks."""
+    with tempfile.TemporaryDirectory() as tmp:
+        folder = pathlib.Path(tmp)
+        few = _write_batch(folder, count=3)
+        template, _ = sb.prepare_template(few, label=False, dpi=FIXTURE_DPI)
+        assert "small_batch_warning" in template.provenance
+
+    with tempfile.TemporaryDirectory() as tmp:
+        folder = pathlib.Path(tmp)
+        many = _write_batch(folder, count=st.MIN_BLANK_DOCUMENTS + 1)
+        template, _ = sb.prepare_template(many, label=False, dpi=FIXTURE_DPI)
+        assert "small_batch_warning" not in template.provenance

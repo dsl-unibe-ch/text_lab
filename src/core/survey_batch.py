@@ -666,3 +666,127 @@ def score_sheet(
         summary["max_certainty_of_a_silent_error"] = round(wrong["certainty"].max(), 3)
         summary["median_certainty_of_a_silent_error"] = round(wrong["certainty"].median(), 3)
     return per_answer, summary
+
+
+# ==========================================
+#           BATCH ORCHESTRATION
+# ==========================================
+
+
+def prepare_template(
+    paths: Sequence[Any],
+    *,
+    label: bool = True,
+    dpi: Optional[int] = None,
+    progress=None,
+):
+    """Learn the questionnaire from a batch: blank, controls, structure, names.
+
+    Shared by the CLI and the TextLab batch page so the two cannot drift.
+    *label* runs PaddleOCR-VL over the synthesized blanks to recover question
+    grouping and option text; everything else needs only OpenCV and Tesseract.
+    """
+    from core import survey_label
+
+    def _say(fraction, text):
+        if progress is not None:
+            progress(fraction, text)
+
+    template, blanks = survey_template.build_template(
+        paths, dpi=dpi or survey_template.DEFAULT_DPI,
+        progress=lambda f, t: _say(0.1 + 0.5 * f, t),
+    )
+
+    if label:
+        _say(0.65, "Reading the questionnaire's own wording...")
+        try:
+            template_page_jsons = _blank_layout(template, blanks)
+            survey_label.label_template(template, template_page_jsons)
+        except Exception as exc:  # layout is an enrichment, not a prerequisite
+            template.provenance["labelling_error"] = str(exc)
+
+    # With few copies a popular option is marked by a majority and survives
+    # the median, leaving ghost ink in the "blank" that every read then
+    # subtracts away. Say so rather than quietly returning a worse template.
+    stacked = min((len(b.contributors) for b in blanks), default=0)
+    if stacked < survey_template.MIN_BLANK_DOCUMENTS:
+        template.provenance["small_batch_warning"] = (
+            f"The blank form was averaged from only {stacked} questionnaire(s). "
+            f"Below {survey_template.MIN_BLANK_DOCUMENTS} an option that most "
+            "respondents chose can survive as a faint mark on the blank and be "
+            "subtracted from every answer. Results are usable but check the "
+            "template overlay."
+        )
+
+    _say(0.85, "Working out which answers belong together...")
+    survey_template.infer_structure(template)
+    survey_label.disambiguate_labels(template)
+    survey_label.assign_sheet_pages(template)
+    survey_label.name_options(template)
+    survey_label.disambiguate_labels(template)
+    survey_template.infer_structure(template)
+    survey_label.name_answer_rows(template)
+    return template, blanks
+
+
+def _blank_layout(template, blanks):
+    """Run the layout/OCR worker over the synthesized blanks."""
+    import tempfile
+
+    import cv2
+
+    from core import auto_ocr
+
+    with tempfile.TemporaryDirectory() as tmp:
+        images = []
+        for page, blank in zip(template.pages, blanks):
+            path = pathlib.Path(tmp) / f"blank_page{page.page_index + 1}.png"
+            cv2.imwrite(str(path), blank.image)
+            images.append(path)
+        return auto_ocr.run_vl_worker(images)
+
+
+def write_batch_outputs(
+    results: Sequence[DocumentReading],
+    template: survey_template.SurveyTemplate,
+    out_dir,
+    *,
+    blanks=None,
+) -> Dict[str, Any]:
+    """Write the questionnaire tables and audit artifacts for one batch."""
+    import cv2
+
+    out = pathlib.Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+
+    to_checkbox_table(results, template).to_csv(
+        out / "responses_checkboxes.csv", index=False
+    )
+    to_wide(results, template).to_csv(out / "responses_matrix.csv", index=False)
+    to_long(results, template).to_csv(out / "responses_long.csv", index=False)
+    review_queue(results, template).to_csv(out / "review_queue.csv", index=False)
+    unused = unused_controls(results, template)
+    unused.to_csv(out / "unused_controls.csv", index=False)
+    template.save(out / "survey_template.json")
+
+    if blanks:
+        for page, blank in zip(template.pages, blanks):
+            vis = survey_template.overlay(
+                blank.image,
+                [{"bbox": c.pixel_bbox(page.width, page.height), "shape": c.shape}
+                 for c in page.controls],
+            )
+            cv2.imwrite(str(out / f"template_page{page.page_index + 1}.png"), vis)
+
+    summary = summarize(results)
+    summary["controls"] = template.control_count
+    summary["answer_groups"] = len(template.rules)
+    summary["unused_controls"] = int(len(unused))
+    return summary
+
+
+def answers_for_document(
+    result: DocumentReading, template: survey_template.SurveyTemplate
+):
+    """The one-row table for a single respondent, for that file's own folder."""
+    return to_checkbox_table([result], template)
