@@ -899,3 +899,27 @@ def test_rebuilding_keeps_a_file_s_own_answers_one_row_per_question():
         # what must be gone, not the id
         remaining = {c.id for page in template.pages for c in page.controls}
         assert not (set(dropped) & remaining)
+
+
+def test_the_survey_folder_explains_itself():
+    """The tables go to someone who did not run the pipeline."""
+    with tempfile.TemporaryDirectory() as tmp:
+        folder = pathlib.Path(tmp)
+        paths = _write_batch(folder, count=6)
+        template, _ = sb.prepare_template(paths, label=False, dpi=FIXTURE_DPI)
+        results = sb.read_batch(paths, template)
+        out = folder / "survey"
+        sb.write_batch_outputs(results, template, out)
+
+        readme = (out / "README.md").read_text(encoding="utf-8")
+        # every file it names must actually be written beside it
+        written = {p.name for p in out.iterdir()}
+        for name in ("responses_checkboxes.csv", "review_queue.csv",
+                     "responses_long.csv", "responses_matrix.csv",
+                     "answers_overview.csv", "unused_controls.csv",
+                     "survey_template.json"):
+            assert name in readme, f"README does not mention {name}"
+            assert name in written, f"README names {name} but it was not written"
+        # and the values a reader will hit
+        for token in ("MULTIPLE", "UNCERTAIN", "registration", "[certainty]"):
+            assert token in readme, f"README does not explain {token}"

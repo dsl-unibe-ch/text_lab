@@ -873,6 +873,85 @@ def answer_overview(
     return pd.DataFrame(records)
 
 
+SURVEY_README = """# Questionnaire responses — what these files are
+
+TextLab read a batch of the **same paper questionnaire**, filled in by different
+people. It learned the blank form from the batch itself, then read every
+questionnaire against it. No text-recognition model decides the answers: each
+response box is compared against the same box on the blank form, so what is
+reported is whether *that* box was marked.
+
+Alongside these files, each questionnaire has its own folder with the ordinary
+text extraction (`document.md`, `.txt`, `.docx`, `.json`).
+
+## Start here
+
+| File | What it is |
+|---|---|
+| `responses_checkboxes.csv` | **The main table.** One row per questionnaire, one column per checkbox. |
+| `<file>/survey_answers.csv` | One questionnaire's answers, one line per question. Easier to read for a single respondent. |
+| `review_queue.csv` | Only the answers a human should check. Start your review here. |
+| `template_page*.png` | The blank form with every detected response box outlined and each question boxed and named. **This is the key between a column name and a place on the paper.** |
+
+## Reading `responses_checkboxes.csv`
+
+Column names look like `p3/4 Q10 Biodiversität | 4`:
+
+* `p3/4` — the questionnaire's own printed page number, from its footer. A scan
+  page may hold two of these side by side.
+* `Q10` — the question number printed on the form.
+* `Biodiversität` — the row, for a question with several rows.
+* `4` — the option.
+
+For each question you get:
+
+* **one column per checkbox**, holding `True` (marked) or `False` (not marked);
+* **for single-choice questions, an extra column** naming the option chosen —
+  empty when the respondent answered nothing;
+* **a `[certainty]` column beside every one of those.**
+
+Two values need care in an answer column:
+
+* `MULTIPLE` — more than one option was marked where only one was allowed. The
+  answer is not guessed; look at the questionnaire.
+* `UNCERTAIN` — at least one box in that question could not be read confidently.
+
+`registration` is how well the scan lined up with the blank form (1.0 is
+perfect). A low value on one questionnaire usually explains why it has more
+uncertain answers than the rest.
+
+## Certainty, and what it is not
+
+Certainty is how far the measured ink sat from the decision threshold: 1.0
+means the box was unmistakably empty or unmistakably marked. It is a way of
+**ranking what to check**, not a probability that the answer is right.
+
+Measured against 11 questionnaires answered by hand for comparison: of 338
+answers the pipeline accepted on its own, 338 were correct, and about one
+answer in ten was flagged for a human instead of being answered. Those numbers
+come from one questionnaire design; treat them as encouraging, not as a
+guarantee for a different form.
+
+## The other files
+
+| File | What it is |
+|---|---|
+| `responses_long.csv` | One row per questionnaire *and* checkbox, with the raw ink measurements. For analysis or debugging. |
+| `responses_matrix.csv` | Every checkbox's state as text (`checked`/`unchecked`/`uncertain`). |
+| `answers_overview.csv` | One line per question: its type, how many respondents answered it. |
+| `unused_controls.csv` | Boxes nobody marked. Where `whole_row_unused` is true, the whole answer was untouched — usually printed text mistaken for a checkbox, occasionally a question everyone skipped. |
+| `survey_template.json` + `survey_template_blank_page*.png` | The learned form. Keep these to read more copies of the same questionnaire later. |
+
+## Before trusting the numbers
+
+1. Open `template_page*.png` and check the outlined boxes really are the
+   response boxes. If printed text was mistaken for one, remove it in TextLab
+   and rebuild — the answers are not read again, only regrouped.
+2. Work through `review_queue.csv`.
+3. Check any questionnaire with a low `registration`.
+"""
+
+
 def write_batch_outputs(
     results: Sequence[DocumentReading],
     template: survey_template.SurveyTemplate,
@@ -891,6 +970,7 @@ def write_batch_outputs(
     unused = unused_controls(results, template)
     unused.to_csv(out / "unused_controls.csv", index=False)
     answer_overview(results, template).to_csv(out / "answers_overview.csv", index=False)
+    (out / "README.md").write_text(SURVEY_README, encoding="utf-8")
     template.save(out / "survey_template.json")
 
     for name, data in template_overlays(template).items():
