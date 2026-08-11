@@ -416,3 +416,46 @@ if __name__ == "__main__":
             fn()
             print(f"OK {name}")
     print("ALL SEARCHABLE-PDF TESTS PASSED")
+
+
+def test_a_rotated_scan_gets_a_carrier_with_no_rotation():
+    """/Rotate leaves two frames and renderers disagree about which holds text.
+
+    The same file read upright in PyMuPDF and on its side in Poppler and in
+    real viewers, so the layer looked correct to every check made with
+    PyMuPDF while being wrong on screen. Rendering the page as displayed
+    removes the rotation, leaving one frame.
+    """
+    import pathlib
+    import tempfile
+
+    import fitz
+
+    from core import searchable_pdf as sp
+
+    with tempfile.TemporaryDirectory() as tmp:
+        source = pathlib.Path(tmp) / "rotated.pdf"
+        doc = fitz.open()
+        page = doc.new_page(width=841, height=1190)   # portrait box...
+        page.set_rotation(270)                        # ...shown landscape
+        doc.save(str(source))
+        doc.close()
+
+        entries = [{"text": "Bevoelkerungsbefragung", "bbox": [400, 180, 1500, 260],
+                    "fontsize": 60, "baseline": 245}]
+        blob = sp.build_searchable_pdf(
+            {1: entries}, source_pdf=str(source),
+            page_sizes={1: (4960, 3507)}, raster_dpi=150,
+        )
+        assert blob
+
+        out = fitz.open(stream=blob)
+        result = out.load_page(0)
+        assert result.rotation == 0, "the carrier still carries /Rotate"
+        assert result.rect.width > result.rect.height, "the page is not landscape"
+        words = result.get_text("words")
+        assert words, "no text layer was written"
+        # the word must read across the page, not down it
+        width = words[0][2] - words[0][0]
+        height = words[0][3] - words[0][1]
+        assert width > height, f"word box is taller than wide: {words[0][:4]}"

@@ -526,9 +526,29 @@ def build_searchable_pdf(
     """
     import fitz
 
+    doc = None
     if source_pdf:
         doc = fitz.open(source_pdf)
-    elif rasters:
+        if any(page.rotation for page in doc):
+            # A scan carrying /Rotate has two coordinate frames, and renderers
+            # do not agree on which one text belongs to: the same file reads
+            # upright in PyMuPDF and on its side in Poppler (and in viewers).
+            # Rendering the pages as displayed removes the rotation, so there
+            # is one frame and nothing left to disagree about. Costs the
+            # original compression on those pages.
+            rendered = {}
+            for page in doc:
+                pix = page.get_pixmap(dpi=raster_dpi or 200)
+                # JPEG, not PNG: these pages are photographs of paper, and
+                # lossless re-encoding multiplies the file size several times.
+                try:
+                    rendered[page.number + 1] = pix.tobytes("jpeg", jpg_quality=88)
+                except Exception:
+                    rendered[page.number + 1] = pix.tobytes("png")
+            doc.close()
+            doc, source_pdf = None, None
+            rasters = rendered
+    if doc is None and rasters:
         doc = fitz.open()
         for page_number in sorted(rasters):
             data = rasters[page_number]
@@ -536,7 +556,7 @@ def build_searchable_pdf(
             # Sized from the raster's pixels, not its dpi tag, so pixels are points.
             page = doc.new_page(width=pix.width, height=pix.height)
             page.insert_image(page.rect, stream=data)
-    else:
+    if doc is None:
         return None
 
     try:
