@@ -7,6 +7,7 @@ import tempfile
 
 import cv2
 import numpy as np
+import pytest
 
 from core import survey_batch as sb
 from core import survey_label as sl
@@ -837,3 +838,64 @@ def test_template_overlay_tags_each_answer_with_its_export_name():
     band_a = a[max(0, y - 60):y, max(0, x - 40):x + 400]
     band_b = b[max(0, y - 60):y, max(0, x - 40):x + 400]
     assert not np.array_equal(band_a, band_b), "no tag above the first control"
+
+
+def test_rebuilding_keeps_a_file_s_own_answers_one_row_per_question():
+    """The refine step must not quietly restore the wide batch shape.
+
+    The batch page wrote each file's answers long, then rebuilding after a
+    control was removed re-wrote them from the wide table -- 468 columns on one
+    line again.
+    """
+    import io
+    import zipfile
+
+    import pandas as pd
+
+    streamlit = pytest.importorskip("streamlit")
+
+    class _State(dict):
+        __getattr__ = dict.get
+
+        def __setattr__(self, key, value):
+            self[key] = value
+
+    streamlit.session_state = _State(ocr_running=False)
+    ocr = pytest.importorskip("pages.OCR")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        folder = pathlib.Path(tmp)
+        paths = _write_batch(folder, count=6)
+        template, _ = sb.prepare_template(paths, label=False, dpi=FIXTURE_DPI)
+        results = sb.read_batch(paths, template)
+
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            for result in results:
+                stem = pathlib.Path(result.document).stem
+                archive.writestr(
+                    f"{stem}/survey_answers.csv",
+                    sb.answers_for_document(result, template).to_csv(index=False),
+                )
+        original = buffer.getvalue()
+
+        row_id = template.pages[0].controls[0].row_id
+        before = len(template.rules)
+        dropped = [c.id for c in template.rows()[row_id]]
+        sb.drop_controls(template, dropped)
+        assert len(template.rules) == before - 1
+        rebuilt, _summary = ocr._rebuild_survey_zip(original, template, results)
+
+        stem = pathlib.Path(results[0].document).stem
+        frame = pd.read_csv(
+            io.BytesIO(zipfile.ZipFile(io.BytesIO(rebuilt)).read(
+                f"{stem}/survey_answers.csv"
+            ))
+        )
+        assert len(frame) == len(template.rules), "one line per answer, not one wide row"
+        assert len(frame) == before - 1, "the removed answer is still there"
+        assert "answer" in frame.columns and "certainty" in frame.columns
+        # ids are positional and get recycled after a drop, so the controls are
+        # what must be gone, not the id
+        remaining = {c.id for page in template.pages for c in page.controls}
+        assert not (set(dropped) & remaining)

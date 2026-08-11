@@ -422,7 +422,13 @@ def _rebuild_survey_zip(zip_bytes, template, readings):
         replacements = {
             f"survey/{path.name}": path.read_bytes() for path in out.iterdir()
         }
-        per_file = survey_batch.to_checkbox_table(readings, template)
+    # Same writer as the first pass, so a rebuild cannot quietly change a
+    # file's own answers back to the wide batch shape.
+    per_file = {
+        pathlib.PurePosixPath(reading.document).stem:
+            survey_batch.answers_for_document(reading, template)
+        for reading in readings
+    }
 
     buffer = io.BytesIO()
     with zipfile.ZipFile(io.BytesIO(zip_bytes)) as source:
@@ -431,15 +437,12 @@ def _rebuild_survey_zip(zip_bytes, template, readings):
                 if item.startswith("survey/"):
                     continue
                 if item.endswith("/survey_answers.csv"):
-                    # Folder names are the file stems, so match on the stem
-                    # rather than a prefix: "split_1_2" must not claim
-                    # "split_1_20".
+                    # Folder names are the file stems, so match on the stem:
+                    # "split_1_2" must not claim "split_1_20".
                     folder = pathlib.PurePosixPath(item).parent.name
-                    rows = per_file[
-                        per_file["document"].map(
-                            lambda name: pathlib.PurePosixPath(str(name)).stem == folder
-                        )
-                    ]
+                    rows = per_file.get(folder)
+                    if rows is None:
+                        continue
                     target.writestr(item, rows.to_csv(index=False))
                     continue
                 target.writestr(item, source.read(item))
