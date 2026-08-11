@@ -746,11 +746,15 @@ def _blank_layout(template, blanks):
         return auto_ocr.run_vl_worker(images)
 
 
-def template_overlays(template: survey_template.SurveyTemplate) -> Dict[str, bytes]:
+def template_overlays(
+    template: survey_template.SurveyTemplate, *, tag_answers: bool = True
+) -> Dict[str, bytes]:
     """Audit PNG per page: the synthesized blank with every control outlined.
 
-    Drawn from the blank the template already carries, so a template that has
-    been refined can be re-rendered without the original questionnaires.
+    Each answer group is tagged with the name it carries in the exports, so the
+    column called "p3/4 Q10 Biodiversitaet" can be found on the paper without
+    counting rows. Drawn from the blank the template already carries, so a
+    refined template can be re-rendered without the original questionnaires.
     """
     import cv2
 
@@ -764,10 +768,38 @@ def template_overlays(template: survey_template.SurveyTemplate) -> Dict[str, byt
             [{"bbox": c.pixel_bbox(page.width, page.height), "shape": c.shape}
              for c in page.controls],
         )
+        if tag_answers:
+            _tag_answers(vis, page, template)
         ok, encoded = cv2.imencode(".png", vis)
         if ok:
             images[f"template_page{page.page_index + 1}.png"] = encoded.tobytes()
     return images
+
+
+def _tag_answers(image, page, template) -> None:
+    """Write each answer's export name beside its first control."""
+    import cv2
+
+    scale = max(0.6, page.width / 4400.0)
+    thickness = max(1, int(round(scale * 1.6)))
+    on_page = {}
+    for control in page.controls:
+        on_page.setdefault(control.row_id or control.id, []).append(control)
+
+    for row_id, controls in on_page.items():
+        ordered = survey_template.reading_order(controls)
+        x1, y1, x2, y2 = ordered[0].pixel_bbox(page.width, page.height)
+        text = template.display_name(row_id)
+        (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, scale, thickness)
+
+        # Above the control, nudged inside the page so nothing is clipped.
+        tx = min(max(4, x1), max(4, image.shape[1] - tw - 4))
+        ty = y1 - int(6 * scale)
+        if ty - th < 0:
+            ty = y2 + th + int(6 * scale)
+        cv2.rectangle(image, (tx - 3, ty - th - 3), (tx + tw + 3, ty + 3), (255, 255, 255), -1)
+        cv2.putText(image, text, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX,
+                    scale, (0, 90, 200), thickness, cv2.LINE_AA)
 
 
 def drop_controls(

@@ -808,3 +808,32 @@ def test_dropping_a_row_does_not_leave_a_stale_name_on_another_row():
             f"{row_id} kept a name from the old numbering: "
             f"{template.row_labels.get(row_id)!r}"
         )
+
+
+def test_template_overlay_tags_each_answer_with_its_export_name():
+    """The overlay is the key between a CSV column and a spot on the paper."""
+    import base64
+
+    template = _template_with(
+        [(200 + i * 300, 380, "circle", str(i), "p1_q4") for i in range(3)]
+    )
+    page = template.pages[0]
+    ok, encoded = cv2.imencode(".png", blank_form())
+    assert ok
+    page.blank_png_b64 = base64.b64encode(encoded.tobytes()).decode("ascii")
+
+    plain = sb.template_overlays(template, tag_answers=False)
+    tagged = sb.template_overlays(template, tag_answers=True)
+    assert set(plain) == set(tagged) == {"template_page1.png"}
+    assert plain["template_page1.png"] != tagged["template_page1.png"], (
+        "tagging changed nothing"
+    )
+    # the tag is drawn, so the tagged image differs near the first control
+    import numpy as np
+
+    a = cv2.imdecode(np.frombuffer(plain["template_page1.png"], np.uint8), cv2.IMREAD_COLOR)
+    b = cv2.imdecode(np.frombuffer(tagged["template_page1.png"], np.uint8), cv2.IMREAD_COLOR)
+    x, y = CENTRES[0]
+    band_a = a[max(0, y - 60):y, max(0, x - 40):x + 400]
+    band_b = b[max(0, y - 60):y, max(0, x - 40):x + 400]
+    assert not np.array_equal(band_a, band_b), "no tag above the first control"
