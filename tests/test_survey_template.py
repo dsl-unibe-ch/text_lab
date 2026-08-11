@@ -811,7 +811,7 @@ def test_dropping_a_row_does_not_leave_a_stale_name_on_another_row():
         )
 
 
-def test_template_overlay_tags_each_answer_with_its_export_name():
+def test_template_overlay_boxes_and_names_each_question():
     """The overlay is the key between a CSV column and a spot on the paper."""
     import base64
 

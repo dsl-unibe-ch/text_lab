@@ -777,29 +777,46 @@ def template_overlays(
 
 
 def _tag_answers(image, page, template) -> None:
-    """Write each answer's export name beside its first control."""
+    """Box each question and name it once.
+
+    Per-answer tags drown a matrix: sixteen labels stacked down one grid say
+    less than a single box round the question. The row names are printed on the
+    form itself, so the question is the level worth marking.
+    """
     import cv2
 
-    scale = max(0.6, page.width / 4400.0)
-    thickness = max(1, int(round(scale * 1.6)))
-    on_page = {}
-    for control in page.controls:
-        on_page.setdefault(control.row_id or control.id, []).append(control)
+    scale = max(0.7, page.width / 3600.0)
+    thickness = max(1, int(round(scale * 1.8)))
+    pad = int(14 * scale)
+    colour = (0, 110, 220)
 
-    for row_id, controls in on_page.items():
-        ordered = survey_template.reading_order(controls)
-        x1, y1, x2, y2 = ordered[0].pixel_bbox(page.width, page.height)
-        text = template.display_name(row_id)
+    questions = {}
+    for control in page.controls:
+        questions.setdefault(control.question_id or control.row_id, []).append(control)
+
+    for question_id, controls in questions.items():
+        boxes = [c.pixel_bbox(page.width, page.height) for c in controls]
+        x1 = max(0, min(b[0] for b in boxes) - pad)
+        y1 = max(0, min(b[1] for b in boxes) - pad)
+        x2 = min(image.shape[1] - 1, max(b[2] for b in boxes) + pad)
+        y2 = min(image.shape[0] - 1, max(b[3] for b in boxes) + pad)
+        cv2.rectangle(image, (x1, y1), (x2, y2), colour, thickness)
+
+        first = survey_template.reading_order(controls)[0]
+        number = first.question_id.rsplit("_q", 1)[-1] if "_q" in first.question_id else ""
+        text = " ".join(
+            part for part in
+            (f"p{first.sheet_page}" if first.sheet_page else "", f"Q{number}" if number else "")
+        ).strip() or question_id
         (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, scale, thickness)
 
-        # Above the control, nudged inside the page so nothing is clipped.
-        tx = min(max(4, x1), max(4, image.shape[1] - tw - 4))
+        tx = min(x1, max(0, image.shape[1] - tw - 4))
         ty = y1 - int(6 * scale)
         if ty - th < 0:
             ty = y2 + th + int(6 * scale)
-        cv2.rectangle(image, (tx - 3, ty - th - 3), (tx + tw + 3, ty + 3), (255, 255, 255), -1)
+        cv2.rectangle(image, (tx - 3, ty - th - 5), (tx + tw + 3, ty + 4), (255, 255, 255), -1)
         cv2.putText(image, text, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX,
-                    scale, (0, 90, 200), thickness, cv2.LINE_AA)
+                    scale, colour, thickness, cv2.LINE_AA)
 
 
 def drop_controls(
