@@ -121,7 +121,7 @@ def clear_results(reset_running=False):
         "auto_error", "batch_auto_complete", "batch_auto_zip",
         # questionnaire batch: kept so the detected form can be reviewed and
         # the tables rebuilt without parsing everything again
-        "survey_template", "survey_readings",
+        "survey_template", "survey_readings", "survey_documents",
     ]
     for key in keys_to_clear:
         if key in st.session_state:
@@ -308,6 +308,9 @@ def run_auto_batch(
 
         n_files = len(valid_files)
         batch_provenance = []
+        # Output folder -> parsed document, for rebuilding the exports after a
+        # control is dropped. Only filled in questionnaire mode.
+        document_index = {}
         for idx, file_path in enumerate(valid_files):
             rel_path = file_path.relative_to(INPUT_DIR)
 
@@ -350,6 +353,10 @@ def run_auto_batch(
                 survey_batch.answers_for_document(reading, template).to_csv(
                     file_output_dir / "survey_answers.csv", index=False
                 )
+                # The marks are ink no text extractor reads, so the answers are
+                # attached to the document itself: document.md and every other
+                # export then carry them in place, not just the batch tables.
+                survey_batch.to_form_groups(reading, template, document)
                 # A rating scale reads as a table to the layout model. Once the
                 # responses are extracted properly, exporting the grid again as
                 # a CSV of empty cells is only noise.
@@ -358,8 +365,19 @@ def run_auto_batch(
             doc_ir.write_document_outputs(
                 document, file_output_dir, "document", provenance=False,
                 skip_tables=skip_tables,
+                # survey_answers.csv is the same answers in the shape the
+                # README documents; two CSVs of them would only raise the
+                # question of which one to trust.
+                form_responses=template is None,
             )
             batch_provenance.append(doc_ir.model_provenance(document))
+            if template is not None:
+                # Kept so that dropping a control rewrites these same exports
+                # without parsing anything again -- once they are on disk, so
+                # the heavy parts can be stripped before the document is stored.
+                document_index[file_output_dir.relative_to(RESULTS_DIR).as_posix()] = (
+                    survey_batch.slim_document(document)
+                )
 
             shutil.rmtree(per_file_ws, ignore_errors=True)
             progress_bar.progress((idx + 1) / n_files)
@@ -393,6 +411,7 @@ def run_auto_batch(
         if template is not None:
             st.session_state.survey_template = template
             st.session_state.survey_readings = readings
+            st.session_state.survey_documents = document_index
 
     except Exception as e:
         st.session_state.auto_error = f"Batch automatic OCR failed: {e}"
@@ -404,51 +423,6 @@ def run_auto_batch(
             shared_vision_client.close()
         st.session_state.ocr_running = False
         _cleanup_job_dir(JOB_DIR)
-
-
-def _rebuild_survey_zip(zip_bytes, template, readings):
-    """Swap the survey/ folder in an existing result ZIP for a fresh one.
-
-    Dropping a control changes only how answers are grouped and exported, not
-    what was read off the page, so the questionnaires do not have to be parsed
-    again.
-    """
-    import tempfile
-    import zipfile
-
-    with tempfile.TemporaryDirectory() as tmp:
-        out = pathlib.Path(tmp) / "survey"
-        summary = survey_batch.write_batch_outputs(readings, template, out)
-        replacements = {
-            f"survey/{path.name}": path.read_bytes() for path in out.iterdir()
-        }
-    # Same writer as the first pass, so a rebuild cannot quietly change a
-    # file's own answers back to the wide batch shape.
-    per_file = {
-        pathlib.PurePosixPath(reading.document).stem:
-            survey_batch.answers_for_document(reading, template)
-        for reading in readings
-    }
-
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as source:
-        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as target:
-            for item in source.namelist():
-                if item.startswith("survey/"):
-                    continue
-                if item.endswith("/survey_answers.csv"):
-                    # Folder names are the file stems, so match on the stem:
-                    # "split_1_2" must not claim "split_1_20".
-                    folder = pathlib.PurePosixPath(item).parent.name
-                    rows = per_file.get(folder)
-                    if rows is None:
-                        continue
-                    target.writestr(item, rows.to_csv(index=False))
-                    continue
-                target.writestr(item, source.read(item))
-            for name, data in replacements.items():
-                target.writestr(name, data)
-    return buffer.getvalue(), summary
 
 
 def render_survey_review():
@@ -494,22 +468,24 @@ def render_survey_review():
         # only the image above settles it.
         key="survey_drop",
         help=(
-            "Removes them from the response tables and renumbers the rest. "
-            "The questionnaires are not parsed again."
+            "Removes them from every file that carries answers — the batch "
+            "tables, each questionnaire's own answers and its document.md — "
+            "and renumbers the rest. The questionnaires are not parsed again."
         ),
     )
-    if chosen and st.button("♻️ Rebuild the response tables", key="survey_rebuild"):
+    if chosen and st.button("♻️ Rebuild the exports", key="survey_rebuild"):
         ids = [i for name in chosen for i in labels[name].split(",") if i]
         removed = survey_batch.drop_controls(template, ids)
-        zip_bytes, summary = _rebuild_survey_zip(
-            st.session_state.batch_auto_zip, template, readings
+        zip_bytes, summary = survey_batch.rebuild_exports(
+            st.session_state.batch_auto_zip, template, readings,
+            st.session_state.get("survey_documents"),
         )
         st.session_state.batch_auto_zip = zip_bytes
         st.session_state.survey_template = template
         st.success(
             f"Removed {removed} control(s); {summary['controls']} remain in "
-            f"{summary['answer_groups']} answers. Download again for the "
-            "updated tables."
+            f"{summary['answer_groups']} answers. Every export was rewritten — "
+            "**download the ZIP again** to get them."
         )
         st.rerun()
 

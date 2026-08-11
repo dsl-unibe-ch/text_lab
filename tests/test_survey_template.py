@@ -2,6 +2,7 @@
 
 import conftest_path  # noqa: F401
 
+import io
 import pathlib
 import tempfile
 
@@ -9,6 +10,7 @@ import cv2
 import numpy as np
 import pytest
 
+from core import doc_ir as di
 from core import survey_batch as sb
 from core import survey_label as sl
 from core import survey_template as st
@@ -847,21 +849,9 @@ def test_rebuilding_keeps_a_file_s_own_answers_one_row_per_question():
     control was removed re-wrote them from the wide table -- 468 columns on one
     line again.
     """
-    import io
     import zipfile
 
     import pandas as pd
-
-    streamlit = pytest.importorskip("streamlit")
-
-    class _State(dict):
-        __getattr__ = dict.get
-
-        def __setattr__(self, key, value):
-            self[key] = value
-
-    streamlit.session_state = _State(ocr_running=False)
-    ocr = pytest.importorskip("pages.OCR")
 
     with tempfile.TemporaryDirectory() as tmp:
         folder = pathlib.Path(tmp)
@@ -884,7 +874,7 @@ def test_rebuilding_keeps_a_file_s_own_answers_one_row_per_question():
         dropped = [c.id for c in template.rows()[row_id]]
         sb.drop_controls(template, dropped)
         assert len(template.rules) == before - 1
-        rebuilt, _summary = ocr._rebuild_survey_zip(original, template, results)
+        rebuilt, _summary = sb.rebuild_exports(original, template, results)
 
         stem = pathlib.Path(results[0].document).stem
         frame = pd.read_csv(
@@ -923,3 +913,162 @@ def test_the_survey_folder_explains_itself():
         # and the values a reader will hit
         for token in ("MULTIPLE", "UNCERTAIN", "registration", "[certainty]"):
             assert token in readme, f"README does not explain {token}"
+
+
+# ==========================================
+#     ANSWERS INSIDE THE PARSED DOCUMENT
+# ==========================================
+
+
+def _row_template(labels=("0", "1", "2", "3"), row_label="Frage A"):
+    """One question, one row of circles, optionally with a printed row stem."""
+    template = _template_with(
+        [(200 + i * 300, 380, "circle", label, "q1") for i, label in enumerate(labels)]
+    )
+    row_id = template.pages[0].controls[0].row_id
+    if row_label:
+        template.row_labels[row_id] = row_label
+    return template, row_id
+
+
+def _parsed_document(with_grid=True):
+    """A parsed page holding a question line and the grid it was printed in."""
+    regions = [
+        di.Region(id="r1", type=di.TEXT, bbox=[150, 200, 1200, 260],
+                  reading_order=0, content={"text": "Wie gut kennst du den Naturpark?"}),
+    ]
+    if with_grid:
+        regions.append(
+            di.Region(id="r2", type=di.TABLE, bbox=[150, 340, 1200, 420],
+                      reading_order=1,
+                      content={"html": "<table><tr><td>sehr gut</td></tr></table>"})
+        )
+    page = di.Page(page_number=1, width=W, height=H, regions=regions)
+    return di.Document(pages=[page], source_name="a.pdf")
+
+
+def test_answers_are_written_into_the_parsed_document():
+    """The marks are ink no text extractor reads, so document.md must carry them."""
+    template, row_id = _row_template()
+    document = _parsed_document()
+    reading = _reading("a.pdf", ["unchecked", "checked", "unchecked", "unchecked"], template)
+
+    assert sb.to_form_groups(reading, template, document) == 1
+    markdown = di.to_markdown(document)
+    assert "Frage A: **1**" in markdown, markdown
+    # the printed question is still there, the empty grid it was read off is not
+    assert "Naturpark" in markdown
+    assert "<table" not in markdown
+    # and in reading order: the answer sits where the question is printed
+    assert markdown.index("Naturpark") < markdown.index("Frage A")
+
+
+def test_an_unnamed_row_keeps_the_printed_grid():
+    """Standing in for the grid must not cost the document its printed text."""
+    template, _ = _row_template(row_label="")
+    document = _parsed_document()
+    reading = _reading("a.pdf", ["unchecked", "checked", "unchecked", "unchecked"], template)
+
+    sb.to_form_groups(reading, template, document)
+    markdown = di.to_markdown(document)
+    assert "<table" in markdown, "the grid carries text the answers do not repeat"
+    assert "**1**" in markdown
+
+
+def test_an_unread_mark_says_so_instead_of_answering():
+    template, _ = _row_template()
+    document = _parsed_document()
+    reading = _reading("a.pdf", ["unchecked", "uncertain", "unchecked", "unchecked"], template)
+
+    sb.to_form_groups(reading, template, document)
+    markdown = di.to_markdown(document)
+    assert "unreadable" in markdown
+    assert "needs review" in markdown
+    group = document.pages[0].form_groups[0]
+    assert group.status == "needs_review"
+
+
+def test_no_answer_is_reported_as_such():
+    template, _ = _row_template()
+    document = _parsed_document()
+    reading = _reading("a.pdf", ["unchecked"] * 4, template)
+
+    sb.to_form_groups(reading, template, document)
+    assert "no answer" in di.to_markdown(document)
+
+
+def test_rebuilding_replaces_the_answers_instead_of_stacking_them():
+    """Dropping a control has to leave the document, not just the CSVs, clean."""
+    template, _ = _row_template()
+    document = _parsed_document()
+    reading = _reading("a.pdf", ["unchecked", "checked", "unchecked", "unchecked"], template)
+    sb.to_form_groups(reading, template, document)
+
+    dropped = template.pages[0].controls[1].id
+    sb.drop_controls(template, [dropped])
+    assert sb.to_form_groups(reading, template, document) == 1
+    assert len(document.pages[0].form_groups) == 1, "answers were attached twice"
+
+    markdown = di.to_markdown(document)
+    assert "**1**" not in markdown, "a dropped control still answers the question"
+    assert "no answer" in markdown
+
+
+def test_a_document_stripped_of_its_preview_still_places_the_answers():
+    """A rebuild works on a slimmed-down document; the boxes must still line up."""
+    template, _ = _row_template()
+    document = _parsed_document()
+    document.pages[0].preview_size = (W, H)
+    document.pages[0].image_b64 = None
+    reading = _reading("a.pdf", ["unchecked", "checked", "unchecked", "unchecked"], template)
+
+    sb.to_form_groups(reading, template, document)
+    group = document.pages[0].form_groups[0]
+    assert group.covered_region_ids == ["r2"], "the grid was not matched in preview pixels"
+
+
+def test_a_rebuild_rewrites_every_file_that_carries_an_answer():
+    """Dropping a control must not leave the removed answer in the ZIP."""
+    import zipfile
+
+    template, _ = _row_template()
+    document = _parsed_document()
+    reading = _reading("a.pdf", ["unchecked", "checked", "unchecked", "unchecked"], template)
+    sb.to_form_groups(reading, template, document)
+    sb.slim_document(document)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        folder = pathlib.Path(tmp)
+        di.write_document_outputs(
+            document, folder / "a", "document", provenance=False,
+            skip_tables=sb.survey_table_regions(document, template),
+            form_responses=False,
+        )
+        sb.answers_for_document(reading, template).to_csv(
+            folder / "a" / "survey_answers.csv", index=False
+        )
+        sb.write_batch_outputs([reading], template, folder / "survey")
+        buffer = pathlib.Path(tmp) / "results.zip"
+        with zipfile.ZipFile(buffer, "w") as zf:
+            for path in folder.rglob("*"):
+                if path.is_file() and path != buffer:
+                    zf.write(path, path.relative_to(folder).as_posix())
+        original = buffer.read_bytes()
+
+    dropped = template.pages[0].controls[1].id
+    sb.drop_controls(template, [dropped])
+    rebuilt, summary = sb.rebuild_exports(
+        original, template, [reading], {"a": document}
+    )
+
+    assert summary["controls"] == 3
+    with zipfile.ZipFile(io.BytesIO(rebuilt)) as zf:
+        names = set(zf.namelist())
+        assert "a/document.md" in names and "survey/responses_checkboxes.csv" in names
+        markdown = zf.read("a/document.md").decode("utf-8")
+        answers = zf.read("a/survey_answers.csv").decode("utf-8")
+        matrix = zf.read("survey/responses_matrix.csv").decode("utf-8")
+    for name, content in (("document.md", markdown), ("survey_answers.csv", answers),
+                          ("responses_matrix.csv", matrix)):
+        assert dropped not in content, f"{name} still names the dropped control"
+    assert "no answer" in markdown, "document.md kept the answer of a dropped control"

@@ -235,6 +235,21 @@ def _column_names(template: Optional[survey_template.SurveyTemplate]) -> Dict[st
     return names
 
 
+def readings_in(result: DocumentReading,
+                template: Optional[survey_template.SurveyTemplate]):
+    """A document's readings for the controls the template still has.
+
+    The readings are taken once, against the template as it was learned. When a
+    control is dropped afterwards -- printed text that fooled the detector --
+    its reading is still in hand and must not reach an export: the template is
+    what says which controls exist.
+    """
+    if template is None:
+        return result.readings
+    known = {control.id for page in template.pages for control in page.controls}
+    return [reading for reading in result.readings if reading.control_id in known]
+
+
 def to_wide(results: Sequence[DocumentReading],
             template: Optional[survey_template.SurveyTemplate] = None):
     """One row per respondent, one column per control."""
@@ -244,7 +259,10 @@ def to_wide(results: Sequence[DocumentReading],
     records = []
     for result in results:
         row: Dict[str, Any] = {"document": result.document}
-        row.update({names.get(r.control_id, r.control_id): r.state for r in result.readings})
+        row.update({
+            names.get(r.control_id, r.control_id): r.state
+            for r in readings_in(result, template)
+        })
         records.append(row)
     return pd.DataFrame(records)
 
@@ -260,7 +278,7 @@ def to_long(results: Sequence[DocumentReading], template: survey_template.Survey
     }
     records = []
     for result in results:
-        for reading in result.readings:
+        for reading in readings_in(result, template):
             question_id, row_id, label = labels.get(reading.control_id, ("", "", ""))
             records.append({
                 "document": result.document,
@@ -436,10 +454,14 @@ def unused_controls(
     return frame
 
 
-def summarize(results: Sequence[DocumentReading]) -> Dict[str, Any]:
-    total = sum(len(r.readings) for r in results)
-    checked = sum(r.checked for r in results)
-    uncertain = sum(r.uncertain for r in results)
+def summarize(
+    results: Sequence[DocumentReading],
+    template: Optional[survey_template.SurveyTemplate] = None,
+) -> Dict[str, Any]:
+    kept = [readings_in(result, template) for result in results]
+    total = sum(len(readings) for readings in kept)
+    checked = sum(1 for readings in kept for r in readings if r.state == "checked")
+    uncertain = sum(1 for readings in kept for r in readings if r.state == UNCERTAIN)
     return {
         "documents": len(results),
         "controls_per_document": total // max(1, len(results)),
@@ -776,6 +798,24 @@ def template_overlays(
     return images
 
 
+def question_tag(control: survey_template.TemplateControl) -> str:
+    """Where a question sits on the paper, e.g. ``p3/4 Q10``.
+
+    The same anchor on the overlay image, in the CSV column names and in
+    ``document.md``, so one name finds a question in all three.
+    """
+    number = (
+        control.question_id.rsplit("_q", 1)[-1] if "_q" in control.question_id else ""
+    )
+    parts = [
+        f"p{control.sheet_page}" if control.sheet_page else "",
+        f"Q{number}" if number else "",
+    ]
+    return " ".join(part for part in parts if part).strip() or (
+        control.question_id or control.row_id
+    )
+
+
 def _tag_answers(image, page, template) -> None:
     """Box each question and name it once.
 
@@ -803,11 +843,7 @@ def _tag_answers(image, page, template) -> None:
         cv2.rectangle(image, (x1, y1), (x2, y2), colour, thickness)
 
         first = survey_template.reading_order(controls)[0]
-        number = first.question_id.rsplit("_q", 1)[-1] if "_q" in first.question_id else ""
-        text = " ".join(
-            part for part in
-            (f"p{first.sheet_page}" if first.sheet_page else "", f"Q{number}" if number else "")
-        ).strip() or question_id
+        text = question_tag(first)
         (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, scale, thickness)
 
         tx = min(x1, max(0, image.shape[1] - tw - 4))
@@ -882,7 +918,9 @@ response box is compared against the same box on the blank form, so what is
 reported is whether *that* box was marked.
 
 Alongside these files, each questionnaire has its own folder with the ordinary
-text extraction (`document.md`, `.txt`, `.docx`, `.json`).
+text extraction (`document.md`, `.txt`, `.docx`, `.json`). The answers are
+written into those too, each one under the question it belongs to, so a single
+questionnaire can be read as a document instead of as a table.
 
 ## Start here
 
@@ -946,10 +984,117 @@ guarantee for a different form.
 
 1. Open `template_page*.png` and check the outlined boxes really are the
    response boxes. If printed text was mistaken for one, remove it in TextLab
-   and rebuild — the answers are not read again, only regrouped.
+   and rebuild, then download the ZIP again — the answers are not read again,
+   only regrouped, and the rebuild rewrites every file that carries them: these
+   tables, each `<file>/survey_answers.csv`, and each `<file>/document.*`.
 2. Work through `review_queue.csv`.
 3. Check any questionnaire with a low `registration`.
 """
+
+
+def slim_document(document):
+    """Strip a parsed document down to what re-exporting it needs.
+
+    The preview raster and the searchable PDF are the bulk of a parsed page and
+    both are already written out; keeping a whole batch of them in memory so a
+    template can be refined afterwards would not fit. The preview's pixel size
+    is kept, because the region boxes were scaled to it.
+    """
+    for page in document.pages:
+        if page.image_b64 and not page.preview_size:
+            page.preview_size = preview_size(page)
+        page.image_b64 = None
+    document.searchable_pdf = None
+    return document
+
+
+def _document_exports(template, readings, documents) -> Dict[str, bytes]:
+    """Fresh per-file exports for a refined template: ``{zip path: bytes}``.
+
+    The answers live inside ``document.md`` as well as in the tables, so a
+    dropped control has to be taken out of both. Nothing is parsed again: the
+    documents already in hand are re-rendered against the pruned template.
+    """
+    import tempfile
+
+    from core import doc_ir
+
+    by_stem = {
+        pathlib.PurePosixPath(reading.document).stem: reading for reading in readings
+    }
+    out: Dict[str, bytes] = {}
+    with tempfile.TemporaryDirectory() as tmp:
+        for rel_dir, document in documents.items():
+            reading = by_stem.get(pathlib.PurePosixPath(rel_dir).name)
+            if reading is None:
+                continue
+            to_form_groups(reading, template, document)
+            target = pathlib.Path(tmp) / rel_dir
+            names = doc_ir.write_document_outputs(
+                document, target, "document", provenance=False,
+                skip_tables=survey_table_regions(document, template),
+                form_responses=False,
+            )
+            for name in names:
+                out[f"{rel_dir}/{pathlib.PurePosixPath(name).as_posix()}"] = (
+                    (target / name).read_bytes()
+                )
+    return out
+
+
+def rebuild_exports(zip_bytes, template, readings, documents=None):
+    """Rewrite every answer-carrying file in a finished result ZIP.
+
+    Dropping a control changes only how answers are grouped and exported, not
+    what was read off the page, so the questionnaires are not parsed again: the
+    batch tables, each file's own answers and each file's document exports are
+    re-rendered from the readings already in hand. Returns the new ZIP and the
+    batch summary.
+    """
+    import io
+    import tempfile
+    import zipfile
+
+    documents = documents or {}
+    with tempfile.TemporaryDirectory() as tmp:
+        out = pathlib.Path(tmp) / "survey"
+        summary = write_batch_outputs(readings, template, out)
+        replacements = {
+            f"survey/{path.name}": path.read_bytes() for path in out.iterdir()
+        }
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as source:
+        # Same writer as the first pass, so a rebuild cannot quietly change a
+        # file's own answers back to the wide batch shape.
+        per_file = {
+            pathlib.PurePosixPath(reading.document).stem: reading
+            for reading in readings
+        }
+        for item in source.namelist():
+            if item.endswith("/survey_answers.csv"):
+                # Folder names are the file stems, so match on the stem:
+                # "split_1_2" must not claim "split_1_20".
+                reading = per_file.get(pathlib.PurePosixPath(item).parent.name)
+                if reading is not None:
+                    replacements[item] = answers_for_document(
+                        reading, template
+                    ).to_csv(index=False).encode("utf-8")
+        replacements.update(_document_exports(template, readings, documents))
+        # Which tables count as questionnaire grids moves with the template, so
+        # a re-exported file's table CSVs replace the old set rather than join it.
+        stale = tuple(f"{rel_dir}/tables/" for rel_dir in documents)
+
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as target:
+            for item in source.namelist():
+                if item.startswith("survey/") or item in replacements:
+                    continue
+                if stale and item.startswith(stale):
+                    continue
+                target.writestr(item, source.read(item))
+            for name, data in replacements.items():
+                target.writestr(name, data)
+    return buffer.getvalue(), summary
 
 
 def write_batch_outputs(
@@ -976,7 +1121,7 @@ def write_batch_outputs(
     for name, data in template_overlays(template).items():
         (out / name).write_bytes(data)
 
-    summary = summarize(results)
+    summary = summarize(results, template)
     summary["controls"] = template.control_count
     summary["answer_groups"] = len(template.rules)
     summary["unused_controls"] = int(len(unused))
@@ -1041,6 +1186,31 @@ def answers_for_document(
     return pd.DataFrame(records)
 
 
+def preview_size(page) -> Optional[Tuple[int, int]]:
+    """Pixel size of the raster a parsed page's region boxes are measured in.
+
+    The preview raster, when the page carries one: region boxes were scaled to
+    it. Falls back to the size a caller recorded before dropping that raster,
+    then to the page's own pixel size.
+    """
+    import base64
+    import io as _io
+
+    if page.preview_size:
+        return tuple(page.preview_size)
+    if page.image_b64:
+        try:
+            from PIL import Image
+
+            with Image.open(_io.BytesIO(base64.b64decode(page.image_b64))) as preview:
+                return preview.size
+        except Exception:
+            pass
+    if page.width and page.height:
+        return page.width, page.height
+    return None
+
+
 def survey_table_regions(document, template) -> set:
     """Table regions that are really questionnaire grids, not data tables.
 
@@ -1049,27 +1219,14 @@ def survey_table_regions(document, template) -> set:
     Region boxes are in preview pixels and template controls in page fractions,
     so both are normalized before they are compared.
     """
-    import base64
-    import io as _io
-
     from core import doc_ir
 
     grids = set()
     for page, template_page in zip(document.pages, template.pages):
-        size = None
-        if page.image_b64:
-            try:
-                from PIL import Image
-
-                with Image.open(_io.BytesIO(base64.b64decode(page.image_b64))) as preview:
-                    size = preview.size
-            except Exception:
-                size = None
+        size = preview_size(page)
         if not size:
-            size = (page.width, page.height)
-        width, height = size
-        if not width or not height:
             continue
+        width, height = size
 
         centres = [
             ((c.bbox[0] + c.bbox[2]) / 2, (c.bbox[1] + c.bbox[3]) / 2)
@@ -1086,3 +1243,126 @@ def survey_table_regions(document, template) -> set:
             if inside >= 2:
                 grids.add(region.id)
     return grids
+
+
+#: Marks the form groups this module attaches, so a rebuild replaces its own
+#: work instead of stacking a second copy of every answer on the page.
+FORM_GROUP_METHOD = "template-omr"
+
+_FORM_STATE = {"checked": "selected", "unchecked": "unselected"}
+_FORM_MARK = {"checked": "filled", "unchecked": "none"}
+
+
+def to_form_groups(
+    result: DocumentReading,
+    template: survey_template.SurveyTemplate,
+    document,
+) -> int:
+    """Attach one respondent's answers to their parsed document.
+
+    The batch tables answer "what did everyone say"; ``document.md`` has to
+    answer "what does this sheet say", and until now it could not -- the marks
+    are ink the layout model reads as an empty grid. The readings are hung on
+    the page they came from as :class:`doc_ir.FormGroup`, which every export
+    renders in place. Returns the number of groups attached.
+    """
+    from core import doc_ir
+
+    readings = {r.control_id: r for r in result.readings}
+    attached = 0
+    for page, template_page in zip(document.pages, template.pages):
+        page.form_groups = [
+            group for group in page.form_groups
+            if group.provenance.get("method") != FORM_GROUP_METHOD
+        ]
+        size = preview_size(page)
+        if not size:
+            continue
+        width, height = size
+
+        by_question: Dict[str, List[survey_template.TemplateControl]] = {}
+        for control in survey_template.reading_order(template_page.controls):
+            by_question.setdefault(control.question_id or control.row_id, []).append(control)
+
+        groups, centres, labelled = [], {}, {}
+        for question_id, controls in by_question.items():
+            by_row: Dict[str, List[survey_template.TemplateControl]] = {}
+            for control in controls:
+                by_row.setdefault(control.row_id or control.id, []).append(control)
+
+            rows, boxes = [], []
+            for row_id, row_controls in by_row.items():
+                options, unread = [], False
+                for control in row_controls:
+                    reading = readings.get(control.id)
+                    state = reading.state if reading else UNCERTAIN
+                    unread = unread or state not in _FORM_STATE
+                    box = control.pixel_bbox(width, height)
+                    boxes.append(box)
+                    options.append(doc_ir.FormOption(
+                        id=control.id,
+                        label=control.label or control.id,
+                        state=_FORM_STATE.get(state, "ambiguous"),
+                        visual_mark=_FORM_MARK.get(state, "uncertain"),
+                        bbox=[float(v) for v in box],
+                        observations=[doc_ir.Observation(
+                            source="textlab-omr",
+                            value=state,
+                            method=FORM_GROUP_METHOD,
+                            score=round(float(reading.score), 3) if reading else None,
+                        )],
+                    ))
+                rows.append(doc_ir.FormRow(
+                    id=row_id,
+                    label=template.row_labels.get(row_id, ""),
+                    options=options,
+                    status="needs_review" if unread else "accepted",
+                    review_reasons=["mark could not be read"] if unread else [],
+                ))
+
+            rules = {template.rules.get(row.id, "single") for row in rows}
+            multiple = rules == {"multiple"}
+            group = doc_ir.FormGroup(
+                id=question_id,
+                bbox=[
+                    float(min(b[0] for b in boxes)), float(min(b[1] for b in boxes)),
+                    float(max(b[2] for b in boxes)), float(max(b[3] for b in boxes)),
+                ],
+                question_text=question_tag(controls[0]),
+                question_type=("matrix" if len(rows) > 1 else
+                               ("multiple" if multiple else "single")),
+                selection_rule="zero_or_more" if multiple else "zero_or_one",
+                rows=rows,
+                status=("needs_review" if any(r.status == "needs_review" for r in rows)
+                        else "accepted"),
+                provenance={
+                    "method": FORM_GROUP_METHOD,
+                    "template_controls": len(controls),
+                    "registration": result.registration.get(template_page.page_index),
+                },
+            )
+            groups.append(group)
+            centres[group.id] = [
+                ((b[0] + b[2]) / 2, (b[1] + b[3]) / 2) for b in boxes
+            ]
+            labelled[group.id] = all(row.label.strip() for row in rows)
+
+        # The printed grid is what the layout model saw: empty cells whose row
+        # stems the answers above already carry. Standing in for it is only safe
+        # when every row of every question on it was named, or the document
+        # would silently lose printed text.
+        for region in page.regions:
+            if region.type != doc_ir.TABLE or len(region.bbox) < 4:
+                continue
+            x1, y1, x2, y2 = region.bbox
+            owners = [
+                group for group in groups
+                if sum(1 for cx, cy in centres[group.id]
+                       if x1 <= cx <= x2 and y1 <= cy <= y2) >= 2
+            ]
+            if owners and all(labelled[group.id] for group in owners):
+                owners[0].covered_region_ids.append(region.id)
+
+        page.form_groups.extend(groups)
+        attached += len(groups)
+    return attached
