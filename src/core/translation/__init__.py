@@ -32,12 +32,14 @@ from .engine import (
     backend_load_signature,
     chunk_text_for_translation,
     flores_to_iso2,
+    free_translation_vram,
     make_translate_fn,
     preload_backend,
     read_text_from_upload,
     split_into_sentences,
     translate,
     translate_madlad,
+    translate_many,
     translate_nllb,
     translate_ollama,
     translate_opus_mt,
@@ -48,10 +50,21 @@ from .format import (
     translate_pdf,
     translate_pptx,
     translate_xlsx,
+    detect_pdf_is_scanned,
+    pdf_needs_ocr,
+    pdf_to_markdown_bundle,
+    translate_pdf_to_markdown,
+    pack_markdown_bundle,
 )
 from .lang_detect import DetectionResult, detect_language, supported_iso639_1_codes
+from .gpu_profile import (
+    GpuProfile,
+    detect_gpu_profile,
+    ocr_with_translation_allowed,
+    resolve_batch_size,
+)
 from .quality import SCORE_UNAVAILABLE, estimate_quality, is_available, quality_badge
-from .shield import shield, shielded_translate, unshield
+from .shield import shield, shielded_translate, shielded_translate_many, unshield
 
 __all__ = [
     # Engine
@@ -63,12 +76,14 @@ __all__ = [
     "backend_load_signature",
     "chunk_text_for_translation",
     "flores_to_iso2",
+    "free_translation_vram",
     "make_translate_fn",
     "preload_backend",
     "read_text_from_upload",
     "split_into_sentences",
     "translate",
     "translate_madlad",
+    "translate_many",
     "translate_nllb",
     "translate_ollama",
     "translate_opus_mt",
@@ -78,10 +93,20 @@ __all__ = [
     "translate_pdf",
     "translate_pptx",
     "translate_xlsx",
+    "detect_pdf_is_scanned",
+    "pdf_needs_ocr",
+    "pdf_to_markdown_bundle",
+    "translate_pdf_to_markdown",
+    "pack_markdown_bundle",
     # Language detection
     "DetectionResult",
     "detect_language",
     "supported_iso639_1_codes",
+    # GPU profile
+    "GpuProfile",
+    "detect_gpu_profile",
+    "ocr_with_translation_allowed",
+    "resolve_batch_size",
     # Quality estimation
     "SCORE_UNAVAILABLE",
     "estimate_quality",
@@ -90,5 +115,6 @@ __all__ = [
     # Shielding
     "shield",
     "shielded_translate",
+    "shielded_translate_many",
     "unshield",
 ]
