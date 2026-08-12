@@ -701,12 +701,15 @@ def prepare_template(
     label: bool = True,
     dpi: Optional[int] = None,
     progress=None,
+    vl_session=None,
 ):
     """Learn the questionnaire from a batch: blank, controls, structure, names.
 
     Shared by the CLI and the TextLab batch page so the two cannot drift.
     *label* runs PaddleOCR-VL over the synthesized blanks to recover question
     grouping and option text; everything else needs only OpenCV and Tesseract.
+    *vl_session* is a resident worker to run that on, so the batch loads the
+    recognition weights once rather than once here and once per file.
     """
     from core import survey_label
 
@@ -722,7 +725,7 @@ def prepare_template(
     if label:
         _say(0.65, "Reading the questionnaire's own wording...")
         try:
-            template_page_jsons = _blank_layout(template, blanks)
+            template_page_jsons = _blank_layout(template, blanks, vl_session)
             survey_label.label_template(template, template_page_jsons)
         except Exception as exc:  # layout is an enrichment, not a prerequisite
             template.provenance["labelling_error"] = str(exc)
@@ -751,7 +754,7 @@ def prepare_template(
     return template, blanks
 
 
-def _blank_layout(template, blanks):
+def _blank_layout(template, blanks, vl_session=None):
     """Run the layout/OCR worker over the synthesized blanks."""
     import tempfile
 
@@ -765,7 +768,7 @@ def _blank_layout(template, blanks):
             path = pathlib.Path(tmp) / f"blank_page{page.page_index + 1}.png"
             cv2.imwrite(str(path), blank.image)
             images.append(path)
-        return auto_ocr.run_vl_worker(images)
+        return auto_ocr.run_vl_worker(images, session=vl_session)
 
 
 def template_overlays(

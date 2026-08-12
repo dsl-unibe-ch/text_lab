@@ -260,6 +260,10 @@ def run_auto_batch(
         if extract_survey and same_template
         else None
     )
+    # One recognition worker for the whole batch: the weights cost ~17 s to
+    # load and another ~7 s to warm up, which a worker per file pays again for
+    # every file.
+    vl_session = auto_ocr.VLWorkerSession()
 
     try:
         INPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -296,7 +300,8 @@ def run_auto_batch(
 
             _template_progress(0.0, f"reading {len(valid_files)} file(s)...")
             template, blanks = survey_batch.prepare_template(
-                valid_files, label=True, progress=_template_progress
+                valid_files, label=True, progress=_template_progress,
+                vl_session=vl_session,
             )
             status_text.markdown(
                 f"**Questionnaire layout** — {template.control_count} response "
@@ -340,6 +345,7 @@ def run_auto_batch(
                 ocr_lang=ocr_lang,
                 vision_client=shared_vision_client,
                 same_layout_template=same_layout_template,
+                vl_session=vl_session,
             )
 
             # Same writer as the single-document downloads; the provenance
@@ -417,6 +423,7 @@ def run_auto_batch(
         st.session_state.auto_error = f"Batch automatic OCR failed: {e}"
         st.exception(e)
     finally:
+        vl_session.close()
         if shared_vision_client is not None:
             # Not evicted: it expires after keep_alive, and the next OCR worker
             # frees the card itself. See vision_enrich.free_gpu.
