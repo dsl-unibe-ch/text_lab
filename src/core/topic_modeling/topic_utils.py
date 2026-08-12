@@ -12,6 +12,7 @@ import pandas as pd
 import spacy
 from nltk.corpus import stopwords
 
+from core import upload_safety
 from .topic_config import TopicModelingConfig
 
 if "NLTK_DATA" in os.environ:
@@ -122,12 +123,13 @@ def load_zip_texts(zip_bytes: bytes) -> pd.DataFrame:
     """
     data = []
     with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as z:
-        for filename in z.namelist():
+        for info in upload_safety.safe_zip_members(z, allowed_extensions={".txt"}):
+            filename = info.filename
             lower_name = filename.lower()
             if lower_name.endswith(".txt") and not os.path.basename(
                 filename
             ).startswith("._"):
-                content = z.read(filename).decode("utf-8", errors="ignore")
+                content = z.read(info).decode("utf-8", errors="ignore")
                 if content.strip():
                     data.append({"Filename": filename, "Text": content})
     return pd.DataFrame(data, columns=["Filename", "Text"])

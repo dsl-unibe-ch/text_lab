@@ -184,16 +184,26 @@ class VLWorkerSession:
     def close(self):
         if self._proc is None:
             return
+        proc = self._proc
+        self._proc = None
         try:
-            if self._proc.poll() is None:
-                self._proc.stdin.close()
-                self._proc.wait(timeout=10)
+            if proc.poll() is None:
+                proc.stdin.close()
+                proc.wait(timeout=10)
         except Exception:
             pass
         finally:
-            if self._proc.poll() is None:
-                self._proc.kill()
-            self._proc = None
+            if proc.poll() is None:
+                proc.kill()
+                try:
+                    proc.wait(timeout=10)
+                except Exception:
+                    pass
+            for stream in (proc.stdin, proc.stdout, proc.stderr):
+                try:
+                    stream.close()
+                except Exception:
+                    pass
 
     def __enter__(self):
         return self
@@ -286,10 +296,8 @@ def run_vl_worker(
 ) -> List[dict]:
     """Invoke the PaddleOCR-VL worker on *image_paths*; return per-page dicts.
 
-    ``on_page(done, total)`` fires as each page is recognised. With *session*
-    the work goes to a worker that is already holding the weights; a session
-    that has died falls back to a one-shot worker, so a batch degrades to the
-    old speed rather than to an error.
+    ``on_page(done, total)`` fires as each page is recognised. A failed
+    resident session falls back to a one-shot worker.
     """
     if not image_paths:
         return []
@@ -420,21 +428,10 @@ def _downscale_png_b64(
 
 
 def _apply_markup(page: "doc_ir.Page", page_bgr=None, debug_collect=None):
-    """Detect and classify survey marks on *page*.
+    """Classify checkbox regions and verify mark glyphs against page ink.
 
-    Two paths:
-
-    * ``checkbox``-typed regions: classified directly from their crop (as
-      before, now with the stroke-aware geometric rule).
-    * any other region whose *content* carries mark glyphs (``○``/``☐``/``☒``
-      ... — the VL model usually folds survey rows into tables or text): the
-      glyph states are compared with the actual ink in the region crop. A
-      disagreement is retained as review evidence; OCR content is immutable.
-
-    ``page_bgr`` must be in the same coordinate space as the region bboxes
-    (i.e. the full-resolution raster, before the preview downscale). When
-    *debug_collect* is a list, every located mark's absolute bbox/state is
-    appended to it so a page overlay can be rendered for auditing.
+    ``page_bgr`` and region boxes must use full-resolution coordinates.
+    Located marks are appended to *debug_collect* when supplied.
     """
     for region in page.regions:
         if region.type == doc_ir.CHECKBOX:
@@ -755,8 +752,7 @@ def _finalize_vl_page(
         raster_bytes = Path(raster_path).read_bytes()
         page_bgr = _decode_bgr(raster_bytes)
 
-    # Markup/form analysis needs full-resolution crops, so it runs BEFORE the
-    # preview downscale rescales the region bboxes. Geometry is evidence only.
+    # Geometry analysis uses full-resolution crops and boxes.
     debug_collect = [] if debug_dir is not None else None
     if extract_survey or debug_dir is not None:
         _apply_markup(page, page_bgr, debug_collect=debug_collect)
@@ -770,8 +766,6 @@ def _finalize_vl_page(
             same_layout_template=same_layout_template,
             contract=survey_contract,
         )
-    # Before the preview downscale rewrites Region.bbox: the geometry pass needs
-    # full-resolution boxes.
     if searchable_pdf and page_bgr is not None:
         from core import searchable_pdf as _searchable_pdf
 
@@ -889,8 +883,6 @@ def process_document(
         _emit(progress, 0.1, "Analysing image...")
 
         def _image_stage(done: int, total: int):
-            # The worker reports in before loading its weights, which is the
-            # bulk of the wait on a single image (~30-45 s).
             _emit(
                 progress,
                 0.15 if done == 0 else 0.7,
@@ -927,8 +919,7 @@ def process_document(
             _emit(progress, 1.0, "Done")
             return document
         finally:
-            # Left loaded: it expires after keep_alive, and the next stage that
-            # needs the card frees it. Evicting costs a ~60 s reload for nothing.
+            # Keep the model warm until its configured expiry.
             if owned_client and vision_client is not None:
                 vision_client.close()
 

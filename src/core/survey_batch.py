@@ -16,6 +16,7 @@ from core import markup_detect, survey_template
 
 UNCERTAIN = "uncertain"
 REGISTRATION_FAILED = "registration_failed"
+CSV_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
 
 
 @dataclass
@@ -41,6 +42,7 @@ class ControlReading:
 @dataclass
 class DocumentReading:
     document: str
+    export_directory: Optional[str] = None
     readings: List[ControlReading] = field(default_factory=list)
     registration: Dict[int, float] = field(default_factory=dict)
     warnings: List[str] = field(default_factory=list)
@@ -237,17 +239,26 @@ def _column_names(template: Optional[survey_template.SurveyTemplate]) -> Dict[st
 
 def readings_in(result: DocumentReading,
                 template: Optional[survey_template.SurveyTemplate]):
-    """A document's readings for the controls the template still has.
-
-    The readings are taken once, against the template as it was learned. When a
-    control is dropped afterwards -- printed text that fooled the detector --
-    its reading is still in hand and must not reach an export: the template is
-    what says which controls exist.
-    """
+    """Return readings for controls still present in the template."""
     if template is None:
         return result.readings
     known = {control.id for page in template.pages for control in page.controls}
     return [reading for reading in result.readings if reading.control_id in known]
+
+
+def _spreadsheet_safe(value):
+    if isinstance(value, str) and value.startswith(CSV_FORMULA_PREFIXES):
+        return "'" + value
+    return value
+
+
+def safe_csv(frame, path_or_buf=None):
+    """Serialize a dataframe without creating active spreadsheet formulas."""
+    safe = frame.copy()
+    safe.columns = [_spreadsheet_safe(str(column)) for column in safe.columns]
+    for column in safe.select_dtypes(include=["object", "string"]).columns:
+        safe[column] = safe[column].map(_spreadsheet_safe)
+    return safe.to_csv(path_or_buf, index=False)
 
 
 def to_wide(results: Sequence[DocumentReading],
@@ -996,13 +1007,7 @@ guarantee for a different form.
 
 
 def slim_document(document):
-    """Strip a parsed document down to what re-exporting it needs.
-
-    The preview raster and the searchable PDF are the bulk of a parsed page and
-    both are already written out; keeping a whole batch of them in memory so a
-    template can be refined afterwards would not fit. The preview's pixel size
-    is kept, because the region boxes were scaled to it.
-    """
+    """Drop heavy assets while preserving geometry needed for re-export."""
     for page in document.pages:
         if page.image_b64 and not page.preview_size:
             page.preview_size = preview_size(page)
@@ -1012,23 +1017,27 @@ def slim_document(document):
 
 
 def _document_exports(template, readings, documents) -> Dict[str, bytes]:
-    """Fresh per-file exports for a refined template: ``{zip path: bytes}``.
-
-    The answers live inside ``document.md`` as well as in the tables, so a
-    dropped control has to be taken out of both. Nothing is parsed again: the
-    documents already in hand are re-rendered against the pruned template.
-    """
+    """Render per-file exports for the current template as ``{path: bytes}``."""
     import tempfile
 
     from core import doc_ir
 
+    by_directory = {
+        reading.export_directory: reading
+        for reading in readings
+        if reading.export_directory
+    }
     by_stem = {
-        pathlib.PurePosixPath(reading.document).stem: reading for reading in readings
+        pathlib.PurePosixPath(reading.document).stem: reading
+        for reading in readings
+        if not reading.export_directory
     }
     out: Dict[str, bytes] = {}
     with tempfile.TemporaryDirectory() as tmp:
         for rel_dir, document in documents.items():
-            reading = by_stem.get(pathlib.PurePosixPath(rel_dir).name)
+            reading = by_directory.get(rel_dir)
+            if reading is None:
+                reading = by_stem.get(pathlib.PurePosixPath(rel_dir).name)
             if reading is None:
                 continue
             to_form_groups(reading, template, document)
@@ -1046,14 +1055,7 @@ def _document_exports(template, readings, documents) -> Dict[str, bytes]:
 
 
 def rebuild_exports(zip_bytes, template, readings, documents=None):
-    """Rewrite every answer-carrying file in a finished result ZIP.
-
-    Dropping a control changes only how answers are grouped and exported, not
-    what was read off the page, so the questionnaires are not parsed again: the
-    batch tables, each file's own answers and each file's document exports are
-    re-rendered from the readings already in hand. Returns the new ZIP and the
-    batch summary.
-    """
+    """Rebuild answer exports from stored readings and return ZIP bytes plus summary."""
     import io
     import tempfile
     import zipfile
@@ -1068,24 +1070,27 @@ def rebuild_exports(zip_bytes, template, readings, documents=None):
 
     buffer = io.BytesIO()
     with zipfile.ZipFile(io.BytesIO(zip_bytes)) as source:
-        # Same writer as the first pass, so a rebuild cannot quietly change a
-        # file's own answers back to the wide batch shape.
         per_file = {
+            reading.export_directory: reading
+            for reading in readings
+            if reading.export_directory
+        }
+        stem_readings = {
             pathlib.PurePosixPath(reading.document).stem: reading
             for reading in readings
+            if not reading.export_directory
         }
         for item in source.namelist():
             if item.endswith("/survey_answers.csv"):
-                # Folder names are the file stems, so match on the stem:
-                # "split_1_2" must not claim "split_1_20".
-                reading = per_file.get(pathlib.PurePosixPath(item).parent.name)
+                parent = pathlib.PurePosixPath(item).parent.as_posix()
+                reading = per_file.get(parent)
+                if reading is None:
+                    reading = stem_readings.get(pathlib.PurePosixPath(item).parent.name)
                 if reading is not None:
-                    replacements[item] = answers_for_document(
-                        reading, template
-                    ).to_csv(index=False).encode("utf-8")
+                    replacements[item] = safe_csv(
+                        answers_for_document(reading, template)
+                    ).encode("utf-8")
         replacements.update(_document_exports(template, readings, documents))
-        # Which tables count as questionnaire grids moves with the template, so
-        # a re-exported file's table CSVs replace the old set rather than join it.
         stale = tuple(f"{rel_dir}/tables/" for rel_dir in documents)
 
         with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as target:
@@ -1109,15 +1114,13 @@ def write_batch_outputs(
     out = pathlib.Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
 
-    to_checkbox_table(results, template).to_csv(
-        out / "responses_checkboxes.csv", index=False
-    )
-    to_wide(results, template).to_csv(out / "responses_matrix.csv", index=False)
-    to_long(results, template).to_csv(out / "responses_long.csv", index=False)
-    review_queue(results, template).to_csv(out / "review_queue.csv", index=False)
+    safe_csv(to_checkbox_table(results, template), out / "responses_checkboxes.csv")
+    safe_csv(to_wide(results, template), out / "responses_matrix.csv")
+    safe_csv(to_long(results, template), out / "responses_long.csv")
+    safe_csv(review_queue(results, template), out / "review_queue.csv")
     unused = unused_controls(results, template)
-    unused.to_csv(out / "unused_controls.csv", index=False)
-    answer_overview(results, template).to_csv(out / "answers_overview.csv", index=False)
+    safe_csv(unused, out / "unused_controls.csv")
+    safe_csv(answer_overview(results, template), out / "answers_overview.csv")
     (out / "README.md").write_text(SURVEY_README, encoding="utf-8")
     template.save(out / "survey_template.json")
 
@@ -1192,9 +1195,7 @@ def answers_for_document(
 def preview_size(page) -> Optional[Tuple[int, int]]:
     """Pixel size of the raster a parsed page's region boxes are measured in.
 
-    The preview raster, when the page carries one: region boxes were scaled to
-    it. Falls back to the size a caller recorded before dropping that raster,
-    then to the page's own pixel size.
+    Uses the preview raster, its cached size, or the page dimensions.
     """
     import base64
     import io as _io
@@ -1261,14 +1262,7 @@ def to_form_groups(
     template: survey_template.SurveyTemplate,
     document,
 ) -> int:
-    """Attach one respondent's answers to their parsed document.
-
-    The batch tables answer "what did everyone say"; ``document.md`` has to
-    answer "what does this sheet say", and until now it could not -- the marks
-    are ink the layout model reads as an empty grid. The readings are hung on
-    the page they came from as :class:`doc_ir.FormGroup`, which every export
-    renders in place. Returns the number of groups attached.
-    """
+    """Attach one respondent's answers as page-positioned form groups."""
     from core import doc_ir
 
     readings = {r.control_id: r for r in result.readings}

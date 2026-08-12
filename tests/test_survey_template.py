@@ -746,7 +746,7 @@ def test_a_small_batch_says_the_blank_may_be_unreliable():
 
 
 def test_dropping_a_control_regroups_without_rereading():
-    """The batch page's refine step: fix the form, keep the readings."""
+    """Template refinement reuses the existing readings."""
     with tempfile.TemporaryDirectory() as tmp:
         folder = pathlib.Path(tmp)
         paths = _write_batch(folder, count=6)
@@ -766,7 +766,6 @@ def test_dropping_a_control_regroups_without_rereading():
         assert template.control_count == before - 1
         assert victim not in {c.id for p in template.pages for c in p.controls}
 
-        # the export rebuilds from the readings already taken
         table = sb.to_checkbox_table(results, template)
         assert len(table) == len(paths)
         assert all(victim not in str(c) for c in table.columns)
@@ -843,12 +842,7 @@ def test_template_overlay_boxes_and_names_each_question():
 
 
 def test_rebuilding_keeps_a_file_s_own_answers_one_row_per_question():
-    """The refine step must not quietly restore the wide batch shape.
-
-    The batch page wrote each file's answers long, then rebuilding after a
-    control was removed re-wrote them from the wide table -- 468 columns on one
-    line again.
-    """
+    """Rebuilt per-file answers retain one row per question."""
     import zipfile
 
     import pandas as pd
@@ -865,7 +859,7 @@ def test_rebuilding_keeps_a_file_s_own_answers_one_row_per_question():
                 stem = pathlib.Path(result.document).stem
                 archive.writestr(
                     f"{stem}/survey_answers.csv",
-                    sb.answers_for_document(result, template).to_csv(index=False),
+                    sb.safe_csv(sb.answers_for_document(result, template)),
                 )
         original = buffer.getvalue()
 
@@ -885,8 +879,6 @@ def test_rebuilding_keeps_a_file_s_own_answers_one_row_per_question():
         assert len(frame) == len(template.rules), "one line per answer, not one wide row"
         assert len(frame) == before - 1, "the removed answer is still there"
         assert "answer" in frame.columns and "certainty" in frame.columns
-        # ids are positional and get recycled after a drop, so the controls are
-        # what must be gone, not the id
         remaining = {c.id for page in template.pages for c in page.controls}
         assert not (set(dropped) & remaining)
 
@@ -913,6 +905,21 @@ def test_the_survey_folder_explains_itself():
         # and the values a reader will hit
         for token in ("MULTIPLE", "UNCERTAIN", "registration", "[certainty]"):
             assert token in readme, f"README does not explain {token}"
+
+
+def test_survey_csv_neutralizes_spreadsheet_formulas():
+    import pandas as pd
+
+    frame = pd.DataFrame({
+        "=heading": ["+value", "ordinary"],
+        "safe": ["@name", "-2+3"],
+    })
+    csv_text = sb.safe_csv(frame)
+
+    assert "'=heading" in csv_text
+    assert "'+value" in csv_text
+    assert "'@name" in csv_text
+    assert "'-2+3" in csv_text
 
 
 # ==========================================
@@ -1072,3 +1079,34 @@ def test_a_rebuild_rewrites_every_file_that_carries_an_answer():
                           ("responses_matrix.csv", matrix)):
         assert dropped not in content, f"{name} still names the dropped control"
     assert "no answer" in markdown, "document.md kept the answer of a dropped control"
+
+
+def test_a_rebuild_keeps_duplicate_basenames_attached_to_the_right_document():
+    import zipfile
+
+    template, _ = _row_template()
+    first = _reading("report.pdf", ["checked", "unchecked", "unchecked", "unchecked"], template)
+    second = _reading("report.pdf", ["unchecked", "checked", "unchecked", "unchecked"], template)
+    first.export_directory = "a/report"
+    second.export_directory = "b/report"
+    first_document = _parsed_document()
+    second_document = _parsed_document()
+    documents = {"a/report": first_document, "b/report": second_document}
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        for reading in (first, second):
+            archive.writestr(
+                f"{reading.export_directory}/survey_answers.csv",
+                sb.safe_csv(sb.answers_for_document(reading, template)),
+            )
+
+    rebuilt, _ = sb.rebuild_exports(
+        buffer.getvalue(), template, [first, second], documents
+    )
+
+    with zipfile.ZipFile(io.BytesIO(rebuilt)) as archive:
+        first_markdown = archive.read("a/report/document.md").decode("utf-8")
+        second_markdown = archive.read("b/report/document.md").decode("utf-8")
+    assert "Frage A: **0**" in first_markdown
+    assert "Frage A: **1**" in second_markdown

@@ -44,7 +44,16 @@ from core.ocr_engine import (
     render_layout_preview,
     LAYOUT_TYPE_COLORS,
 )
-from core import auto_ocr, doc_ir, form_extract, searchable_pdf, survey_batch, vision_enrich
+from core import (
+    auto_ocr,
+    doc_ir,
+    form_extract,
+    html_safety,
+    searchable_pdf,
+    survey_batch,
+    upload_safety,
+    vision_enrich,
+)
 
 try:
     from language_mappings import EASYOCR_LANGUAGE_MAPPING, PADDLEOCR_LANGUAGE_MAPPING
@@ -186,7 +195,8 @@ def run_auto_single(
         INPUT_DIR.mkdir(parents=True, exist_ok=True)
         WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
 
-        input_file_path = INPUT_DIR / uploaded_file.name
+        upload_name = upload_safety.safe_upload_name(uploaded_file.name)
+        input_file_path = INPUT_DIR / upload_name
         with open(input_file_path, "wb") as f:
             f.write(uploaded_file.getbuffer())
 
@@ -198,14 +208,14 @@ def run_auto_single(
             WORKSPACE_DIR,
             native_fast_lane=native_fast_lane,
             progress=_progress,
-            source_name=uploaded_file.name,
+            source_name=upload_name,
             describe_images=describe_images,
             extract_survey=extract_survey,
             searchable_pdf=searchable_pdf,
             ocr_lang=ocr_lang,
         )
 
-        stem = pathlib.Path(uploaded_file.name).stem or "document"
+        stem = pathlib.Path(upload_name).stem or "document"
         st.session_state.auto_document = document
         st.session_state.auto_summary = auto_ocr.document_summary(document)
         st.session_state.auto_downloads = {
@@ -262,27 +272,19 @@ def run_auto_batch(
         if extract_survey and same_template
         else None
     )
-    # One recognition worker for the whole batch: the weights cost ~17 s to
-    # load and another ~7 s to warm up, which a worker per file pays again for
-    # every file.
+    # Keep recognition weights resident for the batch.
     vl_session = auto_ocr.VLWorkerSession()
 
     try:
         INPUT_DIR.mkdir(parents=True, exist_ok=True)
         RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
-        with zipfile.ZipFile(batch_zip, "r") as z:
-            z.extractall(INPUT_DIR)
-
         valid_exts = {"." + e for e in AUTO_INPUT_TYPES}
-        valid_files = []
-        for root, dirs, files in os.walk(INPUT_DIR):
-            for file in files:
-                if file.startswith("._"):
-                    continue
-                file_path = pathlib.Path(root) / file
-                if file_path.suffix.lower() in valid_exts:
-                    valid_files.append(file_path)
+        with zipfile.ZipFile(batch_zip, "r") as z:
+            valid_files = upload_safety.extract_zip_safely(
+                z, INPUT_DIR, allowed_extensions=valid_exts
+            )
+        valid_files = [path for path in valid_files if not path.name.startswith("._")]
         valid_files.sort(key=lambda path: str(path.relative_to(INPUT_DIR)).casefold())
 
         if not valid_files:
@@ -291,9 +293,7 @@ def run_auto_batch(
         progress_bar = st.progress(0.0)
         status_text = st.empty()
 
-        # One questionnaire template for the whole batch, learned before any
-        # file is parsed: the blank is the median of the copies, so it needs
-        # them all up front.
+        # The consensus template needs all questionnaires up front.
         template, blanks, readings = None, None, []
         if survey_batch_mode:
             def _template_progress(fraction, text):
@@ -315,18 +315,14 @@ def run_auto_batch(
 
         n_files = len(valid_files)
         batch_provenance = []
-        # Logged per file: "no faster" is otherwise impossible to tell from
-        # "faster after the first", which is what loading the model once buys.
         batch_started = time.monotonic()
         file_times = []
-        # Output folder -> parsed document, for rebuilding the exports after a
-        # control is dropped. Only filled in questionnaire mode.
         document_index = {}
+        used_output_dirs = set()
         for idx, file_path in enumerate(valid_files):
             rel_path = file_path.relative_to(INPUT_DIR)
 
             def _file_progress(frac, text, _idx=idx, _rel=rel_path):
-                # Each file's own page progress, folded into the batch bar.
                 progress_bar.progress(
                     min(1.0, (_idx + max(0.0, min(1.0, frac))) / n_files)
                 )
@@ -337,7 +333,10 @@ def run_auto_batch(
             _file_progress(0.0, "starting...")
             file_started = time.monotonic()
 
-            file_output_dir = RESULTS_DIR / rel_path.parent / file_path.stem
+            output_rel_dir = upload_safety.unique_output_directory(
+                rel_path, used_output_dirs
+            )
+            file_output_dir = RESULTS_DIR / output_rel_dir
             file_output_dir.mkdir(parents=True, exist_ok=True)
             per_file_ws = WORKSPACE_DIR / "tmp" / f"job_{idx}"
 
@@ -355,39 +354,25 @@ def run_auto_batch(
                 vl_session=vl_session,
             )
 
-            # Same writer as the single-document downloads; the provenance
-            # summary is collected instead, and written once at the root.
             skip_tables = None
             if template is not None:
-                # Same file, second pass: the text extraction above is
-                # unchanged, this adds the questionnaire answers.
                 reading = survey_batch.read_document(file_path, template)
+                reading.export_directory = output_rel_dir.as_posix()
                 readings.append(reading)
-                survey_batch.answers_for_document(reading, template).to_csv(
-                    file_output_dir / "survey_answers.csv", index=False
+                survey_batch.safe_csv(
+                    survey_batch.answers_for_document(reading, template),
+                    file_output_dir / "survey_answers.csv",
                 )
-                # The marks are ink no text extractor reads, so the answers are
-                # attached to the document itself: document.md and every other
-                # export then carry them in place, not just the batch tables.
                 survey_batch.to_form_groups(reading, template, document)
-                # A rating scale reads as a table to the layout model. Once the
-                # responses are extracted properly, exporting the grid again as
-                # a CSV of empty cells is only noise.
                 skip_tables = survey_batch.survey_table_regions(document, template)
 
             doc_ir.write_document_outputs(
                 document, file_output_dir, "document", provenance=False,
                 skip_tables=skip_tables,
-                # survey_answers.csv is the same answers in the shape the
-                # README documents; two CSVs of them would only raise the
-                # question of which one to trust.
                 form_responses=template is None,
             )
             batch_provenance.append(doc_ir.model_provenance(document))
             if template is not None:
-                # Kept so that dropping a control rewrites these same exports
-                # without parsing anything again -- once they are on disk, so
-                # the heavy parts can be stripped before the document is stored.
                 document_index[file_output_dir.relative_to(RESULTS_DIR).as_posix()] = (
                     survey_batch.slim_document(document)
                 )
@@ -539,7 +524,9 @@ def render_document_tab(document):
                 if text:
                     st.markdown(f"### {text}")
             elif rtype == doc_ir.TABLE:
-                html = region.content.get("html", "").strip()
+                html = html_safety.sanitize_table_html(
+                    region.content.get("html", "").strip()
+                )
                 if html:
                     st.markdown(html, unsafe_allow_html=True)
             elif rtype == doc_ir.FORMULA:
@@ -1421,7 +1408,7 @@ def auto_batch_ui():
 
 
 # ==========================================
-#      LEGACY ENGINES (unchanged behavior)
+#      ADDITIONAL OCR ENGINES
 # ==========================================
 
 def legacy_single_flow(ocr_engine, ocr_language, glm_mode):
@@ -1484,7 +1471,8 @@ def legacy_single_flow(ocr_engine, ocr_language, glm_mode):
                 preview_images = []
 
                 # Save uploaded file
-                input_file_path = INPUT_DIR / uploaded_file.name
+                upload_name = upload_safety.safe_upload_name(uploaded_file.name)
+                input_file_path = INPUT_DIR / upload_name
                 with open(input_file_path, "wb") as f:
                     f.write(uploaded_file.getbuffer())
 
@@ -1697,7 +1685,10 @@ def legacy_single_flow(ocr_engine, ocr_language, glm_mode):
         elif "<table>" in st.session_state.extracted_text or '<table class="' in st.session_state.extracted_text:
             # Fallback if pandas parsing failed but HTML table exists
             st.markdown("### 📊 Detected Table")
-            st.markdown(st.session_state.extracted_text, unsafe_allow_html=True)
+            st.markdown(
+                html_safety.sanitize_table_html(st.session_state.extracted_text),
+                unsafe_allow_html=True,
+            )
 
         # 2. Raw Text Output
         st.markdown("### Extracted Text / Code")
@@ -1807,23 +1798,18 @@ def legacy_batch_flow(ocr_engine, ocr_language, glm_mode):
                 INPUT_DIR.mkdir(parents=True, exist_ok=True)
                 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
-                # Extract the uploaded ZIP securely
-                with zipfile.ZipFile(batch_zip, "r") as z:
-                    z.extractall(INPUT_DIR)
-
                 valid_exts = {".pdf", ".png", ".jpg", ".jpeg", ".bmp", ".tiff"}
-                valid_files = []
-                for root, dirs, files in os.walk(INPUT_DIR):
-                    for file in files:
-                        if file.startswith("._"): continue # Skip macOS metadata files
-                        file_path = pathlib.Path(root) / file
-                        if file_path.suffix.lower() in valid_exts:
-                            valid_files.append(file_path)
+                with zipfile.ZipFile(batch_zip, "r") as z:
+                    valid_files = upload_safety.extract_zip_safely(
+                        z, INPUT_DIR, allowed_extensions=valid_exts
+                    )
+                valid_files = [
+                    path for path in valid_files if not path.name.startswith("._")
+                ]
 
                 if not valid_files:
                     raise RuntimeError("No valid documents or images found in the ZIP.")
 
-                # Pre-load Models for Image Engines (Saves massive time)
                 reader = None
                 if ocr_engine == "EasyOCR":
                     reader = get_easyocr_reader(ocr_language)
@@ -1831,14 +1817,16 @@ def legacy_batch_flow(ocr_engine, ocr_language, glm_mode):
                 progress_bar = st.progress(0.0)
                 status_text = st.empty()
 
-                # Processing Loop
+                used_output_dirs = set()
                 for idx, file_path in enumerate(valid_files):
-                    base_name = file_path.stem
                     rel_path = file_path.relative_to(INPUT_DIR)
                     status_text.text(f"Processing ({idx+1}/{len(valid_files)}): {rel_path}")
 
-                    # Create dedicated output folder replicating zip structure
-                    file_output_dir = RESULTS_DIR / rel_path.parent / base_name
+                    output_rel_dir = upload_safety.unique_output_directory(
+                        rel_path, used_output_dirs
+                    )
+                    base_name = output_rel_dir.name
+                    file_output_dir = RESULTS_DIR / output_rel_dir
                     file_output_dir.mkdir(parents=True, exist_ok=True)
 
                     is_pdf = file_path.suffix.lower() == ".pdf"

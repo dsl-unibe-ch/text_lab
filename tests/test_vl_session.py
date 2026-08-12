@@ -38,7 +38,6 @@ def load():
 def answer(images, serving):
     for index, image in enumerate(images, start=1):
         print(f"{PROGRESS}{index}/{len(images)}", flush=True)
-    # only the resident worker dies, so a test can watch the fallback succeed
     if serving and os.environ.get("STUB_DIE_ON") in set(images):
         sys.exit(9)
     if os.environ.get("STUB_ERROR_ON") in set(images):
@@ -80,7 +79,7 @@ def _loads(counter) -> int:
 
 
 def test_a_batch_loads_the_weights_once(stub):
-    """The whole point: file two must not pay for the model again."""
+    """One resident worker serves every document in the batch."""
     worker, counter = stub
     with auto_ocr.VLWorkerSession(
         backend_python=sys.executable, worker_path=worker
@@ -165,3 +164,42 @@ def test_no_images_never_starts_a_worker(stub):
     worker, counter = stub
     assert auto_ocr.run_vl_worker([], backend_python=sys.executable, worker_path=worker) == []
     assert _loads(counter) == 0
+
+
+def test_close_reaps_a_worker_after_forced_termination():
+    class Stream:
+        def close(self):
+            pass
+
+    class Process:
+        def __init__(self):
+            self.stdin = Stream()
+            self.stdout = Stream()
+            self.stderr = Stream()
+            self.wait_calls = 0
+            self.killed = False
+            self.reaped = False
+
+        def poll(self):
+            return 0 if self.reaped else None
+
+        def wait(self, timeout):
+            self.wait_calls += 1
+            if not self.killed:
+                raise TimeoutError("worker did not stop")
+            self.reaped = True
+            return 0
+
+        def kill(self):
+            self.killed = True
+
+    process = Process()
+    session = auto_ocr.VLWorkerSession()
+    session._proc = process
+
+    session.close()
+
+    assert process.killed
+    assert process.reaped
+    assert process.wait_calls == 2
+    assert session._proc is None

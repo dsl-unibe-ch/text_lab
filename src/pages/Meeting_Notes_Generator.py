@@ -53,6 +53,7 @@ from core.chat_engine import (
     unload_all_models,
 )
 from core.model_config import get_available_models, is_high_memory_gpu
+from core.upload_safety import safe_upload_name
 from core.summarize_engine import (
     SUMMARY_MODES,
     apply_speaker_labels,
@@ -414,6 +415,7 @@ def _run_transcription(
         align_language = "de"
 
     tmp_dir = tempfile.mkdtemp(prefix="tl_transcribe_")
+    audio_name = safe_upload_name(audio_name, fallback="audio")
     audio_path = os.path.join(tmp_dir, audio_name)
     config_path = os.path.join(tmp_dir, "config.json")
     output_path = os.path.join(tmp_dir, "output.json")
