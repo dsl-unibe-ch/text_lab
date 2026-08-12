@@ -56,13 +56,19 @@ from core.translation import (
     FORMALITY_CHOICES,
     TRANSLATION_BACKENDS,
     backend_load_signature,
+    detect_gpu_profile,
     detect_language,
+    detect_pdf_is_scanned,
     make_translate_fn,
+    ocr_with_translation_allowed,
+    pack_markdown_bundle,
+    pdf_needs_ocr,
     preload_backend,
     shielded_translate,
     translate_docx,
     translate_markdown,
     translate_pdf,
+    translate_pdf_to_markdown,
     translate_pptx,
     translate_xlsx,
 )
@@ -308,8 +314,20 @@ def _mime_for(name: str) -> str:
     return "text/plain"
 
 
-def _translate_one(name: str, data: bytes, tfn, progress_stage_cb, tgt_code_):
-    """Dispatch by extension; return ``(translated_bytes, output_name)``."""
+def _translate_one(
+    name: str,
+    data: bytes,
+    tfn,
+    progress_stage_cb,
+    tgt_code_,
+) -> list[tuple[str, bytes]]:
+    """Dispatch by extension; return a list of ``(output_name, bytes)``.
+
+    PDFs always yield Markdown. Native (text-layer) PDFs additionally
+    yield the reconstructed PDF via the redact-and-insert pipeline;
+    scanned PDFs skip that step because there is no text layer to
+    redact.
+    """
     base, ext = os.path.splitext(name)
     ext_lower = ext.lower()
     stem = os.path.basename(base)
@@ -322,15 +340,75 @@ def _translate_one(name: str, data: bytes, tfn, progress_stage_cb, tgt_code_):
             text, tfn, progress_cb=progress_stage_cb, glossary=glossary,
         )
         progress_stage_cb(1, 1, "reconstructing markdown")
-        return result.encode("utf-8"), f"{out_stem}.md"
+        return [(f"{out_stem}.md", result.encode("utf-8"))]
 
     if ext_lower == ".pdf":
-        progress_stage_cb(0, 1, "parsing pdf")
-        result = translate_pdf(
-            data, tfn, progress_cb=progress_stage_cb, glossary=glossary,
-        )
-        progress_stage_cb(1, 1, "reconstructing pdf")
-        return result, f"{out_stem}.pdf"
+        outputs: list[tuple[str, bytes]] = []
+        ocr_ok = ocr_with_translation_allowed()
+
+        try:
+            is_scan = detect_pdf_is_scanned(data)
+        except Exception:
+            is_scan = False
+
+        # Does the Markdown route actually need OCR? Pure text PDFs (text
+        # layer, no equations) never invoke the VL worker; only scanned pages
+        # or pages with math do.
+        try:
+            needs_ocr = pdf_needs_ocr(data)
+        except Exception:
+            needs_ocr = is_scan
+
+        # Fully-scanned PDF: nothing to translate without OCR, and OCR can't
+        # share VRAM with the translation model on a 24 GB card. Refuse.
+        if is_scan and not ocr_ok:
+            prof = detect_gpu_profile()
+            raise RuntimeError(
+                f"This looks like a scanned PDF, which needs the OCR model. "
+                f"On this GPU ({prof.name}, {prof.vram_mb // 1000} GB) the OCR "
+                f"and translation models don't fit together. Relaunch Text Lab "
+                f"on an A100, H100, or H200 to translate scanned PDFs."
+            )
+
+        # Produce the Markdown deliverable whenever it's safe: either OCR may
+        # co-exist with translation (high-memory GPU), or this PDF needs no
+        # OCR at all (pure text, no math). A native-but-math PDF on a 24 GB
+        # card gets the reconstructed .pdf only.
+        #
+        # IMPORTANT: run this BEFORE the native ``translate_pdf`` step. The
+        # OCR pipeline frees any resident translation model from the GPU and
+        # runs the PaddleOCR-VL worker on a clean card, then reloads the
+        # translation model for the Markdown translation. Doing the native
+        # PDF step first would load a (possibly 3B) translation model that
+        # would then contend with the OCR worker for VRAM and stall it until
+        # the 900s watchdog fires.
+        if ocr_ok or not needs_ocr:
+            progress_stage_cb(0, 1, "OCR: preparing" if is_scan else "extracting markdown")
+            md_text, assets = translate_pdf_to_markdown(
+                data,
+                tfn,
+                progress_cb=progress_stage_cb,
+                glossary=glossary,
+                pdf_type="force_ocr" if is_scan else "auto",
+                source_name=os.path.basename(name),
+            )
+            md_bytes, md_name = pack_markdown_bundle(md_text, assets, stem=out_stem)
+            outputs.append((md_name, md_bytes))
+            progress_stage_cb(1, 1, "reconstructing markdown")
+
+        # Native (text-layer) PDFs also get the reconstructed .pdf via the
+        # redact-and-insert pipeline. This reuses the translation model that
+        # the Markdown step already loaded (or loads it now if the Markdown
+        # route was skipped). No OCR worker is involved here.
+        if not is_scan:
+            progress_stage_cb(0, 1, "parsing pdf")
+            pdf_result = translate_pdf(
+                data, tfn, progress_cb=progress_stage_cb, glossary=glossary,
+            )
+            progress_stage_cb(1, 1, "reconstructing pdf")
+            outputs.append((f"{out_stem}.pdf", pdf_result))
+
+        return outputs
 
     if ext_lower == ".docx":
         progress_stage_cb(0, 1, "parsing docx")
@@ -338,7 +416,7 @@ def _translate_one(name: str, data: bytes, tfn, progress_stage_cb, tgt_code_):
             data, tfn, progress_cb=progress_stage_cb, glossary=glossary,
         )
         progress_stage_cb(1, 1, "reconstructing docx")
-        return result, f"{out_stem}.docx"
+        return [(f"{out_stem}.docx", result)]
 
     if ext_lower == ".xlsx":
         progress_stage_cb(0, 1, "parsing xlsx")
@@ -346,7 +424,7 @@ def _translate_one(name: str, data: bytes, tfn, progress_stage_cb, tgt_code_):
             data, tfn, progress_cb=progress_stage_cb, glossary=glossary,
         )
         progress_stage_cb(1, 1, "reconstructing xlsx")
-        return result, f"{out_stem}.xlsx"
+        return [(f"{out_stem}.xlsx", result)]
 
     if ext_lower == ".pptx":
         progress_stage_cb(0, 1, "parsing pptx")
@@ -354,7 +432,7 @@ def _translate_one(name: str, data: bytes, tfn, progress_stage_cb, tgt_code_):
             data, tfn, progress_cb=progress_stage_cb, glossary=glossary,
         )
         progress_stage_cb(1, 1, "reconstructing pptx")
-        return result, f"{out_stem}.pptx"
+        return [(f"{out_stem}.pptx", result)]
 
     if ext_lower in (".txt", ".srt", ".vtt"):
         progress_stage_cb(0, 1, f"translating {ext_lower}")
@@ -365,7 +443,7 @@ def _translate_one(name: str, data: bytes, tfn, progress_stage_cb, tgt_code_):
             glossary_case_sensitive=glossary_case_sensitive,
         )
         progress_stage_cb(1, 1, "done")
-        return result.encode("utf-8"), f"{out_stem}{ext_lower}"
+        return [(f"{out_stem}{ext_lower}", result.encode("utf-8"))]
 
     raise ValueError(f"Unsupported file type: {ext_lower}")
 
@@ -706,6 +784,28 @@ with doc_tab:
         key="doc_uploader",
     )
 
+    _gpu = detect_gpu_profile()
+    if _gpu.tier == "cpu":
+        st.caption(
+            "No GPU detected — translation will run on CPU (slow). "
+            "Scanned-PDF OCR is unavailable."
+        )
+    elif _gpu.ocr_with_translation:
+        st.caption(
+            f"GPU: **{_gpu.name}** ({_gpu.vram_mb // 1000} GB) · high-memory "
+            f"mode — large translation batches, scanned-PDF OCR enabled. "
+            f"PDFs are delivered as Markdown too; native PDFs also get a "
+            f"reconstructed PDF."
+        )
+    else:
+        st.caption(
+            f"GPU: **{_gpu.name}** ({_gpu.vram_mb // 1000} GB) · standard mode. "
+            f"Plain text PDFs are fully supported (PDF + Markdown) — they never "
+            f"use OCR. **Scanned PDFs (and pages with equations) need the OCR "
+            f"model, which doesn't fit alongside translation on this card; "
+            f"relaunch on an A100 / H100 / H200 for those.**"
+        )
+
     run_doc = st.button(
         "Translate document(s)",
         type="primary",
@@ -780,10 +880,10 @@ with doc_tab:
             _stage(f"[{i}/{len(flat_inputs)}] {entry_name}")
             bar.progress((i - 1) / len(flat_inputs))
             try:
-                tbytes, tname = _translate_one(
+                for tname, tbytes in _translate_one(
                     entry_name, entry_data, tfn, _prog_stage, tgt_code,
-                )
-                successes.append((tname, tbytes))
+                ):
+                    successes.append((tname, tbytes))
             except Exception as exc:
                 errors.append((entry_name, str(exc)))
 

@@ -31,6 +31,8 @@ import re
 import time
 from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
+from .gpu_profile import resolve_batch_size
+
 # ---------------------------------------------------------------------------
 # Backend registry
 # ---------------------------------------------------------------------------
@@ -139,6 +141,153 @@ def chunk_text_for_translation(
 
 
 # ---------------------------------------------------------------------------
+# Shared batched generation for HuggingFace seq2seq backends
+#
+# The single biggest performance lever: instead of one ``model.generate``
+# call per chunk (each paying fixed GPU launch + host<->device sync cost),
+# we tokenize many chunks together with padding and run them through the
+# model in mini-batches. On a GPU this is often 10-20x faster for documents
+# with many short paragraphs.
+# ---------------------------------------------------------------------------
+
+# Greedy decoding by default (num_beams=1). Beam search roughly doubles
+# generation cost for a marginal quality gain on NLLB/Marian/MADLAD.
+DEFAULT_NUM_BEAMS = 1
+DEFAULT_BATCH_SIZE = 16  # fallback; the GPU profile usually overrides this
+
+
+def _resolve_device(device: Optional[str]) -> str:
+    import torch
+
+    return device or ("cuda" if torch.cuda.is_available() else "cpu")
+
+
+def _hf_generate_batch(
+    model,
+    tokenizer,
+    texts: List[str],
+    device: str,
+    *,
+    forced_bos_token_id: Optional[int] = None,
+    num_beams: int = DEFAULT_NUM_BEAMS,
+    max_new_tokens: int = 512,
+    batch_size: int = DEFAULT_BATCH_SIZE,
+    progress_cb: Optional[Callable[[int, int], None]] = None,
+) -> List[str]:
+    """
+    Translate a flat list of already-prepared strings, batched.
+
+    Returns one output string per input string, in order.
+    """
+    import torch
+
+    outputs: List[str] = []
+    total = len(texts)
+    gen_kwargs: Dict = {"max_new_tokens": max_new_tokens, "num_beams": num_beams}
+    if forced_bos_token_id is not None:
+        gen_kwargs["forced_bos_token_id"] = forced_bos_token_id
+
+    for start in range(0, total, batch_size):
+        batch = texts[start : start + batch_size]
+        enc = tokenizer(
+            batch,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            max_length=512,
+        )
+        enc = {k: v.to(device) for k, v in enc.items()}
+        with torch.inference_mode():
+            gen = model.generate(**enc, **gen_kwargs)
+        outputs.extend(tokenizer.batch_decode(gen, skip_special_tokens=True))
+        if progress_cb is not None:
+            progress_cb(min(start + len(batch), total), total)
+
+    return outputs
+
+
+def _translate_chunks_hf(
+    chunks: List[str],
+    src_lang: str,
+    tgt_lang: str,
+    backend: str,
+    *,
+    device: Optional[str] = None,
+    num_beams: int = DEFAULT_NUM_BEAMS,
+    max_new_tokens: int = 512,
+    batch_size: Optional[int] = None,
+    progress_cb: Optional[Callable[[int, int], None]] = None,
+) -> List[str]:
+    """
+    Batched translation of pre-chunked text for the HF seq2seq backends
+    (``nllb``, ``nllb-large``, ``madlad-3b``, ``opus-mt``).
+
+    Returns one translated string per input chunk, in order. When
+    ``batch_size`` is None it is resolved from the current GPU profile so
+    bigger cards automatically use bigger, faster batches.
+    """
+    if not chunks:
+        return []
+
+    if batch_size is None:
+        batch_size = resolve_batch_size(backend)
+
+    device = _resolve_device(device)
+
+    if backend in NLLB_MODEL_IDS:
+        dtype_name = "float16" if device == "cuda" else "float32"
+        tokenizer, model = _load_nllb(NLLB_MODEL_IDS[backend], device, dtype_name)
+        tokenizer.src_lang = src_lang
+        forced_bos_token_id = tokenizer.convert_tokens_to_ids(tgt_lang)
+        if forced_bos_token_id is None or forced_bos_token_id == tokenizer.unk_token_id:
+            raise ValueError(f"Target language {tgt_lang} is not supported by NLLB.")
+        prepared = chunks
+    elif backend in MADLAD_MODEL_IDS:
+        dtype_name = "float16" if device == "cuda" else "float32"
+        tokenizer, model = _load_madlad(MADLAD_MODEL_IDS[backend], device, dtype_name)
+        tgt_iso = flores_to_iso2(tgt_lang)
+        if not tgt_iso:
+            raise ValueError(
+                f"MADLAD needs an ISO 639-1 target code; {tgt_lang} is unmapped. "
+                "Try the NLLB backend for this language."
+            )
+        forced_bos_token_id = None
+        prepared = [f"<2{tgt_iso}> {c}" for c in chunks]
+    elif backend == "opus-mt":
+        src_iso = flores_to_iso2(src_lang)
+        tgt_iso = flores_to_iso2(tgt_lang)
+        if not src_iso or not tgt_iso:
+            raise ValueError(
+                f"OPUS-MT backend does not have an ISO-2 mapping for "
+                f"{src_lang} -> {tgt_lang}. Try the NLLB backend."
+            )
+        model_id = opus_mt_model_for(src_iso, tgt_iso)
+        try:
+            tokenizer, model = _load_marian(model_id, device)
+        except Exception as exc:
+            raise RuntimeError(
+                f"No OPUS-MT model available for {src_iso}->{tgt_iso} ({model_id}). "
+                "Try the NLLB backend instead."
+            ) from exc
+        forced_bos_token_id = None
+        prepared = chunks
+    else:
+        raise ValueError(f"Not an HF seq2seq backend: {backend}")
+
+    return _hf_generate_batch(
+        model,
+        tokenizer,
+        prepared,
+        device,
+        forced_bos_token_id=forced_bos_token_id,
+        num_beams=num_beams,
+        max_new_tokens=max_new_tokens,
+        batch_size=batch_size,
+        progress_cb=progress_cb,
+    )
+
+
+# ---------------------------------------------------------------------------
 # NLLB backend
 # ---------------------------------------------------------------------------
 
@@ -167,7 +316,7 @@ def translate_nllb(
     backend: str = "nllb",
     device: Optional[str] = None,
     max_new_tokens: int = 512,
-    num_beams: int = 2,
+    num_beams: int = DEFAULT_NUM_BEAMS,
     progress_cb: Optional[Callable[[int, int], None]] = None,
 ) -> str:
     """
@@ -175,40 +324,20 @@ def translate_nllb(
 
     ``src_lang`` / ``tgt_lang`` are FLORES-200 codes (e.g. ``deu_Latn``).
     """
-    import torch
-
     if backend not in NLLB_MODEL_IDS:
         raise ValueError(f"Unknown NLLB backend: {backend}")
 
-    if device is None:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-    dtype_name = "float16" if device == "cuda" else "float32"
-
-    tokenizer, model = _load_nllb(NLLB_MODEL_IDS[backend], device, dtype_name)
-
     chunks = chunk_text_for_translation(text)
-    total = len(chunks)
-    outputs: List[str] = []
-
-    forced_bos_token_id = tokenizer.convert_tokens_to_ids(tgt_lang)
-    if forced_bos_token_id is None or forced_bos_token_id == tokenizer.unk_token_id:
-        raise ValueError(f"Target language {tgt_lang} is not supported by NLLB.")
-
-    for i, chunk in enumerate(chunks, start=1):
-        tokenizer.src_lang = src_lang
-        enc = tokenizer(chunk, return_tensors="pt", truncation=True, max_length=512)
-        enc = {k: v.to(device) for k, v in enc.items()}
-        with torch.inference_mode():
-            gen = model.generate(
-                **enc,
-                forced_bos_token_id=forced_bos_token_id,
-                max_new_tokens=max_new_tokens,
-                num_beams=num_beams,
-            )
-        outputs.append(tokenizer.batch_decode(gen, skip_special_tokens=True)[0])
-        if progress_cb is not None:
-            progress_cb(i, total)
-
+    outputs = _translate_chunks_hf(
+        chunks,
+        src_lang,
+        tgt_lang,
+        backend,
+        device=device,
+        num_beams=num_beams,
+        max_new_tokens=max_new_tokens,
+        progress_cb=progress_cb,
+    )
     return "\n\n".join(outputs)
 
 
@@ -245,39 +374,15 @@ def translate_opus_mt(
     Helsinki-NLP pairs exist but not all - e.g. de<->fr is direct, but exotic
     pairs may need pivoting through English, which is not implemented here).
     """
-    import torch
-
-    src_iso = flores_to_iso2(src_lang)
-    tgt_iso = flores_to_iso2(tgt_lang)
-    if not src_iso or not tgt_iso:
-        raise ValueError(
-            f"OPUS-MT backend does not have an ISO-2 mapping for "
-            f"{src_lang} -> {tgt_lang}. Try the NLLB backend."
-        )
-
-    if device is None:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-
-    model_id = opus_mt_model_for(src_iso, tgt_iso)
-    try:
-        tokenizer, model = _load_marian(model_id, device)
-    except Exception as exc:
-        raise RuntimeError(
-            f"No OPUS-MT model available for {src_iso}->{tgt_iso} ({model_id}). "
-            "Try the NLLB backend instead."
-        ) from exc
-
     chunks = chunk_text_for_translation(text)
-    total = len(chunks)
-    outputs: List[str] = []
-    for i, chunk in enumerate(chunks, start=1):
-        enc = tokenizer(chunk, return_tensors="pt", truncation=True, max_length=512)
-        enc = {k: v.to(device) for k, v in enc.items()}
-        with torch.inference_mode():
-            gen = model.generate(**enc, num_beams=2, max_new_tokens=512)
-        outputs.append(tokenizer.batch_decode(gen, skip_special_tokens=True)[0])
-        if progress_cb is not None:
-            progress_cb(i, total)
+    outputs = _translate_chunks_hf(
+        chunks,
+        src_lang,
+        tgt_lang,
+        "opus-mt",
+        device=device,
+        progress_cb=progress_cb,
+    )
     return "\n\n".join(outputs)
 
 
@@ -370,7 +475,7 @@ def translate_madlad(
     backend: str = "madlad-3b",
     device: Optional[str] = None,
     max_new_tokens: int = 512,
-    num_beams: int = 2,
+    num_beams: int = DEFAULT_NUM_BEAMS,
     progress_cb: Optional[Callable[[int, int], None]] = None,
 ) -> str:
     """
@@ -380,42 +485,20 @@ def translate_madlad(
     the target language as a ``<2xx>`` prefix (2-letter ISO 639-1). The
     ``src_lang`` argument is accepted for API symmetry but ignored.
     """
-    import torch
-
     if backend not in MADLAD_MODEL_IDS:
         raise ValueError(f"Unknown MADLAD backend: {backend}")
 
-    tgt_iso = flores_to_iso2(tgt_lang)
-    if not tgt_iso:
-        raise ValueError(
-            f"MADLAD needs an ISO 639-1 target code; {tgt_lang} is unmapped. "
-            "Try the NLLB backend for this language."
-        )
-
-    if device is None:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-    dtype_name = "float16" if device == "cuda" else "float32"
-
-    tokenizer, model = _load_madlad(MADLAD_MODEL_IDS[backend], device, dtype_name)
-
     chunks = chunk_text_for_translation(text)
-    total = len(chunks)
-    outputs: List[str] = []
-    prefix = f"<2{tgt_iso}> "
-
-    for i, chunk in enumerate(chunks, start=1):
-        enc = tokenizer(prefix + chunk, return_tensors="pt", truncation=True, max_length=512)
-        enc = {k: v.to(device) for k, v in enc.items()}
-        with torch.inference_mode():
-            gen = model.generate(
-                **enc,
-                max_new_tokens=max_new_tokens,
-                num_beams=num_beams,
-            )
-        outputs.append(tokenizer.batch_decode(gen, skip_special_tokens=True)[0])
-        if progress_cb is not None:
-            progress_cb(i, total)
-
+    outputs = _translate_chunks_hf(
+        chunks,
+        src_lang,
+        tgt_lang,
+        backend,
+        device=device,
+        num_beams=num_beams,
+        max_new_tokens=max_new_tokens,
+        progress_cb=progress_cb,
+    )
     return "\n\n".join(outputs)
 
 
@@ -459,6 +542,84 @@ def translate(
     raise ValueError(f"Unknown translation backend: {backend}")
 
 
+def translate_many(
+    texts: List[str],
+    src_lang: str,
+    tgt_lang: str,
+    backend: str = "nllb",
+    ollama_model: Optional[str] = None,
+    src_lang_name: Optional[str] = None,
+    tgt_lang_name: Optional[str] = None,
+    formality: str = "default",
+    batch_size: Optional[int] = None,
+    progress_cb: Optional[Callable[[int, int], None]] = None,
+) -> List[str]:
+    """
+    Translate a list of independent texts, returning one output per input.
+
+    For the HuggingFace seq2seq backends this flattens every text into its
+    chunks, translates all chunks in padded mini-batches (one shared GPU
+    pass instead of one call per text), then reassembles per input. This is
+    the fast path used by the format-preserving document pipelines, where a
+    document may contain hundreds of short paragraphs.
+
+    ``batch_size`` defaults to the current GPU profile (bigger cards -> bigger
+    batches -> faster). Ollama has no batched API, so it falls back to a
+    per-text loop.
+    """
+    if not texts:
+        return []
+
+    # Empty / whitespace-only inputs pass through untouched.
+    to_do = [i for i, t in enumerate(texts) if t and t.strip()]
+    result: List[str] = list(texts)
+    if not to_do:
+        return result
+
+    if backend in NLLB_MODEL_IDS or backend in MADLAD_MODEL_IDS or backend == "opus-mt":
+        # Flatten every text into chunks, remembering ownership.
+        flat_chunks: List[str] = []
+        owners: List[int] = []
+        for idx in to_do:
+            chunks = chunk_text_for_translation(texts[idx]) or [texts[idx]]
+            for c in chunks:
+                flat_chunks.append(c)
+                owners.append(idx)
+
+        translated_flat = _translate_chunks_hf(
+            flat_chunks,
+            src_lang,
+            tgt_lang,
+            backend,
+            batch_size=batch_size,
+            progress_cb=progress_cb,
+        )
+
+        buckets: Dict[int, List[str]] = {}
+        for owner, tr in zip(owners, translated_flat):
+            buckets.setdefault(owner, []).append(tr)
+        for idx, pieces in buckets.items():
+            result[idx] = "\n\n".join(pieces)
+        return result
+
+    # Ollama (and any other non-batchable backend): per-text loop.
+    total = len(to_do)
+    for done, idx in enumerate(to_do, start=1):
+        result[idx] = translate(
+            texts[idx],
+            src_lang=src_lang,
+            tgt_lang=tgt_lang,
+            backend=backend,
+            ollama_model=ollama_model,
+            src_lang_name=src_lang_name,
+            tgt_lang_name=tgt_lang_name,
+            formality=formality,
+        )
+        if progress_cb is not None:
+            progress_cb(done, total)
+    return result
+
+
 def make_translate_fn(
     src_lang: str,
     tgt_lang: str,
@@ -473,6 +634,11 @@ def make_translate_fn(
     Return a single-argument ``str -> str`` translator with all backend
     parameters baked in. Handy for feeding to format-preserving pipelines
     (:mod:`core.translation.format`) or the shielding wrapper.
+
+    The returned callable also exposes a ``.many`` attribute: a
+    ``List[str] -> List[str]`` batched translator with the same parameters
+    baked in. Format-preserving pipelines use it to translate all units of
+    a document in a few padded GPU passes instead of one call per unit.
     """
     def _fn(text: str) -> str:
         return translate(
@@ -486,6 +652,21 @@ def make_translate_fn(
             formality=formality,
             progress_cb=progress_cb,
         )
+
+    def _many(texts: List[str]) -> List[str]:
+        return translate_many(
+            texts,
+            src_lang=src_lang,
+            tgt_lang=tgt_lang,
+            backend=backend,
+            ollama_model=ollama_model,
+            src_lang_name=src_lang_name,
+            tgt_lang_name=tgt_lang_name,
+            formality=formality,
+            progress_cb=progress_cb,
+        )
+
+    _fn.many = _many  # type: ignore[attr-defined]
     return _fn
 
 
@@ -567,6 +748,37 @@ def backend_load_signature(
     if backend == "ollama":
         return ("ollama", ollama_model or "")
     return (backend,)
+
+
+def free_translation_vram() -> None:
+    """
+    Evict every cached HuggingFace translation model and release its VRAM.
+
+    Text Lab shares one GPU between translation and the PaddleOCR-VL document
+    parser. The VL worker needs ~8-9 GB; a resident 3B translation backend
+    (``madlad-3b`` / ``nllb-large``) plus its generation activations can leave
+    too little headroom, which makes the OCR subprocess stall until its
+    watchdog kills it. Calling this *before* spawning the OCR worker lets the
+    two run sequentially — each fits comfortably even on a 24 GB card — and
+    the translation model is transparently reloaded (``lru_cache``) on the
+    next :func:`translate` call.
+    """
+    for loader in (_load_nllb, _load_marian, _load_madlad):
+        try:
+            loader.cache_clear()
+        except Exception:
+            pass
+
+    import gc
+
+    gc.collect()
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        pass
 
 
 def preload_backend(

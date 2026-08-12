@@ -39,15 +39,21 @@ import functools
 import io
 import os
 import re
+import tempfile
 import zipfile
-from typing import Callable, List, Mapping, Optional, Tuple
+from pathlib import Path
+from typing import Callable, Dict, List, Mapping, Optional, Tuple
 from xml.etree import ElementTree as ET
 
-from .shield import shielded_translate
+from .shield import shielded_translate, shielded_translate_many
 
 TranslateFn = Callable[[str], str]
 ProgressCb = Optional[Callable[[int, int, str], None]]
 Glossary = Optional[Mapping[str, str]]
+
+# Scanned-PDF threshold: total non-whitespace characters in the text layer
+# below which the PDF is treated as image-only and routed through OCR.
+SCANNED_PDF_TEXT_THRESHOLD = 200
 
 
 def _report(cb: ProgressCb, done: int, total: int, stage: str) -> None:
@@ -85,17 +91,27 @@ def translate_markdown(
     HTML, and placeholders survive the round-trip. The optional
     ``glossary`` maps source-language terms to forced target-language
     replacements.
+
+    All translatable line bodies are collected first and translated in a
+    single batched call (:func:`shielded_translate_many`), which on GPU is
+    dramatically faster than one model call per line.
     """
     lines = md_text.splitlines(keepends=False)
-    out: List[str] = []
+    out: List[Optional[str]] = []
     in_fence = False
     total = len(lines)
 
-    def _tr(s: str) -> str:
-        return shielded_translate(s, translate_fn, glossary=glossary)
+    # Gather translatable bodies; each slot records where/how to reinsert.
+    bodies: List[str] = []
+    slots: List[Tuple[int, str, str]] = []  # (out_index, prefix, suffix)
+
+    def _defer(prefix: str, body: str, suffix: str) -> None:
+        out.append(None)
+        slots.append((len(out) - 1, prefix, suffix))
+        bodies.append(body)
 
     for i, line in enumerate(lines, start=1):
-        _report(progress_cb, i, total, "translating markdown")
+        _report(progress_cb, i, total, "parsing markdown")
 
         # Code fences: toggle and passthrough (fence + contents).
         if _MD_FENCE_RE.match(line):
@@ -115,28 +131,35 @@ def translate_markdown(
         m = _MD_HEADING_RE.match(line)
         if m:
             prefix, body, suffix = m.group(1), m.group(2), (m.group(3) or "")
-            out.append(f"{prefix}{_tr(body)}{suffix}")
+            _defer(prefix, body, suffix)
             continue
 
         # Blockquote:  > text
         m = _MD_BLOCKQUOTE_RE.match(line)
         if m:
             prefix, body = m.group(1), m.group(2)
-            body_out = _tr(body) if body.strip() else body
-            out.append(f"{prefix}{body_out}")
+            if body.strip():
+                _defer(prefix, body, "")
+            else:
+                out.append(line)
             continue
 
         # List item:  - text  |  1. text  |  * [x] text
         m = _MD_LIST_RE.match(line)
         if m:
             prefix, body = m.group(1), m.group(2)
-            out.append(f"{prefix}{_tr(body)}")
+            _defer(prefix, body, "")
             continue
 
         # Regular paragraph line.
-        out.append(_tr(line))
+        _defer("", line, "")
 
-    return "\n".join(out)
+    _report(progress_cb, total, total, "translating markdown")
+    translated = shielded_translate_many(bodies, translate_fn, glossary=glossary)
+    for (idx, prefix, suffix), tr in zip(slots, translated):
+        out[idx] = f"{prefix}{tr}{suffix}"
+
+    return "\n".join(s if s is not None else "" for s in out)
 
 
 # ===========================================================================
@@ -208,13 +231,14 @@ def _translate_docx_part(
         return xml_bytes
 
     paragraphs = list(_iter_paragraphs(root))
-    for p in paragraphs:
-        text = _paragraph_text(p)
-        counter[0] += 1
-        _report(progress_cb, counter[0], total_est, stage)
+    texts = [_paragraph_text(p) for p in paragraphs]
+    counter[0] += len(paragraphs)
+    _report(progress_cb, counter[0], total_est, stage)
+
+    translated_list = shielded_translate_many(texts, translate_fn, glossary=glossary)
+    for p, text, translated in zip(paragraphs, texts, translated_list):
         if not text.strip():
             continue
-        translated = shielded_translate(text, translate_fn, glossary=glossary)
         _rewrite_paragraph(p, translated)
 
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
@@ -636,13 +660,16 @@ def translate_pdf(
     groups = _semantic_paragraphs(all_blocks)
     total = len(groups)
 
-    # ---- 4: translate each semantic paragraph ---------------------------
-    translated_per_block: dict[int, str] = {}
-    for gi, group in enumerate(groups, start=1):
-        _report(progress_cb, gi, total, "translating pdf")
-        joined = " ".join(all_blocks[i][2] for i in group)
-        translated_joined = shielded_translate(joined, translate_fn, glossary=glossary)
+    # ---- 4: translate all semantic paragraphs in one batched pass -------
+    _report(progress_cb, 0, total, "translating pdf")
+    joined_list = [" ".join(all_blocks[i][2] for i in group) for group in groups]
+    translated_list = shielded_translate_many(
+        joined_list, translate_fn, glossary=glossary
+    )
+    _report(progress_cb, total, total, "translating pdf")
 
+    translated_per_block: dict[int, str] = {}
+    for group, translated_joined in zip(groups, translated_list):
         # Distribute the translated string across the group's blocks by
         # length ratio so text stays near its original position when a
         # paragraph spans multiple blocks.
@@ -700,6 +727,190 @@ def translate_pdf(
     src.save(out_buf, garbage=3, deflate=True)
     src.close()
     return out_buf.getvalue()
+
+
+# ===========================================================================
+# PDF -> Markdown (uses the OCR pipeline for structure recovery and scans)
+# ===========================================================================
+
+
+def detect_pdf_is_scanned(
+    pdf_bytes: bytes,
+    threshold: int = SCANNED_PDF_TEXT_THRESHOLD,
+) -> bool:
+    """True when the PDF has essentially no extractable text layer.
+
+    Cheap PyMuPDF-only check: sums stripped text length across pages and
+    stops as soon as the threshold is crossed.
+    """
+    import fitz
+
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    try:
+        total = 0
+        for page in doc:
+            total += len(page.get_text("text").strip())
+            if total >= threshold:
+                return False
+        return True
+    finally:
+        doc.close()
+
+
+def pdf_needs_ocr(pdf_bytes: bytes) -> bool:
+    """True if translating this PDF to Markdown would invoke the OCR (VL) lane.
+
+    Mirrors :func:`core.auto_ocr.process_document` per-page routing under the
+    ``auto`` lane: a page is sent to PaddleOCR-VL only when it lacks a real
+    text layer *or* contains math. A plain born-digital PDF (text layer, no
+    equations) returns ``False`` and never touches the OCR worker.
+
+    Used to decide whether a PDF can be handled on a GPU where OCR and the
+    translation model can't be resident at once (e.g. a 24 GB RTX 4090).
+    """
+    import fitz
+
+    from core.auto_ocr import _page_has_math, _page_has_text_layer
+
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    try:
+        for page in doc:
+            if not _page_has_text_layer(page) or _page_has_math(page):
+                return True
+        return False
+    finally:
+        doc.close()
+
+
+def _ocr_progress_bridge(progress_cb: ProgressCb, stage_hint: str):
+    """Adapt auto_ocr's ``callback(fraction, text)`` to our ``(done,total,stage)``."""
+    if progress_cb is None:
+        return None
+
+    def _cb(frac: float, text: str) -> None:
+        pct = int(round(max(0.0, min(1.0, frac)) * 1000))
+        # Prepend the outer stage hint so the UI shows "OCR: parsing page 3/12".
+        try:
+            progress_cb(pct, 1000, f"{stage_hint}: {text}")
+        except Exception:
+            pass
+
+    return _cb
+
+
+def pdf_to_markdown_bundle(
+    pdf_bytes: bytes,
+    *,
+    pdf_type: str = "auto",
+    source_name: str = "input.pdf",
+    progress_cb: ProgressCb = None,
+    free_translation_vram_first: bool = False,
+) -> Tuple[str, Dict[str, bytes]]:
+    """Extract ``pdf_bytes`` into (markdown_text, {asset_name: png_bytes}).
+
+    ``pdf_type``:
+      * ``"auto"``      — ``auto_ocr.process_document(native_fast_lane=True)``,
+                          picks the fast native lane per page and only routes
+                          scanned / math-heavy pages through PaddleOCR-VL.
+      * ``"force_ocr"`` — ``native_fast_lane=False``: every page through
+                          PaddleOCR-VL. Slower but robust to unreliable
+                          text layers.
+
+    ``free_translation_vram_first``: when True, evict any resident HuggingFace
+    translation model from the GPU *before* spawning the PaddleOCR-VL worker.
+    The OCR worker and a large (3B) translation backend do not fit together on
+    smaller cards; freeing first makes them run sequentially and avoids the
+    watchdog stall. Callers that translate afterwards should set this — the
+    model is reloaded transparently on the next translate call.
+    """
+    # Deferred imports: pulling auto_ocr eagerly would drag the vision-model
+    # subprocess wiring into every translate_engine import.
+    from core import auto_ocr, doc_ir
+
+    if free_translation_vram_first:
+        # Give the OCR worker a clean GPU. Deferred import avoids a cycle at
+        # module load (engine imports are otherwise lazy inside this package).
+        from .engine import free_translation_vram
+
+        free_translation_vram()
+
+    ocr_prog = _ocr_progress_bridge(progress_cb, "OCR")
+
+    with tempfile.TemporaryDirectory(prefix="tl_translate_ocr_") as tmp:
+        input_path = Path(tmp) / source_name
+        input_path.write_bytes(pdf_bytes)
+        workspace = Path(tmp) / "ws"
+        workspace.mkdir()
+
+        document = auto_ocr.process_document(
+            input_path,
+            workspace,
+            native_fast_lane=(pdf_type != "force_ocr"),
+            progress=ocr_prog,
+            source_name=source_name,
+        )
+        md_text = doc_ir.to_markdown(
+            document, asset_dir="assets", embed_assets=True,
+        )
+        assets = doc_ir.collect_assets(document)
+    return md_text, dict(assets)
+
+
+def translate_pdf_to_markdown(
+    pdf_bytes: bytes,
+    translate_fn: TranslateFn,
+    *,
+    progress_cb: ProgressCb = None,
+    glossary: Glossary = None,
+    pdf_type: str = "auto",
+    source_name: str = "input.pdf",
+) -> Tuple[str, Dict[str, bytes]]:
+    """OCR the PDF into markdown, translate that markdown.
+
+    Returns ``(translated_markdown, assets)``. Callers that want a single
+    downloadable artifact can wrap the result with
+    :func:`pack_markdown_bundle`.
+
+    The OCR extraction frees any resident translation model from the GPU
+    first, so the PaddleOCR-VL worker and the translation model run
+    sequentially rather than competing for VRAM. The translation model is
+    reloaded automatically for the :func:`translate_markdown` step below.
+    """
+    _report(progress_cb, 0, 1, "reading pdf")
+    md_source, assets = pdf_to_markdown_bundle(
+        pdf_bytes,
+        pdf_type=pdf_type,
+        source_name=source_name,
+        progress_cb=progress_cb,
+        free_translation_vram_first=True,
+    )
+    md_translated = translate_markdown(
+        md_source,
+        translate_fn,
+        progress_cb=progress_cb,
+        glossary=glossary,
+    )
+    return md_translated, assets
+
+
+def pack_markdown_bundle(
+    md_text: str,
+    assets: Optional[Mapping[str, bytes]],
+    *,
+    stem: str,
+) -> Tuple[bytes, str]:
+    """Return ``(bytes, filename)`` — a ZIP when there are assets, else a ``.md``.
+
+    ZIP layout:  ``<stem>.md``  +  ``assets/<name>.png`` per crop.
+    """
+    if not assets:
+        return md_text.encode("utf-8"), f"{stem}.md"
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(f"{stem}.md", md_text)
+        for name, data in assets.items():
+            zf.writestr(f"assets/{name}", data)
+    return buf.getvalue(), f"{stem}.md.zip"
 
 
 def _split_by_ratio(text: str, ratios: List[float]) -> List[str]:
@@ -836,17 +1047,20 @@ def translate_xlsx(
                     translatable.append((cell, "comment"))
 
     total = max(1, len(translatable))
-    for i, (cell, kind) in enumerate(translatable, start=1):
-        _report(progress_cb, i, total, "translating xlsx")
+    texts = [
+        cell.value if kind == "cell" else cell.comment.text
+        for cell, kind in translatable
+    ]
+    _report(progress_cb, 0, total, "translating xlsx")
+    translated_list = shielded_translate_many(texts, translate_fn, glossary=glossary)
+    _report(progress_cb, total, total, "translating xlsx")
+
+    for (cell, kind), translated in zip(translatable, translated_list):
         if kind == "cell":
-            cell.value = shielded_translate(
-                cell.value, translate_fn, glossary=glossary,
-            )
+            cell.value = translated
         else:
             comment = cell.comment
-            comment.text = shielded_translate(
-                comment.text, translate_fn, glossary=glossary,
-            )
+            comment.text = translated
             cell.comment = comment
 
     out = io.BytesIO()
@@ -946,12 +1160,14 @@ def translate_pptx(
             paragraphs.append(para)
 
     total = max(1, len(paragraphs))
-    for i, para in enumerate(paragraphs, start=1):
-        _report(progress_cb, i, total, "translating pptx")
-        text = _pptx_paragraph_text(para)
+    texts = [_pptx_paragraph_text(para) for para in paragraphs]
+    _report(progress_cb, 0, total, "translating pptx")
+    translated_list = shielded_translate_many(texts, translate_fn, glossary=glossary)
+    _report(progress_cb, total, total, "translating pptx")
+
+    for para, text, translated in zip(paragraphs, texts, translated_list):
         if not text.strip():
             continue
-        translated = shielded_translate(text, translate_fn, glossary=glossary)
         _pptx_rewrite_paragraph(para, translated)
 
     out = io.BytesIO()

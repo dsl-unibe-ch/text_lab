@@ -162,6 +162,68 @@ def shielded_translate(
     return restored
 
 
+def shielded_translate_many(
+    texts: List[str],
+    translate_fn,
+    glossary: Optional[Mapping[str, str]] = None,
+    glossary_case_sensitive: bool = False,
+) -> List[str]:
+    """
+    Batched counterpart of :func:`shielded_translate`.
+
+    Shields every text (glossary-mask + structure-shield), translates them
+    all in one batched call when ``translate_fn`` exposes a ``.many``
+    (``List[str] -> List[str]``) attribute, then unshields each. Returns one
+    output per input, in order. Empty / whitespace inputs pass through.
+
+    This is the primitive the format-preserving pipelines use to avoid one
+    model call per paragraph/line/cell.
+    """
+    n = len(texts)
+    result: List[str] = list(texts)
+
+    # Shield only the non-empty inputs; remember their positions.
+    positions: List[int] = []
+    masked_list: List[str] = []
+    tables: List[List[str]] = []
+    glossary_tables: List[List[str]] = []
+
+    for i, text in enumerate(texts):
+        if not text or not text.strip():
+            continue
+        gloss_ph: List[str] = []
+        work = text
+        if glossary:
+            work = _apply_glossary(
+                work, glossary, gloss_ph,
+                case_sensitive=glossary_case_sensitive,
+            )
+        masked, table = shield(work)
+        positions.append(i)
+        masked_list.append(masked)
+        tables.append(table)
+        glossary_tables.append(gloss_ph)
+
+    if not masked_list:
+        return result
+
+    many = getattr(translate_fn, "many", None)
+    if callable(many):
+        translated_list = many(masked_list)
+    else:
+        translated_list = [translate_fn(m) for m in masked_list]
+
+    for pos, translated, table, gloss_ph in zip(
+        positions, translated_list, tables, glossary_tables
+    ):
+        restored = unshield(translated, table)
+        if gloss_ph:
+            restored = _restore_glossary(restored, gloss_ph)
+        result[pos] = restored
+
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Glossary / term-lock helpers
 # ---------------------------------------------------------------------------
