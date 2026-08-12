@@ -11,12 +11,19 @@ The JSON is ``{"pages": [ ... ]}`` where each page carries the typed layout
 blocks, per-region layout confidence, the pipeline markdown, and base64 PNG
 crops for non-text regions (figures, charts, seals, checkboxes). The parent
 turns these into the typed IR via ``doc_ir.from_paddle_vl``.
+
+With ``--serve`` the script instead stays alive and reads one JSON request per
+line from stdin, answering each with the same result line. Loading the weights
+costs ~17 s and the first prediction another ~7 s of warm-up, which a batch
+would otherwise pay once per file.
 """
 
 import argparse
 import base64
 import json
 import os
+import sys
+import traceback
 from pathlib import Path
 
 import numpy as np
@@ -33,6 +40,10 @@ RESULT_MARKER = "TEXTLAB_PADDLEVL_RESULT_JSON="
 #: Emitted on stdout as each page finishes, so the parent can report progress
 #: through a stage that runs ~25-50 s per page.
 PROGRESS_MARKER = "TEXTLAB_PADDLEVL_PROGRESS="
+
+#: Emitted once in ``--serve`` mode when the weights are loaded and the worker
+#: is waiting for requests.
+READY_MARKER = "TEXTLAB_PADDLEVL_READY="
 
 # Layout labels whose regions we cut out as image crops (superset of the IR's
 # asset types so the parent can classify checkboxes and render figures).
@@ -229,35 +240,84 @@ def process_image(pipeline, image_path, asset_labels, margin_frac, page_number):
     }
 
 
+def _asset_labels(extra: str) -> set:
+    labels = set(DEFAULT_ASSET_LABELS)
+    for lbl in (extra or "").split(","):
+        lbl = lbl.strip().lower()
+        if lbl:
+            labels.add(lbl)
+    return labels
+
+
+def _run_request(pipeline, images, asset_labels, crop_margin) -> dict:
+    """Recognise one request's pages, reporting each as it lands."""
+    total = len(images)
+    pages = []
+    for idx, image in enumerate(images, start=1):
+        pages.append(process_image(pipeline, Path(image), asset_labels, crop_margin, idx))
+        print(f"{PROGRESS_MARKER}{idx}/{total}", flush=True)
+    return {"pages": pages}
+
+
+def serve(default_margin: float):
+    """Answer one JSON request per stdin line until stdin closes.
+
+    A request is ``{"images": [...], "extra_labels": "...", "crop_margin": f}``.
+    Every request is answered with exactly one result line, an error included,
+    so one bad document cannot leave the parent waiting or desynchronise the
+    stream.
+    """
+    pipeline = _build_pipeline()
+    print(f"{READY_MARKER}1", flush=True)
+
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            request = json.loads(line)
+            images = [str(p) for p in request.get("images") or []]
+            print(f"{PROGRESS_MARKER}0/{len(images)}", flush=True)
+            payload = _run_request(
+                pipeline,
+                images,
+                _asset_labels(request.get("extra_labels", "")),
+                float(request.get("crop_margin", default_margin)),
+            )
+        except Exception as exc:  # one document's failure, not the session's
+            traceback.print_exc()
+            payload = {"pages": [], "error": f"{type(exc).__name__}: {exc}"}
+        print(RESULT_MARKER + json.dumps(payload, ensure_ascii=False), flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description="PaddleOCR-VL doc-parser worker")
-    parser.add_argument("images", nargs="+", help="single-page image paths")
+    parser.add_argument("images", nargs="*", help="single-page image paths")
     parser.add_argument(
         "--extra-labels",
         default="",
         help="comma-separated extra layout labels to crop as assets",
     )
     parser.add_argument("--crop-margin", type=float, default=0.06, help="crop margin as fraction of box")
+    parser.add_argument(
+        "--serve", action="store_true",
+        help="stay alive and answer one JSON request per stdin line",
+    )
     args = parser.parse_args()
 
-    asset_labels = set(DEFAULT_ASSET_LABELS)
-    for lbl in args.extra_labels.split(","):
-        lbl = lbl.strip().lower()
-        if lbl:
-            asset_labels.add(lbl)
+    if args.serve:
+        serve(args.crop_margin)
+        return
+    if not args.images:
+        parser.error("one or more image paths are required without --serve")
 
     total = len(args.images)
     print(f"{PROGRESS_MARKER}0/{total}", flush=True)
     pipeline = _build_pipeline()
-
-    pages = []
-    for idx, image in enumerate(args.images, start=1):
-        pages.append(
-            process_image(pipeline, Path(image), asset_labels, args.crop_margin, idx)
-        )
-        print(f"{PROGRESS_MARKER}{idx}/{total}", flush=True)
-
-    print(RESULT_MARKER + json.dumps({"pages": pages}, ensure_ascii=False))
+    payload = _run_request(
+        pipeline, args.images, _asset_labels(args.extra_labels), args.crop_margin
+    )
+    print(RESULT_MARKER + json.dumps(payload, ensure_ascii=False))
 
 
 if __name__ == "__main__":

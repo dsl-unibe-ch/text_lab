@@ -42,6 +42,7 @@ _BINARY_OPTION_PAIRS = (
 MAX_FORM_SECTIONS_PER_PAGE = 30
 SCHEMA_FREE_CONTRACT = "schema-free-v2"
 PADDLE_ID_CONTRACT = "paddle-id-v1"
+HYBRID_TABLE_CONTRACT = "hybrid-paddle-table-v1"
 DEFAULT_SURVEY_CONTRACT = SCHEMA_FREE_CONTRACT
 _VALID_STATES = {"selected", "cancelled", "ambiguous"}
 _VALID_VISUAL_MARKS = {"x", "tick", "filled", "scribbled", "other", "uncertain"}
@@ -449,20 +450,174 @@ def _crop(image, bbox):
     return image[y1:y2, x1:x2]
 
 
-def _has_geometry_disagreement(page: "doc_ir.Page", bbox: List[int]) -> bool:
-    if len(bbox) < 4:
-        return False
-    x1, y1, x2, y2 = bbox[:4]
-    for region in page.regions:
-        status = (region.markup or {}).get("status")
-        if status not in ("geometry_disagreement", "count_mismatch"):
+def _append_once(values: List[str], value: str) -> None:
+    if value not in values:
+        values.append(value)
+
+
+def _markup_evidence(
+    page: "doc_ir.Page", bbox: List[int]
+) -> Tuple[List[Tuple[dict, str]], List[dict]]:
+    """Return answer-alignable geometry and diagnostics for one question crop.
+
+    A geometric ``count_mismatch`` is deliberately diagnostic only. There is no
+    one-to-one mapping between controls and answer options in that state, so it
+    cannot establish doubt about an extracted answer.
+    """
+    aligned: List[Tuple[dict, str]] = []
+    diagnostics: List[dict] = []
+    for region in page.ordered_regions():
+        if not _region_overlaps_bbox(region, bbox):
             continue
-        if len(region.bbox) < 4:
+        markup = region.markup or {}
+        if markup.get("kind") != "glyph-marks":
             continue
-        rx1, ry1, rx2, ry2 = region.bbox[:4]
-        if min(x2, rx2) > max(x1, rx1) and min(y2, ry2) > max(y1, ry1):
-            return True
-    return False
+        items = list(markup.get("items") or [])
+        status = str(markup.get("status") or "unknown")
+        geometry_items = [item for item in items if isinstance(item.get("geometry"), dict)]
+        diagnostics.append(
+            {
+                "region_id": region.id,
+                "status": status,
+                "transcribed_control_count": len(items),
+                "aligned_geometry_count": len(geometry_items),
+            }
+        )
+        if status not in {"matched", "geometry_disagreement"}:
+            continue
+        if len(geometry_items) != len(items):
+            continue
+        aligned.extend((item, region.id) for item in items)
+    return aligned, diagnostics
+
+
+def _reconcile_answer_geometry(
+    page: "doc_ir.Page",
+    bbox: List[int],
+    groups: List["doc_ir.FormGroup"],
+) -> None:
+    """Attach geometry to final options and flag only strong answer conflicts."""
+    evidence, diagnostics = _markup_evidence(page, bbox)
+    option_rows = [
+        (group, row, option)
+        for group in groups
+        for row in group.rows
+        for option in row.options
+    ]
+    alignment = (
+        "aligned"
+        if evidence and len(evidence) == len(option_rows)
+        else ("no_aligned_geometry" if not evidence else "answer_count_mismatch")
+    )
+    for group in groups:
+        group.provenance["markup_diagnostics"] = copy.deepcopy(diagnostics)
+        group.provenance["answer_geometry_alignment"] = alignment
+    if alignment != "aligned":
+        return
+
+    for (group, row, option), (item, region_id) in zip(option_rows, evidence):
+        geometry = item["geometry"]
+        geometry_state = str(geometry.get("state") or "uncertain")
+        score = geometry.get("score")
+        option.observations.append(
+            doc_ir.Observation(
+                source="geometric",
+                value=geometry_state,
+                method="position-aligned-control",
+                score=score,
+                raw={
+                    "region_id": region_id,
+                    "paddle_state": item.get("state"),
+                    "fill_ratio": geometry.get("fill_ratio"),
+                    "strike": geometry.get("strike"),
+                },
+            )
+        )
+        if geometry_state not in {"checked", "unchecked"} or (score or 0.0) < 0.55:
+            continue
+        answer_state = "checked" if option.state == "selected" else "unchecked"
+        if option.state in {"cancelled", "ambiguous"} or answer_state == geometry_state:
+            continue
+        warning = (
+            f"extracted answer {answer_state!r} disagrees with strong geometric "
+            f"evidence {geometry_state!r}"
+        )
+        _append_once(option.warnings, warning)
+        _append_once(row.review_reasons, "answer_geometry_disagreement")
+        _append_once(group.review_reasons, "answer_geometry_disagreement")
+        row.status = "needs_review"
+        group.status = "needs_review"
+
+
+def _review_reason_for_warning(warning: str) -> str:
+    text = warning.lower()
+    if "extracted answer" in text and "geometric evidence" in text:
+        return "answer_geometry_disagreement"
+    if "release benchmark" in text:
+        return "unbenchmarked_model"
+    if any(
+        phrase in text
+        for phrase in (
+            "could not be validated",
+            "complete question section:",
+            "no response rows",
+            "no logical questions",
+        )
+    ):
+        return "extraction_failed"
+    if "zero marked answers" in text or "no visible response mark" in text:
+        return "missing_answer"
+    if "unmapped" in text or "not mapped to a logical choice" in text:
+        return "unmapped_mark"
+    if "changed or ambiguous" in text or "uncertain" in text:
+        return "ambiguous_mark"
+    if "multiple visible marks" in text or "selection rule" in text:
+        return "selection_rule_violation"
+    if (
+        "disagrees" in text
+        or "disagreement" in text
+        or "paddle reports selected" in text
+    ):
+        return "source_disagreement"
+    if any(
+        phrase in text
+        for phrase in (
+            "fewer choices",
+            "choice label",
+            "row",
+            "question",
+            "duplicate",
+            "crop-boundary",
+            "response type",
+            "schema",
+        )
+    ):
+        return "structural_issue"
+    return "validation_warning"
+
+
+def _finalize_review_reasons(groups: List["doc_ir.FormGroup"]) -> None:
+    """Give every active review flag stable, machine-readable reason codes."""
+    for group in groups:
+        for row in group.rows:
+            if row.status != "needs_review":
+                continue
+            warnings = list(row.warnings)
+            warnings.extend(
+                warning for option in row.options for warning in option.warnings
+            )
+            for warning in warnings:
+                _append_once(row.review_reasons, _review_reason_for_warning(warning))
+            if not row.review_reasons:
+                row.review_reasons.append("validation_warning")
+            for reason in row.review_reasons:
+                _append_once(group.review_reasons, reason)
+        if group.status != "needs_review":
+            continue
+        for warning in group.warnings:
+            _append_once(group.review_reasons, _review_reason_for_warning(warning))
+        if not group.review_reasons:
+            group.review_reasons.append("validation_warning")
 
 
 def _png_bytes(image) -> bytes:
@@ -556,20 +711,70 @@ def _text_schema(region: "doc_ir.Region") -> List[dict]:
     return [{"row_id": region.id, "label": prefix, "options": options}]
 
 
+def _reliable_table_rows(rows: List[dict]) -> bool:
+    """Whether Paddle recovered enough table structure to own the question.
+
+    Matrix rows must agree on resolved column labels and have distinct,
+    resolved row labels. A single-row table is accepted only when it is a wide
+    rating/scale (four or more choices); tiny one-row tables remain on the
+    schema-free lane because they are often layout artefacts.
+    """
+    if not rows:
+        return False
+    option_counts = {len(row.get("options") or []) for row in rows}
+    if len(option_counts) != 1:
+        return False
+    option_count = next(iter(option_counts))
+    if option_count < 2:
+        return False
+    option_vectors = [
+        tuple(_normalized_label(option.get("label")) for option in row["options"])
+        for row in rows
+    ]
+    if any(
+        not label or label.startswith("option ")
+        for row in rows
+        for label in (str(option.get("label") or "").strip() for option in row["options"])
+    ):
+        return False
+    if any(vector != option_vectors[0] for vector in option_vectors[1:]):
+        return False
+    if len(rows) == 1:
+        return option_count >= 4
+    row_labels = [str(row.get("label") or "").strip() for row in rows]
+    normalized_rows = [_normalized_label(label) for label in row_labels]
+    return (
+        all(_label_is_resolved(label) for label in row_labels)
+        and len(set(normalized_rows)) == len(normalized_rows)
+    )
+
+
 def _schema_hint(section: dict, group_id: str) -> dict:
     rows = []
     seen = set()
+    reliable_tables = []
     for region in section["regions"]:
         candidates = _table_schema(region) if region.type == doc_ir.TABLE else _text_schema(region)
+        if region.type == doc_ir.TABLE and _reliable_table_rows(candidates):
+            reliable_tables.append((region.id, candidates))
         for row in candidates:
             key = row["row_id"]
             if key not in seen:
                 seen.add(key)
                 rows.append(row)
+    # Auto-routing requires one unambiguous table owner. When present, exclude
+    # incidental mark glyphs in titles/prose from the supplied mark-only schema.
+    structure_source = ""
+    structure_region_id = ""
+    if len(reliable_tables) == 1:
+        structure_region_id, rows = reliable_tables[0]
+        structure_source = "paddleocr-vl-table"
     return {
         "question_id": group_id,
         "question_text": _clean_question_text(section.get("anchor", ""))[:600],
         "rows": rows,
+        "structure_source": structure_source,
+        "structure_region_id": structure_region_id,
     }
 
 
@@ -693,10 +898,12 @@ MARK_ONLY_RESPONSE_SCHEMA = {
     "properties": {
         "visible_row_ids": {
             "type": "array",
+            "maxItems": 32,
             "items": {"type": "string"},
         },
         "marks": {
             "type": "array",
+            "maxItems": 48,
             "items": {
                 "type": "object",
                 "properties": {
@@ -718,6 +925,7 @@ MARK_ONLY_RESPONSE_SCHEMA = {
         },
         "unmapped_marks": {
             "type": "array",
+            "maxItems": 12,
             "items": {
                 "type": "object",
                 "properties": {
@@ -1161,6 +1369,8 @@ def _question_defect(raw_question: dict) -> str:
     condition_text = _SPACE.sub(" ", str(raw_question.get("condition_text") or "")).strip()
     if len(question_text) > 800 or len(condition_text) > 240:
         return "schema-free response contains an overlong question field"
+    if re.fullmatch(r"\d{1,3}\s*[).:]", question_text):
+        return "schema-free question is only a numbering marker"
     model_type = str(raw_question.get("response_type") or "unknown")
     model_rule = str(raw_question.get("selection_rule") or "unknown")
     if model_type not in _VALID_RESPONSE_TYPES or model_rule not in _VALID_SELECTION_RULES:
@@ -1173,6 +1383,90 @@ def _question_defect(raw_question: dict) -> str:
     if not choices or not isinstance(raw_rows, list) or not raw_rows:
         return "schema-free question must contain choices and rows"
     return ""
+
+
+def _collapse_padded_non_matrix_rows(
+    raw_rows: List[dict], model_type: str
+) -> Tuple[List[dict], int]:
+    """Collapse bounded-decoding padding without inventing answer structure.
+
+    Qwen sometimes fills the 24-row safety bound for a simple question with
+    empty-label copies. Collapse only the unambiguous case: every row label and
+    extra-choice vector is identical, and at most one row carries marks.
+    Distinct labelled rows remain untouched and are reviewed as a structural
+    disagreement.
+    """
+    if model_type == "matrix" or len(raw_rows) <= 1:
+        return raw_rows, 0
+    if not all(isinstance(row, dict) for row in raw_rows):
+        return raw_rows, 0
+    row_labels = [
+        _normalized_label(_SPACE.sub(" ", str(row.get("row_text") or "")).strip())
+        for row in raw_rows
+    ]
+    if any(row_labels) or len(set(row_labels)) != 1:
+        return raw_rows, 0
+    extra_signatures = [
+        tuple(
+            _normalized_label(str(item.get("choice_text") or ""))
+            for item in (row.get("extra_choices") or [])
+            if isinstance(item, dict)
+        )
+        for row in raw_rows
+    ]
+    if len(set(extra_signatures)) != 1:
+        return raw_rows, 0
+    marked_rows = [
+        row
+        for row in raw_rows
+        if isinstance(row.get("marked_answers"), list) and row["marked_answers"]
+    ]
+    if len(marked_rows) > 1:
+        return raw_rows, 0
+    retained = marked_rows[0] if marked_rows else raw_rows[0]
+    return [retained], len(raw_rows) - 1
+
+
+def _collapse_choice_as_rows(
+    raw_rows: List[dict],
+    choices: List[str],
+    model_type: str,
+) -> Tuple[List[dict], int, int]:
+    """Undo the model's ``choices -> rows`` diagonal hallucination.
+
+    The observed failure repeats the complete shared choice vector on every
+    row, labels row N with choice N, then reports choice N selected on row N.
+    That is not a different interpretation of the answer; it contradicts the
+    non-matrix response type and the prompt's one-row contract. Preserve only
+    the deterministic choice structure. Model marks from this malformed shape
+    are discarded and the caller keeps the group in review.
+    """
+    if model_type == "matrix" or len(raw_rows) < 2 or len(raw_rows) != len(choices):
+        return raw_rows, 0, 0
+    if not all(isinstance(row, dict) for row in raw_rows):
+        return raw_rows, 0, 0
+    normalized_choices = [_normalized_label(choice) for choice in choices]
+    if (
+        any(not choice for choice in normalized_choices)
+        or len(set(normalized_choices)) != len(normalized_choices)
+    ):
+        return raw_rows, 0, 0
+    normalized_rows = [
+        _normalized_label(_SPACE.sub(" ", str(row.get("row_text") or "")).strip())
+        for row in raw_rows
+    ]
+    if normalized_rows != normalized_choices:
+        return raw_rows, 0, 0
+    if any(row.get("extra_choices") not in ([], None) for row in raw_rows):
+        return raw_rows, 0, 0
+    if not all(isinstance(row.get("marked_answers"), list) for row in raw_rows):
+        return raw_rows, 0, 0
+    discarded_marks = sum(len(row["marked_answers"]) for row in raw_rows)
+    return (
+        [{"row_text": "", "extra_choices": [], "marked_answers": []}],
+        len(raw_rows),
+        discarded_marks,
+    )
 
 
 def _choice_texts(items: Any, *, field_name: str) -> List[str]:
@@ -1345,9 +1639,17 @@ def _universal_to_form_groups(
         raw_rows = raw_question.get("rows")
         if not choices or not isinstance(raw_rows, list) or not raw_rows:
             raise ValueError("schema-free question must contain choices and rows")
+        raw_rows, collapsed_padding_rows = _collapse_padded_non_matrix_rows(
+            raw_rows, model_type
+        )
 
         group_id = question_ids[question_index - 1]
         group_warnings: List[str] = []
+        if collapsed_padding_rows:
+            group_warnings.append(
+                f"collapsed {collapsed_padding_rows} padded row(s) from a "
+                "non-matrix model response"
+            )
         parent_id = ""
         parent_index = raw_question.get("parent_question_index", 0)
         if not isinstance(parent_index, int) or parent_index < 0:
@@ -1976,7 +2278,14 @@ def extract_page_forms(
         crop_b64 = base64.b64encode(crop_bytes).decode("ascii")
         errors = []
         _, _, _, _, complete_section = _complete_section_view(crop)
-        if contract_name == PADDLE_ID_CONTRACT:
+        auto_table_hybrid = (
+            contract_name == SCHEMA_FREE_CONTRACT
+            and schema_hint.get("structure_source") == "paddleocr-vl-table"
+        )
+        use_mark_only_contract = (
+            contract_name == PADDLE_ID_CONTRACT or auto_table_hybrid
+        )
+        if use_mark_only_contract:
             section_results: List[List[dict]] = []
             try:
                 result = client.analyze(
@@ -2001,7 +2310,17 @@ def extract_page_forms(
                 candidate_evidence=job.get("candidate_evidence"),
             )
             for group in extracted:
-                group.provenance["contract_version"] = PADDLE_ID_CONTRACT
+                group.provenance["contract_version"] = (
+                    HYBRID_TABLE_CONTRACT
+                    if auto_table_hybrid
+                    else PADDLE_ID_CONTRACT
+                )
+                group.provenance["structure_source"] = (
+                    schema_hint.get("structure_source") or "paddleocr-vl"
+                )
+                group.provenance["structure_region_id"] = str(
+                    schema_hint.get("structure_region_id") or ""
+                )
         else:
             try:
                 try:
@@ -2056,16 +2375,12 @@ def extract_page_forms(
                 group.warnings.append(
                     "survey model has not yet passed TextLab's release benchmark"
                 )
-        if _has_geometry_disagreement(page, bbox):
-            for group in extracted:
-                group.status = "needs_review"
-                group.warnings.append(
-                    "geometric ink evidence disagrees with the OCR transcription"
-                )
+        _reconcile_answer_geometry(page, bbox, extracted)
         if errors:
             for group in extracted:
                 group.status = "needs_review"
                 group.warnings.extend(errors)
+        _finalize_review_reasons(extracted)
         groups.extend(extracted)
     if (
         same_layout_template is not None
