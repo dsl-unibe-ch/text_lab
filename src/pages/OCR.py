@@ -11,6 +11,7 @@ os.environ.setdefault("STREAMLIT_SERVER_FILE_WATCHER_TYPE", "none")
 
 import streamlit as st
 import subprocess
+import time
 import uuid
 import pathlib
 import shutil
@@ -119,6 +120,7 @@ def clear_results(reset_running=False):
         # automatic pipeline
         "auto_complete", "auto_document", "auto_summary", "auto_downloads",
         "auto_error", "batch_auto_complete", "batch_auto_zip",
+        "batch_auto_elapsed",
         # questionnaire batch: kept so the detected form can be reviewed and
         # the tables rebuilt without parsing everything again
         "survey_template", "survey_readings", "survey_documents",
@@ -313,6 +315,10 @@ def run_auto_batch(
 
         n_files = len(valid_files)
         batch_provenance = []
+        # Logged per file: "no faster" is otherwise impossible to tell from
+        # "faster after the first", which is what loading the model once buys.
+        batch_started = time.monotonic()
+        file_times = []
         # Output folder -> parsed document, for rebuilding the exports after a
         # control is dropped. Only filled in questionnaire mode.
         document_index = {}
@@ -329,6 +335,7 @@ def run_auto_batch(
                 )
 
             _file_progress(0.0, "starting...")
+            file_started = time.monotonic()
 
             file_output_dir = RESULTS_DIR / rel_path.parent / file_path.stem
             file_output_dir.mkdir(parents=True, exist_ok=True)
@@ -386,6 +393,9 @@ def run_auto_batch(
                 )
 
             shutil.rmtree(per_file_ws, ignore_errors=True)
+            file_times.append(time.monotonic() - file_started)
+            print(f"[OCR] file {idx + 1}/{n_files} {rel_path}: "
+                  f"{file_times[-1]:.1f}s", flush=True)
             progress_bar.progress((idx + 1) / n_files)
 
         if template is not None:
@@ -394,7 +404,15 @@ def run_auto_batch(
                 readings, template, RESULTS_DIR / "survey"
             )
 
-        status_text.markdown(f"**{n_files} file(s) parsed** — zipping results...")
+        elapsed = time.monotonic() - batch_started
+        print(f"[OCR] {n_files} file(s) in {elapsed:.1f}s "
+              f"(mean {elapsed / max(1, n_files):.1f}s/file; "
+              f"first {file_times[0]:.1f}s, rest mean "
+              f"{sum(file_times[1:]) / max(1, len(file_times) - 1):.1f}s)", flush=True)
+        st.session_state.batch_auto_elapsed = elapsed
+        status_text.markdown(
+            f"**{n_files} file(s) parsed in {elapsed / 60:.1f} min** — zipping results..."
+        )
 
         # One summary at the root, the union over files: a batch can mix lanes.
         merged_provenance = doc_ir.provenance_to_text(
@@ -1384,7 +1402,11 @@ def auto_batch_ui():
             )
 
     if st.session_state.get("batch_auto_complete"):
-        st.success("✅ Batch parsing completed successfully!")
+        elapsed = st.session_state.get("batch_auto_elapsed")
+        st.success(
+            "✅ Batch parsing completed successfully!"
+            + (f" ({elapsed / 60:.1f} min)" if elapsed else "")
+        )
         st.download_button(
             "📥 Download all results (ZIP)",
             st.session_state.batch_auto_zip,

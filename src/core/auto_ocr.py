@@ -46,6 +46,8 @@ IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif", ".webp"}
 RESULT_MARKER = "TEXTLAB_PADDLEVL_RESULT_JSON="
 #: Mirrors ``paddle_vl_worker.PROGRESS_MARKER``; the worker is a separate env.
 PROGRESS_MARKER = "TEXTLAB_PADDLEVL_PROGRESS="
+#: Mirrors ``paddle_vl_worker.READY_MARKER``.
+READY_MARKER = "TEXTLAB_PADDLEVL_READY="
 
 ProgressFn = Callable[[float, str], None]
 
@@ -142,7 +144,11 @@ class VLWorkerSession:
         self._proc = None
         self._lines = None
         self._stderr: List[str] = []
+        self._started_at = 0.0
         self.failed = False
+        #: Documents this session has answered, so a log reader can tell a
+        #: resident worker from one that keeps dying and being restarted.
+        self.documents = 0
 
     # -- lifecycle ------------------------------------------------------------
     def _start(self):
@@ -150,6 +156,7 @@ class VLWorkerSession:
         import threading
 
         _free_gpu_for_worker()
+        self._started_at = time.monotonic()
         self._proc = subprocess.Popen(
             [self.backend_python, str(self.worker_path), "--serve"],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -209,6 +216,7 @@ class VLWorkerSession:
             self.close()
             self._start()
 
+        started = time.monotonic()
         request = {"images": [str(p) for p in image_paths]}
         if extra_labels:
             request["extra_labels"] = extra_labels
@@ -242,10 +250,18 @@ class VLWorkerSession:
                     f"stderr:\n{''.join(self._stderr)[-4000:]}"
                 )
             out_lines.append(line)
+            if line.startswith(READY_MARKER):
+                print(f"[auto_ocr] VL worker ready in "
+                      f"{time.monotonic() - self._started_at:.1f}s", flush=True)
             if line.startswith(PROGRESS_MARKER):
                 _report_progress(line, on_page)
             if line.startswith(RESULT_MARKER):
-                return _pages_from_result("".join(out_lines), "".join(self._stderr))
+                pages = _pages_from_result("".join(out_lines), "".join(self._stderr))
+                self.documents += 1
+                print(f"[auto_ocr] recognised {len(image_paths)} page(s) in "
+                      f"{time.monotonic() - started:.1f}s "
+                      f"(resident worker, document {self.documents})", flush=True)
+                return pages
 
 
 def _report_progress(line: str, on_page: Optional[Callable[[int, int], None]]) -> None:
@@ -294,6 +310,7 @@ def run_vl_worker(
 
     _free_gpu_for_worker()
 
+    started = time.monotonic()
     returncode, stdout, stderr = _run_streaming(
         cmd, env, on_page, stall_timeout if stall_timeout is not None else VL_STALL_TIMEOUT
     )
@@ -302,7 +319,11 @@ def run_vl_worker(
             "PaddleOCR-VL backend failed.\n"
             f"stdout:\n{stdout[-4000:]}\n\nstderr:\n{stderr[-4000:]}"
         )
-    return _pages_from_result(stdout, stderr)
+    pages = _pages_from_result(stdout, stderr)
+    print(f"[auto_ocr] recognised {len(image_paths)} page(s) in "
+          f"{time.monotonic() - started:.1f}s (one-shot worker: model loaded "
+          "for this document alone)", flush=True)
+    return pages
 
 
 def _run_streaming(
