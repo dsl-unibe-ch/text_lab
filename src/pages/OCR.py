@@ -11,6 +11,7 @@ os.environ.setdefault("STREAMLIT_SERVER_FILE_WATCHER_TYPE", "none")
 
 import streamlit as st
 import subprocess
+import time
 import uuid
 import pathlib
 import shutil
@@ -20,6 +21,7 @@ import base64
 import cv2
 import ollama
 import io
+import pandas as pd
 from PIL import Image
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -42,7 +44,16 @@ from core.ocr_engine import (
     render_layout_preview,
     LAYOUT_TYPE_COLORS,
 )
-from core import auto_ocr, doc_ir, form_extract, searchable_pdf, vision_enrich
+from core import (
+    auto_ocr,
+    doc_ir,
+    form_extract,
+    html_safety,
+    searchable_pdf,
+    survey_batch,
+    upload_safety,
+    vision_enrich,
+)
 
 try:
     from language_mappings import EASYOCR_LANGUAGE_MAPPING, PADDLEOCR_LANGUAGE_MAPPING
@@ -118,6 +129,10 @@ def clear_results(reset_running=False):
         # automatic pipeline
         "auto_complete", "auto_document", "auto_summary", "auto_downloads",
         "auto_error", "batch_auto_complete", "batch_auto_zip",
+        "batch_auto_elapsed",
+        # questionnaire batch: kept so the detected form can be reviewed and
+        # the tables rebuilt without parsing everything again
+        "survey_template", "survey_readings", "survey_documents",
     ]
     for key in keys_to_clear:
         if key in st.session_state:
@@ -180,7 +195,8 @@ def run_auto_single(
         INPUT_DIR.mkdir(parents=True, exist_ok=True)
         WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
 
-        input_file_path = INPUT_DIR / uploaded_file.name
+        upload_name = upload_safety.safe_upload_name(uploaded_file.name)
+        input_file_path = INPUT_DIR / upload_name
         with open(input_file_path, "wb") as f:
             f.write(uploaded_file.getbuffer())
 
@@ -192,14 +208,14 @@ def run_auto_single(
             WORKSPACE_DIR,
             native_fast_lane=native_fast_lane,
             progress=_progress,
-            source_name=uploaded_file.name,
+            source_name=upload_name,
             describe_images=describe_images,
             extract_survey=extract_survey,
             searchable_pdf=searchable_pdf,
             ocr_lang=ocr_lang,
         )
 
-        stem = pathlib.Path(uploaded_file.name).stem or "document"
+        stem = pathlib.Path(upload_name).stem or "document"
         st.session_state.auto_document = document
         st.session_state.auto_summary = auto_ocr.document_summary(document)
         st.session_state.auto_downloads = {
@@ -231,6 +247,7 @@ def run_auto_batch(
     describe_images=False,
     extract_survey=False,
     same_template=False,
+    survey_batch_mode=False,
     searchable_pdf=False,
     ocr_lang="eng",
 ):
@@ -255,23 +272,19 @@ def run_auto_batch(
         if extract_survey and same_template
         else None
     )
+    # Keep recognition weights resident for the batch.
+    vl_session = auto_ocr.VLWorkerSession()
 
     try:
         INPUT_DIR.mkdir(parents=True, exist_ok=True)
         RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
-        with zipfile.ZipFile(batch_zip, "r") as z:
-            z.extractall(INPUT_DIR)
-
         valid_exts = {"." + e for e in AUTO_INPUT_TYPES}
-        valid_files = []
-        for root, dirs, files in os.walk(INPUT_DIR):
-            for file in files:
-                if file.startswith("._"):
-                    continue
-                file_path = pathlib.Path(root) / file
-                if file_path.suffix.lower() in valid_exts:
-                    valid_files.append(file_path)
+        with zipfile.ZipFile(batch_zip, "r") as z:
+            valid_files = upload_safety.extract_zip_safely(
+                z, INPUT_DIR, allowed_extensions=valid_exts
+            )
+        valid_files = [path for path in valid_files if not path.name.startswith("._")]
         valid_files.sort(key=lambda path: str(path.relative_to(INPUT_DIR)).casefold())
 
         if not valid_files:
@@ -280,13 +293,36 @@ def run_auto_batch(
         progress_bar = st.progress(0.0)
         status_text = st.empty()
 
+        # The consensus template needs all questionnaires up front.
+        template, blanks, readings = None, None, []
+        if survey_batch_mode:
+            def _template_progress(fraction, text):
+                progress_bar.progress(min(0.99, max(0.0, fraction)))
+                status_text.markdown(f"**Questionnaire layout** — {text}")
+
+            _template_progress(0.0, f"reading {len(valid_files)} file(s)...")
+            template, blanks = survey_batch.prepare_template(
+                valid_files, label=True, progress=_template_progress,
+                vl_session=vl_session,
+            )
+            status_text.markdown(
+                f"**Questionnaire layout** — {template.control_count} response "
+                f"controls in {len(template.rules)} answers"
+            )
+            small_batch = template.provenance.get("small_batch_warning")
+            if small_batch:
+                st.warning(small_batch)
+
         n_files = len(valid_files)
         batch_provenance = []
+        batch_started = time.monotonic()
+        file_times = []
+        document_index = {}
+        used_output_dirs = set()
         for idx, file_path in enumerate(valid_files):
             rel_path = file_path.relative_to(INPUT_DIR)
 
             def _file_progress(frac, text, _idx=idx, _rel=rel_path):
-                # Each file's own page progress, folded into the batch bar.
                 progress_bar.progress(
                     min(1.0, (_idx + max(0.0, min(1.0, frac))) / n_files)
                 )
@@ -295,8 +331,12 @@ def run_auto_batch(
                 )
 
             _file_progress(0.0, "starting...")
+            file_started = time.monotonic()
 
-            file_output_dir = RESULTS_DIR / rel_path.parent / file_path.stem
+            output_rel_dir = upload_safety.unique_output_directory(
+                rel_path, used_output_dirs
+            )
+            file_output_dir = RESULTS_DIR / output_rel_dir
             file_output_dir.mkdir(parents=True, exist_ok=True)
             per_file_ws = WORKSPACE_DIR / "tmp" / f"job_{idx}"
 
@@ -311,19 +351,53 @@ def run_auto_batch(
                 ocr_lang=ocr_lang,
                 vision_client=shared_vision_client,
                 same_layout_template=same_layout_template,
+                vl_session=vl_session,
             )
 
-            # Same writer as the single-document downloads; the provenance
-            # summary is collected instead, and written once at the root.
+            skip_tables = None
+            if template is not None:
+                reading = survey_batch.read_document(file_path, template)
+                reading.export_directory = output_rel_dir.as_posix()
+                readings.append(reading)
+                survey_batch.safe_csv(
+                    survey_batch.answers_for_document(reading, template),
+                    file_output_dir / "survey_answers.csv",
+                )
+                survey_batch.to_form_groups(reading, template, document)
+                skip_tables = survey_batch.survey_table_regions(document, template)
+
             doc_ir.write_document_outputs(
-                document, file_output_dir, "document", provenance=False
+                document, file_output_dir, "document", provenance=False,
+                skip_tables=skip_tables,
+                form_responses=template is None,
             )
             batch_provenance.append(doc_ir.model_provenance(document))
+            if template is not None:
+                document_index[file_output_dir.relative_to(RESULTS_DIR).as_posix()] = (
+                    survey_batch.slim_document(document)
+                )
 
             shutil.rmtree(per_file_ws, ignore_errors=True)
+            file_times.append(time.monotonic() - file_started)
+            print(f"[OCR] file {idx + 1}/{n_files} {rel_path}: "
+                  f"{file_times[-1]:.1f}s", flush=True)
             progress_bar.progress((idx + 1) / n_files)
 
-        status_text.markdown(f"**{n_files} file(s) parsed** — zipping results...")
+        if template is not None:
+            status_text.markdown("**Collecting questionnaire responses...**")
+            survey_batch.write_batch_outputs(
+                readings, template, RESULTS_DIR / "survey"
+            )
+
+        elapsed = time.monotonic() - batch_started
+        print(f"[OCR] {n_files} file(s) in {elapsed:.1f}s "
+              f"(mean {elapsed / max(1, n_files):.1f}s/file; "
+              f"first {file_times[0]:.1f}s, rest mean "
+              f"{sum(file_times[1:]) / max(1, len(file_times) - 1):.1f}s)", flush=True)
+        st.session_state.batch_auto_elapsed = elapsed
+        status_text.markdown(
+            f"**{n_files} file(s) parsed in {elapsed / 60:.1f} min** — zipping results..."
+        )
 
         # One summary at the root, the union over files: a batch can mix lanes.
         merged_provenance = doc_ir.provenance_to_text(
@@ -343,17 +417,87 @@ def run_auto_batch(
 
         st.session_state.batch_auto_zip = out_zip_buffer.getvalue()
         st.session_state.batch_auto_complete = True
+        if template is not None:
+            st.session_state.survey_template = template
+            st.session_state.survey_readings = readings
+            st.session_state.survey_documents = document_index
 
     except Exception as e:
         st.session_state.auto_error = f"Batch automatic OCR failed: {e}"
         st.exception(e)
     finally:
+        vl_session.close()
         if shared_vision_client is not None:
             # Not evicted: it expires after keep_alive, and the next OCR worker
             # frees the card itself. See vision_enrich.free_gpu.
             shared_vision_client.close()
         st.session_state.ocr_running = False
         _cleanup_job_dir(JOB_DIR)
+
+
+def render_survey_review():
+    """Let the user check the detected form and drop anything spurious."""
+    template = st.session_state.get("survey_template")
+    readings = st.session_state.get("survey_readings")
+    if not template or not readings:
+        return
+
+    st.markdown("### 📋 The questionnaire TextLab detected")
+    st.caption(
+        f"{template.control_count} response controls in {len(template.rules)} "
+        f"answers, learned from the batch itself. Check the outlines below: "
+        "printed text can occasionally be mistaken for an empty checkbox."
+    )
+    overlays = survey_batch.template_overlays(template)
+    if overlays:
+        tabs = st.tabs([f"Page {i + 1}" for i in range(len(overlays))])
+        for tab, (name, data) in zip(tabs, sorted(overlays.items())):
+            with tab:
+                st.image(data, caption=name, use_container_width=True)
+
+    overview = survey_batch.answer_overview(readings, template)
+    dead = overview[overview["never_marked"]]
+    if len(dead):
+        st.warning(
+            f"{len(dead)} answer(s) nobody in this batch marked (shown as "
+            "`never_marked` below). That is either a question they all skipped, "
+            "or printed text mistaken for a control — the image above settles "
+            "which."
+        )
+    st.dataframe(
+        overview.drop(columns=["control_ids"]),
+        use_container_width=True, hide_index=True,
+    )
+
+    labels = {row["answer"]: row["control_ids"] for _, row in overview.iterrows()}
+    chosen = st.multiselect(
+        "Remove answers that are not really on the form",
+        options=list(labels),
+        # Deliberately not pre-selected: an answer nobody marked is just as
+        # likely a question the whole batch skipped as a false positive, and
+        # only the image above settles it.
+        key="survey_drop",
+        help=(
+            "Removes them from every file that carries answers — the batch "
+            "tables, each questionnaire's own answers and its document.md — "
+            "and renumbers the rest. The questionnaires are not parsed again."
+        ),
+    )
+    if chosen and st.button("♻️ Rebuild the exports", key="survey_rebuild"):
+        ids = [i for name in chosen for i in labels[name].split(",") if i]
+        removed = survey_batch.drop_controls(template, ids)
+        zip_bytes, summary = survey_batch.rebuild_exports(
+            st.session_state.batch_auto_zip, template, readings,
+            st.session_state.get("survey_documents"),
+        )
+        st.session_state.batch_auto_zip = zip_bytes
+        st.session_state.survey_template = template
+        st.success(
+            f"Removed {removed} control(s); {summary['controls']} remain in "
+            f"{summary['answer_groups']} answers. Every export was rewritten — "
+            "**download the ZIP again** to get them."
+        )
+        st.rerun()
 
 
 # ==========================================
@@ -380,7 +524,9 @@ def render_document_tab(document):
                 if text:
                     st.markdown(f"### {text}")
             elif rtype == doc_ir.TABLE:
-                html = region.content.get("html", "").strip()
+                html = html_safety.sanitize_table_html(
+                    region.content.get("html", "").strip()
+                )
                 if html:
                     st.markdown(html, unsafe_allow_html=True)
             elif rtype == doc_ir.FORMULA:
@@ -465,14 +611,116 @@ def _group_is_multiselect(group):
     return group.question_type == "multiple" or group.selection_rule == "zero_or_more"
 
 
-def _render_form_review(document):
-    """Interactive answer-correction editor bound to ``FormOption.state``.
+REVIEW_REASON_LABELS = {
+    "answer_geometry_disagreement": "answer conflicts with geometric ink evidence",
+    "ambiguous_mark": "ambiguous response mark",
+    "extraction_failed": "response extraction failed",
+    "missing_answer": "expected answer was not found",
+    "selection_rule_violation": "answer violates the selection rule",
+    "source_disagreement": "answer evidence disagrees",
+    "structural_issue": "question structure needs checking",
+    "unbenchmarked_model": "model has not passed the release benchmark",
+    "unmapped_mark": "visible ink was not mapped to an answer",
+    "validation_warning": "validation warning",
+}
 
-    Each question is rendered as pre-filled widgets (radio for single/rating/matrix
-    rows, checkboxes for multi-answer questions). Saving writes the reviewer's
-    selections back onto the document and regenerates the CSV/JSON downloads; the
-    model's original answer is preserved in ``group.provenance``.
-    """
+
+def _option_labels(row):
+    """Unambiguous labels suitable for both widgets and correction mapping."""
+    labels = [
+        (option.label.strip() or f"option {index + 1}")
+        for index, option in enumerate(row.options)
+    ]
+    duplicates = {label for label in labels if labels.count(label) > 1}
+    return [
+        f"{label} [{index + 1}]" if label in duplicates else label
+        for index, label in enumerate(labels)
+    ]
+
+
+def _selected_answer(row):
+    labels = _option_labels(row)
+    selected = [
+        labels[index]
+        for index, option in enumerate(row.options)
+        if option.state == "selected"
+    ]
+    return " | ".join(selected) if selected else "— no answer —"
+
+
+def _group_answer_summary(group):
+    answers = []
+    for row in group.rows:
+        answer = _selected_answer(row)
+        answers.append(f"{row.label}: {answer}" if row.label else answer)
+    return "; ".join(answers) if answers else "— extraction failed —"
+
+
+def _matrix_uses_shared_single_choice_options(group):
+    """Whether a matrix can be edited safely as one compact answer column."""
+    if (
+        group.question_type != "matrix"
+        or not group.rows
+        or _group_is_multiselect(group)
+    ):
+        return False
+    first = _option_labels(group.rows[0])
+    return bool(first) and all(
+        _option_labels(row) == first
+        and sum(option.state == "selected" for option in row.options) <= 1
+        for row in group.rows
+    )
+
+
+def _render_matrix_editor(group):
+    """Render a whole matrix as one table and return row -> selected position."""
+    labels = _option_labels(group.rows[0])
+    choices = ["— none —", *labels]
+    records = []
+    for row in group.rows:
+        selected_position = next(
+            (
+                index + 1
+                for index, option in enumerate(row.options)
+                if option.state == "selected"
+            ),
+            0,
+        )
+        reasons = [
+            REVIEW_REASON_LABELS.get(reason, reason.replace("_", " "))
+            for reason in row.review_reasons
+        ]
+        records.append(
+            {
+                "Row": row.label or row.id,
+                "Answer": choices[selected_position],
+                "Review": " · ".join(reasons),
+            }
+        )
+    edited = st.data_editor(
+        pd.DataFrame(records),
+        key=f"rev_matrix_{group.id}",
+        hide_index=True,
+        use_container_width=True,
+        disabled=["Row", "Review"],
+        column_config={
+            "Row": st.column_config.TextColumn(width="large"),
+            "Answer": st.column_config.SelectboxColumn(
+                options=choices,
+                required=True,
+                width="medium",
+            ),
+            "Review": st.column_config.TextColumn(width="large"),
+        },
+    )
+    return {
+        row.id: choices.index(answer) if answer in choices else 0
+        for row, answer in zip(group.rows, edited["Answer"].tolist())
+    }
+
+
+def _render_form_review(document):
+    """Summary-first response review with compact question-level editors."""
     form_groups = [(page, g) for page in document.pages for g in page.form_groups]
     if not form_groups:
         return
@@ -480,79 +728,147 @@ def _render_form_review(document):
     if n_review:
         st.warning(
             f"⚠️ {n_review} of {len(form_groups)} question(s) were flagged for review. "
-            "Correct any answer below and press **Save corrections** — the downloads update "
-            "to your edits and the model's original answer is kept in the JSON."
+            "Flagged questions are open below; accepted questions stay collapsed. "
+            "Saving updates the downloads and retains the original model answer in JSON."
         )
     else:
         st.success(
-            f"Extracted {len(form_groups)} question(s). You can still correct any answer below."
+            f"Extracted {len(form_groups)} question(s). Expand any row below to make a correction."
         )
 
+    summary_records = [
+        {
+            "Question": group.question_text or group.id,
+            "Answer": _group_answer_summary(group),
+            "Status": "Needs review" if group.status == "needs_review" else "Accepted",
+            "Page": page.page_number,
+        }
+        for page, group in form_groups
+    ]
+    st.dataframe(
+        pd.DataFrame(summary_records),
+        hide_index=True,
+        use_container_width=True,
+        column_config={
+            "Question": st.column_config.TextColumn(width="large"),
+            "Answer": st.column_config.TextColumn(width="large"),
+            "Status": st.column_config.TextColumn(width="small"),
+            "Page": st.column_config.NumberColumn(width="small"),
+        },
+    )
+
+    matrix_edits = {}
     with st.form("survey_review_form"):
         for page, group in form_groups:
             multi = _group_is_multiselect(group)
             flag = "⚠️ " if group.status == "needs_review" else ""
-            st.markdown(f"**{flag}{group.question_text or group.id}**")
-            st.caption(
-                f"`{group.question_type}` · `{group.selection_rule}` · page {page.page_number}"
-            )
-            if group.condition_text:
-                st.caption(f"↳ conditional: {group.condition_text}")
-            for w in group.warnings:
-                st.caption(f"⚠️ {w}")
-            if not group.rows or not any(r.options for r in group.rows):
-                st.info(
-                    "Options for this question could not be extracted automatically. "
-                    "Open the scan below; if there is an answer, enter it from the export. "
-                    "(This often means the vision model's response failed validation.)"
-                )
-            for row in group.rows:
-                key_base = f"rev_{group.id}_{row.id}"
-                labels = [
-                    (o.label.strip() or f"option {i + 1}") for i, o in enumerate(row.options)
-                ]
-                if not row.options:
-                    st.caption(f"_{row.label or 'row'}: no options detected_")
-                    continue
-                if multi:
-                    if row.label:
-                        st.markdown(f"*{row.label}*")
-                    n_cols = min(len(row.options), 4)
-                    cols = st.columns(n_cols)
-                    for i, o in enumerate(row.options):
-                        cols[i % n_cols].checkbox(
-                            labels[i], value=(o.state == "selected"), key=f"{key_base}_{o.id}"
-                        )
-                else:
-                    sel_idx = next(
-                        (i + 1 for i, o in enumerate(row.options) if o.state == "selected"), 0
+            question = group.question_text or group.id
+            answer = _group_answer_summary(group)
+            expander_label = f"{flag}{question} — {answer}"
+            if len(expander_label) > 180:
+                expander_label = f"{expander_label[:177]}…"
+            with st.expander(
+                expander_label,
+                expanded=(group.status == "needs_review"),
+            ):
+                needs_review = group.status == "needs_review"
+                layout = st.columns([3, 2]) if needs_review else [st.container()]
+                with layout[0]:
+                    st.caption(
+                        f"`{group.question_type}` · `{group.selection_rule}` · "
+                        f"page {page.page_number}"
                     )
-                    st.radio(
-                        row.label or "Answer",
-                        options=list(range(len(row.options) + 1)),
-                        index=sel_idx,
-                        format_func=lambda x, _l=labels: "— none —" if x == 0 else _l[x - 1],
-                        key=key_base,
-                        horizontal=(len(row.options) <= 6),
-                    )
-                for i, o in enumerate(row.options):
-                    if o.associated_text:
-                        st.text_input(
-                            f"✍️ handwriting near “{labels[i]}”",
-                            value=o.associated_text,
-                            key=f"{key_base}_{o.id}_txt",
+                    if group.condition_text:
+                        st.caption(f"↳ conditional: {group.condition_text}")
+                    if group.review_reasons:
+                        reasons = [
+                            REVIEW_REASON_LABELS.get(reason, reason.replace("_", " "))
+                            for reason in group.review_reasons
+                        ]
+                        st.caption(f"Review because: {'; '.join(reasons)}")
+                    for warning in group.warnings:
+                        st.caption(f"⚠️ {warning}")
+                    if not group.rows or not any(row.options for row in group.rows):
+                        st.info(
+                            "Options for this question could not be extracted automatically. "
+                            "This item remains flagged after saving because there is no safe "
+                            "correction control."
                         )
-            with st.expander("🔍 Show scan of this question"):
-                crop = _b64_bytes(group.source_crop_b64)
-                if crop:
-                    st.image(crop, use_container_width=True)
-                else:
-                    st.caption("No crop available for this question.")
-            st.divider()
+                    elif _matrix_uses_shared_single_choice_options(group):
+                        matrix_edits[group.id] = _render_matrix_editor(group)
+                    else:
+                        for row in group.rows:
+                            key_base = f"rev_{group.id}_{row.id}"
+                            labels = _option_labels(row)
+                            if not row.options:
+                                st.caption(f"_{row.label or 'row'}: no options detected_")
+                                continue
+                            if row.review_reasons:
+                                reasons = [
+                                    REVIEW_REASON_LABELS.get(
+                                        reason, reason.replace("_", " ")
+                                    )
+                                    for reason in row.review_reasons
+                                ]
+                                st.caption(
+                                    f"⚠️ {row.label or 'Answer'}: {'; '.join(reasons)}"
+                                )
+                            if multi:
+                                if row.label:
+                                    st.markdown(f"*{row.label}*")
+                                n_cols = min(len(row.options), 4)
+                                cols = st.columns(n_cols)
+                                for index, option in enumerate(row.options):
+                                    cols[index % n_cols].checkbox(
+                                        labels[index],
+                                        value=(option.state == "selected"),
+                                        key=f"{key_base}_{option.id}",
+                                    )
+                            else:
+                                selected_index = next(
+                                    (
+                                        index + 1
+                                        for index, option in enumerate(row.options)
+                                        if option.state == "selected"
+                                    ),
+                                    0,
+                                )
+                                st.radio(
+                                    row.label or "Answer",
+                                    options=list(range(len(row.options) + 1)),
+                                    index=selected_index,
+                                    format_func=lambda value, _labels=labels: (
+                                        "— none —" if value == 0 else _labels[value - 1]
+                                    ),
+                                    key=key_base,
+                                    horizontal=(len(row.options) <= 6),
+                                )
+                            for index, option in enumerate(row.options):
+                                if option.associated_text:
+                                    st.text_input(
+                                        f"✍️ handwriting near “{labels[index]}”",
+                                        value=option.associated_text,
+                                        key=f"{key_base}_{option.id}_txt",
+                                    )
+                if needs_review:
+                    with layout[1]:
+                        st.caption("Source section")
+                        crop = _b64_bytes(group.source_crop_b64)
+                        if crop:
+                            st.image(
+                                crop,
+                                caption=f"Page {page.page_number}",
+                                use_container_width=True,
+                            )
+                        else:
+                            st.warning(
+                                "The source crop is unavailable; this item cannot be "
+                                "verified visually."
+                            )
         submitted = st.form_submit_button("💾 Save corrections", type="primary")
 
     if submitted:
-        _apply_form_corrections(document)
+        _apply_form_corrections(document, matrix_edits)
         downloads = st.session_state.setdefault("auto_downloads", {})
         stem = downloads.get("stem", "document")
         downloads["json"] = doc_ir.to_json(document).encode("utf-8")
@@ -562,12 +878,13 @@ def _render_form_review(document):
         st.success("✅ Corrections saved. The downloads above now reflect your edits.")
 
 
-def _apply_form_corrections(document):
+def _apply_form_corrections(document, matrix_edits=None):
     """Write reviewer selections back into the document, preserving model originals."""
+    matrix_edits = matrix_edits or {}
     for page in document.pages:
         for group in page.form_groups:
             multi = _group_is_multiselect(group)
-            if not group.provenance.get("human_reviewed"):
+            if "model_answer" not in group.provenance:
                 group.provenance["model_answer"] = [
                     {
                         "row": row.label or row.id,
@@ -576,11 +893,28 @@ def _apply_form_corrections(document):
                     }
                     for row in group.rows
                 ]
+                group.provenance["pre_review_reasons"] = {
+                    "group": list(group.review_reasons),
+                    "rows": {
+                        row.id: list(row.review_reasons)
+                        for row in group.rows
+                    },
+                }
+            reviewed_rows = 0
+            unresolved_rows = 0
             for row in group.rows:
                 key_base = f"rev_{group.id}_{row.id}"
                 if not row.options:
+                    unresolved_rows += 1
                     continue
-                if multi:
+                previous_states = {option.id: option.state for option in row.options}
+                if group.id in matrix_edits:
+                    selected_position = matrix_edits[group.id].get(row.id, 0)
+                    for index, option in enumerate(row.options):
+                        option.state = (
+                            "selected" if selected_position == index + 1 else "unselected"
+                        )
+                elif multi:
                     for o in row.options:
                         chosen = st.session_state.get(
                             f"{key_base}_{o.id}", o.state == "selected"
@@ -594,9 +928,23 @@ def _apply_form_corrections(document):
                     tkey = f"{key_base}_{o.id}_txt"
                     if tkey in st.session_state:
                         o.associated_text = st.session_state[tkey]
+                    o.observations.append(
+                        doc_ir.Observation(
+                            source="human-review",
+                            value=o.state,
+                            method="responses-tab",
+                            raw={"previous_state": previous_states[o.id]},
+                        )
+                    )
                 row.status = "accepted"
-            group.status = "accepted"
-            group.provenance["human_reviewed"] = True
+                row.review_reasons.clear()
+                reviewed_rows += 1
+            if reviewed_rows and not unresolved_rows:
+                group.status = "accepted"
+                group.review_reasons.clear()
+                group.provenance["human_reviewed"] = True
+            elif unresolved_rows or not group.rows:
+                group.status = "needs_review"
 
 
 def _render_legacy_mark_summary(glyph_regions, checkbox_marks):
@@ -871,6 +1219,7 @@ _OPTION_COSTS = {
     "searchable_pdf": "a word-positioning pass per page",
     "describe_images": "one vision-model call per figure",
     "extract_survey": "one vision-model call per question",
+    "survey_batch_mode": "one pass to learn the form, then a second read per file",
 }
 
 
@@ -922,6 +1271,22 @@ def _parse_options(prefix, *, batch=False):
                 help=(
                     "Adds a generated description and visible-text "
                     "transcription to each detected figure."
+                ),
+            )
+
+        options["survey_batch_mode"] = False
+        if batch:
+            options["survey_batch_mode"] = st.checkbox(
+                "📋 Extract questionnaire responses",
+                value=False,
+                key=f"{prefix}_survey_batch",
+                help=(
+                    "For a batch of the **same** paper questionnaire filled in by "
+                    "different people. TextLab learns the blank form from the "
+                    "batch itself, then reads every respondent against it and "
+                    "adds a survey/ folder: one row per respondent, TRUE/FALSE "
+                    "per checkbox, and a certainty beside every answer. The "
+                    "normal text extraction still runs for each file."
                 ),
             )
 
@@ -995,7 +1360,9 @@ def auto_batch_ui():
     st.markdown(
         "Upload a **ZIP archive** of PDFs or images. Each file is parsed with the "
         "automatic pipeline; the result ZIP mirrors your folder structure with a "
-        "`document.md`, `document.json`, `tables/` and `assets/` per file."
+        "`document.md`, `document.json`, `tables/` and `assets/` per file. For a "
+        "batch of the same filled-in questionnaire, tick **Extract questionnaire "
+        "responses** to also get a `survey/` folder with one row per respondent."
     )
     batch_zip = st.file_uploader(
         "Upload ZIP file",
@@ -1016,12 +1383,17 @@ def auto_batch_ui():
                 describe_images=opts["describe_images"],
                 extract_survey=opts["extract_survey"],
                 same_template=opts["same_template"],
+                survey_batch_mode=opts["survey_batch_mode"],
                 searchable_pdf=opts["searchable_pdf"],
                 ocr_lang=opts["ocr_lang"],
             )
 
     if st.session_state.get("batch_auto_complete"):
-        st.success("✅ Batch parsing completed successfully!")
+        elapsed = st.session_state.get("batch_auto_elapsed")
+        st.success(
+            "✅ Batch parsing completed successfully!"
+            + (f" ({elapsed / 60:.1f} min)" if elapsed else "")
+        )
         st.download_button(
             "📥 Download all results (ZIP)",
             st.session_state.batch_auto_zip,
@@ -1030,12 +1402,13 @@ def auto_batch_ui():
             use_container_width=True,
             type="primary",
         )
+        render_survey_review()
     elif st.session_state.get("auto_error"):
         st.error(st.session_state.auto_error)
 
 
 # ==========================================
-#      LEGACY ENGINES (unchanged behavior)
+#      ADDITIONAL OCR ENGINES
 # ==========================================
 
 def legacy_single_flow(ocr_engine, ocr_language, glm_mode):
@@ -1098,7 +1471,8 @@ def legacy_single_flow(ocr_engine, ocr_language, glm_mode):
                 preview_images = []
 
                 # Save uploaded file
-                input_file_path = INPUT_DIR / uploaded_file.name
+                upload_name = upload_safety.safe_upload_name(uploaded_file.name)
+                input_file_path = INPUT_DIR / upload_name
                 with open(input_file_path, "wb") as f:
                     f.write(uploaded_file.getbuffer())
 
@@ -1311,7 +1685,10 @@ def legacy_single_flow(ocr_engine, ocr_language, glm_mode):
         elif "<table>" in st.session_state.extracted_text or '<table class="' in st.session_state.extracted_text:
             # Fallback if pandas parsing failed but HTML table exists
             st.markdown("### 📊 Detected Table")
-            st.markdown(st.session_state.extracted_text, unsafe_allow_html=True)
+            st.markdown(
+                html_safety.sanitize_table_html(st.session_state.extracted_text),
+                unsafe_allow_html=True,
+            )
 
         # 2. Raw Text Output
         st.markdown("### Extracted Text / Code")
@@ -1421,23 +1798,18 @@ def legacy_batch_flow(ocr_engine, ocr_language, glm_mode):
                 INPUT_DIR.mkdir(parents=True, exist_ok=True)
                 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
-                # Extract the uploaded ZIP securely
-                with zipfile.ZipFile(batch_zip, "r") as z:
-                    z.extractall(INPUT_DIR)
-
                 valid_exts = {".pdf", ".png", ".jpg", ".jpeg", ".bmp", ".tiff"}
-                valid_files = []
-                for root, dirs, files in os.walk(INPUT_DIR):
-                    for file in files:
-                        if file.startswith("._"): continue # Skip macOS metadata files
-                        file_path = pathlib.Path(root) / file
-                        if file_path.suffix.lower() in valid_exts:
-                            valid_files.append(file_path)
+                with zipfile.ZipFile(batch_zip, "r") as z:
+                    valid_files = upload_safety.extract_zip_safely(
+                        z, INPUT_DIR, allowed_extensions=valid_exts
+                    )
+                valid_files = [
+                    path for path in valid_files if not path.name.startswith("._")
+                ]
 
                 if not valid_files:
                     raise RuntimeError("No valid documents or images found in the ZIP.")
 
-                # Pre-load Models for Image Engines (Saves massive time)
                 reader = None
                 if ocr_engine == "EasyOCR":
                     reader = get_easyocr_reader(ocr_language)
@@ -1445,14 +1817,16 @@ def legacy_batch_flow(ocr_engine, ocr_language, glm_mode):
                 progress_bar = st.progress(0.0)
                 status_text = st.empty()
 
-                # Processing Loop
+                used_output_dirs = set()
                 for idx, file_path in enumerate(valid_files):
-                    base_name = file_path.stem
                     rel_path = file_path.relative_to(INPUT_DIR)
                     status_text.text(f"Processing ({idx+1}/{len(valid_files)}): {rel_path}")
 
-                    # Create dedicated output folder replicating zip structure
-                    file_output_dir = RESULTS_DIR / rel_path.parent / base_name
+                    output_rel_dir = upload_safety.unique_output_directory(
+                        rel_path, used_output_dirs
+                    )
+                    base_name = output_rel_dir.name
+                    file_output_dir = RESULTS_DIR / output_rel_dir
                     file_output_dir.mkdir(parents=True, exist_ok=True)
 
                     is_pdf = file_path.suffix.lower() == ".pdf"

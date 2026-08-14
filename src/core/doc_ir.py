@@ -21,7 +21,7 @@ import json
 import re
 import zipfile
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import pandas as pd
 
@@ -181,6 +181,7 @@ class FormRow:
     label: str = ""
     options: List[FormOption] = field(default_factory=list)
     status: str = "accepted"  # accepted|recovered|needs_review|failed
+    review_reasons: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -189,6 +190,7 @@ class FormRow:
             "label": self.label,
             "options": [o.to_dict() for o in self.options],
             "status": self.status,
+            "review_reasons": list(self.review_reasons),
             "warnings": list(self.warnings),
         }
 
@@ -204,10 +206,16 @@ class FormGroup:
     selection_rule: str = "zero_or_more"
     rows: List[FormRow] = field(default_factory=list)
     status: str = "accepted"
+    review_reasons: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
     parent_question_id: str = ""
     condition_text: str = ""
     provenance: Dict[str, Any] = field(default_factory=dict)
+    #: Regions this group stands in for when the document is rendered: the
+    #: printed grid a matrix was read off says nothing the answers below do not,
+    #: and its OCR cells are empty. Producers that would lose printed text by
+    #: replacing a region leave it out, and the region is kept as well.
+    covered_region_ids: List[str] = field(default_factory=list)
     source_crop_b64: Optional[str] = None  # runtime/bundle asset; omitted from JSON
 
     def to_dict(self) -> Dict[str, Any]:
@@ -219,10 +227,12 @@ class FormGroup:
             "selection_rule": self.selection_rule,
             "rows": [r.to_dict() for r in self.rows],
             "status": self.status,
+            "review_reasons": list(self.review_reasons),
             "warnings": list(self.warnings),
             "parent_question_id": self.parent_question_id,
             "condition_text": self.condition_text,
             "provenance": dict(self.provenance),
+            "covered_region_ids": list(self.covered_region_ids),
         }
 
 
@@ -278,6 +288,10 @@ class Page:
     width: Optional[int] = None
     height: Optional[int] = None
     image_b64: Optional[str] = None  # rendered page raster (PNG) for the layout preview
+    #: Pixel ``(width, height)`` of that preview. Region boxes are scaled to it,
+    #: so a consumer that drops the raster to save memory can record the size
+    #: here and still place a box on the page.
+    preview_size: Optional[Tuple[int, int]] = None
     source: str = "paddleocr-vl-1.6"
     markdown: Optional[str] = None  # engine-native markdown, if any
     form_groups: List[FormGroup] = field(default_factory=list)
@@ -555,14 +569,113 @@ def _region_to_markdown(region: Region, asset_dir: str, embed_assets: bool) -> s
     return region.text.strip()
 
 
+def _covered_fraction(inner: List[float], outer: List[float]) -> float:
+    """How much of *inner* lies inside *outer*, 0..1."""
+    if len(inner) < 4 or len(outer) < 4:
+        return 0.0
+    ix1, iy1 = max(inner[0], outer[0]), max(inner[1], outer[1])
+    ix2, iy2 = min(inner[2], outer[2]), min(inner[3], outer[3])
+    if ix2 <= ix1 or iy2 <= iy1:
+        return 0.0
+    area = (inner[2] - inner[0]) * (inner[3] - inner[1])
+    return ((ix2 - ix1) * (iy2 - iy1) / area) if area > 0 else 0.0
+
+
+def _form_answer_text(option: FormOption) -> str:
+    """One option as it reads in an answer: its label, plus any written-in text."""
+    label = option.label.strip() or option.id
+    if not option.associated_text:
+        return label
+    return f"{label.rstrip().rstrip(':')}: {option.associated_text}"
+
+
+def _form_row_answer(row: FormRow) -> str:
+    """What one question row answers: the chosen options, or why there is none."""
+    selected = [_form_answer_text(o) for o in row.options if o.state == "selected"]
+    unread = any(o.state == "ambiguous" for o in row.options)
+    if selected:
+        return " | ".join(selected) + (" (+ unreadable mark)" if unread else "")
+    return "unreadable" if unread else "no answer"
+
+
+def _form_group_lines(group: FormGroup, *, markup: bool) -> List[str]:
+    """A group as flat lines: the question, then one line per row it answers."""
+    strong = "**" if markup else ""
+    bullet = "- " if markup else "  "
+    header = group.question_text.strip() or group.id
+    if group.status == "needs_review":
+        header = f"{header} (needs review)"
+    lines = [f"{strong}{header}{strong}"]
+    if group.condition_text.strip():
+        lines.append(f"_{group.condition_text.strip()}_" if markup else group.condition_text.strip())
+    for row in group.rows:
+        label = row.label.strip()
+        answer = f"{strong}{_form_row_answer(row)}{strong}"
+        flag = " (needs review)" if row.status == "needs_review" else ""
+        lines.append(f"{bullet}{label + ': ' if label else ''}{answer}{flag}")
+    return lines
+
+
+def _page_stream(page: Page):
+    """Regions and form groups of one page in reading order.
+
+    Yields ``("region", region)`` and ``("form_group", group)``. A group is
+    emitted where its question is printed -- after the last region it overlaps
+    -- and the regions it accounts for are dropped: the grid it was read off
+    (declared by the producer) and the individual checkboxes inside it, which
+    would otherwise repeat every option a second time with no answer attached.
+    """
+    regions = page.ordered_regions()
+    groups = list(page.form_groups or [])
+    if not groups:
+        return [("region", region) for region in regions]
+
+    covered = {rid for group in groups for rid in group.covered_region_ids}
+    anchors: Dict[int, List[FormGroup]] = {}
+    trailing: List[FormGroup] = []
+    for group in groups:
+        overlapping = [
+            index for index, region in enumerate(regions)
+            if _covered_fraction(region.bbox, group.bbox) > 0
+        ]
+        if not overlapping:
+            # Nothing to sit next to: fall back to vertical position, so a group
+            # whose controls the layout model never boxed still lands in place.
+            top = group.bbox[1] if len(group.bbox) >= 4 else None
+            overlapping = [
+                index for index, region in enumerate(regions)
+                if top is not None and len(region.bbox) >= 4 and region.bbox[3] <= top
+            ]
+        if overlapping:
+            anchors.setdefault(max(overlapping), []).append(group)
+        else:
+            trailing.append(group)
+        for region in regions:
+            if region.type == CHECKBOX and _covered_fraction(region.bbox, group.bbox) >= 0.5:
+                covered.add(region.id)
+
+    stream = []
+    for index, region in enumerate(regions):
+        if region.id not in covered:
+            stream.append(("region", region))
+        for group in anchors.get(index, ()):
+            stream.append(("form_group", group))
+    stream.extend(("form_group", group) for group in trailing)
+    return stream
+
+
 def to_markdown(document: Document, asset_dir: str = "assets", embed_assets: bool = True) -> str:
     """Deterministic markdown rendering of the whole document (reading order)."""
     chunks: List[str] = []
     for page in document.pages:
         if len(document.pages) > 1:
             chunks.append(f"<!-- page {page.page_number} -->")
-        for region in page.ordered_regions():
-            md = _region_to_markdown(region, asset_dir, embed_assets)
+        for kind, item in _page_stream(page):
+            md = (
+                _region_to_markdown(item, asset_dir, embed_assets)
+                if kind == "region"
+                else "\n".join(_form_group_lines(item, markup=True))
+            )
             if md.strip():
                 chunks.append(md)
     return "\n\n".join(chunks).strip() + "\n"
@@ -594,8 +707,12 @@ def to_text(document: Document, page_separator: bool = True) -> str:
     for page in document.pages:
         if page_separator and len(document.pages) > 1:
             chunks.append(f"--- page {page.page_number} ---")
-        for region in page.ordered_regions():
-            text = _region_to_text(region)
+        for kind, item in _page_stream(page):
+            text = (
+                _region_to_text(item)
+                if kind == "region"
+                else "\n".join(_form_group_lines(item, markup=False))
+            )
             if text.strip():
                 chunks.append(text)
     return "\n\n".join(chunks).strip() + "\n"
@@ -617,7 +734,14 @@ def build_docx(document: Document, doc_stem: str = "document") -> Optional[bytes
     for page_index, page in enumerate(document.pages):
         if page_index:
             doc.add_page_break()
-        for region in page.ordered_regions():
+        for kind, item in _page_stream(page):
+            if kind == "form_group":
+                lines = _form_group_lines(item, markup=False)
+                doc.add_paragraph().add_run(lines[0]).bold = True
+                for line in lines[1:]:
+                    doc.add_paragraph(line.strip())
+                continue
+            region = item
             rtype = region.type
             if rtype == TITLE:
                 text = region.text.strip()
@@ -733,6 +857,17 @@ def form_responses_to_dataframe(document: Document) -> Optional[pd.DataFrame]:
                             "needs_review"
                             if "needs_review" in (group.status, row.status)
                             else row.status
+                        ),
+                        "review_reasons": " | ".join(
+                            dict.fromkeys(group.review_reasons + row.review_reasons)
+                        ),
+                        "evidence_sources": " | ".join(
+                            dict.fromkeys(
+                                observation.source
+                                for option in row.options
+                                for observation in option.observations
+                                if option.state == "selected"
+                            )
                         ),
                     }
                 )
@@ -882,13 +1017,20 @@ def build_full_bundle(document: Document, doc_stem: str = "document") -> bytes:
 
 
 def write_document_outputs(
-    document: Document, out_dir, stem: str = "document", *, provenance: bool = True
+    document: Document,
+    out_dir,
+    stem: str = "document",
+    *,
+    provenance: bool = True,
+    skip_tables: Optional[Set[str]] = None,
+    form_responses: bool = True,
 ) -> List[str]:
     """Write every export format for one document into *out_dir*.
 
     Shared with the batch runner, so a format cannot reach one path and not the
     other. ``provenance=False`` omits ``models_used.txt``, for a batch writing
-    one merged copy at its root. Returns the relative names written.
+    one merged copy at its root; ``form_responses=False`` omits the generic
+    response CSV, for a caller that writes its own. Returns the names written.
     """
     import os
 
@@ -914,11 +1056,13 @@ def write_document_outputs(
     for fname, data in collect_assets(document).items():
         _write(os.path.join("assets", fname), data, binary=True)
     for entry in tables_to_dataframes(document):
+        if entry["region_id"] in (skip_tables or ()):
+            continue
         _write(
             os.path.join("tables", f"table_{entry['region_id']}.csv"),
             entry["dataframe"].to_csv(index=False),
         )
-    form_csv = build_form_responses_csv(document)
+    form_csv = build_form_responses_csv(document) if form_responses else None
     if form_csv:
         _write("form_responses.csv", form_csv, binary=True)
     if provenance:

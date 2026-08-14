@@ -46,6 +46,8 @@ IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif", ".webp"}
 RESULT_MARKER = "TEXTLAB_PADDLEVL_RESULT_JSON="
 #: Mirrors ``paddle_vl_worker.PROGRESS_MARKER``; the worker is a separate env.
 PROGRESS_MARKER = "TEXTLAB_PADDLEVL_PROGRESS="
+#: Mirrors ``paddle_vl_worker.READY_MARKER``.
+READY_MARKER = "TEXTLAB_PADDLEVL_READY="
 
 ProgressFn = Callable[[float, str], None]
 
@@ -82,6 +84,206 @@ def _emit(progress: Optional[ProgressFn], frac: float, text: str):
 VL_STALL_TIMEOUT = float(os.environ.get("TEXTLAB_VL_STALL_TIMEOUT", "900"))
 
 
+def _worker_env(backend_python: str) -> dict:
+    env = os.environ.copy()
+    bin_dir = Path(backend_python).resolve().parent
+    env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
+    env["LD_LIBRARY_PATH"] = f"{bin_dir.parent / 'lib'}:{env.get('LD_LIBRARY_PATH', '')}"
+    env.setdefault("DISABLE_MODEL_SOURCE_CHECK", "True")
+    env.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
+    return env
+
+
+def _free_gpu_for_worker() -> None:
+    """The worker allocates ~8.4 GiB, which does not fit beside a resident
+    ~20 GiB vision model on a 23 GiB card, and Ollama cannot account for a
+    non-Ollama consumer."""
+    try:
+        evicted = vision_enrich.free_gpu()
+        if evicted:
+            print(f"[auto_ocr] freed GPU for the OCR worker: {', '.join(evicted)}", flush=True)
+    except Exception:
+        pass
+
+
+def _pages_from_result(stdout: str, stderr: str) -> List[dict]:
+    for line in reversed(stdout.splitlines()):
+        if line.startswith(RESULT_MARKER):
+            payload = json.loads(line[len(RESULT_MARKER):])
+            if payload.get("error"):
+                raise RuntimeError(f"PaddleOCR-VL backend failed: {payload['error']}")
+            return payload.get("pages", [])
+    raise RuntimeError(
+        "PaddleOCR-VL backend did not return JSON.\n"
+        f"stdout:\n{stdout[-4000:]}\n\nstderr:\n{stderr[-4000:]}"
+    )
+
+
+class VLWorkerSession:
+    """A PaddleOCR-VL worker kept alive across many documents.
+
+    Loading the weights costs ~17 s and the first prediction another ~7 s of
+    warm-up. A batch that starts a worker per file pays that for every file,
+    which on short questionnaires is most of the wall clock; one session pays it
+    once. Not thread-safe: one request at a time, which is also all a single GPU
+    would do with them.
+    """
+
+    def __init__(
+        self,
+        *,
+        backend_python: Optional[str] = None,
+        worker_path: Optional[Path] = None,
+        stall_timeout: Optional[float] = None,
+    ):
+        self.backend_python = backend_python or _default_backend_python()
+        self.worker_path = worker_path or _worker_path()
+        self.stall_timeout = (
+            stall_timeout if stall_timeout is not None else VL_STALL_TIMEOUT
+        )
+        self._proc = None
+        self._lines = None
+        self._stderr: List[str] = []
+        self._started_at = 0.0
+        self.failed = False
+        #: Documents this session has answered, so a log reader can tell a
+        #: resident worker from one that keeps dying and being restarted.
+        self.documents = 0
+
+    # -- lifecycle ------------------------------------------------------------
+    def _start(self):
+        import queue
+        import threading
+
+        _free_gpu_for_worker()
+        self._started_at = time.monotonic()
+        self._proc = subprocess.Popen(
+            [self.backend_python, str(self.worker_path), "--serve"],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding="utf-8", errors="replace",
+            env=_worker_env(self.backend_python), bufsize=1,
+        )
+        self._lines = queue.Queue()
+
+        def drain_stdout(stream, sink):
+            for line in stream:
+                sink.put(line)
+            sink.put(None)  # the worker is gone; unblock whoever is waiting
+
+        def drain_stderr(stream, sink):
+            for line in stream:
+                sink.append(line)
+                del sink[:-400]  # a tail is enough to explain a crash
+
+        for target, args in (
+            (drain_stdout, (self._proc.stdout, self._lines)),
+            (drain_stderr, (self._proc.stderr, self._stderr)),
+        ):
+            threading.Thread(target=target, args=args, daemon=True).start()
+
+    def close(self):
+        if self._proc is None:
+            return
+        proc = self._proc
+        self._proc = None
+        try:
+            if proc.poll() is None:
+                proc.stdin.close()
+                proc.wait(timeout=10)
+        except Exception:
+            pass
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                try:
+                    proc.wait(timeout=10)
+                except Exception:
+                    pass
+            for stream in (proc.stdin, proc.stdout, proc.stderr):
+                try:
+                    stream.close()
+                except Exception:
+                    pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+    # -- requests -------------------------------------------------------------
+    def run(
+        self,
+        image_paths: List[Path],
+        *,
+        extra_labels: str = "",
+        on_page: Optional[Callable[[int, int], None]] = None,
+    ) -> List[dict]:
+        """Recognise one document's pages on the resident worker."""
+        import queue
+
+        if self._proc is None or self._proc.poll() is not None:
+            self.close()
+            self._start()
+
+        started = time.monotonic()
+        request = {"images": [str(p) for p in image_paths]}
+        if extra_labels:
+            request["extra_labels"] = extra_labels
+        try:
+            self._proc.stdin.write(json.dumps(request) + "\n")
+            self._proc.stdin.flush()
+        except Exception as exc:
+            self.failed = True
+            raise RuntimeError(f"PaddleOCR-VL worker is not accepting work: {exc}")
+
+        out_lines: List[str] = []
+        while True:
+            try:
+                line = self._lines.get(timeout=self.stall_timeout)
+            except queue.Empty:
+                self.failed = True
+                self.close()
+                raise RuntimeError(
+                    f"PaddleOCR-VL backend produced no output for "
+                    f"{self.stall_timeout:.0f}s and was stopped. Re-run the "
+                    "document; if it happens again, the page count or GPU "
+                    "memory may be the cause.\n"
+                    f"stderr:\n{''.join(self._stderr)[-4000:]}"
+                )
+            if line is None:
+                self.failed = True
+                self.close()
+                raise RuntimeError(
+                    "PaddleOCR-VL worker exited mid-document.\n"
+                    f"stdout:\n{''.join(out_lines)[-4000:]}\n\n"
+                    f"stderr:\n{''.join(self._stderr)[-4000:]}"
+                )
+            out_lines.append(line)
+            if line.startswith(READY_MARKER):
+                print(f"[auto_ocr] VL worker ready in "
+                      f"{time.monotonic() - self._started_at:.1f}s", flush=True)
+            if line.startswith(PROGRESS_MARKER):
+                _report_progress(line, on_page)
+            if line.startswith(RESULT_MARKER):
+                pages = _pages_from_result("".join(out_lines), "".join(self._stderr))
+                self.documents += 1
+                print(f"[auto_ocr] recognised {len(image_paths)} page(s) in "
+                      f"{time.monotonic() - started:.1f}s "
+                      f"(resident worker, document {self.documents})", flush=True)
+                return pages
+
+
+def _report_progress(line: str, on_page: Optional[Callable[[int, int], None]]) -> None:
+    if on_page is None:
+        return
+    try:
+        done, total = line[len(PROGRESS_MARKER):].strip().split("/")
+        on_page(int(done), int(total))
+    except Exception:
+        pass
+
+
 def run_vl_worker(
     image_paths: List[Path],
     *,
@@ -90,37 +292,33 @@ def run_vl_worker(
     extra_labels: str = "",
     on_page: Optional[Callable[[int, int], None]] = None,
     stall_timeout: Optional[float] = None,
+    session: Optional[VLWorkerSession] = None,
 ) -> List[dict]:
     """Invoke the PaddleOCR-VL worker on *image_paths*; return per-page dicts.
 
-    ``on_page(done, total)`` fires as each page is recognised.
+    ``on_page(done, total)`` fires as each page is recognised. A failed
+    resident session falls back to a one-shot worker.
     """
     if not image_paths:
         return []
+    if session is not None:
+        try:
+            return session.run(image_paths, extra_labels=extra_labels, on_page=on_page)
+        except Exception as exc:
+            print(f"[auto_ocr] resident VL worker failed ({exc}); "
+                  "falling back to a one-shot worker", flush=True)
+
     backend_python = backend_python or _default_backend_python()
     worker_path = worker_path or _worker_path()
-
-    env = os.environ.copy()
-    bin_dir = Path(backend_python).resolve().parent
-    env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
-    env["LD_LIBRARY_PATH"] = f"{bin_dir.parent / 'lib'}:{env.get('LD_LIBRARY_PATH', '')}"
-    env.setdefault("DISABLE_MODEL_SOURCE_CHECK", "True")
-    env.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
+    env = _worker_env(backend_python)
 
     cmd = [backend_python, str(worker_path), *[str(p) for p in image_paths]]
     if extra_labels:
         cmd += ["--extra-labels", extra_labels]
 
-    # The worker allocates ~8.4 GiB, which does not fit beside a resident
-    # ~20 GiB vision model on a 23 GiB card, and Ollama cannot account for a
-    # non-Ollama consumer.
-    try:
-        evicted = vision_enrich.free_gpu()
-        if evicted:
-            print(f"[auto_ocr] freed GPU for the OCR worker: {', '.join(evicted)}", flush=True)
-    except Exception:
-        pass
+    _free_gpu_for_worker()
 
+    started = time.monotonic()
     returncode, stdout, stderr = _run_streaming(
         cmd, env, on_page, stall_timeout if stall_timeout is not None else VL_STALL_TIMEOUT
     )
@@ -129,13 +327,11 @@ def run_vl_worker(
             "PaddleOCR-VL backend failed.\n"
             f"stdout:\n{stdout[-4000:]}\n\nstderr:\n{stderr[-4000:]}"
         )
-    for line in reversed(stdout.splitlines()):
-        if line.startswith(RESULT_MARKER):
-            return json.loads(line[len(RESULT_MARKER):]).get("pages", [])
-    raise RuntimeError(
-        "PaddleOCR-VL backend did not return JSON.\n"
-        f"stdout:\n{stdout[-4000:]}\n\nstderr:\n{stderr[-4000:]}"
-    )
+    pages = _pages_from_result(stdout, stderr)
+    print(f"[auto_ocr] recognised {len(image_paths)} page(s) in "
+          f"{time.monotonic() - started:.1f}s (one-shot worker: model loaded "
+          "for this document alone)", flush=True)
+    return pages
 
 
 def _run_streaming(
@@ -163,14 +359,8 @@ def _run_streaming(
         for line in stream:
             last_output[0] = time.monotonic()
             sink.append(line)
-            if not watch_progress or not line.startswith(PROGRESS_MARKER):
-                continue
-            try:
-                done, total = line[len(PROGRESS_MARKER):].strip().split("/")
-                if on_page is not None:
-                    on_page(int(done), int(total))
-            except Exception:
-                pass
+            if watch_progress and line.startswith(PROGRESS_MARKER):
+                _report_progress(line, on_page)
         stream.close()
 
     threads = [
@@ -238,21 +428,10 @@ def _downscale_png_b64(
 
 
 def _apply_markup(page: "doc_ir.Page", page_bgr=None, debug_collect=None):
-    """Detect and classify survey marks on *page*.
+    """Classify checkbox regions and verify mark glyphs against page ink.
 
-    Two paths:
-
-    * ``checkbox``-typed regions: classified directly from their crop (as
-      before, now with the stroke-aware geometric rule).
-    * any other region whose *content* carries mark glyphs (``○``/``☐``/``☒``
-      ... — the VL model usually folds survey rows into tables or text): the
-      glyph states are compared with the actual ink in the region crop. A
-      disagreement is retained as review evidence; OCR content is immutable.
-
-    ``page_bgr`` must be in the same coordinate space as the region bboxes
-    (i.e. the full-resolution raster, before the preview downscale). When
-    *debug_collect* is a list, every located mark's absolute bbox/state is
-    appended to it so a page overlay can be rendered for auditing.
+    ``page_bgr`` and region boxes must use full-resolution coordinates.
+    Located marks are appended to *debug_collect* when supplied.
     """
     for region in page.regions:
         if region.type == doc_ir.CHECKBOX:
@@ -573,8 +752,7 @@ def _finalize_vl_page(
         raster_bytes = Path(raster_path).read_bytes()
         page_bgr = _decode_bgr(raster_bytes)
 
-    # Markup/form analysis needs full-resolution crops, so it runs BEFORE the
-    # preview downscale rescales the region bboxes. Geometry is evidence only.
+    # Geometry analysis uses full-resolution crops and boxes.
     debug_collect = [] if debug_dir is not None else None
     if extract_survey or debug_dir is not None:
         _apply_markup(page, page_bgr, debug_collect=debug_collect)
@@ -588,8 +766,6 @@ def _finalize_vl_page(
             same_layout_template=same_layout_template,
             contract=survey_contract,
         )
-    # Before the preview downscale rewrites Region.bbox: the geometry pass needs
-    # full-resolution boxes.
     if searchable_pdf and page_bgr is not None:
         from core import searchable_pdf as _searchable_pdf
 
@@ -649,6 +825,7 @@ def process_document(
     survey_contract=None,
     searchable_pdf: bool = False,
     ocr_lang: str = "eng",
+    vl_session: Optional["VLWorkerSession"] = None,
 ) -> "doc_ir.Document":
     """Parse one document into a typed IR, choosing the route per page.
 
@@ -662,6 +839,9 @@ def process_document(
         pages use the 300-DPI Paddle lane even when they have a text layer.
     vision_client : optional shared client; batch callers should pass one to
         keep the model loaded across files.
+    vl_session : optional resident PaddleOCR-VL worker; batch callers should
+        pass one for the same reason -- the weights then load once for the whole
+        batch instead of once per file.
     same_layout_template : optional in-job template shared by a batch. The
         first document supplies normalized crop locations; subsequent documents
         still have their structure and response read independently from pixels.
@@ -703,8 +883,6 @@ def process_document(
         _emit(progress, 0.1, "Analysing image...")
 
         def _image_stage(done: int, total: int):
-            # The worker reports in before loading its weights, which is the
-            # bulk of the wait on a single image (~30-45 s).
             _emit(
                 progress,
                 0.15 if done == 0 else 0.7,
@@ -714,7 +892,7 @@ def process_document(
 
         pages_json = run_vl_worker(
             [input_path], backend_python=backend_python, worker_path=worker_path,
-            on_page=_image_stage,
+            on_page=_image_stage, session=vl_session,
         )
         try:
             if pages_json:
@@ -741,8 +919,7 @@ def process_document(
             _emit(progress, 1.0, "Done")
             return document
         finally:
-            # Left loaded: it expires after keep_alive, and the next stage that
-            # needs the card frees it. Evicting costs a ~60 s reload for nothing.
+            # Keep the model warm until its configured expiry.
             if owned_client and vision_client is not None:
                 vision_client.close()
 
@@ -791,7 +968,7 @@ def process_document(
 
         pages_json = run_vl_worker(
             [p for _, p in vl_jobs], backend_python=backend_python, worker_path=worker_path,
-            on_page=_vl_page_done,
+            on_page=_vl_page_done, session=vl_session,
         )
     try:
         for idx, page_json in enumerate(pages_json if vl_jobs else []):

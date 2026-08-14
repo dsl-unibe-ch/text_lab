@@ -199,6 +199,146 @@ def test_schema_free_zero_marks_is_never_silently_accepted():
     assert "zero marked answers" in " ".join(group.warnings)
 
 
+def _add_markup_evidence(page, status, geometries=None):
+    geometries = geometries or [None, None]
+    page.regions[1].markup = {
+        "kind": "glyph-marks",
+        "status": status,
+        "items": [
+            {
+                "glyph": "○",
+                "state": "unchecked",
+                **({"geometry": geometry} if geometry else {}),
+            }
+            for geometry in geometries
+        ],
+    }
+
+
+def test_markup_count_mismatch_is_diagnostic_not_answer_review(monkeypatch):
+    monkeypatch.setenv("TEXTLAB_APPROVED_SURVEY_MODELS", "fake-vl")
+    image, _ = _png_bytes()
+    page = _survey_page()
+    _add_markup_evidence(page, "count_mismatch")
+
+    group = form_extract.extract_page_forms(
+        page,
+        image,
+        FakeVisionClient(
+            [
+                _universal_result(
+                    marks=[
+                        {
+                            "choice_position": 1,
+                            "choice_text": "Alpha",
+                            "state": "selected",
+                            "visual_mark": "x",
+                            "associated_text": "",
+                        }
+                    ]
+                )
+            ]
+        ),
+    )[0]
+
+    assert group.status == "accepted"
+    assert group.review_reasons == []
+    assert group.provenance["answer_geometry_alignment"] == "no_aligned_geometry"
+    assert group.provenance["markup_diagnostics"][0]["status"] == "count_mismatch"
+
+
+def test_ocr_geometry_disagreement_is_not_review_when_answer_matches_geometry(monkeypatch):
+    monkeypatch.setenv("TEXTLAB_APPROVED_SURVEY_MODELS", "fake-vl")
+    image, _ = _png_bytes()
+    page = _survey_page()
+    _add_markup_evidence(
+        page,
+        "geometry_disagreement",
+        [
+            {"state": "checked", "score": 0.87, "fill_ratio": 0.32, "strike": 0.66},
+            {"state": "unchecked", "score": 0.70, "fill_ratio": 0.01, "strike": 0.0},
+        ],
+    )
+
+    group = form_extract.extract_page_forms(
+        page,
+        image,
+        FakeVisionClient(
+            [
+                _universal_result(
+                    marks=[
+                        {
+                            "choice_position": 1,
+                            "choice_text": "Alpha",
+                            "state": "selected",
+                            "visual_mark": "x",
+                            "associated_text": "",
+                        }
+                    ]
+                )
+            ]
+        ),
+    )[0]
+
+    assert group.status == "accepted"
+    assert group.provenance["answer_geometry_alignment"] == "aligned"
+    assert any(
+        observation.source == "geometric"
+        for observation in group.rows[0].options[0].observations
+    )
+
+
+def test_strong_answer_geometry_conflict_flags_the_specific_row(monkeypatch):
+    monkeypatch.setenv("TEXTLAB_APPROVED_SURVEY_MODELS", "fake-vl")
+    image, _ = _png_bytes()
+    page = _survey_page()
+    _add_markup_evidence(
+        page,
+        "matched",
+        [
+            {"state": "checked", "score": 0.87, "fill_ratio": 0.32, "strike": 0.66},
+            {"state": "unchecked", "score": 0.70, "fill_ratio": 0.01, "strike": 0.0},
+        ],
+    )
+
+    group = form_extract.extract_page_forms(
+        page,
+        image,
+        FakeVisionClient(
+            [
+                _universal_result(
+                    marks=[
+                        {
+                            "choice_position": 2,
+                            "choice_text": "Beta",
+                            "state": "selected",
+                            "visual_mark": "x",
+                            "associated_text": "",
+                        }
+                    ]
+                )
+            ]
+        ),
+    )[0]
+
+    assert group.status == group.rows[0].status == "needs_review"
+    assert group.review_reasons == ["answer_geometry_disagreement"]
+    assert group.rows[0].review_reasons == ["answer_geometry_disagreement"]
+    assert "geometric evidence" in " ".join(
+        warning
+        for option in group.rows[0].options
+        for warning in option.warnings
+    )
+    dataframe = doc_ir.form_responses_to_dataframe(
+        doc_ir.Document(pages=[page], source_name="survey.pdf")
+    )
+    assert dataframe.loc[0, "review_reasons"] == "answer_geometry_disagreement"
+    assert set(dataframe.loc[0, "evidence_sources"].split(" | ")) == {
+        "fake-local",
+        "geometric",
+    }
+
+
 def test_schema_free_preserves_conditional_parent_and_row_extra_choice():
     image, _ = _png_bytes()
     page = _survey_page()
@@ -451,6 +591,152 @@ def test_repaired_paddle_schema_strips_answer_leakage_and_skips_response_headers
         ["Good", "Bad"],
         ["Good", "Bad"],
     ]
+
+
+def test_default_contract_routes_reliable_matrix_through_paddle_owned_ids(monkeypatch):
+    monkeypatch.setenv("TEXTLAB_APPROVED_SURVEY_MODELS", "fake-vl")
+    image, _ = _png_bytes()
+    title = doc_ir.Region(
+        id="q7",
+        type=doc_ir.TITLE,
+        bbox=[20, 20, 600, 80],
+        reading_order=0,
+        content={"text": "7) Rate each statement"},
+    )
+    table = doc_ir.Region(
+        id="matrix",
+        type=doc_ir.TABLE,
+        bbox=[20, 90, 600, 300],
+        reading_order=1,
+        content={
+            "html": (
+                "<table><tr><th></th><th>Good</th><th>Bad</th></tr>"
+                "<tr><td>First</td><td>○</td><td>○</td></tr>"
+                "<tr><td>Second</td><td>○</td><td>○</td></tr></table>"
+            )
+        },
+    )
+    page = doc_ir.Page(
+        page_number=1,
+        width=640,
+        height=420,
+        regions=[title, table],
+    )
+    client = FakeVisionClient(
+        [
+            {
+                "visible_row_ids": ["matrix_r1", "matrix_r2"],
+                "marks": [
+                    {
+                        "option_id": "matrix_r1_o2",
+                        "state": "selected",
+                        "visual_mark": "x",
+                    }
+                ],
+                "unmapped_marks": [],
+            }
+        ]
+    )
+
+    group = form_extract.extract_page_forms(page, image, client)[0]
+
+    assert set(client.calls[0][2]["properties"]) == {
+        "visible_row_ids",
+        "marks",
+        "unmapped_marks",
+    }
+    assert group.question_type == "matrix"
+    assert len(group.rows) == 2
+    assert [option.label for option in group.rows[0].options] == ["Good", "Bad"]
+    assert group.rows[0].options[1].state == "selected"
+    assert group.provenance["contract_version"] == "hybrid-paddle-table-v1"
+    assert group.provenance["structure_source"] == "paddleocr-vl-table"
+    assert group.provenance["structure_region_id"] == "matrix"
+
+
+def test_non_matrix_safety_bound_padding_collapses_to_one_reviewable_row():
+    result = _universal_result(
+        marks=[
+            {
+                "choice_position": 1,
+                "choice_text": "Alpha",
+                "state": "selected",
+                "visual_mark": "x",
+                "associated_text": "",
+            }
+        ]
+    )
+    rows = result["questions"][0]["rows"]
+    rows.extend(
+        {"row_text": "", "extra_choices": [], "marked_answers": []}
+        for _ in range(23)
+    )
+
+    group = form_extract._universal_to_form_groups(
+        result,
+        section_id="p1_s1",
+        bbox=[0, 0, 100, 100],
+        crop_b64="",
+        client=FakeVisionClient([]),
+        template_reused=False,
+        candidate_evidence=[],
+        paddle_mark_present=False,
+        printed_validation_text="1) Which option do you prefer? Alpha Beta",
+    )[0]
+
+    assert group.question_type == "single"
+    assert len(group.rows) == 1
+    assert group.rows[0].options[0].state == "selected"
+    assert group.status == "needs_review"
+    assert "collapsed 23 padded row" in " ".join(group.warnings)
+
+
+def test_numbering_marker_model_question_is_dropped_as_structural_noise():
+    result = _universal_result(
+        marks=[
+            {
+                "choice_position": 1,
+                "choice_text": "Alpha",
+                "state": "selected",
+                "visual_mark": "x",
+                "associated_text": "",
+            }
+        ]
+    )
+    result["questions"].append(
+        {
+            "question_text": "15)",
+            "response_type": "unknown",
+            "selection_rule": "zero_or_one",
+            "parent_question_index": 0,
+            "condition_text": "",
+            "choices": [{"choice_text": "15)"}],
+            "rows": [
+                {
+                    "row_text": "",
+                    "extra_choices": [],
+                    "marked_answers": [],
+                }
+            ],
+        }
+    )
+
+    groups = form_extract._universal_to_form_groups(
+        result,
+        section_id="p1_s1",
+        bbox=[0, 0, 100, 100],
+        crop_b64="",
+        client=FakeVisionClient([]),
+        template_reused=False,
+        candidate_evidence=[],
+        paddle_mark_present=False,
+        printed_validation_text="Question Alpha Beta",
+    )
+
+    assert len(groups) == 1
+    assert "numbering marker" in " ".join(groups[0].warnings)
+
+
 def test_form_extraction_builds_question_ir_without_mutating_ocr():
     image, _ = _png_bytes()
     page = _survey_page()
