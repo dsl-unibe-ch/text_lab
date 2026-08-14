@@ -9,10 +9,26 @@ import threading
 import traceback
 from typing import Any, Callable
 
-import ollama
+
+def _unwrap_exception_group(exc: BaseException) -> str:
+    """Recursively unwrap ExceptionGroup / BaseExceptionGroup to reveal the
+    actual root cause.  The MCP ``stdio_client`` uses ``anyio.TaskGroup``
+    internally, and when the subprocess fails, the real error gets buried
+    inside an ``ExceptionGroup`` whose ``str()`` only shows
+    *"unhandled errors in a TaskGroup (1 sub-exception)"*."""
+    parts: list[str] = []
+    if hasattr(exc, "exceptions"):
+        for sub in exc.exceptions:
+            parts.append(_unwrap_exception_group(sub))
+    else:
+        tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+        parts.append(f"{type(exc).__name__}: {exc}\n{tb}")
+    return "\n".join(parts) if parts else f"{type(exc).__name__}: {exc}"
+
 from mcp import ClientSession, StdioServerParameters, types
 from mcp.client.stdio import stdio_client
 
+from core.chat_engine import chat_no_think, message_text
 from core.visualization.plot_data import get_all_columns_summary_impl
 from core.visualization.viz_config import (
     AGENT_TOOLS,
@@ -99,23 +115,30 @@ async def _run_worker_agent(
         args=[mcp_server_script],
     )
 
-    async with stdio_client(server_params) as (read, write):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            return await _run_worker_agent_inner(
-                session=session,
-                agent_role=agent_role,
-                task_instruction=task_instruction,
-                data_file_path=data_file_path,
-                model_name=model_name,
-                global_plots=global_plots,
-                global_stats=global_stats,
-                global_logs=global_logs,
-                max_iterations=max_iterations,
-                log_callback=log_callback,
-                cancel_event=cancel_event,
-                _log=_log,
-            )
+    try:
+        async with stdio_client(server_params) as (read, write):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                return await _run_worker_agent_inner(
+                    session=session,
+                    agent_role=agent_role,
+                    task_instruction=task_instruction,
+                    data_file_path=data_file_path,
+                    model_name=model_name,
+                    global_plots=global_plots,
+                    global_stats=global_stats,
+                    global_logs=global_logs,
+                    max_iterations=max_iterations,
+                    log_callback=log_callback,
+                    cancel_event=cancel_event,
+                    _log=_log,
+                )
+    except BaseException as exc:
+        detail = _unwrap_exception_group(exc)
+        _log("error", f"Worker '{agent_role}' MCP session failed:\n{detail}")
+        raise RuntimeError(
+            f"Worker '{agent_role}' MCP session failed: {detail}"
+        ) from exc
 
 
 async def _run_worker_agent_inner(
@@ -160,7 +183,7 @@ async def _run_worker_agent_inner(
             _log("warning", f"Worker '{agent_role}' cancelled by user.")
             return f"Worker '{agent_role}' was cancelled."
         try:
-            response = ollama.chat(
+            response = chat_no_think(
                 model=model_name,
                 messages=messages,
                 tools=tools,
@@ -172,7 +195,7 @@ async def _run_worker_agent_inner(
             return error_msg
 
         if not response["message"].get("tool_calls"):
-            worker_summary = response["message"].get("content", f"{agent_role} agent completed task silently.")
+            worker_summary = message_text(response["message"]) or f"{agent_role} agent completed task silently."
             _log("info", f"Worker '{agent_role}' finished task successfully.")
             return worker_summary
 
@@ -206,6 +229,7 @@ async def _run_worker_agent_inner(
                         _log("warning", f"Worker '{agent_role}' stat tool '{tool_name}' failed. Retrying...")
                         mcp_tool_results.append({
                             "role": "tool",
+                            "tool_name": tool_name,
                             "content": f"Execution Error: {tool_output_raw.strip()}\nPlease correct your code/parameters and try again.",
                         })
                     else:
@@ -219,6 +243,7 @@ async def _run_worker_agent_inner(
                             })
                         mcp_tool_results.append({
                             "role": "tool",
+                            "tool_name": tool_name,
                             "content": tool_output_raw,
                         })
 
@@ -234,12 +259,14 @@ async def _run_worker_agent_inner(
                         # Generic message — never expose internal file paths to the model.
                         mcp_tool_results.append({
                             "role": "tool",
+                            "tool_name": tool_name,
                             "content": "Plot generated successfully. It will be displayed to the user.",
                         })
                     else:
                         _log("warning", f"Worker '{agent_role}' plot tool '{tool_name}' failed: {tool_output_raw.strip()}. Retrying...")
                         mcp_tool_results.append({
                             "role": "tool",
+                            "tool_name": tool_name,
                             "content": f"Execution Error: {tool_output_raw.strip()}\nPlease correct your code or parameters and try again.",
                         })
 
@@ -248,6 +275,7 @@ async def _run_worker_agent_inner(
                 _log("error", error_msg)
                 mcp_tool_results.append({
                     "role": "tool",
+                    "tool_name": tool_name,
                     "content": error_msg,
                 })
 
@@ -300,7 +328,7 @@ async def run_analysis(
                 _log("warning", "Analysis cancelled by user.")
                 break
             try:
-                response = ollama.chat(
+                response = chat_no_think(
                     model=model_name,
                     messages=supervisor_messages,
                     tools=[DELEGATE_TASK_TOOL],
@@ -326,6 +354,7 @@ async def run_analysis(
                 if agent_role not in WORKER_PROMPTS:
                     invalid_results.append({
                         "role": "tool",
+                        "tool_name": "delegate_task",
                         "content": f"Error: Agent role '{agent_role}' does not exist.",
                     })
                 else:
@@ -354,12 +383,13 @@ async def run_analysis(
 
             supervisor_tool_results = list(invalid_results)
             for (role, _), output in zip(pending, worker_outputs):
-                if isinstance(output, Exception):
-                    _log("error", f"Worker '{role}' raised an exception: {output}")
-                    content = f"Error from {role}: {output}"
+                if isinstance(output, BaseException):
+                    detail = _unwrap_exception_group(output) if hasattr(output, 'exceptions') else str(output)
+                    _log("error", f"Worker '{role}' raised an exception:\n{detail}")
+                    content = f"Error from {role}: {detail}"
                 else:
                     content = f"Results from {role}:\n{output}"
-                supervisor_tool_results.append({"role": "tool", "content": content})
+                supervisor_tool_results.append({"role": "tool", "tool_name": "delegate_task", "content": content})
 
             supervisor_messages.extend(supervisor_tool_results)
 
@@ -368,8 +398,7 @@ async def run_analysis(
 
     summary = ""
     if supervisor_messages and supervisor_messages[-1].get("role") == "assistant":
-        summary = supervisor_messages[-1].get("content", "")
-        
+        summary = message_text(supervisor_messages[-1])
     if not summary:
         summary = "Analysis complete. Please review the generated visualizations below."
 

@@ -37,6 +37,107 @@ SYSTEM_PROMPT = (
 )
 
 
+def message_text(message: Any) -> str:
+    """Return the textual content of an Ollama chat message as a string.
+
+    Ollama >= 0.28 splits reasoning ("thinking") models' output into a separate
+    ``thinking`` field, leaving ``content`` set to ``None`` on reasoning-only
+    chunks/turns. Older Ollama returned the reasoning inline in ``content`` (as
+    ``<think>`` text), so ``content`` was always a string. Callers that stream or
+    concatenate content must therefore treat ``None`` as an empty string.
+    """
+    if message is None:
+        return ""
+    content = message.get("content") if isinstance(message, dict) else getattr(message, "content", None)
+    return content or ""
+
+
+def _normalize_tool_call(tc: Any) -> Dict[str, Any]:
+    """Convert a ToolCall object (or dict) into a plain dict."""
+    if isinstance(tc, dict):
+        return tc
+    # Pydantic ToolCall → plain dict
+    fn = tc.function if hasattr(tc, "function") else tc.get("function", {})
+    if not isinstance(fn, dict):
+        fn = {
+            "name": getattr(fn, "name", ""),
+            "arguments": getattr(fn, "arguments", {}),
+        }
+    return {"function": fn}
+
+
+def _normalize_message(msg: Any) -> Dict[str, Any]:
+    """Convert a Message object (or dict) into a plain dict for the Ollama
+    messages list.
+
+    The ollama Python SDK (≥ 0.4) returns ``Message`` Pydantic objects from
+    ``ollama.chat()``. These objects support ``__getitem__`` but NOT ``.get()``,
+    so downstream code that calls ``msg.get("tool_calls")`` breaks. Converting
+    to a plain dict fixes that and ensures the message can be serialised back
+    into the next ``ollama.chat()`` call.
+    """
+    if isinstance(msg, dict):
+        return msg
+    # Use model_dump() if available (Pydantic v2), otherwise build manually.
+    if hasattr(msg, "model_dump"):
+        return msg.model_dump(exclude_none=True)
+    d: Dict[str, Any] = {
+        "role": getattr(msg, "role", "assistant"),
+        "content": getattr(msg, "content", None) or "",
+    }
+    tool_calls = getattr(msg, "tool_calls", None)
+    if tool_calls:
+        d["tool_calls"] = [_normalize_tool_call(tc) for tc in tool_calls]
+    return d
+
+
+def _normalize_response(response: Any) -> Dict[str, Any]:
+    """Convert a ChatResponse object into the dict shape the codebase expects:
+    ``{"message": {...}, "model": ..., ...}``.
+    """
+    if isinstance(response, dict):
+        # Still normalise the inner message, just in case.
+        if "message" in response and not isinstance(response["message"], dict):
+            response["message"] = _normalize_message(response["message"])
+        return response
+    # Pydantic ChatResponse → plain dict
+    msg = getattr(response, "message", None)
+    return {
+        "message": _normalize_message(msg) if msg is not None else {},
+        "model": getattr(response, "model", ""),
+        "done": getattr(response, "done", True),
+    }
+
+
+def chat_no_think(
+    model: str,
+    messages: List[Dict[str, Any]],
+    tools: List[Dict[str, Any]] | None = None,
+) -> Any:
+    """Non-streaming ``ollama.chat`` with reasoning disabled.
+
+    Structured tool-routing/agent calls need a fast, deterministic tool decision,
+    not chain-of-thought. With thinking enabled (the default for reasoning models
+    on Ollama >= 0.28) these calls waste the context window on reasoning, bloat
+    multi-turn history with stale ``thinking`` blocks, and frequently stop before
+    emitting a real tool call. ``think=False`` avoids that.
+
+    Falls back gracefully when the installed client/model/server does not accept
+    the ``think`` argument.
+    """
+    kwargs: Dict[str, Any] = {"model": model, "messages": messages}
+    if tools is not None:
+        kwargs["tools"] = tools
+    try:
+        return _normalize_response(ollama.chat(think=False, **kwargs))
+    except TypeError:
+        # Older ollama-python without the ``think`` keyword.
+        return _normalize_response(ollama.chat(**kwargs))
+    except Exception:
+        # Model/server rejected ``think`` (e.g. a non-reasoning model) — retry plain.
+        return _normalize_response(ollama.chat(**kwargs))
+
+
 def is_port_open(host: str, port: int) -> bool:
     """
     Check if a specific network port is open and accepting connections.
@@ -120,8 +221,13 @@ def is_model_loaded(model_name: str) -> bool:
     """
     try:
         running_models = ollama.ps()
-        for model in running_models.get('models', []):
-            running_name = model.get('name', '')
+        models = (
+            running_models.get("models", [])
+            if isinstance(running_models, dict)
+            else getattr(running_models, "models", [])
+        )
+        for model in (models or []):
+            running_name = extract_model_name(model)
             if running_name == model_name or running_name.startswith(f"{model_name}:"):
                 return True
         return False
@@ -324,7 +430,9 @@ def get_response_generator(model_name: str, messages: List[Dict[str, str]]) -> G
     system_message = {"role": "system", "content": SYSTEM_PROMPT}
     stream = ollama.chat(model=model_name, messages=[system_message] + messages, stream=True)
     for chunk in stream:
-        yield chunk["message"]["content"]
+        text = message_text(chunk["message"] if isinstance(chunk, dict) else chunk.message)
+        if text:
+            yield text
 
 
 # --- Image generation as a first-class chat tool -----------------------------
@@ -416,7 +524,7 @@ def stream_chat_with_image_tool(
     def _plain_stream() -> Generator[str, None, None]:
         system_message = {"role": "system", "content": SYSTEM_PROMPT}
         for chunk in ollama.chat(model=model_name, messages=[system_message] + messages, stream=True):
-            content = chunk["message"].get("content")
+            content = message_text(chunk["message"] if isinstance(chunk, dict) else chunk.message)
             if content:
                 yield content
 
@@ -424,7 +532,7 @@ def stream_chat_with_image_tool(
         return "text", _plain_stream()
 
     def _content_of(msg):
-        return msg.get("content") if isinstance(msg, dict) else getattr(msg, "content", "")
+        return message_text(msg)
 
     try:
         system_message = {"role": "system", "content": SYSTEM_PROMPT + "\n\n" + IMAGE_TOOL_SYSTEM_HINT}
@@ -521,9 +629,7 @@ def get_chunk_answer(
     system_message = {"role": "system", "content": SYSTEM_PROMPT}
     messages = [system_message] + chat_history + [{"role": "user", "content": chunk_prompt}]
     response = ollama.chat(model=model_name, messages=messages, stream=False)
-    if isinstance(response, dict):
-        return response["message"]["content"]
-    return response.message.content
+    return message_text(response["message"] if isinstance(response, dict) else response.message)
 
 
 def get_synthesis_generator(
@@ -558,10 +664,9 @@ def get_synthesis_generator(
     messages = [system_message] + chat_history + [{"role": "user", "content": synthesis_prompt}]
     stream = ollama.chat(model=model_name, messages=messages, stream=True)
     for chunk in stream:
-        if isinstance(chunk, dict):
-            yield chunk["message"]["content"]
-        else:
-            yield chunk.message.content
+        text = message_text(chunk["message"] if isinstance(chunk, dict) else chunk.message)
+        if text:
+            yield text
 
 
 # --- Tool Routing (Data Analysis Supervisor) ---
@@ -643,7 +748,7 @@ def decide_tool_use(
     )
 
     try:
-        response = ollama.chat(
+        response = chat_no_think(
             model=model_name,
             messages=router_messages,
             tools=[ANALYZE_DATA_TOOL],

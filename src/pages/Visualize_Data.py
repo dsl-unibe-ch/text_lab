@@ -395,7 +395,17 @@ def _start_analysis_thread(
 
     def _worker() -> None:
         try:
-            local_models = {m["model"] for m in ollama.list().get("models", [])}
+            list_resp = ollama.list()
+            models_list = (
+                list_resp.get("models", [])
+                if isinstance(list_resp, dict)
+                else getattr(list_resp, "models", [])
+            )
+            local_models = set()
+            for m in (models_list or []):
+                name = m.get("model", m.get("name", "")) if isinstance(m, dict) else getattr(m, "model", getattr(m, "name", ""))
+                if name:
+                    local_models.add(name)
             if selected_model not in local_models:
                 live_logs.append(("info", f"Pulling model '{selected_model}'..."))
                 ollama.pull(selected_model)
