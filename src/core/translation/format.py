@@ -1174,8 +1174,3 @@ def translate_pptx(
     prs.save(out)
     return out.getvalue()
 
-
-    out = io.BytesIO()
-    prs.save(out)
-    return out.getvalue()
-

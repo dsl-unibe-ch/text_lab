@@ -28,15 +28,15 @@ from __future__ import annotations
 import re
 from typing import Dict, List, Mapping, Optional, Tuple
 
-# Sentinel: [TL_0], [TL_1], ... — ASCII, bracketed, tokenizer-stable.
-_SENTINEL_FMT = "[TL_{i}]"
-_SENTINEL_RE = re.compile(r"\[TL_(\d+)\]")
+# Sentinel: [TL_0], [TL_1], ... — using control characters to avoid collision
+_SENTINEL_FMT = "\x02TL_{i}\x03"
+_SENTINEL_RE = re.compile(r"\x02TL_(\d+)\x03")
 
 # Distinct sentinel for glossary/term-lock so it doesn't collide with the
 # generic shield table. Applied *before* :func:`shield` and restored *after*
 # :func:`unshield`.
-_GLOSSARY_FMT = "[GL_{i}]"
-_GLOSSARY_RE = re.compile(r"\[GL_(\d+)\]")
+_GLOSSARY_FMT = "\x02GL_{i}\x03"
+_GLOSSARY_RE = re.compile(r"\x02GL_(\d+)\x03")
 
 # Order matters. Higher-priority (longer / structural) patterns first.
 # Each pattern is applied globally to the text before the next one runs.

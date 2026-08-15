@@ -227,6 +227,12 @@ current_load_sig = backend_load_signature(
 )
 model_is_loaded = st.session_state["loaded_signature"] == current_load_sig
 
+opus_mt_supported = True
+if backend_key == "opus-mt":
+    from core.translation.engine import flores_to_iso2
+    if not flores_to_iso2(src_code) or not flores_to_iso2(tgt_code):
+        opus_mt_supported = False
+
 # ---------------------------------------------------------------------------
 # Glossary editor (shared between Text and Document tabs)
 # ---------------------------------------------------------------------------
@@ -645,7 +651,11 @@ with text_tab:
     # paying it. The Translate button stays disabled until the currently-
     # selected backend/model matches what's already loaded.
     # -------------------------------------------------------------------
-    if model_is_loaded:
+    if src_code == tgt_code:
+        st.warning("Source and target languages are the same.")
+    elif not opus_mt_supported:
+        st.error(f"OPUS-MT does not support direct translation between {src_name} and {tgt_name}.")
+    elif model_is_loaded:
         st.success(
             f"✅ **{backend_label}** is loaded on the GPU — you can translate."
         )
@@ -655,6 +665,7 @@ with text_tab:
             do_load = st.button(
                 "🚀 Load model",
                 type="primary",
+                disabled=(not opus_mt_supported or src_code == tgt_code),
                 key="load_model_btn",
             )
         with msg_col:
@@ -707,10 +718,14 @@ with text_tab:
         disabled=(
             not st.session_state["source_text"].strip()
             or not model_is_loaded
+            or not opus_mt_supported
+            or src_code == tgt_code
         ),
         key="translate_btn",
         help=(
-            None if model_is_loaded
+            "Source and target languages are the same." if src_code == tgt_code
+            else "OPUS-MT pair unsupported." if not opus_mt_supported
+            else None if model_is_loaded
             else "Load the model first (button above)."
         ),
     )
@@ -806,10 +821,19 @@ with doc_tab:
             f"relaunch on an A100 / H100 / H200 for those.**"
         )
 
+    total_size = sum(d.size for d in docs) if docs else 0
+    if total_size > 5_000_000:
+        st.warning("Large files detected. Translation may take several minutes.")
+
+    if src_code == tgt_code:
+        st.warning("Source and target languages are the same.")
+    elif not opus_mt_supported:
+        st.error(f"OPUS-MT does not support direct translation between {src_name} and {tgt_name}.")
+
     run_doc = st.button(
         "Translate document(s)",
         type="primary",
-        disabled=not docs,
+        disabled=not docs or src_code == tgt_code or not opus_mt_supported,
         key="translate_doc_btn",
     )
 
@@ -825,6 +849,7 @@ with doc_tab:
             stage_ph.markdown(f"**Stage:** {stage}")
 
         def _prog_translate(done: int, total: int) -> None:
+            _stage(f"translating chunk {done}/{total}")
             if total > 0:
                 bar.progress(min(done / total, 1.0))
 
@@ -856,6 +881,10 @@ with doc_tab:
                     with zipfile.ZipFile(io.BytesIO(raw), "r") as zin:
                         for entry in zin.namelist():
                             if entry.endswith("/"):
+                                continue
+                            ext = os.path.splitext(entry)[1].lower()
+                            if ext not in (".md", ".txt", ".srt", ".vtt", ".pdf", ".docx", ".xlsx", ".pptx"):
+                                st.warning(f"Skipped {entry}: unsupported file type inside ZIP.")
                                 continue
                             flat_inputs.append((entry, zin.read(entry)))
                 except zipfile.BadZipFile:

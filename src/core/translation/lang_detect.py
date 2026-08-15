@@ -82,7 +82,7 @@ def _load_pipeline():
     import torch
     from transformers import pipeline
 
-    device = 0 if torch.cuda.is_available() else -1
+    device = -1
     return pipeline(
         "text-classification",
         model=_MODEL_ID,

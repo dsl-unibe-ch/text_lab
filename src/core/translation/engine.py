@@ -327,9 +327,19 @@ def translate_nllb(
     if backend not in NLLB_MODEL_IDS:
         raise ValueError(f"Unknown NLLB backend: {backend}")
 
-    chunks = chunk_text_for_translation(text)
+    parts = re.split(r'(\n+)', text)
+    flat_chunks = []
+    owners = []
+    for p_idx, part in enumerate(parts):
+        if not part.strip():
+            continue
+        chunks = chunk_text_for_translation(part) or [part]
+        for c in chunks:
+            flat_chunks.append(c)
+            owners.append(p_idx)
+
     outputs = _translate_chunks_hf(
-        chunks,
+        flat_chunks,
         src_lang,
         tgt_lang,
         backend,
@@ -338,7 +348,18 @@ def translate_nllb(
         max_new_tokens=max_new_tokens,
         progress_cb=progress_cb,
     )
-    return "\n\n".join(outputs)
+    
+    buckets = {}
+    for owner, tr in zip(owners, outputs):
+        buckets.setdefault(owner, []).append(tr)
+
+    out_parts = []
+    for p_idx, part in enumerate(parts):
+        if not part.strip():
+            out_parts.append(part)
+        else:
+            out_parts.append(" ".join(buckets.get(p_idx, [part])))
+    return "".join(out_parts)
 
 
 # ---------------------------------------------------------------------------
@@ -374,16 +395,37 @@ def translate_opus_mt(
     Helsinki-NLP pairs exist but not all - e.g. de<->fr is direct, but exotic
     pairs may need pivoting through English, which is not implemented here).
     """
-    chunks = chunk_text_for_translation(text)
+    parts = re.split(r'(\n+)', text)
+    flat_chunks = []
+    owners = []
+    for p_idx, part in enumerate(parts):
+        if not part.strip():
+            continue
+        chunks = chunk_text_for_translation(part) or [part]
+        for c in chunks:
+            flat_chunks.append(c)
+            owners.append(p_idx)
+
     outputs = _translate_chunks_hf(
-        chunks,
+        flat_chunks,
         src_lang,
         tgt_lang,
         "opus-mt",
         device=device,
         progress_cb=progress_cb,
     )
-    return "\n\n".join(outputs)
+    
+    buckets = {}
+    for owner, tr in zip(owners, outputs):
+        buckets.setdefault(owner, []).append(tr)
+
+    out_parts = []
+    for p_idx, part in enumerate(parts):
+        if not part.strip():
+            out_parts.append(part)
+        else:
+            out_parts.append(" ".join(buckets.get(p_idx, [part])))
+    return "".join(out_parts)
 
 
 # ---------------------------------------------------------------------------
@@ -428,10 +470,20 @@ def translate_ollama(
         f"entities.{formality_instr} Do not add commentary. Return ONLY the translated text."
     )
 
-    chunks = chunk_text_for_translation(text, max_chars=3000)
-    total = len(chunks)
-    outputs: List[str] = []
-    for i, chunk in enumerate(chunks, start=1):
+    parts = re.split(r'(\n+)', text)
+    flat_chunks = []
+    owners = []
+    for p_idx, part in enumerate(parts):
+        if not part.strip():
+            continue
+        chunks = chunk_text_for_translation(part, max_chars=3000) or [part]
+        for c in chunks:
+            flat_chunks.append(c)
+            owners.append(p_idx)
+
+    total = len(flat_chunks)
+    buckets = {}
+    for i, (chunk, owner) in enumerate(zip(flat_chunks, owners), start=1):
         resp = ollama.chat(
             model=model_name,
             messages=[
@@ -440,10 +492,19 @@ def translate_ollama(
             ],
             options={"temperature": 0.2},
         )
-        outputs.append(resp["message"]["content"].strip())
+        msg = resp.message if hasattr(resp, "message") else resp.get("message", {})
+        content = msg.content if hasattr(msg, "content") else msg.get("content", "")
+        buckets.setdefault(owner, []).append(content.strip())
         if progress_cb is not None:
             progress_cb(i, total)
-    return "\n\n".join(outputs)
+            
+    out_parts = []
+    for p_idx, part in enumerate(parts):
+        if not part.strip():
+            out_parts.append(part)
+        else:
+            out_parts.append(" ".join(buckets.get(p_idx, [part])))
+    return "".join(out_parts)
 
 
 # ---------------------------------------------------------------------------
@@ -488,9 +549,19 @@ def translate_madlad(
     if backend not in MADLAD_MODEL_IDS:
         raise ValueError(f"Unknown MADLAD backend: {backend}")
 
-    chunks = chunk_text_for_translation(text)
+    parts = re.split(r'(\n+)', text)
+    flat_chunks = []
+    owners = []
+    for p_idx, part in enumerate(parts):
+        if not part.strip():
+            continue
+        chunks = chunk_text_for_translation(part) or [part]
+        for c in chunks:
+            flat_chunks.append(c)
+            owners.append(p_idx)
+
     outputs = _translate_chunks_hf(
-        chunks,
+        flat_chunks,
         src_lang,
         tgt_lang,
         backend,
@@ -499,7 +570,18 @@ def translate_madlad(
         max_new_tokens=max_new_tokens,
         progress_cb=progress_cb,
     )
-    return "\n\n".join(outputs)
+
+    buckets = {}
+    for owner, tr in zip(owners, outputs):
+        buckets.setdefault(owner, []).append(tr)
+
+    out_parts = []
+    for p_idx, part in enumerate(parts):
+        if not part.strip():
+            out_parts.append(part)
+        else:
+            out_parts.append(" ".join(buckets.get(p_idx, [part])))
+    return "".join(out_parts)
 
 
 # ---------------------------------------------------------------------------
@@ -579,12 +661,18 @@ def translate_many(
     if backend in NLLB_MODEL_IDS or backend in MADLAD_MODEL_IDS or backend == "opus-mt":
         # Flatten every text into chunks, remembering ownership.
         flat_chunks: List[str] = []
-        owners: List[int] = []
+        owners: List[Tuple[int, int]] = []
+        parts_per_text: Dict[int, List[str]] = {}
         for idx in to_do:
-            chunks = chunk_text_for_translation(texts[idx]) or [texts[idx]]
-            for c in chunks:
-                flat_chunks.append(c)
-                owners.append(idx)
+            parts = re.split(r'(\n+)', texts[idx])
+            parts_per_text[idx] = parts
+            for p_idx, part in enumerate(parts):
+                if not part.strip():
+                    continue
+                chunks = chunk_text_for_translation(part) or [part]
+                for c in chunks:
+                    flat_chunks.append(c)
+                    owners.append((idx, p_idx))
 
         translated_flat = _translate_chunks_hf(
             flat_chunks,
@@ -595,11 +683,20 @@ def translate_many(
             progress_cb=progress_cb,
         )
 
-        buckets: Dict[int, List[str]] = {}
+        buckets: Dict[Tuple[int, int], List[str]] = {}
         for owner, tr in zip(owners, translated_flat):
             buckets.setdefault(owner, []).append(tr)
-        for idx, pieces in buckets.items():
-            result[idx] = "\n\n".join(pieces)
+            
+        for idx in to_do:
+            parts = parts_per_text[idx]
+            out_parts = []
+            for p_idx, part in enumerate(parts):
+                if not part.strip():
+                    out_parts.append(part)
+                else:
+                    tr_chunks = buckets.get((idx, p_idx), [part])
+                    out_parts.append(" ".join(tr_chunks))
+            result[idx] = "".join(out_parts)
         return result
 
     # Ollama (and any other non-batchable backend): per-text loop.
