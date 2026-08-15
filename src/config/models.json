@@ -8,8 +8,8 @@
     "gemma4:12b"
   ],
   "large_models": [
+    "qwen3.8:latest",
     "muse-glimmer:30b",
-    "gemma4:31b",
-    "qwen3-coder-next:latest"
+    "gemma4:31b"
   ]
 }

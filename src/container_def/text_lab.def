@@ -76,7 +76,7 @@ From: nvidia/cuda:12.8.0-cudnn-devel-ubuntu22.04
     apt-get install -y --no-install-recommends apptainer
 
     # 3. Install Ollama backend
-    export OLLAMA_VERSION="0.32.8"
+    export OLLAMA_VERSION="0.32.13"
     curl -fsSL https://ollama.com/install.sh | OLLAMA_VERSION=${OLLAMA_VERSION} sh
 
     # 4. Install Miniconda

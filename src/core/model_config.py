@@ -53,6 +53,6 @@ def get_available_models(gpu_name: str) -> list[str]:
     large_models = config.get("large_models", [])
 
     if is_high_memory_gpu(gpu_name):
-        return small_models + large_models
+        return large_models
 
     return small_models
