@@ -64,6 +64,7 @@ from core.translation import (
     pack_markdown_bundle,
     pdf_needs_ocr,
     preload_backend,
+    reflow_soft_wraps,
     shielded_translate,
     translate_docx,
     translate_markdown,
@@ -443,6 +444,12 @@ def _translate_one(
     if ext_lower in (".txt", ".srt", ".vtt"):
         progress_stage_cb(0, 1, f"translating {ext_lower}")
         text = data.decode("utf-8", errors="replace")
+        if ext_lower == ".txt":
+            # Plain prose: rejoin sentences the file hard-wrapped, so the model
+            # gets whole ones. Subtitles are excluded deliberately -- there
+            # every line break carries timing, and joining them destroys the
+            # cue structure.
+            text = reflow_soft_wraps(text)
         result = shielded_translate(
             text, tfn,
             glossary=glossary,
@@ -759,7 +766,11 @@ with text_tab:
         )
         try:
             translated = shielded_translate(
-                st.session_state["source_text"], tfn,
+                # Pasted text is usually prose, and a paste out of a PDF or an
+                # email arrives hard-wrapped. Rejoin those sentences so the
+                # model sees each one whole; a break after a finished sentence
+                # is left where it is.
+                reflow_soft_wraps(st.session_state["source_text"]), tfn,
                 glossary=glossary,
                 glossary_case_sensitive=glossary_case_sensitive,
             )

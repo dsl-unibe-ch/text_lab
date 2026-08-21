@@ -86,6 +86,11 @@ def translate_markdown(
     """
     Translate a Markdown document while preserving structure.
 
+    A paragraph the source hard-wrapped over several lines is rejoined first
+    (:func:`reflow_soft_wraps`), so the model sees whole sentences; markdown
+    treats those breaks as cosmetic anyway. Structure -- headings, lists,
+    tables, block quotes, fenced code -- keeps its own lines.
+
     Fenced code blocks are passed through untouched. Every other line is
     routed through :func:`shielded_translate` so links, math, inline code,
     HTML, and placeholders survive the round-trip. The optional
@@ -96,7 +101,10 @@ def translate_markdown(
     single batched call (:func:`shielded_translate_many`), which on GPU is
     dramatically faster than one model call per line.
     """
-    lines = md_text.splitlines(keepends=False)
+    # Rejoin sentences the source hard-wrapped across lines. Without this each
+    # line goes to the model on its own, with no subject and no verb, and the
+    # translation is as broken as the fragment it came from.
+    lines = reflow_soft_wraps(md_text).splitlines(keepends=False)
     out: List[Optional[str]] = []
     in_fence = False
     total = len(lines)
@@ -475,6 +483,88 @@ def _unicode_font_path() -> Optional[str]:
         if os.path.isfile(path):
             return path
     return None
+
+
+# Structure that markdown marks with a line, on top of the _MD_* patterns
+# above: a table row, and the four-space indent of a code block.
+_MD_TABLE_ROW_RE = re.compile(r"^\s*\|")
+_INDENTED_CODE_RE = re.compile(r"^(?: {4,}|\t)")
+
+
+def _is_soft_wrap(line: str, following: str) -> bool:
+    """Did *line* stop mid-sentence, with *following* continuing it?
+
+    A hard-wrapped paragraph is one sentence the writer's editor happened to
+    break in the middle. Translating the halves separately gives the model no
+    subject, no verb and no context, and the output shows it -- which is the
+    whole reason this exists.
+
+    Conservative on purpose: a line break that follows a completed sentence is
+    left alone, so deliberately line-structured prose keeps its shape.
+    """
+    if not line.strip() or not following.strip():
+        return False
+    if _ENDS_SENTENCE_RE.search(line.rstrip()):
+        return False
+    # An explicit markdown hard break ("two trailing spaces") is deliberate.
+    # Checked before any rstrip, which would erase the evidence.
+    if line.endswith("  "):
+        return False
+    # Structural lines are breaks in their own right, whatever they end with.
+    # Probed with their indentation intact: that is what marks an indented
+    # code block, and what tells a list continuation from a new paragraph.
+    for probe in (line, following):
+        if (
+            _MD_HEADING_RE.match(probe)
+            or _MD_LIST_RE.match(probe)
+            or _MD_BLOCKQUOTE_RE.match(probe)
+            or _MD_FENCE_RE.match(probe)
+            or _MD_HR_RE.match(probe)
+            or _MD_TABLE_ROW_RE.match(probe)
+            or _INDENTED_CODE_RE.match(probe)
+        ):
+            return False
+    return True
+
+
+def reflow_soft_wraps(text: str) -> str:
+    """Rejoin sentences that a hard-wrapped source split across lines.
+
+    Blank lines, and any break that follows a finished sentence, are kept, so
+    paragraph structure survives. A word hyphenated across the break is put
+    back together.
+
+    Fenced code blocks pass through untouched: the lines inside one are not
+    prose, and nothing there ends in a full stop.
+
+    Not safe for line-oriented formats -- subtitles, for one, where every line
+    break carries meaning -- so callers opt in rather than get this for free.
+    """
+    if not text or "\n" not in text:
+        return text
+
+    lines = text.split("\n")
+    out: List[str] = []
+    in_fence = False
+    for i, line in enumerate(lines):
+        if _MD_FENCE_RE.match(line):
+            # The fence markers themselves are structural, so _is_soft_wrap
+            # already refuses them; this is about the arbitrary code between.
+            in_fence = not in_fence
+            out.append(line)
+            continue
+        if in_fence:
+            out.append(line)
+            continue
+        if out and _is_soft_wrap(lines[i - 1], line):
+            previous = out.pop().rstrip()
+            if previous.endswith("-") and line.lstrip()[:1].islower():
+                out.append(previous[:-1] + line.strip())  # de-hyphenate
+            else:
+                out.append(f"{previous} {line.strip()}")
+        else:
+            out.append(line)
+    return "\n".join(out)
 
 
 def _reflow_lines(lines: List[str]) -> str:

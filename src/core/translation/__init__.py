@@ -45,6 +45,7 @@ from .engine import (
     translate_opus_mt,
 )
 from .format import (
+    reflow_soft_wraps,
     translate_docx,
     translate_markdown,
     translate_pdf,
@@ -88,6 +89,7 @@ __all__ = [
     "translate_ollama",
     "translate_opus_mt",
     # Format
+    "reflow_soft_wraps",
     "translate_docx",
     "translate_markdown",
     "translate_pdf",
