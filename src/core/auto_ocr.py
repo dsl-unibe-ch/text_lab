@@ -692,12 +692,70 @@ def _page_has_math(page) -> bool:
     return False
 
 
+#: A figure has to be big enough to look at. Below either bar an image block
+#: cannot carry information: ``MIN_FIGURE_PT`` is smaller than one character of
+#: body text on the page, and ``MIN_FIGURE_PX`` is a raster too small to show a
+#: shape. Publisher PDFs build a diagram out of hundreds of such fragments —
+#: gradient tiles and hairline rules — and one real page has been seen to yield
+#: 208 image blocks, of which the size bars alone rule out 192.
+MIN_FIGURE_PT = 6.0
+MIN_FIGURE_PX = 8
+
+
+#: Greyscale standard deviation below which an image carries no detail. Solid
+#: panel fills measure 0.0 and a near-solid one 1.3, while the faintest real
+#: image seen measures 6.6 and most sit above 50, so this sits inside a wide
+#: gap. Note it must be measured on *luminance*: counting distinct colours
+#: would discard a bilevel scan, which is real content with only two of them.
+MAX_FLAT_FILL_STD = 3.0
+
+
+def _is_figure_sized(block) -> bool:
+    """Is this image block big enough to be a figure rather than a fragment?
+
+    Checked in both spaces, because either one alone can be fooled: a gradient
+    tile can be a large raster squeezed into a hairline box, and a decorative
+    rule can be a 2x2 raster stretched across the page.
+    """
+    x0, y0, x1, y1 = block.get("bbox", (0, 0, 0, 0))
+    if min(x1 - x0, y1 - y0) < MIN_FIGURE_PT:
+        return False
+    raster = (block.get("width"), block.get("height"))
+    if not all(isinstance(v, int) and v > 0 for v in raster):
+        return True  # no raster dimensions to judge by: keep it
+    return min(raster) >= MIN_FIGURE_PX
+
+
+def _is_flat_fill(img_bytes: Optional[bytes]) -> bool:
+    """Is this image a solid or near-solid block of colour?
+
+    The coloured rectangles behind a diagram's panels are embedded as images
+    just like its photographs are, and they are far too big for any size test
+    to catch. What separates them is that they hold no detail at all.
+
+    Undecodable images are reported as *not* flat, so a failure to read one
+    never silently drops content.
+    """
+    arr = _decode_bgr(img_bytes)
+    if arr is None or arr.size == 0:
+        return False
+    import cv2
+
+    # Subsample first so the cost does not grow with the raster: a fill stays
+    # flat under striding, and anything with detail keeps it.
+    step_y = max(1, arr.shape[0] // 64)
+    step_x = max(1, arr.shape[1] // 64)
+    grey = cv2.cvtColor(arr[::step_y, ::step_x], cv2.COLOR_BGR2GRAY)
+    return float(grey.std()) <= MAX_FLAT_FILL_STD
+
+
 def _native_page(fitz_page, page_number: int, debug_dir: Optional[Path] = None) -> "doc_ir.Page":
     """Extract text + embedded images from a born-digital page into IR."""
     scale = PREVIEW_DPI / 72.0
     data = fitz_page.get_text("dict")
     regions: List[doc_ir.Region] = []
     order = 0
+    skipped_fragments = 0
     for block in data.get("blocks", []):
         bbox = [c * scale for c in block.get("bbox", [0, 0, 0, 0])]
         if block.get("type") == 0:  # text block
@@ -724,6 +782,11 @@ def _native_page(fitz_page, page_number: int, debug_dir: Optional[Path] = None) 
             order += 1
         elif block.get("type") == 1:  # image block
             img_bytes = block.get("image")
+            # Size first: it is free, and it rules out the bulk of the noise
+            # before anything has to be decoded.
+            if not _is_figure_sized(block) or _is_flat_fill(img_bytes):
+                skipped_fragments += 1
+                continue
             asset = None
             if img_bytes:
                 asset = {
@@ -743,6 +806,15 @@ def _native_page(fitz_page, page_number: int, debug_dir: Optional[Path] = None) 
                 )
             )
             order += 1
+
+    if skipped_fragments:
+        # Worth a line: it is the difference between a 3-figure page and a
+        # bundle with 200 unusable PNGs in it.
+        print(
+            f"[auto_ocr] page {page_number}: skipped {skipped_fragments} decorative "
+            f"image block(s), kept {sum(1 for r in regions if r.type == doc_ir.FIGURE)} figure(s)",
+            flush=True,
+        )
 
     page = doc_ir.Page(
         page_number=page_number,
