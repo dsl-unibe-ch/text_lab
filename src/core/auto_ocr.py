@@ -603,6 +603,49 @@ def _page_has_text_layer(page) -> bool:
     return len(words) >= MIN_WORDS_NATIVE
 
 
+# Where a PDF with a broken ``ToUnicode`` CMap dumps its raw glyph indices:
+# it emits indices instead of characters, and they surface as private-use
+# codepoints (or, below, as control bytes).
+_PUA_RANGES = ((0xE000, 0xF8FF), (0xF0000, 0xFFFFD), (0x100000, 0x10FFFD))
+#: Private-use glyphs are the one signal with a legitimate use — journal
+#: headers and corporate templates map a logo or a bullet into the PUA — so
+#: they need company before they condemn a page. Control characters and
+#: U+FFFD have no legitimate use at all and count from the first one.
+PUA_GLYPH_MIN = 4
+
+
+def _text_layer_is_corrupt(page) -> bool:
+    """Heuristic: is this page's text layer mis-encoded beyond recovery?
+
+    Some publisher PDFs ship a ``ToUnicode`` CMap that maps glyphs to control
+    bytes and private-use codepoints rather than to characters. The extracted
+    text then looks like ``MMD½Hk; P; Q ¼`` instead of ``MMD[Hk; P, Q] =``,
+    which no downstream consumer can undo — the mapping back to real characters
+    simply is not in the file. Re-reading the rendered page with the VL model
+    is the only way to recover it, so such a page is routed there even when the
+    caller asked for the born-digital fast lane.
+
+    Deliberately narrow: it fires only on codepoints that cannot be text.
+    Mojibake proper (``ðX; YÞ`` for ``(X, Y)``) is left alone, because
+    every character in it is a legitimate letter in some language.
+    """
+    text = page.get_text("text") or ""
+    if not text:
+        return False
+    n_pua = 0
+    for ch in text:
+        cp = ord(ch)
+        if cp < 0x20 and ch not in "\t\n\r":
+            return True  # C0 control: an unambiguous CMap failure
+        if cp == 0xFFFD:
+            return True  # the decoder already gave up on this glyph
+        if any(lo <= cp <= hi for lo, hi in _PUA_RANGES):
+            n_pua += 1
+            if n_pua >= PUA_GLYPH_MIN:
+                return True
+    return False
+
+
 # Unicode blocks that signal mathematical notation in a text layer.
 _MATH_CHAR_RANGES = (
     (0x2200, 0x22FF),  # mathematical operators
@@ -938,19 +981,30 @@ def process_document(
         page_number = i + 1
         _emit(progress, 0.05 + 0.35 * (i / max(1, n_pages)), f"Routing page {page_number}/{n_pages}...")
         fitz_page = doc.load_page(i)
-        if (
-            not extract_survey
-            and
-            native_fast_lane
-            and _page_has_text_layer(fitz_page)
-            and not _page_has_math(fitz_page)
-        ):
-            native_pages[page_number] = _native_page(fitz_page, page_number, debug_dir=debug_dir)
-        else:
-            raster_path = raster_dir / f"page_{page_number:04d}.png"
-            pix = fitz_page.get_pixmap(dpi=SURVEY_DPI if extract_survey else VL_DPI)
-            raster_path.write_bytes(pix.tobytes("png"))
-            vl_jobs.append((page_number, raster_path))
+        if not extract_survey and native_fast_lane and _page_has_text_layer(fitz_page):
+            # Having a text layer is not enough: it also has to be usable. A
+            # page that fails either check is worse than one with no text layer
+            # at all, because the fast lane would "succeed" and hand back
+            # silently wrong characters, so it goes to the VL model whatever
+            # the caller asked for.
+            if _page_has_math(fitz_page):
+                unusable = "equations extract as junk text"
+            elif _text_layer_is_corrupt(fitz_page):
+                unusable = "text layer is mis-encoded"
+            else:
+                native_pages[page_number] = _native_page(
+                    fitz_page, page_number, debug_dir=debug_dir
+                )
+                continue
+            print(
+                f"[auto_ocr] page {page_number}: {unusable}, "
+                "using the VL model instead of the born-digital fast lane",
+                flush=True,
+            )
+        raster_path = raster_dir / f"page_{page_number:04d}.png"
+        pix = fitz_page.get_pixmap(dpi=SURVEY_DPI if extract_survey else VL_DPI)
+        raster_path.write_bytes(pix.tobytes("png"))
+        vl_jobs.append((page_number, raster_path))
 
     # ---- run the VL lane in one batch ---------------------------------------
     vl_pages: dict[int, doc_ir.Page] = {}

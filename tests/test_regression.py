@@ -319,6 +319,39 @@ def test_native_lane():
     assert np_page.image_b64
 
 
+def test_a_mis_encoded_text_layer_is_sent_to_the_vl_lane():
+    r"""A broken ToUnicode CMap makes the fast lane succeed with wrong text.
+
+    Real case: a journal PDF extracted ``MMD½Hk; P; Q ¼`` for
+    ``MMD[Hk; P, Q] =``, and subtraction signs coming out as raw ``\x03`` bytes.
+    Nothing downstream can undo that, so the page is re-read from the raster.
+    """
+
+    def page_with(text):
+        class FPage:
+            def get_text(self, mode):
+                return text if mode == "text" else []
+
+        return FPage()
+
+    # Control bytes and U+FFFD are never legitimate: one is enough.
+    assert auto_ocr._text_layer_is_corrupt(page_with("kðxi; xjÞ \x03 kðyi; xjÞ")) is True
+    assert auto_ocr._text_layer_is_corrupt(page_with("a \ufffd b")) is True
+
+    # Private-use glyphs have a legitimate use (a logo in a journal header),
+    # so a lone one must not condemn the page.
+    assert auto_ocr._text_layer_is_corrupt(page_with("\ue000 Journal of Things")) is False
+    assert auto_ocr._text_layer_is_corrupt(page_with("\ue000" * auto_ocr.PUA_GLYPH_MIN)) is True
+
+    # Healthy text, including the tab/newline that XML allows, stays native.
+    assert auto_ocr._text_layer_is_corrupt(page_with("Rahmen\tbedingungen\nder Studie\r")) is False
+    assert auto_ocr._text_layer_is_corrupt(page_with("")) is False
+
+    # Mojibake proper is deliberately NOT caught: every character in it is a
+    # real letter somewhere (ð and Þ are ordinary Icelandic).
+    assert auto_ocr._text_layer_is_corrupt(page_with("ðX; YÞ ¼ 1")) is False
+
+
 def test_api_compat():
     assert md.classify_from_b64("☑", None)["state"] == "checked"
 
