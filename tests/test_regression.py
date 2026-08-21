@@ -115,6 +115,38 @@ def test_docx_export():
     assert doc_ir.build_docx(doc_ir.Document(pages=[]), "empty") is not None
 
 
+def test_glyph_index_junk_never_reaches_an_export():
+    """A PDF with a broken ToUnicode CMap leaks raw glyph indices as C0
+    control bytes. They are unrecoverable, and one of them used to abort the
+    whole .docx export with an lxml ValueError."""
+    dirty = "Rahmenbedingungen\x03 der\x02 Studie\x00"
+    page = doc_ir.from_paddle_vl({
+        "page_number": 1,
+        "markdown": dirty,
+        "parsing_res_list": [
+            {"block_label": "text", "block_content": dirty, "block_bbox": [0, 0, 10, 10]},
+            {"block_label": "table", "block_content": "<table><tr><td>a\x04</td></tr></table>",
+             "block_bbox": [0, 20, 10, 30]},
+        ],
+    })
+    assert page.regions[0].text == "Rahmenbedingungen der Studie"
+    assert "\x03" not in page.markdown
+    assert "\x04" not in page.regions[1].text
+
+    # Tab/newline/CR are legal XML and must survive the scrub.
+    kept = doc_ir.Region("r", doc_ir.TEXT, [0, 0, 1, 1], 0, {"text": "a\tb\nc\r"})
+    assert kept.text == "a\tb\nc\r"
+
+    doc = doc_ir.Document(pages=[page], source_name="broken_cmap.pdf")
+    blob = doc_ir.build_docx(doc, "broken_cmap")  # used to raise ValueError
+    if blob is None:  # python-docx absent
+        return
+    import docx as _docx
+
+    text = "\n".join(p.text for p in _docx.Document(io.BytesIO(blob)).paragraphs)
+    assert "Rahmenbedingungen der Studie" in text
+
+
 def test_full_bundle_carries_every_format():
     doc = doc_ir.Document(pages=[doc_ir.from_paddle_vl(PAGE_JSON)], source_name="s.pdf")
     names = zipfile.ZipFile(io.BytesIO(doc_ir.build_full_bundle(doc, "s"))).namelist()
