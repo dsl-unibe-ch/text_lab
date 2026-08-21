@@ -7,6 +7,8 @@ from top2vec import Top2Vec
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
+from . import small_corpus
+
 
 def _is_reduced_model(topic_model: Top2Vec, target_topics: Union[int, str]) -> bool:
     """
@@ -49,7 +51,8 @@ def train_top2vec_model(
         A trained Top2Vec model.
 
     Raises:
-        ValueError: If no texts are provided.
+        ValueError: If no texts are provided, or if the corpus is too small for
+            Top2Vec to model.
     """
     if not texts:
         raise ValueError("No texts were provided to Top2Vec.")
@@ -77,14 +80,10 @@ def train_top2vec_model(
             embedding_model=embed_model,
             workers=workers,
             )
-    except ValueError as e:
-        if "need at least one array to concatenate" in str(e):
-            raise ValueError(
-                "The uploaded dataset is too small or its vocabulary is too fragmented "
-                "for Top2Vec. Please switch your algorithm to **Latent Dirichlet Allocation (LDA)**, "
-                "which is better suited for small datasets."
-            ) from e
-        raise e
+    except (ValueError, TypeError) as e:
+        if small_corpus.is_corpus_too_small(e):
+            raise small_corpus.too_small_error(len(texts), "Top2Vec") from e
+        raise
 
     if target_topics != "auto" and isinstance(target_topics, int):
         num_found = topic_model.get_num_topics()
