@@ -26,6 +26,7 @@ src_dir = os.path.dirname(current_dir)
 sys.path.append(src_dir)
 
 from auth import check_token
+from core.artifacts import ensure_artifacts_dir
 from core.chat_engine import check_ollama_server, get_gpu_name
 from core.visualization.viz_agent import run_analysis
 from core.visualization.viz_config import DEFAULT_PROMPT, MAX_ROWS, get_tool_label
@@ -44,21 +45,17 @@ except FileNotFoundError:
 _CURRENT_SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
 _SRC_DIR = _CURRENT_SCRIPT_DIR.parent
 MCP_SERVER_SCRIPT = str(_SRC_DIR / "core" / "visualization" / "mcp_server.py")
-ARTIFACTS_DIR = str(_SRC_DIR / "mcp_artifacts")
 
 # Max seconds before the analysis is cancelled and an error is shown.
 ANALYSIS_TIMEOUT_SECONDS = 600
 
-os.makedirs(ARTIFACTS_DIR, exist_ok=True)
-try:
-    os.chmod(ARTIFACTS_DIR, 0o700)
-except Exception:
-    pass
+# Per user, and off the shared source tree; created 0700. See core.artifacts.
+ARTIFACTS_DIR = ensure_artifacts_dir()
 
 
 def _cleanup_orphaned_artifacts(max_age_hours: int = 12) -> None:
     """
-    Remove any mcp_artifacts/tmp* directories that are older than max_age_hours.
+    Remove any tmp* directories under ARTIFACTS_DIR older than max_age_hours.
     These can accumulate when Streamlit crashes mid-analysis before the
     TemporaryDirectory context manager can run its cleanup.
     Called once per browser session via session_state guard.

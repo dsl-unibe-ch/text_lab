@@ -115,6 +115,38 @@ def test_docx_export():
     assert doc_ir.build_docx(doc_ir.Document(pages=[]), "empty") is not None
 
 
+def test_glyph_index_junk_never_reaches_an_export():
+    """A PDF with a broken ToUnicode CMap leaks raw glyph indices as C0
+    control bytes. They are unrecoverable, and one of them used to abort the
+    whole .docx export with an lxml ValueError."""
+    dirty = "Rahmenbedingungen\x03 der\x02 Studie\x00"
+    page = doc_ir.from_paddle_vl({
+        "page_number": 1,
+        "markdown": dirty,
+        "parsing_res_list": [
+            {"block_label": "text", "block_content": dirty, "block_bbox": [0, 0, 10, 10]},
+            {"block_label": "table", "block_content": "<table><tr><td>a\x04</td></tr></table>",
+             "block_bbox": [0, 20, 10, 30]},
+        ],
+    })
+    assert page.regions[0].text == "Rahmenbedingungen der Studie"
+    assert "\x03" not in page.markdown
+    assert "\x04" not in page.regions[1].text
+
+    # Tab/newline/CR are legal XML and must survive the scrub.
+    kept = doc_ir.Region("r", doc_ir.TEXT, [0, 0, 1, 1], 0, {"text": "a\tb\nc\r"})
+    assert kept.text == "a\tb\nc\r"
+
+    doc = doc_ir.Document(pages=[page], source_name="broken_cmap.pdf")
+    blob = doc_ir.build_docx(doc, "broken_cmap")  # used to raise ValueError
+    if blob is None:  # python-docx absent
+        return
+    import docx as _docx
+
+    text = "\n".join(p.text for p in _docx.Document(io.BytesIO(blob)).paragraphs)
+    assert "Rahmenbedingungen der Studie" in text
+
+
 def test_full_bundle_carries_every_format():
     doc = doc_ir.Document(pages=[doc_ir.from_paddle_vl(PAGE_JSON)], source_name="s.pdf")
     names = zipfile.ZipFile(io.BytesIO(doc_ir.build_full_bundle(doc, "s"))).namelist()
@@ -249,7 +281,9 @@ def test_worker_protocol():
 
 
 def test_native_lane():
-    _img = np.full((20, 20, 3), 128, np.uint8)
+    # A real figure carries detail. A flat one would be filtered out as the
+    # decorative fill it looks like -- covered in the test below.
+    _img = np.random.default_rng(0).integers(0, 255, (20, 20, 3), dtype=np.uint8)
     _ok, _enc = cv2.imencode(".png", _img)
     PNG = _enc.tobytes()
 
@@ -272,7 +306,8 @@ def test_native_lane():
             if mode == "dict":
                 return {"blocks": [
                     {"type": 0, "bbox": [72, 72, 500, 96], "lines": [{"spans": [{"text": "Hello world", "font": "Arial"}]}]},
-                    {"type": 1, "bbox": [72, 120, 300, 300], "image": PNG, "ext": "png"},
+                    {"type": 1, "bbox": [72, 120, 300, 300], "image": PNG, "ext": "png",
+                     "width": 20, "height": 20},
                 ]}
             return []
 
@@ -285,6 +320,87 @@ def test_native_lane():
     assert [r.type for r in np_page.regions] == ["text", "figure"]
     assert np_page.regions[0].text == "Hello world"
     assert np_page.image_b64
+
+
+def test_decorative_image_blocks_do_not_become_figures():
+    """A publisher PDF builds a diagram out of hundreds of image blocks.
+
+    Real case: one page held 208 of them, of which 3 were figures — the rest
+    were gradient tiles, hairline rules and the flat rectangles behind each
+    panel. Exporting them all put 200+ unusable files in the bundle and 200+
+    embedded images in the .docx.
+    """
+    rng = np.random.default_rng(1)
+
+    def png(arr):
+        return cv2.imencode(".png", arr)[1].tobytes()
+
+    photo = rng.integers(0, 255, (60, 60, 3), dtype=np.uint8)
+    flat = np.full((60, 60, 3), (200, 180, 160), np.uint8)
+
+    big = {"bbox": (0, 0, 90, 90), "width": 60, "height": 60}
+    assert auto_ocr._is_figure_sized(big) is True
+    # Degenerate on the page: the 0.00 x 0.11 pt hairlines seen in the wild.
+    assert auto_ocr._is_figure_sized({**big, "bbox": (0, 0, 90, 0.11)}) is False
+    # Degenerate in its own raster: a 2x2 tile stretched across the page.
+    assert auto_ocr._is_figure_sized({**big, "width": 2, "height": 2}) is False
+
+    assert auto_ocr._is_flat_fill(png(flat)) is True
+    assert auto_ocr._is_flat_fill(png(photo)) is False
+
+    # A bilevel scan holds exactly two colours and is unmistakably content, so
+    # flatness has to be measured as detail, never as a count of colours.
+    scan = np.full((300, 300, 3), 255, np.uint8)
+    scan[::7, :] = 0  # text-like rows of ink
+    assert len(np.unique(scan.reshape(-1, 3), axis=0)) == 2
+    assert auto_ocr._is_flat_fill(png(scan)) is False
+
+    # A fill is flat whatever its hue: measured on luminance, not on spread
+    # between the channels.
+    assert auto_ocr._is_flat_fill(png(np.full((60, 60, 3), (173, 216, 230), np.uint8))) is True
+    # An image that cannot be decoded is never dropped: losing content in
+    # silence is worse than carrying one dubious asset. Same for a block that
+    # does not report its raster size -- judge it on the page box alone.
+    assert auto_ocr._is_flat_fill(b"not an image") is False
+    assert auto_ocr._is_flat_fill(None) is False
+    assert auto_ocr._is_figure_sized({"bbox": (0, 0, 90, 90)}) is True
+
+    # A large flat fill survives every size test, so only the colour count
+    # separates it from the photograph beside it.
+    assert auto_ocr._is_figure_sized(big) and auto_ocr._is_flat_fill(png(flat))
+
+
+def test_a_mis_encoded_text_layer_is_sent_to_the_vl_lane():
+    r"""A broken ToUnicode CMap makes the fast lane succeed with wrong text.
+
+    Real case: a journal PDF extracted ``MMD½Hk; P; Q ¼`` for
+    ``MMD[Hk; P, Q] =``, and subtraction signs coming out as raw ``\x03`` bytes.
+    Nothing downstream can undo that, so the page is re-read from the raster.
+    """
+
+    def page_with(text):
+        class FPage:
+            def get_text(self, mode):
+                return text if mode == "text" else []
+
+        return FPage()
+
+    # Control bytes and U+FFFD are never legitimate: one is enough.
+    assert auto_ocr._text_layer_is_corrupt(page_with("kðxi; xjÞ \x03 kðyi; xjÞ")) is True
+    assert auto_ocr._text_layer_is_corrupt(page_with("a \ufffd b")) is True
+
+    # Private-use glyphs have a legitimate use (a logo in a journal header),
+    # so a lone one must not condemn the page.
+    assert auto_ocr._text_layer_is_corrupt(page_with("\ue000 Journal of Things")) is False
+    assert auto_ocr._text_layer_is_corrupt(page_with("\ue000" * auto_ocr.PUA_GLYPH_MIN)) is True
+
+    # Healthy text, including the tab/newline that XML allows, stays native.
+    assert auto_ocr._text_layer_is_corrupt(page_with("Rahmen\tbedingungen\nder Studie\r")) is False
+    assert auto_ocr._text_layer_is_corrupt(page_with("")) is False
+
+    # Mojibake proper is deliberately NOT caught: every character in it is a
+    # real letter somewhere (ð and Þ are ordinary Icelandic).
+    assert auto_ocr._text_layer_is_corrupt(page_with("ðX; YÞ ¼ 1")) is False
 
 
 def test_api_compat():

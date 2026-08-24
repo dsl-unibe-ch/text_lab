@@ -102,6 +102,32 @@ def label_to_type(block_label: Optional[str]) -> str:
 
 
 # ==========================================
+#        TEXT HYGIENE
+# ==========================================
+
+#: Everything outside XML 1.0's ``Char`` production. Tab, newline and carriage
+#: return are the only control characters a well-formed XML document may hold,
+#: which makes this the exact set ``lxml`` — and so ``python-docx`` — rejects.
+_XML_ILLEGAL = re.compile("[^\u0009\u000a\u000d\u0020-\ud7ff\ue000-\ufffd\U00010000-\U0010ffff]")
+
+
+def xml_safe(text: str) -> str:
+    r"""Drop characters that cannot appear in an XML document.
+
+    A PDF whose subsetted fonts carry a broken ``ToUnicode`` CMap leaks raw
+    glyph indices into its text layer, so the born-digital lane really does
+    hand us bytes like ``\x03``. They are not recoverable text — nothing maps
+    them back to characters — and one of them anywhere in a document used to
+    abort the whole ``.docx`` export with an lxml ``ValueError``. Scrubbing
+    them where text enters the IR keeps every downstream format honest;
+    already-clean text (the overwhelmingly common case) is returned unchanged.
+    """
+    if not text or not _XML_ILLEGAL.search(text):
+        return text
+    return _XML_ILLEGAL.sub("", text)
+
+
+# ==========================================
 #        DATACLASSES
 # ==========================================
 
@@ -252,6 +278,14 @@ class Region:
     markup: Optional[Dict[str, Any]] = None  # {"state":.., "method":.., "score":..} for CHECKBOX
     visual_description: Optional[VisualDescription] = None
 
+    def __post_init__(self) -> None:
+        # Every adapter funnels its recognised text through ``content``, so this
+        # is the one place that has to hold the XML-safety guarantee the .docx
+        # exporter depends on.
+        for key, value in self.content.items():
+            if isinstance(value, str):
+                self.content[key] = xml_safe(value)
+
     # -- convenience accessors -------------------------------------------------
     @property
     def text(self) -> str:
@@ -303,6 +337,12 @@ class Page:
     raster_size: Optional[Tuple[int, int]] = None
     #: Engine that supplied the geometry, kept for the citable summary.
     text_layer_engine: str = ""
+
+    def __post_init__(self) -> None:
+        # The engine-native markdown is a second, independent copy of the page
+        # text, so it needs the same guarantee the regions get.
+        if self.markdown:
+            self.markdown = xml_safe(self.markdown)
 
     def ordered_regions(self) -> List[Region]:
         return sorted(self.regions, key=lambda r: (r.reading_order, r.id))

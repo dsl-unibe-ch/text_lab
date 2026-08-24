@@ -603,6 +603,49 @@ def _page_has_text_layer(page) -> bool:
     return len(words) >= MIN_WORDS_NATIVE
 
 
+# Where a PDF with a broken ``ToUnicode`` CMap dumps its raw glyph indices:
+# it emits indices instead of characters, and they surface as private-use
+# codepoints (or, below, as control bytes).
+_PUA_RANGES = ((0xE000, 0xF8FF), (0xF0000, 0xFFFFD), (0x100000, 0x10FFFD))
+#: Private-use glyphs are the one signal with a legitimate use — journal
+#: headers and corporate templates map a logo or a bullet into the PUA — so
+#: they need company before they condemn a page. Control characters and
+#: U+FFFD have no legitimate use at all and count from the first one.
+PUA_GLYPH_MIN = 4
+
+
+def _text_layer_is_corrupt(page) -> bool:
+    """Heuristic: is this page's text layer mis-encoded beyond recovery?
+
+    Some publisher PDFs ship a ``ToUnicode`` CMap that maps glyphs to control
+    bytes and private-use codepoints rather than to characters. The extracted
+    text then looks like ``MMD½Hk; P; Q ¼`` instead of ``MMD[Hk; P, Q] =``,
+    which no downstream consumer can undo — the mapping back to real characters
+    simply is not in the file. Re-reading the rendered page with the VL model
+    is the only way to recover it, so such a page is routed there even when the
+    caller asked for the born-digital fast lane.
+
+    Deliberately narrow: it fires only on codepoints that cannot be text.
+    Mojibake proper (``ðX; YÞ`` for ``(X, Y)``) is left alone, because
+    every character in it is a legitimate letter in some language.
+    """
+    text = page.get_text("text") or ""
+    if not text:
+        return False
+    n_pua = 0
+    for ch in text:
+        cp = ord(ch)
+        if cp < 0x20 and ch not in "\t\n\r":
+            return True  # C0 control: an unambiguous CMap failure
+        if cp == 0xFFFD:
+            return True  # the decoder already gave up on this glyph
+        if any(lo <= cp <= hi for lo, hi in _PUA_RANGES):
+            n_pua += 1
+            if n_pua >= PUA_GLYPH_MIN:
+                return True
+    return False
+
+
 # Unicode blocks that signal mathematical notation in a text layer.
 _MATH_CHAR_RANGES = (
     (0x2200, 0x22FF),  # mathematical operators
@@ -649,12 +692,70 @@ def _page_has_math(page) -> bool:
     return False
 
 
+#: A figure has to be big enough to look at. Below either bar an image block
+#: cannot carry information: ``MIN_FIGURE_PT`` is smaller than one character of
+#: body text on the page, and ``MIN_FIGURE_PX`` is a raster too small to show a
+#: shape. Publisher PDFs build a diagram out of hundreds of such fragments —
+#: gradient tiles and hairline rules — and one real page has been seen to yield
+#: 208 image blocks, of which the size bars alone rule out 192.
+MIN_FIGURE_PT = 6.0
+MIN_FIGURE_PX = 8
+
+
+#: Greyscale standard deviation below which an image carries no detail. Solid
+#: panel fills measure 0.0 and a near-solid one 1.3, while the faintest real
+#: image seen measures 6.6 and most sit above 50, so this sits inside a wide
+#: gap. Note it must be measured on *luminance*: counting distinct colours
+#: would discard a bilevel scan, which is real content with only two of them.
+MAX_FLAT_FILL_STD = 3.0
+
+
+def _is_figure_sized(block) -> bool:
+    """Is this image block big enough to be a figure rather than a fragment?
+
+    Checked in both spaces, because either one alone can be fooled: a gradient
+    tile can be a large raster squeezed into a hairline box, and a decorative
+    rule can be a 2x2 raster stretched across the page.
+    """
+    x0, y0, x1, y1 = block.get("bbox", (0, 0, 0, 0))
+    if min(x1 - x0, y1 - y0) < MIN_FIGURE_PT:
+        return False
+    raster = (block.get("width"), block.get("height"))
+    if not all(isinstance(v, int) and v > 0 for v in raster):
+        return True  # no raster dimensions to judge by: keep it
+    return min(raster) >= MIN_FIGURE_PX
+
+
+def _is_flat_fill(img_bytes: Optional[bytes]) -> bool:
+    """Is this image a solid or near-solid block of colour?
+
+    The coloured rectangles behind a diagram's panels are embedded as images
+    just like its photographs are, and they are far too big for any size test
+    to catch. What separates them is that they hold no detail at all.
+
+    Undecodable images are reported as *not* flat, so a failure to read one
+    never silently drops content.
+    """
+    arr = _decode_bgr(img_bytes)
+    if arr is None or arr.size == 0:
+        return False
+    import cv2
+
+    # Subsample first so the cost does not grow with the raster: a fill stays
+    # flat under striding, and anything with detail keeps it.
+    step_y = max(1, arr.shape[0] // 64)
+    step_x = max(1, arr.shape[1] // 64)
+    grey = cv2.cvtColor(arr[::step_y, ::step_x], cv2.COLOR_BGR2GRAY)
+    return float(grey.std()) <= MAX_FLAT_FILL_STD
+
+
 def _native_page(fitz_page, page_number: int, debug_dir: Optional[Path] = None) -> "doc_ir.Page":
     """Extract text + embedded images from a born-digital page into IR."""
     scale = PREVIEW_DPI / 72.0
     data = fitz_page.get_text("dict")
     regions: List[doc_ir.Region] = []
     order = 0
+    skipped_fragments = 0
     for block in data.get("blocks", []):
         bbox = [c * scale for c in block.get("bbox", [0, 0, 0, 0])]
         if block.get("type") == 0:  # text block
@@ -681,6 +782,11 @@ def _native_page(fitz_page, page_number: int, debug_dir: Optional[Path] = None) 
             order += 1
         elif block.get("type") == 1:  # image block
             img_bytes = block.get("image")
+            # Size first: it is free, and it rules out the bulk of the noise
+            # before anything has to be decoded.
+            if not _is_figure_sized(block) or _is_flat_fill(img_bytes):
+                skipped_fragments += 1
+                continue
             asset = None
             if img_bytes:
                 asset = {
@@ -700,6 +806,15 @@ def _native_page(fitz_page, page_number: int, debug_dir: Optional[Path] = None) 
                 )
             )
             order += 1
+
+    if skipped_fragments:
+        # Worth a line: it is the difference between a 3-figure page and a
+        # bundle with 200 unusable PNGs in it.
+        print(
+            f"[auto_ocr] page {page_number}: skipped {skipped_fragments} decorative "
+            f"image block(s), kept {sum(1 for r in regions if r.type == doc_ir.FIGURE)} figure(s)",
+            flush=True,
+        )
 
     page = doc_ir.Page(
         page_number=page_number,
@@ -938,19 +1053,30 @@ def process_document(
         page_number = i + 1
         _emit(progress, 0.05 + 0.35 * (i / max(1, n_pages)), f"Routing page {page_number}/{n_pages}...")
         fitz_page = doc.load_page(i)
-        if (
-            not extract_survey
-            and
-            native_fast_lane
-            and _page_has_text_layer(fitz_page)
-            and not _page_has_math(fitz_page)
-        ):
-            native_pages[page_number] = _native_page(fitz_page, page_number, debug_dir=debug_dir)
-        else:
-            raster_path = raster_dir / f"page_{page_number:04d}.png"
-            pix = fitz_page.get_pixmap(dpi=SURVEY_DPI if extract_survey else VL_DPI)
-            raster_path.write_bytes(pix.tobytes("png"))
-            vl_jobs.append((page_number, raster_path))
+        if not extract_survey and native_fast_lane and _page_has_text_layer(fitz_page):
+            # Having a text layer is not enough: it also has to be usable. A
+            # page that fails either check is worse than one with no text layer
+            # at all, because the fast lane would "succeed" and hand back
+            # silently wrong characters, so it goes to the VL model whatever
+            # the caller asked for.
+            if _page_has_math(fitz_page):
+                unusable = "equations extract as junk text"
+            elif _text_layer_is_corrupt(fitz_page):
+                unusable = "text layer is mis-encoded"
+            else:
+                native_pages[page_number] = _native_page(
+                    fitz_page, page_number, debug_dir=debug_dir
+                )
+                continue
+            print(
+                f"[auto_ocr] page {page_number}: {unusable}, "
+                "using the VL model instead of the born-digital fast lane",
+                flush=True,
+            )
+        raster_path = raster_dir / f"page_{page_number:04d}.png"
+        pix = fitz_page.get_pixmap(dpi=SURVEY_DPI if extract_survey else VL_DPI)
+        raster_path.write_bytes(pix.tobytes("png"))
+        vl_jobs.append((page_number, raster_path))
 
     # ---- run the VL lane in one batch ---------------------------------------
     vl_pages: dict[int, doc_ir.Page] = {}

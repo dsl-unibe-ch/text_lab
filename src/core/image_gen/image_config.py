@@ -139,8 +139,11 @@ def get_artifacts_dir() -> str:
     env_dir = os.environ.get("IMAGE_GEN_ARTIFACTS_DIR")
     if env_dir:
         return env_dir
-    # src/core/image_gen/image_config.py -> parents[2] == src
-    return str(pathlib.Path(__file__).resolve().parents[2] / "mcp_artifacts" / "images")
+    # Unset: fall back to the same per-user location Chat would have exported,
+    # never to the deployed source tree, which is shared and not ours to write.
+    from core.artifacts import ensure_artifacts_dir
+
+    return ensure_artifacts_dir("images")
 
 
 def is_image_gen_installed() -> bool:

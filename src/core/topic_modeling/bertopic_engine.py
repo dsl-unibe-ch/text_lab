@@ -13,6 +13,8 @@ from sklearn.cluster import KMeans
 from hdbscan import HDBSCAN
 from umap import UMAP
 
+from . import small_corpus
+
 
 _SUPPORTED_DIM_ALGOS = {"UMAP", "PCA", "Truncated SVD", "None"}
 _SUPPORTED_CLUSTERING_ALGOS = {"HDBSCAN", "KMeans"}
@@ -91,9 +93,9 @@ def train_bertopic_model(
         original probability matrix.
 
     Raises:
-        ValueError: If no texts are provided, ``ngram_range`` is invalid, or
-            an unsupported dimensionality-reduction/clustering algorithm is
-            requested.
+        ValueError: If no texts are provided, ``ngram_range`` is invalid, an
+            unsupported dimensionality-reduction/clustering algorithm is
+            requested, or the corpus is too small to cluster.
     """
     if clustering_params is None:
         clustering_params = {}
@@ -220,10 +222,17 @@ def train_bertopic_model(
         calculate_probabilities=True,
     )
 
-    topics, probabilities = topic_model.fit_transform(
-        texts,
-        embeddings=precomputed_embeddings,
-    )
+    try:
+        topics, probabilities = topic_model.fit_transform(
+            texts,
+            embeddings=precomputed_embeddings,
+        )
+    except (ValueError, TypeError) as e:
+        # Same UMAP/HDBSCAN stack as Top2Vec, so the same failures on a corpus
+        # with too few documents to cluster.
+        if small_corpus.is_corpus_too_small(e):
+            raise small_corpus.too_small_error(len(texts), "BERTopic") from e
+        raise
 
     if reduce_outliers and clustering_algo == "HDBSCAN":
         topics = topic_model.reduce_outliers(
