@@ -5,11 +5,16 @@
     "H200"
   ],
   "small_models": [
+    "qwen3.8:latest",
+    "muse-glimmer:30b",
     "gemma4:12b"
   ],
   "large_models": [
     "qwen3.8:latest",
     "muse-glimmer:30b",
-    "gemma4:31b"
+    "gemma4:31b",
+    "llama4:16x17b",
+    "mistral-medium-3.5:latest",
+    "nemotron-3-super:latest"
   ]
 }
