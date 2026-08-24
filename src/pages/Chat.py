@@ -28,6 +28,7 @@ st.set_page_config(
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from auth import check_token
+from core.artifacts import ensure_artifacts_dir
 from core.chat_engine import (
     check_ollama_server,
     get_gpu_name,
@@ -75,13 +76,14 @@ from core.image_gen.image_config import (
 _SRC_DIR = pathlib.Path(__file__).resolve().parent.parent
 MCP_SERVER_SCRIPT = str(_SRC_DIR / "core" / "visualization" / "mcp_server.py")
 IMAGE_MCP_SERVER_SCRIPT = str(_SRC_DIR / "core" / "image_gen" / "mcp_server.py")
-ARTIFACTS_DIR = str(_SRC_DIR / "mcp_artifacts")
-IMAGE_ARTIFACTS_DIR = str(_SRC_DIR / "mcp_artifacts" / "images")
 ANALYSIS_TIMEOUT_SECONDS = 600
 TABULAR_EXTENSIONS = (".csv", ".tsv", ".xls", ".xlsx", ".json")
 
-os.makedirs(ARTIFACTS_DIR, exist_ok=True)
-os.makedirs(IMAGE_ARTIFACTS_DIR, exist_ok=True)
+# Per user, and off the shared source tree: uploaded data is private, so these
+# directories are 0700, and a single shared one can only ever serve whoever
+# created it. See core.artifacts.
+ARTIFACTS_DIR = ensure_artifacts_dir()
+IMAGE_ARTIFACTS_DIR = ensure_artifacts_dir("images")
 # Keep the MCP subprocess and Streamlit in agreement on where PNGs are written.
 os.environ.setdefault("IMAGE_GEN_ARTIFACTS_DIR", IMAGE_ARTIFACTS_DIR)
 
