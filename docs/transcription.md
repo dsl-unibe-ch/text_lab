@@ -29,7 +29,7 @@ If you have multiple audio recordings (e.g., a folder of 10 interviews), you can
    * Alternatively, select **Auto-detect**. The AI will dynamically analyze and figure out the correct language for each file individually before transcribing it.
 4. **Process:** Click Start. The AI will load the models once and loop through your entire ZIP file at maximum speed. 
 
-### 🇨🇭 Swiss German Support
+### Swiss German Support
 
 Text Lab includes a specialized fine-tuned model for **Swiss German**.
 

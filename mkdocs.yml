@@ -40,6 +40,8 @@ nav:
   - Features:
     - Transcription: transcription.md
     - OCR: ocr.md
+    - Translate: translate.md
+    - Meeting Notes Generator: meeting_notes.md
     - Knowledge Graph: knowledge_graph.md
     - Topic Modeling: topic_modeling.md
     - Chat & Viz: other_tools.md
