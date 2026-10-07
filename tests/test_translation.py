@@ -35,7 +35,8 @@ def test_a_break_after_a_finished_sentence_is_kept():
 
 
 def test_a_word_hyphenated_across_the_break_is_put_back_together():
-    assert reflow_soft_wraps("Ein Wort wurde ge-\ntrennt.") == "Ein Wort wurde getrennt."
+    assert reflow_soft_wraps(
+        "Ein Wort wurde ge-\ntrennt.") == "Ein Wort wurde getrennt."
 
 
 def test_markdown_structure_keeps_its_own_lines():
@@ -61,7 +62,8 @@ def test_fenced_code_is_never_reflowed():
 
 
 def test_reflow_is_idempotent_and_safe_on_edge_cases():
-    assert reflow_soft_wraps(reflow_soft_wraps(WRAPPED)) == reflow_soft_wraps(WRAPPED)
+    assert reflow_soft_wraps(reflow_soft_wraps(
+        WRAPPED)) == reflow_soft_wraps(WRAPPED)
     for text in ("", "no newlines here", "\n", "\n\n\n"):
         assert reflow_soft_wraps(text) == text
 
@@ -91,5 +93,8 @@ def test_subtitles_would_be_destroyed_which_is_why_callers_opt_in():
     in the helper can tell that apart from prose -- which is exactly why it is
     applied by the caller that knows the format, and not inside the engine.
     """
-    cue = "1\n00:00:01,000 --> 00:00:04,000\nHello there, this is\na wrapped sentence."
+    cue = (
+        "1\n00:00:01,000 --> 00:00:04,000\n"
+        "Hello there, this is\na wrapped sentence."
+    )
     assert "\n" not in reflow_soft_wraps(cue)

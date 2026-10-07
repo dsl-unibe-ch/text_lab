@@ -59,7 +59,7 @@ def _try_load_model():
 
 
 def is_available() -> bool:
-    """Whether CometKiwi can be used in this environment. Loads on first call."""
+    """Check CometKiwi availability, loading it on the first call."""
     return _try_load_model() is not None
 
 

@@ -27,11 +27,19 @@ storage. Subsequent calls are cache hits.
 from __future__ import annotations
 
 import functools
-import re
-import time
-from typing import Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional
 
+from .chunking import (
+    chunk_text_for_translation,
+    split_into_sentences,
+    translate_lines,
+)
 from .gpu_profile import resolve_batch_size
+from .hf_backend import (
+    DEFAULT_NUM_BEAMS,
+    generate_translations,
+)
+from .ollama_backend import translate_ollama
 
 # ---------------------------------------------------------------------------
 # Backend registry
@@ -82,128 +90,10 @@ def flores_to_iso2(code: str) -> Optional[str]:
     return _FLORES_TO_ISO2.get(code)
 
 
-# ---------------------------------------------------------------------------
-# Text chunking (translation models have a hard token limit; ~512 tokens for
-# NLLB / MarianMT). We chunk by sentence to avoid mid-sentence cuts.
-# ---------------------------------------------------------------------------
-
-_SENT_SPLIT_RE = re.compile(r"(?<=[\.\!\?\u3002\uFF01\uFF1F])\s+")
-
-
-def split_into_sentences(text: str) -> List[str]:
-    """Simple regex-based sentence split. Good enough for chunking."""
-    text = text.strip()
-    if not text:
-        return []
-    parts = _SENT_SPLIT_RE.split(text)
-    return [p.strip() for p in parts if p.strip()]
-
-
-def chunk_text_for_translation(
-    text: str,
-    max_chars: int = 1200,
-) -> List[str]:
-    """
-    Split text into ~max_chars chunks on sentence boundaries where possible.
-
-    Paragraphs (double newline) are preserved. Very long sentences are
-    hard-split so no chunk exceeds ``max_chars`` characters.
-    """
-    if not text:
-        return []
-
-    chunks: List[str] = []
-    for paragraph in text.split("\n\n"):
-        paragraph = paragraph.strip()
-        if not paragraph:
-            continue
-        sentences = split_into_sentences(paragraph)
-        if not sentences:
-            continue
-
-        buf = ""
-        for sent in sentences:
-            if len(sent) > max_chars:
-                if buf:
-                    chunks.append(buf)
-                    buf = ""
-                for i in range(0, len(sent), max_chars):
-                    chunks.append(sent[i : i + max_chars])
-                continue
-            if buf and len(buf) + 1 + len(sent) > max_chars:
-                chunks.append(buf)
-                buf = sent
-            else:
-                buf = f"{buf} {sent}".strip() if buf else sent
-        if buf:
-            chunks.append(buf)
-    return chunks
-
-
-# ---------------------------------------------------------------------------
-# Shared batched generation for HuggingFace seq2seq backends
-#
-# The single biggest performance lever: instead of one ``model.generate``
-# call per chunk (each paying fixed GPU launch + host<->device sync cost),
-# we tokenize many chunks together with padding and run them through the
-# model in mini-batches. On a GPU this is often 10-20x faster for documents
-# with many short paragraphs.
-# ---------------------------------------------------------------------------
-
-# Greedy decoding by default (num_beams=1). Beam search roughly doubles
-# generation cost for a marginal quality gain on NLLB/Marian/MADLAD.
-DEFAULT_NUM_BEAMS = 1
-DEFAULT_BATCH_SIZE = 16  # fallback; the GPU profile usually overrides this
-
-
 def _resolve_device(device: Optional[str]) -> str:
     import torch
 
     return device or ("cuda" if torch.cuda.is_available() else "cpu")
-
-
-def _hf_generate_batch(
-    model,
-    tokenizer,
-    texts: List[str],
-    device: str,
-    *,
-    forced_bos_token_id: Optional[int] = None,
-    num_beams: int = DEFAULT_NUM_BEAMS,
-    max_new_tokens: int = 512,
-    batch_size: int = DEFAULT_BATCH_SIZE,
-    progress_cb: Optional[Callable[[int, int], None]] = None,
-) -> List[str]:
-    """
-    Translate a flat list of already-prepared strings, batched.
-
-    Returns one output string per input string, in order.
-    """
-    import torch
-
-    outputs: List[str] = []
-    total = len(texts)
-    gen_kwargs: Dict = {"max_new_tokens": max_new_tokens, "num_beams": num_beams}
-    if forced_bos_token_id is not None:
-        gen_kwargs["forced_bos_token_id"] = forced_bos_token_id
-
-    for start in range(0, total, batch_size):
-        batch = texts[start : start + batch_size]
-        enc = tokenizer(
-            batch,
-            return_tensors="pt",
-            padding=True,
-            truncation=True,
-            max_length=512,
-        )
-        enc = {k: v.to(device) for k, v in enc.items()}
-        with torch.inference_mode():
-            gen = model.generate(**enc, **gen_kwargs)
-        outputs.extend(tokenizer.batch_decode(gen, skip_special_tokens=True))
-        if progress_cb is not None:
-            progress_cb(min(start + len(batch), total), total)
-
-    return outputs
 
 
 def _translate_chunks_hf(
@@ -217,14 +107,12 @@ def _translate_chunks_hf(
     max_new_tokens: int = 512,
     batch_size: Optional[int] = None,
     progress_cb: Optional[Callable[[int, int], None]] = None,
+    status_cb: Optional[Callable[[str], None]] = None,
 ) -> List[str]:
-    """
-    Batched translation of pre-chunked text for the HF seq2seq backends
-    (``nllb``, ``nllb-large``, ``madlad-3b``, ``opus-mt``).
+    """Load a backend, then split and batch inputs with its real tokenizer.
 
-    Returns one translated string per input chunk, in order. When
-    ``batch_size`` is None it is resolved from the current GPU profile so
-    bigger cards automatically use bigger, faster batches.
+    Return one complete translation per input. Language prefixes, special
+    tokens, and model limits are included in the generation layer's budget.
     """
     if not chunks:
         return []
@@ -233,26 +121,31 @@ def _translate_chunks_hf(
         batch_size = resolve_batch_size(backend)
 
     device = _resolve_device(device)
+    source_prefix = ""
 
     if backend in NLLB_MODEL_IDS:
         dtype_name = "float16" if device == "cuda" else "float32"
-        tokenizer, model = _load_nllb(NLLB_MODEL_IDS[backend], device, dtype_name)
+        tokenizer, model = _load_nllb(
+            NLLB_MODEL_IDS[backend], device, dtype_name)
         tokenizer.src_lang = src_lang
         forced_bos_token_id = tokenizer.convert_tokens_to_ids(tgt_lang)
-        if forced_bos_token_id is None or forced_bos_token_id == tokenizer.unk_token_id:
-            raise ValueError(f"Target language {tgt_lang} is not supported by NLLB.")
-        prepared = chunks
+        if (forced_bos_token_id is None
+                or forced_bos_token_id == tokenizer.unk_token_id):
+            raise ValueError(
+                f"Target language {tgt_lang} is not supported by NLLB.")
     elif backend in MADLAD_MODEL_IDS:
         dtype_name = "float16" if device == "cuda" else "float32"
-        tokenizer, model = _load_madlad(MADLAD_MODEL_IDS[backend], device, dtype_name)
+        tokenizer, model = _load_madlad(
+            MADLAD_MODEL_IDS[backend], device, dtype_name)
         tgt_iso = flores_to_iso2(tgt_lang)
         if not tgt_iso:
             raise ValueError(
-                f"MADLAD needs an ISO 639-1 target code; {tgt_lang} is unmapped. "
+                "MADLAD needs an ISO 639-1 target code; "
+                f"{tgt_lang} is unmapped. "
                 "Try the NLLB backend for this language."
             )
         forced_bos_token_id = None
-        prepared = [f"<2{tgt_iso}> {c}" for c in chunks]
+        source_prefix = f"<2{tgt_iso}> "
     elif backend == "opus-mt":
         src_iso = flores_to_iso2(src_lang)
         tgt_iso = flores_to_iso2(tgt_lang)
@@ -266,25 +159,50 @@ def _translate_chunks_hf(
             tokenizer, model = _load_marian(model_id, device)
         except Exception as exc:
             raise RuntimeError(
-                f"No OPUS-MT model available for {src_iso}->{tgt_iso} ({model_id}). "
+                f"No OPUS-MT model available for {src_iso}->{tgt_iso} "
+                f"({model_id}). "
                 "Try the NLLB backend instead."
             ) from exc
         forced_bos_token_id = None
-        prepared = chunks
     else:
         raise ValueError(f"Not an HF seq2seq backend: {backend}")
 
-    return _hf_generate_batch(
+    return generate_translations(
         model,
         tokenizer,
-        prepared,
+        chunks,
         device,
+        source_prefix=source_prefix,
         forced_bos_token_id=forced_bos_token_id,
         num_beams=num_beams,
         max_new_tokens=max_new_tokens,
         batch_size=batch_size,
         progress_cb=progress_cb,
+        status_cb=status_cb,
     )
+
+
+def _translate_hf_texts(
+    texts: List[str],
+    src_lang: str,
+    tgt_lang: str,
+    backend: str,
+    *,
+    device: Optional[str] = None,
+    num_beams: int = DEFAULT_NUM_BEAMS,
+    max_new_tokens: int = 512,
+    batch_size: Optional[int] = None,
+    progress_cb: Optional[Callable[[int, int], None]] = None,
+    status_cb: Optional[Callable[[str], None]] = None,
+) -> List[str]:
+    """Use the same layout and generation path for single and batch inputs."""
+    translator = functools.partial(
+        _translate_chunks_hf,
+        src_lang=src_lang, tgt_lang=tgt_lang, backend=backend,
+        device=device, num_beams=num_beams, max_new_tokens=max_new_tokens,
+        batch_size=batch_size, progress_cb=progress_cb, status_cb=status_cb,
+    )
+    return translate_lines(texts, translator)
 
 
 # ---------------------------------------------------------------------------
@@ -318,48 +236,18 @@ def translate_nllb(
     max_new_tokens: int = 512,
     num_beams: int = DEFAULT_NUM_BEAMS,
     progress_cb: Optional[Callable[[int, int], None]] = None,
+    *,
+    status_cb: Optional[Callable[[str], None]] = None,
 ) -> str:
-    """
-    Translate ``text`` from ``src_lang`` to ``tgt_lang`` using NLLB-200.
-
-    ``src_lang`` / ``tgt_lang`` are FLORES-200 codes (e.g. ``deu_Latn``).
-    """
+    """Translate with NLLB using FLORES-200 language codes."""
     if backend not in NLLB_MODEL_IDS:
         raise ValueError(f"Unknown NLLB backend: {backend}")
-
-    parts = re.split(r'(\n+)', text)
-    flat_chunks = []
-    owners = []
-    for p_idx, part in enumerate(parts):
-        if not part.strip():
-            continue
-        chunks = chunk_text_for_translation(part) or [part]
-        for c in chunks:
-            flat_chunks.append(c)
-            owners.append(p_idx)
-
-    outputs = _translate_chunks_hf(
-        flat_chunks,
-        src_lang,
-        tgt_lang,
-        backend,
-        device=device,
-        num_beams=num_beams,
-        max_new_tokens=max_new_tokens,
-        progress_cb=progress_cb,
-    )
-    
-    buckets = {}
-    for owner, tr in zip(owners, outputs):
-        buckets.setdefault(owner, []).append(tr)
-
-    out_parts = []
-    for p_idx, part in enumerate(parts):
-        if not part.strip():
-            out_parts.append(part)
-        else:
-            out_parts.append(" ".join(buckets.get(p_idx, [part])))
-    return "".join(out_parts)
+    return _translate_hf_texts(
+        [text], src_lang, tgt_lang, backend,
+        device=device, num_beams=num_beams,
+        max_new_tokens=max_new_tokens, progress_cb=progress_cb,
+        status_cb=status_cb,
+    )[0]
 
 
 # ---------------------------------------------------------------------------
@@ -387,124 +275,14 @@ def translate_opus_mt(
     tgt_lang: str,
     device: Optional[str] = None,
     progress_cb: Optional[Callable[[int, int], None]] = None,
+    *,
+    status_cb: Optional[Callable[[str], None]] = None,
 ) -> str:
-    """
-    Translate using an appropriate MarianMT bilingual model.
-
-    Falls back gracefully with a clear error if no direct pair exists (many
-    Helsinki-NLP pairs exist but not all - e.g. de<->fr is direct, but exotic
-    pairs may need pivoting through English, which is not implemented here).
-    """
-    parts = re.split(r'(\n+)', text)
-    flat_chunks = []
-    owners = []
-    for p_idx, part in enumerate(parts):
-        if not part.strip():
-            continue
-        chunks = chunk_text_for_translation(part) or [part]
-        for c in chunks:
-            flat_chunks.append(c)
-            owners.append(p_idx)
-
-    outputs = _translate_chunks_hf(
-        flat_chunks,
-        src_lang,
-        tgt_lang,
-        "opus-mt",
-        device=device,
-        progress_cb=progress_cb,
-    )
-    
-    buckets = {}
-    for owner, tr in zip(owners, outputs):
-        buckets.setdefault(owner, []).append(tr)
-
-    out_parts = []
-    for p_idx, part in enumerate(parts):
-        if not part.strip():
-            out_parts.append(part)
-        else:
-            out_parts.append(" ".join(buckets.get(p_idx, [part])))
-    return "".join(out_parts)
-
-
-# ---------------------------------------------------------------------------
-# Ollama LLM backend (prompt-based, useful for dialects / low-resource cases)
-# ---------------------------------------------------------------------------
-
-
-def translate_ollama(
-    text: str,
-    src_lang_name: str,
-    tgt_lang_name: str,
-    model_name: str,
-    formality: str = "default",
-    progress_cb: Optional[Callable[[int, int], None]] = None,
-) -> str:
-    """
-    Translate by prompting a chat LLM served via Ollama.
-
-    ``src_lang_name`` and ``tgt_lang_name`` are the human-readable names
-    from ``TRANSLATE_LANGUAGE_MAPPING`` (e.g. ``"German"``).
-
-    ``formality`` is one of :data:`FORMALITY_CHOICES`. When not ``default``
-    a matching register instruction is appended to the system prompt.
-    """
-    import ollama
-
-    formality_instr = {
-        "formal": (
-            " Use a formal, professional register throughout — polite"
-            " pronouns, complete sentences, no colloquialisms."
-        ),
-        "informal": (
-            " Use a casual, conversational register — everyday vocabulary,"
-            " contractions where natural, informal pronouns."
-        ),
-    }.get(formality, "")
-
-    system = (
-        "You are a professional translator. Translate the user's text from "
-        f"{src_lang_name} into {tgt_lang_name}. "
-        "Preserve meaning, tone, formatting (paragraphs, lists) and named "
-        f"entities.{formality_instr} Do not add commentary. Return ONLY the translated text."
-    )
-
-    parts = re.split(r'(\n+)', text)
-    flat_chunks = []
-    owners = []
-    for p_idx, part in enumerate(parts):
-        if not part.strip():
-            continue
-        chunks = chunk_text_for_translation(part, max_chars=3000) or [part]
-        for c in chunks:
-            flat_chunks.append(c)
-            owners.append(p_idx)
-
-    total = len(flat_chunks)
-    buckets = {}
-    for i, (chunk, owner) in enumerate(zip(flat_chunks, owners), start=1):
-        resp = ollama.chat(
-            model=model_name,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": chunk},
-            ],
-            options={"temperature": 0.2},
-        )
-        msg = resp.message if hasattr(resp, "message") else resp.get("message", {})
-        content = msg.content if hasattr(msg, "content") else msg.get("content", "")
-        buckets.setdefault(owner, []).append(content.strip())
-        if progress_cb is not None:
-            progress_cb(i, total)
-            
-    out_parts = []
-    for p_idx, part in enumerate(parts):
-        if not part.strip():
-            out_parts.append(part)
-        else:
-            out_parts.append(" ".join(buckets.get(p_idx, [part])))
-    return "".join(out_parts)
+    """Translate with a direct MarianMT pair, or report an unavailable pair."""
+    return _translate_hf_texts(
+        [text], src_lang, tgt_lang, "opus-mt", device=device,
+        progress_cb=progress_cb, status_cb=status_cb,
+    )[0]
 
 
 # ---------------------------------------------------------------------------
@@ -538,50 +316,18 @@ def translate_madlad(
     max_new_tokens: int = 512,
     num_beams: int = DEFAULT_NUM_BEAMS,
     progress_cb: Optional[Callable[[int, int], None]] = None,
+    *,
+    status_cb: Optional[Callable[[str], None]] = None,
 ) -> str:
-    """
-    Translate ``text`` to ``tgt_lang`` using MADLAD-400.
-
-    MADLAD is source-language-agnostic: it detects the source and takes
-    the target language as a ``<2xx>`` prefix (2-letter ISO 639-1). The
-    ``src_lang`` argument is accepted for API symmetry but ignored.
-    """
+    """Translate with MADLAD's target-language prefix (source is detected)."""
     if backend not in MADLAD_MODEL_IDS:
         raise ValueError(f"Unknown MADLAD backend: {backend}")
-
-    parts = re.split(r'(\n+)', text)
-    flat_chunks = []
-    owners = []
-    for p_idx, part in enumerate(parts):
-        if not part.strip():
-            continue
-        chunks = chunk_text_for_translation(part) or [part]
-        for c in chunks:
-            flat_chunks.append(c)
-            owners.append(p_idx)
-
-    outputs = _translate_chunks_hf(
-        flat_chunks,
-        src_lang,
-        tgt_lang,
-        backend,
-        device=device,
-        num_beams=num_beams,
-        max_new_tokens=max_new_tokens,
-        progress_cb=progress_cb,
-    )
-
-    buckets = {}
-    for owner, tr in zip(owners, outputs):
-        buckets.setdefault(owner, []).append(tr)
-
-    out_parts = []
-    for p_idx, part in enumerate(parts):
-        if not part.strip():
-            out_parts.append(part)
-        else:
-            out_parts.append(" ".join(buckets.get(p_idx, [part])))
-    return "".join(out_parts)
+    return _translate_hf_texts(
+        [text], src_lang, tgt_lang, backend,
+        device=device, num_beams=num_beams,
+        max_new_tokens=max_new_tokens, progress_cb=progress_cb,
+        status_cb=status_cb,
+    )[0]
 
 
 # ---------------------------------------------------------------------------
@@ -599,17 +345,19 @@ def translate(
     tgt_lang_name: Optional[str] = None,
     formality: str = "default",
     progress_cb: Optional[Callable[[int, int], None]] = None,
+    *,
+    status_cb: Optional[Callable[[str], None]] = None,
 ) -> str:
-    """Dispatch to the requested backend."""
+    """Dispatch to a backend; limit failures propagate to the caller."""
     if not text or not text.strip():
         return ""
 
-    if backend in NLLB_MODEL_IDS:
-        return translate_nllb(text, src_lang, tgt_lang, backend=backend, progress_cb=progress_cb)
-    if backend in MADLAD_MODEL_IDS:
-        return translate_madlad(text, src_lang, tgt_lang, backend=backend, progress_cb=progress_cb)
-    if backend == "opus-mt":
-        return translate_opus_mt(text, src_lang, tgt_lang, progress_cb=progress_cb)
+    if (backend in NLLB_MODEL_IDS or backend in MADLAD_MODEL_IDS
+            or backend == "opus-mt"):
+        return _translate_hf_texts(
+            [text], src_lang, tgt_lang, backend,
+            progress_cb=progress_cb, status_cb=status_cb,
+        )[0]
     if backend == "ollama":
         if not ollama_model:
             raise ValueError("ollama backend requires ollama_model")
@@ -620,6 +368,7 @@ def translate(
             model_name=ollama_model,
             formality=formality,
             progress_cb=progress_cb,
+            status_cb=status_cb,
         )
     raise ValueError(f"Unknown translation backend: {backend}")
 
@@ -635,6 +384,8 @@ def translate_many(
     formality: str = "default",
     batch_size: Optional[int] = None,
     progress_cb: Optional[Callable[[int, int], None]] = None,
+    *,
+    status_cb: Optional[Callable[[str], None]] = None,
 ) -> List[str]:
     """
     Translate a list of independent texts, returning one output per input.
@@ -658,46 +409,12 @@ def translate_many(
     if not to_do:
         return result
 
-    if backend in NLLB_MODEL_IDS or backend in MADLAD_MODEL_IDS or backend == "opus-mt":
-        # Flatten every text into chunks, remembering ownership.
-        flat_chunks: List[str] = []
-        owners: List[Tuple[int, int]] = []
-        parts_per_text: Dict[int, List[str]] = {}
-        for idx in to_do:
-            parts = re.split(r'(\n+)', texts[idx])
-            parts_per_text[idx] = parts
-            for p_idx, part in enumerate(parts):
-                if not part.strip():
-                    continue
-                chunks = chunk_text_for_translation(part) or [part]
-                for c in chunks:
-                    flat_chunks.append(c)
-                    owners.append((idx, p_idx))
-
-        translated_flat = _translate_chunks_hf(
-            flat_chunks,
-            src_lang,
-            tgt_lang,
-            backend,
-            batch_size=batch_size,
-            progress_cb=progress_cb,
+    if (backend in NLLB_MODEL_IDS or backend in MADLAD_MODEL_IDS
+            or backend == "opus-mt"):
+        return _translate_hf_texts(
+            texts, src_lang, tgt_lang, backend, batch_size=batch_size,
+            progress_cb=progress_cb, status_cb=status_cb,
         )
-
-        buckets: Dict[Tuple[int, int], List[str]] = {}
-        for owner, tr in zip(owners, translated_flat):
-            buckets.setdefault(owner, []).append(tr)
-            
-        for idx in to_do:
-            parts = parts_per_text[idx]
-            out_parts = []
-            for p_idx, part in enumerate(parts):
-                if not part.strip():
-                    out_parts.append(part)
-                else:
-                    tr_chunks = buckets.get((idx, p_idx), [part])
-                    out_parts.append(" ".join(tr_chunks))
-            result[idx] = "".join(out_parts)
-        return result
 
     # Ollama (and any other non-batchable backend): per-text loop.
     total = len(to_do)
@@ -711,6 +428,7 @@ def translate_many(
             src_lang_name=src_lang_name,
             tgt_lang_name=tgt_lang_name,
             formality=formality,
+            status_cb=status_cb,
         )
         if progress_cb is not None:
             progress_cb(done, total)
@@ -726,6 +444,8 @@ def make_translate_fn(
     tgt_lang_name: Optional[str] = None,
     formality: str = "default",
     progress_cb: Optional[Callable[[int, int], None]] = None,
+    *,
+    status_cb: Optional[Callable[[str], None]] = None,
 ) -> Callable[[str], str]:
     """
     Return a single-argument ``str -> str`` translator with all backend
@@ -748,6 +468,7 @@ def make_translate_fn(
             tgt_lang_name=tgt_lang_name,
             formality=formality,
             progress_cb=progress_cb,
+            status_cb=status_cb,
         )
 
     def _many(texts: List[str]) -> List[str]:
@@ -761,6 +482,7 @@ def make_translate_fn(
             tgt_lang_name=tgt_lang_name,
             formality=formality,
             progress_cb=progress_cb,
+            status_cb=status_cb,
         )
 
     _fn.many = _many  # type: ignore[attr-defined]
@@ -798,7 +520,8 @@ def read_text_from_upload(name: str, data: bytes) -> str:
             import docx  # python-docx, optional
         except ImportError as exc:
             raise RuntimeError(
-                "python-docx is not installed in this container; upload .txt or .pdf instead."
+                "python-docx is not installed in this container; "
+                "upload .txt or .pdf instead."
             ) from exc
         import io as _io
 

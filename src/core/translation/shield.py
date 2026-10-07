@@ -42,7 +42,8 @@ _GLOSSARY_RE = re.compile(r"\x02GL_(\d+)\x03")
 # Each pattern is applied globally to the text before the next one runs.
 _PATTERNS: List[Tuple[str, re.Pattern]] = [
     # Fenced code blocks (```lang ... ``` or ~~~ ... ~~~) — whole thing kept.
-    ("fenced_code", re.compile(r"(?ms)^[ \t]*(?:```|~~~)[^\n]*\n.*?^[ \t]*(?:```|~~~)[ \t]*$")),
+    ("fenced_code", re.compile(
+        r"(?ms)^[ \t]*(?:```|~~~)[^\n]*\n.*?^[ \t]*(?:```|~~~)[ \t]*$")),
     # Display math $$...$$ and \[...\]
     ("math_display", re.compile(r"\$\$[\s\S]+?\$\$")),
     ("math_display_bracket", re.compile(r"\\\[[\s\S]+?\\\]")),
@@ -70,7 +71,8 @@ _PATTERNS: List[Tuple[str, re.Pattern]] = [
 ]
 
 
-def _shield_pattern(text: str, pattern: re.Pattern, placeholders: List[str]) -> str:
+def _shield_pattern(text: str, pattern: re.Pattern,
+                    placeholders: List[str]) -> str:
     def _sub(m: re.Match) -> str:
         placeholders.append(m.group(0))
         return _SENTINEL_FMT.format(i=len(placeholders) - 1)
@@ -276,7 +278,8 @@ def _apply_glossary(
 # Characters where Python's ``\b`` boundary reliably fires. If the source
 # term begins/ends with one of these, we anchor with ``\b``; otherwise we
 # fall back to plain substring matching (relevant for CJK, Thai, etc.).
-_BOUNDARY_CHAR_RE = re.compile(r"[A-Za-z0-9_\u00C0-\u024F\u0400-\u052F\u0370-\u03FF]")
+_BOUNDARY_CHAR_RE = re.compile(
+    r"[A-Za-z0-9_\u00C0-\u024F\u0400-\u052F\u0370-\u03FF]")
 
 
 def _glossary_pattern(src: str) -> str:

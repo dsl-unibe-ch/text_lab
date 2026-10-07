@@ -163,7 +163,8 @@ def translate_markdown(
         _defer("", line, "")
 
     _report(progress_cb, total, total, "translating markdown")
-    translated = shielded_translate_many(bodies, translate_fn, glossary=glossary)
+    translated = shielded_translate_many(
+        bodies, translate_fn, glossary=glossary)
     for (idx, prefix, suffix), tr in zip(slots, translated):
         out[idx] = f"{prefix}{tr}{suffix}"
 
@@ -243,7 +244,8 @@ def _translate_docx_part(
     counter[0] += len(paragraphs)
     _report(progress_cb, counter[0], total_est, stage)
 
-    translated_list = shielded_translate_many(texts, translate_fn, glossary=glossary)
+    translated_list = shielded_translate_many(
+        texts, translate_fn, glossary=glossary)
     for p, text, translated in zip(paragraphs, texts, translated_list):
         if not text.strip():
             continue
@@ -332,7 +334,8 @@ def translate_docx(
 # PDF (pymupdf)
 # ===========================================================================
 
-_ENDS_SENTENCE_RE = re.compile(r"[\.\!\?\u3002\uFF01\uFF1F\u203C\u2049\uFF0E]\s*[\"'\)\]]?\s*$")
+_ENDS_SENTENCE_RE = re.compile(
+    r"[\.\!\?\u3002\uFF01\uFF1F\u203C\u2049\uFF0E]\s*[\"'\)\]]?\s*$")
 
 
 # --- Math detection --------------------------------------------------------
@@ -355,7 +358,8 @@ _MATH_FONT_PATTERN = re.compile(
     r"|\bCMEX\d*"                       # Computer Modern Math Extension
     r"|\bMSAM\d*|\bMSBM\d*"             # AMS math fonts
     r"|\bMTMain\b|\bMTSym\b|\bMTEx\b|\bMTExtra\b"       # MathTime
-    r"|LatinModern-?Math\b"             # ONLY the Math variant (not Roman/Mono/Italic)
+    # ONLY the Math variant (not Roman/Mono/Italic)
+    r"|LatinModern-?Math\b"
     r"|Cambria\s?Math\b"                # OpenType math
     r"|(?:STIX|STIXTwo)\s?Math\b"       # STIX Math families only
     r"|MathJax"
@@ -367,7 +371,7 @@ _MATH_FONT_PATTERN = re.compile(
 
 
 def _is_math_char(ch: str) -> bool:
-    """Return True for characters that are almost exclusively used in equations."""
+    """Identify characters used almost exclusively in equations."""
     code = ord(ch)
     # NOTE: intentionally excludes the Greek block (0x0370-0x03FF) and the
     # Arrows block (0x2190-0x21FF). Both appear in body text often enough
@@ -404,7 +408,12 @@ def _is_math_block(block: dict) -> bool:
     Return True if a block should be treated as an equation / formula and
     left untouched. Requires a strict majority of spans to look like math.
     """
-    spans = [s for line in block.get("lines", []) for s in line.get("spans", [])]
+    spans = [
+        s for line in block.get(
+            "lines",
+            []) for s in line.get(
+            "spans",
+            [])]
     if not spans:
         return False
     math_spans = sum(1 for s in spans if _is_math_span(s))
@@ -429,8 +438,9 @@ def _rect_intersect_area(
     return max(0.0, ix1 - ix0) * max(0.0, iy1 - iy0)
 
 
-def _extract_image_bboxes(page_dict: dict) -> List[Tuple[float, float, float, float]]:
-    """Return the list of image-block bboxes on a page (block ``type == 1``)."""
+def _extract_image_bboxes(
+        page_dict: dict) -> List[Tuple[float, float, float, float]]:
+    """Return image-block bboxes on a page (block ``type == 1``)."""
     out: List[Tuple[float, float, float, float]] = []
     for block in page_dict.get("blocks", []):
         if block.get("type") == 1:
@@ -647,7 +657,7 @@ def translate_pdf(
 
     Strategy
     --------
-    1. Extract all text blocks with bounding boxes (pymupdf ``get_text('dict')``).
+    1. Extract text blocks with bounding boxes using ``get_text('dict')``.
     2. Reflow lines within each block (hyphen joining, whitespace).
     3. Skip blocks that look like equations (font-based + Unicode-block
        heuristics) or that are heavily enclosed by an image bbox
@@ -752,7 +762,8 @@ def translate_pdf(
 
     # ---- 4: translate all semantic paragraphs in one batched pass -------
     _report(progress_cb, 0, total, "translating pdf")
-    joined_list = [" ".join(all_blocks[i][2] for i in group) for group in groups]
+    joined_list = [" ".join(all_blocks[i][2] for i in group)
+                   for group in groups]
     translated_list = shielded_translate_many(
         joined_list, translate_fn, glossary=glossary
     )
@@ -873,13 +884,14 @@ def pdf_needs_ocr(pdf_bytes: bytes) -> bool:
 
 
 def _ocr_progress_bridge(progress_cb: ProgressCb, stage_hint: str):
-    """Adapt auto_ocr's ``callback(fraction, text)`` to our ``(done,total,stage)``."""
+    """Adapt OCR's fraction/text callback to a done/total/stage callback."""
     if progress_cb is None:
         return None
 
     def _cb(frac: float, text: str) -> None:
         pct = int(round(max(0.0, min(1.0, frac)) * 1000))
-        # Prepend the outer stage hint so the UI shows "OCR: parsing page 3/12".
+        # Prepend the outer stage hint so the UI shows "OCR: parsing page
+        # 3/12".
         try:
             progress_cb(pct, 1000, f"{stage_hint}: {text}")
         except Exception:
@@ -989,7 +1001,7 @@ def pack_markdown_bundle(
     *,
     stem: str,
 ) -> Tuple[bytes, str]:
-    """Return ``(bytes, filename)`` — a ZIP when there are assets, else a ``.md``.
+    """Return bytes and filename: a ZIP with assets, otherwise Markdown.
 
     ZIP layout:  ``<stem>.md``  +  ``assets/<name>.png`` per crop.
     """
@@ -1133,7 +1145,8 @@ def translate_xlsx(
                 translatable.append((cell, "cell"))
 
                 comment = getattr(cell, "comment", None)
-                if comment is not None and comment.text and comment.text.strip():
+                if (comment is not None and comment.text
+                        and comment.text.strip()):
                     translatable.append((cell, "comment"))
 
     total = max(1, len(translatable))
@@ -1142,7 +1155,8 @@ def translate_xlsx(
         for cell, kind in translatable
     ]
     _report(progress_cb, 0, total, "translating xlsx")
-    translated_list = shielded_translate_many(texts, translate_fn, glossary=glossary)
+    translated_list = shielded_translate_many(
+        texts, translate_fn, glossary=glossary)
     _report(progress_cb, total, total, "translating xlsx")
 
     for (cell, kind), translated in zip(translatable, translated_list):
@@ -1199,7 +1213,8 @@ def _iter_pptx_text_frames(prs):
 def _iter_shape_text_frames(shape):
     """Recurse into groups/tables/text-frames and yield each text frame."""
     # Grouped shapes.
-    if getattr(shape, "shape_type", None) is not None and hasattr(shape, "shapes"):
+    if getattr(shape, "shape_type", None) is not None and hasattr(
+            shape, "shapes"):
         try:
             for sub in shape.shapes:
                 yield from _iter_shape_text_frames(sub)
@@ -1252,7 +1267,8 @@ def translate_pptx(
     total = max(1, len(paragraphs))
     texts = [_pptx_paragraph_text(para) for para in paragraphs]
     _report(progress_cb, 0, total, "translating pptx")
-    translated_list = shielded_translate_many(texts, translate_fn, glossary=glossary)
+    translated_list = shielded_translate_many(
+        texts, translate_fn, glossary=glossary)
     _report(progress_cb, total, total, "translating pptx")
 
     for para, text, translated in zip(paragraphs, texts, translated_list):
@@ -1263,4 +1279,3 @@ def translate_pptx(
     out = io.BytesIO()
     prs.save(out)
     return out.getvalue()
-

@@ -4,9 +4,11 @@ Machine-translation subpackage for Text Lab.
 Layout
 ------
 
-* :mod:`.engine`       -- backend registry, NLLB / MADLAD / OPUS-MT /
-                          Ollama inference, dispatch, and the
-                          :func:`make_translate_fn` factory.
+* :mod:`.engine`       -- model loading, language adapters, dispatch, and
+                          the :func:`make_translate_fn` factory.
+* :mod:`.chunking`     -- lossless boundaries, budgets, and limit errors.
+* :mod:`.hf_backend`   -- tokenizer-aware batching and bounded recovery.
+* :mod:`.ollama_backend` -- conservative context budgets and stop checks.
 * :mod:`.format`       -- format-preserving document translation for
                           Markdown, DOCX, PDF, XLSX, PPTX.
 * :mod:`.shield`       -- pre/post-translation shielding for URLs,
@@ -23,6 +25,11 @@ the internal file layout.
 
 from __future__ import annotations
 
+from .chunking import (
+    InputTooLongError,
+    OutputTruncatedError,
+    TranslationLimitError,
+)
 from .engine import (
     FORMALITY_CAPABLE_BACKENDS,
     FORMALITY_CHOICES,
@@ -57,17 +64,34 @@ from .format import (
     translate_pdf_to_markdown,
     pack_markdown_bundle,
 )
-from .lang_detect import DetectionResult, detect_language, supported_iso639_1_codes
+from .lang_detect import (
+    DetectionResult,
+    detect_language,
+    supported_iso639_1_codes,
+)
 from .gpu_profile import (
     GpuProfile,
     detect_gpu_profile,
     ocr_with_translation_allowed,
     resolve_batch_size,
 )
-from .quality import SCORE_UNAVAILABLE, estimate_quality, is_available, quality_badge
-from .shield import shield, shielded_translate, shielded_translate_many, unshield
+from .quality import (
+    SCORE_UNAVAILABLE,
+    estimate_quality,
+    is_available,
+    quality_badge,
+)
+from .shield import (
+    shield,
+    shielded_translate,
+    shielded_translate_many,
+    unshield,
+)
 
 __all__ = [
+    "InputTooLongError",
+    "OutputTruncatedError",
+    "TranslationLimitError",
     # Engine
     "FORMALITY_CAPABLE_BACKENDS",
     "FORMALITY_CHOICES",

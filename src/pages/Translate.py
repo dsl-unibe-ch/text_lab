@@ -33,11 +33,11 @@ import os
 import sys
 import zipfile
 
-os.environ.setdefault("TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD", "1")
-
 import streamlit as st
 import streamlit.components.v1 as components
 from PIL import Image
+
+os.environ.setdefault("TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD", "1")
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 src_dir = os.path.dirname(current_dir)
@@ -49,12 +49,14 @@ st.set_page_config(page_title="Translate", page_icon=favicon, layout="wide")
 if src_dir not in sys.path:
     sys.path.insert(0, src_dir)
 
-from auth import check_token
-from language_mappings import TRANSLATE_LANGUAGE_MAPPING
-from core.translation import (
+# Streamlit page scripts need the source path before application imports.
+from auth import check_token  # noqa: E402
+from language_mappings import TRANSLATE_LANGUAGE_MAPPING  # noqa: E402
+from core.translation import (  # noqa: E402
     FORMALITY_CAPABLE_BACKENDS,
     FORMALITY_CHOICES,
     TRANSLATION_BACKENDS,
+    TranslationLimitError,
     backend_load_signature,
     detect_gpu_profile,
     detect_language,
@@ -84,7 +86,9 @@ GLOSSARY_MAX_ROWS = 50
 
 check_token()
 st.title("Translate")
-st.caption("Neural machine translation — all inference runs locally on UBELIX.")
+st.caption(
+    "Neural machine translation — all inference runs locally on UBELIX."
+)
 
 
 # ---------------------------------------------------------------------------
@@ -109,6 +113,7 @@ _STATE_DEFAULTS = {
     # Persistent translation error (survives the st.rerun after Translate).
     "translate_error": None,
     "translate_traceback": None,
+    "translation_notices": [],
     # Explicit "load model" state for the Text tab. Compared against the
     # current (backend, langs, ollama_model) signature to gate translation.
     "loaded_signature": None,
@@ -163,7 +168,8 @@ with col_backend:
         ),
     )
 backend_label = st.session_state["backend_label"]
-backend_key = next(k for k, v in TRANSLATION_BACKENDS.items() if v == backend_label)
+backend_key = next(k for k, v in TRANSLATION_BACKENDS.items()
+                   if v == backend_label)
 
 with col_src:
     st.selectbox("Source language", lang_names, key="src_lang")
@@ -195,7 +201,8 @@ if backend_key == "ollama":
         if check_ollama_server():
             models = get_available_models(get_gpu_name())
             if models:
-                ollama_model = st.selectbox("LLM model (Ollama)", models, index=0)
+                ollama_model = st.selectbox(
+                    "LLM model (Ollama)", models, index=0)
             else:
                 st.warning("No Ollama models are available on this GPU.")
         else:
@@ -237,6 +244,8 @@ if backend_key == "opus-mt":
 # ---------------------------------------------------------------------------
 # Glossary editor (shared between Text and Document tabs)
 # ---------------------------------------------------------------------------
+
+
 def _current_glossary() -> dict[str, str]:
     """Return the non-empty glossary rows as an ordered dict."""
     out: dict[str, str] = {}
@@ -372,8 +381,10 @@ def _translate_one(
             prof = detect_gpu_profile()
             raise RuntimeError(
                 f"This looks like a scanned PDF, which needs the OCR model. "
-                f"On this GPU ({prof.name}, {prof.vram_mb // 1000} GB) the OCR "
-                f"and translation models don't fit together. Relaunch Text Lab "
+                f"On this GPU ({prof.name}, "
+                f"{prof.vram_mb // 1000} GB) the OCR "
+                "and translation models don't fit together. "
+                "Relaunch Text Lab "
                 f"on an A100, H100, or H200 to translate scanned PDFs."
             )
 
@@ -390,7 +401,8 @@ def _translate_one(
         # would then contend with the OCR worker for VRAM and stall it until
         # the 900s watchdog fires.
         if ocr_ok or not needs_ocr:
-            progress_stage_cb(0, 1, "OCR: preparing" if is_scan else "extracting markdown")
+            progress_stage_cb(
+                0, 1, "OCR: preparing" if is_scan else "extracting markdown")
             md_text, assets = translate_pdf_to_markdown(
                 data,
                 tfn,
@@ -399,7 +411,8 @@ def _translate_one(
                 pdf_type="force_ocr" if is_scan else "auto",
                 source_name=os.path.basename(name),
             )
-            md_bytes, md_name = pack_markdown_bundle(md_text, assets, stem=out_stem)
+            md_bytes, md_name = pack_markdown_bundle(
+                md_text, assets, stem=out_stem)
             outputs.append((md_name, md_bytes))
             progress_stage_cb(1, 1, "reconstructing markdown")
 
@@ -476,8 +489,10 @@ text_tab, doc_tab = st.tabs(["📝 Text", "📄 Document"])
 # ===========================================================================
 with text_tab:
     st.markdown(
-        "Paste text on the left and press **Translate** to see the result on the right. "
-        "Markdown links, inline code, LaTeX, HTML tags, URLs, and placeholders are "
+        "Paste text on the left and press **Translate** "
+        "to see the result on the right. "
+        "Markdown links, inline code, LaTeX, HTML tags, URLs, "
+        "and placeholders are "
         "automatically shielded so the model can't corrupt them."
     )
 
@@ -500,7 +515,9 @@ with text_tab:
         char_count = len(source_value)
         word_count = _count_words(source_value)
         over_cap = char_count > TEXT_SOFT_CAP
-        cap_style = "color:#c0392b;font-weight:600;" if over_cap else "color:#666;"
+        cap_style = (
+            "color:#c0392b;font-weight:600;" if over_cap else "color:#666;"
+        )
         st.markdown(
             f"<div style='{cap_style}font-size:13px;'>"
             f"{char_count:,} / {TEXT_SOFT_CAP:,} characters &nbsp;·&nbsp; "
@@ -625,11 +642,14 @@ with text_tab:
             components.html(
                 f"""
                 <button id="tl-copy-btn"
-                    style="padding:6px 14px;border-radius:6px;border:1px solid #888;
-                           background:#f6f6f6;cursor:pointer;font-size:14px;">
+                    style="padding:6px 14px;border-radius:6px;
+                           border:1px solid #888;background:#f6f6f6;
+                           cursor:pointer;font-size:14px;">
                     📋 Copy translation
                 </button>
-                <span id="tl-copy-msg" style="margin-left:10px;color:#0a0;font-size:13px;"></span>
+                <span id="tl-copy-msg"
+                    style="margin-left:10px;color:#0a0;font-size:13px;">
+                </span>
                 <script>
                     const btn = document.getElementById('tl-copy-btn');
                     const msg = document.getElementById('tl-copy-msg');
@@ -661,7 +681,10 @@ with text_tab:
     if src_code == tgt_code:
         st.warning("Source and target languages are the same.")
     elif not opus_mt_supported:
-        st.error(f"OPUS-MT does not support direct translation between {src_name} and {tgt_name}.")
+        st.error(
+            "OPUS-MT does not support direct translation between "
+            f"{src_name} and {tgt_name}."
+        )
     elif model_is_loaded:
         st.success(
             f"✅ **{backend_label}** is loaded on the GPU — you can translate."
@@ -678,10 +701,11 @@ with text_tab:
         with msg_col:
             if st.session_state["loaded_signature"] is None:
                 st.info(
-                    "Text translation runs entirely on the GPU allocated to this "
-                    f"session. Click **Load model** to warm up **{backend_label}** "
-                    "before translating. First-time downloads can take 1-2 minutes; "
-                    "subsequent loads hit the shared cache and are seconds fast."
+                    "Text translation runs entirely on the GPU allocated "
+                    "to this session. Click **Load model** to warm up "
+                    f"**{backend_label}** before translating. First-time "
+                    "downloads can take 1-2 minutes; subsequent loads hit "
+                    "the shared cache and are seconds fast."
                 )
             else:
                 st.info(
@@ -692,7 +716,8 @@ with text_tab:
 
         if do_load:
             with st.spinner(
-                f"Loading {backend_label} onto the GPU… (first time can take 1-2 min)"
+                f"Loading {backend_label} onto the GPU… "
+                "(first time can take 1-2 min)"
             ):
                 try:
                     preload_backend(
@@ -708,7 +733,9 @@ with text_tab:
                     st.session_state["load_traceback"] = None
                 except Exception as exc:
                     import traceback as _tb
-                    st.session_state["load_error"] = f"Model load failed: {exc}"
+                    st.session_state["load_error"] = (
+                        f"Model load failed: {exc}"
+                    )
                     st.session_state["load_traceback"] = _tb.format_exc()
             st.rerun()
 
@@ -746,8 +773,19 @@ with text_tab:
             with st.expander("Show traceback"):
                 st.code(st.session_state["translate_traceback"])
 
+    for notice in st.session_state["translation_notices"]:
+        st.info(notice)
+
     if do_translate:
+        st.session_state["translation_notices"] = []
         progress = st.progress(0.0, text="Translating…")
+        retry_status = st.empty()
+
+        def _text_retry_notice(message: str) -> None:
+            notices = st.session_state["translation_notices"]
+            if message not in notices:
+                notices.append(message)
+            retry_status.info(message)
 
         def _cb(done: int, total: int) -> None:
             if total > 0:
@@ -763,6 +801,7 @@ with text_tab:
             src_lang_name=src_name, tgt_lang_name=tgt_name,
             formality=formality,
             progress_cb=_cb,
+            status_cb=_text_retry_notice,
         )
         try:
             translated = shielded_translate(
@@ -777,6 +816,10 @@ with text_tab:
             st.session_state["target_text"] = translated
             # Clear any previous error on a successful run.
             st.session_state["translate_error"] = None
+            st.session_state["translate_traceback"] = None
+        except TranslationLimitError as exc:
+            st.session_state["target_text"] = ""
+            st.session_state["translate_error"] = str(exc)
             st.session_state["translate_traceback"] = None
         except Exception as exc:
             import traceback as _tb
@@ -825,8 +868,10 @@ with doc_tab:
         )
     else:
         st.caption(
-            f"GPU: **{_gpu.name}** ({_gpu.vram_mb // 1000} GB) · standard mode. "
-            f"Plain text PDFs are fully supported (PDF + Markdown) — they never "
+            f"GPU: **{_gpu.name}** "
+            f"({_gpu.vram_mb // 1000} GB) · standard mode. "
+            "Plain text PDFs are fully supported (PDF + Markdown) — "
+            "they never "
             f"use OCR. **Scanned PDFs (and pages with equations) need the OCR "
             f"model, which doesn't fit alongside translation on this card; "
             f"relaunch on an A100 / H100 / H200 for those.**"
@@ -834,12 +879,17 @@ with doc_tab:
 
     total_size = sum(d.size for d in docs) if docs else 0
     if total_size > 5_000_000:
-        st.warning("Large files detected. Translation may take several minutes.")
+        st.warning(
+            "Large files detected. Translation may take several minutes."
+        )
 
     if src_code == tgt_code:
         st.warning("Source and target languages are the same.")
     elif not opus_mt_supported:
-        st.error(f"OPUS-MT does not support direct translation between {src_name} and {tgt_name}.")
+        st.error(
+            "OPUS-MT does not support direct translation between "
+            f"{src_name} and {tgt_name}."
+        )
 
     run_doc = st.button(
         "Translate document(s)",
@@ -859,6 +909,14 @@ with doc_tab:
         def _stage(stage: str) -> None:
             stage_ph.markdown(f"**Stage:** {stage}")
 
+        retry_notices: set[str] = set()
+
+        def _document_retry_notice(message: str) -> None:
+            _stage(message)
+            if message not in retry_notices:
+                retry_notices.add(message)
+                st.warning(message)
+
         def _prog_translate(done: int, total: int) -> None:
             _stage(f"translating chunk {done}/{total}")
             if total > 0:
@@ -876,6 +934,7 @@ with doc_tab:
             src_lang_name=src_name, tgt_lang_name=tgt_name,
             formality=formality,
             progress_cb=_prog_translate,
+            status_cb=_document_retry_notice,
         )
 
         info_ph.markdown(
@@ -894,8 +953,14 @@ with doc_tab:
                             if entry.endswith("/"):
                                 continue
                             ext = os.path.splitext(entry)[1].lower()
-                            if ext not in (".md", ".txt", ".srt", ".vtt", ".pdf", ".docx", ".xlsx", ".pptx"):
-                                st.warning(f"Skipped {entry}: unsupported file type inside ZIP.")
+                            if ext not in (
+                                ".md", ".txt", ".srt", ".vtt", ".pdf",
+                                ".docx", ".xlsx", ".pptx",
+                            ):
+                                st.warning(
+                                    f"Skipped {entry}: "
+                                    "unsupported file type inside ZIP."
+                                )
                                 continue
                             flat_inputs.append((entry, zin.read(entry)))
                 except zipfile.BadZipFile:
@@ -957,7 +1022,8 @@ with doc_tab:
                         f"Failed to translate: {msg}".encode("utf-8"),
                     )
             st.success(
-                f"Batch complete: {len(successes)}/{len(flat_inputs)} translated."
+                f"Batch complete: {len(successes)}/"
+                f"{len(flat_inputs)} translated."
             )
             st.download_button(
                 "⬇ Download translated ZIP",

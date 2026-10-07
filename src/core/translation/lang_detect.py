@@ -55,7 +55,8 @@ _ISO2_TO_FLORES: dict[str, str] = {
     "tr": "tur_Latn",   # Turkish
     "ur": "urd_Arab",   # Urdu
     "vi": "vie_Latn",   # Vietnamese
-    "zh": "zho_Hans",   # Chinese (Simplified) - default; user can flip to Traditional
+    # Chinese (Simplified) - default; user can flip to Traditional
+    "zh": "zho_Hans",
 }
 
 _MODEL_ID = "papluca/xlm-roberta-base-language-detection"
@@ -93,7 +94,8 @@ def _load_pipeline():
     )
 
 
-def _flores_and_name_from_iso2(iso2: str) -> tuple[Optional[str], Optional[str]]:
+def _flores_and_name_from_iso2(
+        iso2: str) -> tuple[Optional[str], Optional[str]]:
     """Map an ISO 639-1 code to its FLORES-200 code and UI display name."""
     from language_mappings import TRANSLATE_LANGUAGE_CODE_TO_NAME
 
@@ -122,7 +124,7 @@ def detect_language(text: str) -> Optional[DetectionResult]:
     except Exception:
         return None
 
-    # ``top_k=1`` returns [[{'label': 'de', 'score': 0.99}]] for a single input.
+    # With top_k=1, a single input can still return a nested result list.
     if not raw:
         return None
     first = raw[0]
