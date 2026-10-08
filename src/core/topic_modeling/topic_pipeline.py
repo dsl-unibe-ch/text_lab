@@ -223,6 +223,7 @@ def _run_top2vec_pipeline(
         language=config.language,
         embedding_backend=config.top2vec_backend,
         speed=config.top2vec_speed,
+        min_count=config.top2vec_min_count,
         target_topics=config.num_topics,
     )
 

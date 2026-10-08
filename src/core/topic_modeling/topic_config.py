@@ -65,6 +65,8 @@ class TopicModelingConfig:
     reduce_outliers: bool = False
     top2vec_backend: str = "doc2vec"
     top2vec_speed: str = "learn"
+    # Words seen fewer times than this in the whole collection are ignored.
+    top2vec_min_count: int = 10
     use_bigrams: bool = False
     passes: int = 10
     random_state: int | None = 42
@@ -74,6 +76,9 @@ class TopicModelingConfig:
     embedding_model_id: str | None = None
     # Whether a custom embedding model may run code from its repository.
     trust_remote_code: bool = False
+    # Embed documents longer than the model's context window in chunks and
+    # average the chunk embeddings, instead of truncating them.
+    chunk_long_documents: bool = False
 
 
 @dataclass

@@ -41,6 +41,7 @@ from core.topic_modeling.topic_utils import (
     build_results_zip,
     count_docs_exceeding_context,
     drop_empty_text_rows,
+    embed_documents,
     generate_metadata_report,
     get_embedding_model_name,
     load_sentence_transformer,
@@ -62,13 +63,13 @@ _BASE_METRIC_KEYS = (
     "Coherence (U_mass)",
 )
 
-# Share of documents above the embedding context window that triggers a warning.
+# Share of documents above the embedding context window that triggers a notice.
 _TRUNCATION_WARNING_RATIO = 0.10
 
 _METRICS_EXPLANATION = """
 **Topic Diversity** — the proportion of unique words across
 the top-10 keywords of every topic. It is computed directly
-from the *Topic Dictionary* above; no re-processing of the
+from the *Topic Dictionary* below; no re-processing of the
 corpus is involved. Higher values mean topics share fewer
 keywords.
 
@@ -94,10 +95,12 @@ tokenization, they are best used to compare runs on the
 **same dataset and language**, not as absolute quality
 scores.
 
-**LDA Perplexity** (LDA only) — held-out likelihood of
-the training corpus under the fitted model
-(`2^(−log_perplexity)`). Lower is better; useful only for
-comparing LDA runs on the same data.
+**LDA Perplexity** (LDA only) — how well the fitted model
+predicts the documents it was trained on
+(`2^(−log_perplexity)`). It is not measured on held-out
+documents, so it does not show how well the model
+generalizes. Lower is better; useful only for comparing LDA
+runs on the same data.
 
 **Topic Stability** (when enabled) — the average Jaccard
 similarity of the best-matching topics across three
@@ -382,9 +385,12 @@ def _render_embedding_model_choice(language: str) -> dict[str, Any]:
         language: The selected primary language.
 
     Returns:
-        The ``embedding_model_id`` and ``trust_remote_code`` configuration
-        fields.
+        The ``embedding_model_id``, ``trust_remote_code`` and
+        ``chunk_long_documents`` configuration fields.
     """
+    embedding_model_id = None
+    trust_remote_code = False
+
     with st.expander("Embedding Model", expanded=False):
         default_model = (
             DEFAULT_EMBEDDING_MODEL_ENGLISH
@@ -408,41 +414,48 @@ def _render_embedding_model_choice(language: str) -> dict[str, Any]:
                 "BAAI/bge-m3, nomic-ai/nomic-embed-text-v1.5)."
             ),
         )
-        if embedding_choice.startswith("Default"):
-            return {"embedding_model_id": None, "trust_remote_code": False}
         if embedding_choice.startswith("English only"):
-            return {
-                "embedding_model_id": DEFAULT_EMBEDDING_MODEL_ENGLISH,
-                "trust_remote_code": False,
-            }
-        if embedding_choice.startswith("Multilingual"):
-            return {
-                "embedding_model_id": DEFAULT_EMBEDDING_MODEL_MULTILINGUAL,
-                "trust_remote_code": False,
-            }
+            embedding_model_id = DEFAULT_EMBEDDING_MODEL_ENGLISH
+        elif embedding_choice.startswith("Multilingual"):
+            embedding_model_id = DEFAULT_EMBEDDING_MODEL_MULTILINGUAL
+        elif embedding_choice.startswith("Custom"):
+            custom_id = st.text_input(
+                "HuggingFace model ID",
+                placeholder="e.g. jinaai/jina-embeddings-v2-base-en",
+                help=(
+                    "First-time use will download the model into "
+                    "your home cache. Requires network access from "
+                    "the compute node."
+                ),
+            )
+            embedding_model_id = custom_id.strip() or None
+            trust_remote_code = st.checkbox(
+                "Allow custom code from this model repository",
+                value=False,
+                help=(
+                    "Some long-context models (e.g. Jina, Nomic) ship their own "
+                    "Python code. Enable this only for repositories you trust: "
+                    "the code runs on the compute node under your account."
+                ),
+            )
 
-        custom_id = st.text_input(
-            "HuggingFace model ID",
-            placeholder="e.g. jinaai/jina-embeddings-v2-base-en",
-            help=(
-                "First-time use will download the model into "
-                "your home cache. Requires network access from "
-                "the compute node."
-            ),
-        )
-        trust_remote_code = st.checkbox(
-            "Allow custom code from this model repository",
+        chunk_long_documents = st.checkbox(
+            "Embed long documents in chunks",
             value=False,
             help=(
-                "Some long-context models (e.g. Jina, Nomic) ship their own "
-                "Python code. Enable this only for repositories you trust: "
-                "the code runs on the compute node under your account."
+                "Documents longer than the model's context window are split "
+                "into pieces that fit, each piece is embedded, and the "
+                "results are averaged, so the whole document shapes its "
+                "topic instead of only its beginning. Encoding takes longer "
+                "for long documents."
             ),
         )
-        return {
-            "embedding_model_id": custom_id.strip() or None,
-            "trust_remote_code": trust_remote_code,
-        }
+
+    return {
+        "embedding_model_id": embedding_model_id,
+        "trust_remote_code": trust_remote_code,
+        "chunk_long_documents": chunk_long_documents,
+    }
 
 
 def _render_vocabulary_settings() -> dict[str, Any]:
@@ -656,11 +669,25 @@ def _render_top2vec_settings(
             options=["fast-learn", "learn", "deep-learn"],
             value="learn",
         )
+        min_count = st.number_input(
+            "Minimum Word Count (min_count)",
+            min_value=1,
+            max_value=500,
+            value=10,
+            step=1,
+            help=(
+                "Words that appear fewer times than this in the whole "
+                "collection are ignored. Lower it for small collections or "
+                "if Top2Vec finds no topics; raise it to ignore rare words "
+                "in large collections."
+            ),
+        )
 
     return {
         "num_topics": num_topics,
         "top2vec_backend": backend_by_label[backend_label],
         "top2vec_speed": speed,
+        "top2vec_min_count": int(min_count),
     }
 
 
@@ -783,18 +810,22 @@ def _render_model_configuration(
     return config, run_stability
 
 
-def _warn_about_truncation(
+def _report_long_documents(
     embedding_model: Any,
     model_id: str,
     raw_texts: list[str],
+    chunk_long_documents: bool,
 ) -> None:
     """
-    Warn when many documents exceed the embedding model's context window.
+    Tell the user how documents above the context window will be handled.
+
+    Nothing is shown when few documents are affected.
 
     Args:
         embedding_model: The loaded SentenceTransformer.
-        model_id: The model ID shown in the warning.
+        model_id: The model ID shown in the message.
         raw_texts: The documents to check.
+        chunk_long_documents: Whether long documents are embedded in chunks.
     """
     over_count, total_count, max_seq_length = count_docs_exceeding_context(
         embedding_model, raw_texts
@@ -802,22 +833,37 @@ def _warn_about_truncation(
     if not total_count or over_count / total_count <= _TRUNCATION_WARNING_RATIO:
         return
 
-    st.warning(
+    summary = (
         f"**{over_count} of {total_count} documents "
         f"({over_count / total_count:.0%}) exceed the "
-        f"{max_seq_length}-token context window of "
-        f"`{model_id}`.** Only the leading portion of "
-        "each of those documents will be used to generate the "
-        "topic embedding, which may bias topic assignments toward "
-        "document openings.\n\n"
-        "To capture the full content of long documents, pick a "
-        "sentence-transformer with a larger context window from "
-        "the *Embedding Model* section — for example "
+        f"{max_seq_length}-token context window of `{model_id}`.**"
+    )
+    larger_models = (
         "`jinaai/jina-embeddings-v2-base-en` (8192 tokens), "
         "`BAAI/bge-m3` (8192 tokens) or "
-        "`nomic-ai/nomic-embed-text-v1.5` (8192 tokens). "
-        "Custom models are downloaded to your own home cache "
-        "(`~/.cache/huggingface`)."
+        "`nomic-ai/nomic-embed-text-v1.5` (8192 tokens)"
+    )
+
+    if chunk_long_documents:
+        st.info(
+            f"{summary} They will be split into chunks that fit the window "
+            "and the chunk embeddings averaged, so encoding takes longer. "
+            "A model with a larger context window needs fewer chunks, for "
+            f"example {larger_models}."
+        )
+        return
+
+    st.warning(
+        f"{summary} Only the leading portion of each of those documents "
+        "will be used to generate the topic embedding, which may bias topic "
+        "assignments toward document openings.\n\n"
+        "To capture the full content of long documents, either:\n\n"
+        "- enable *Embed long documents in chunks* in the *Embedding Model* "
+        "section, which embeds each document piece by piece and averages "
+        "the results, or\n"
+        "- pick a sentence-transformer with a larger context window from the "
+        f"same section, for example {larger_models}. Custom models are "
+        "downloaded to your own home cache (`~/.cache/huggingface`)."
     )
 
 
@@ -857,13 +903,15 @@ def _encode_documents(
             )
         raise ValueError(message) from exc
 
-    _warn_about_truncation(embedding_model, model_id, raw_texts)
+    _report_long_documents(
+        embedding_model, model_id, raw_texts, config.chunk_long_documents
+    )
 
     with st.spinner("Encoding documents with the embedding model..."):
-        embeddings = embedding_model.encode(
+        embeddings = embed_documents(
+            embedding_model,
             raw_texts,
-            show_progress_bar=False,
-            convert_to_numpy=True,
+            chunk_long_documents=config.chunk_long_documents,
         )
     return embedding_model, embeddings
 

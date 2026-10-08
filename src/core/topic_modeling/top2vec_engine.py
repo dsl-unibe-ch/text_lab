@@ -48,7 +48,8 @@ def train_top2vec_model(
         language: The language of the documents.
         embedding_backend: The embedding backend to use.
         speed: The Top2Vec training speed mode.
-        min_count: The minimum word count threshold.
+        min_count: Words that appear fewer times than this in the whole
+            collection are ignored.
         target_topics: The target number of topics, or "auto".
 
     Returns:

@@ -15,6 +15,7 @@ from functools import lru_cache
 from typing import Any
 
 import nltk
+import numpy as np
 import pandas as pd
 import spacy
 from nltk.corpus import stopwords
@@ -518,6 +519,146 @@ def count_docs_exceeding_context(
     return over, len(texts), max_seq_length
 
 
+def split_into_token_chunks(
+    text: str,
+    tokenizer: Any,
+    max_tokens: int,
+) -> list[tuple[str, int]]:
+    """
+    Split a document into pieces that fit an embedding model's context window.
+
+    Args:
+        text: The document to split.
+        tokenizer: The HuggingFace tokenizer of the embedding model.
+        max_tokens: The maximum number of tokens per piece, excluding the
+            special tokens the model adds.
+
+    Returns:
+        ``(chunk_text, token_count)`` pairs. A document that already fits is
+        returned unchanged as a single chunk.
+    """
+    token_ids = tokenizer.encode(text, add_special_tokens=False, truncation=False)
+    if len(token_ids) <= max_tokens:
+        return [(text, max(len(token_ids), 1))]
+
+    chunks = []
+    for start in range(0, len(token_ids), max_tokens):
+        window = token_ids[start:start + max_tokens]
+        chunks.append((tokenizer.decode(window, skip_special_tokens=True), len(window)))
+    return chunks
+
+
+def average_chunk_embeddings(
+    chunk_embeddings: np.ndarray,
+    owners: np.ndarray,
+    weights: np.ndarray,
+    n_documents: int,
+) -> np.ndarray:
+    """
+    Combine chunk embeddings into one embedding per document.
+
+    Chunks are averaged with their token counts as weights, so a short final
+    chunk does not count as much as a full one. Averaging shortens vectors
+    whose chunks point in different directions, so each average is rescaled
+    to the weighted mean length of its chunks; long documents then stay on
+    the same scale as documents that were embedded in one piece.
+
+    Args:
+        chunk_embeddings: One embedding per chunk, shape ``(n_chunks, dim)``.
+        owners: The document index of every chunk.
+        weights: The token count of every chunk.
+        n_documents: The number of documents.
+
+    Returns:
+        One embedding per document, shape ``(n_documents, dim)``.
+    """
+    weighted = chunk_embeddings * weights[:, None]
+    sums = np.zeros((n_documents, chunk_embeddings.shape[1]), dtype=np.float64)
+    np.add.at(sums, owners, weighted)
+    totals = np.bincount(owners, weights=weights, minlength=n_documents)
+    averages = sums / totals[:, None]
+
+    chunk_norms = np.linalg.norm(chunk_embeddings, axis=1)
+    target_norms = (
+        np.bincount(owners, weights=weights * chunk_norms, minlength=n_documents)
+        / totals
+    )
+    current_norms = np.linalg.norm(averages, axis=1)
+    scale = np.divide(
+        target_norms,
+        current_norms,
+        out=np.ones_like(current_norms),
+        where=current_norms > 0,
+    )
+    return (averages * scale[:, None]).astype(chunk_embeddings.dtype)
+
+
+def _special_token_count(tokenizer: Any) -> int:
+    """
+    Return how many special tokens the tokenizer adds to a single text.
+
+    Args:
+        tokenizer: A HuggingFace tokenizer.
+
+    Returns:
+        The number of special tokens, or 2 (the usual start and end tokens)
+        if the tokenizer cannot tell.
+    """
+    try:
+        return int(tokenizer.num_special_tokens_to_add(pair=False))
+    except (AttributeError, TypeError):
+        return 2
+
+
+def embed_documents(
+    embedding_model: Any,
+    texts: list[str],
+    chunk_long_documents: bool = False,
+) -> np.ndarray:
+    """
+    Embed documents with a sentence-transformer.
+
+    By default the model truncates documents longer than its context window.
+    With ``chunk_long_documents`` those documents are split into pieces that
+    fit, every piece is embedded, and the pieces are averaged with
+    :func:`average_chunk_embeddings`, so the whole document contributes.
+
+    Args:
+        embedding_model: A SentenceTransformer (or compatible) instance.
+        texts: The documents to embed.
+        chunk_long_documents: Whether to embed long documents in chunks.
+
+    Returns:
+        One embedding per document, shape ``(len(texts), dim)``.
+    """
+    max_seq_length = int(getattr(embedding_model, "max_seq_length", 0) or 0)
+    tokenizer = getattr(embedding_model, "tokenizer", None)
+    if not chunk_long_documents or not max_seq_length or tokenizer is None:
+        return embedding_model.encode(
+            texts, show_progress_bar=False, convert_to_numpy=True
+        )
+
+    max_tokens = max(max_seq_length - _special_token_count(tokenizer), 1)
+    chunk_texts: list[str] = []
+    owners: list[int] = []
+    weights: list[int] = []
+    for index, text in enumerate(texts):
+        for chunk_text, n_tokens in split_into_token_chunks(text, tokenizer, max_tokens):
+            chunk_texts.append(chunk_text)
+            owners.append(index)
+            weights.append(n_tokens)
+
+    chunk_embeddings = embedding_model.encode(
+        chunk_texts, show_progress_bar=False, convert_to_numpy=True
+    )
+    return average_chunk_embeddings(
+        chunk_embeddings,
+        np.asarray(owners),
+        np.asarray(weights, dtype=np.float64),
+        len(texts),
+    )
+
+
 def _report_header(filename: str, config: TopicModelingConfig) -> list[str]:
     """
     Build the source and core-settings part of the metadata report.
@@ -575,6 +716,7 @@ def _report_bertopic_parameters(
         f"Target Topics: {config.num_topics}",
         f"Embedding Model: {embedding_model_name}",
         f"Trust Remote Code: {config.trust_remote_code}",
+        f"Chunk Long Documents: {config.chunk_long_documents}",
         f"N-Gram Range: {config.ngram_range}",
         f"Min Topic Frequency (min_df): {config.min_df}",
         f"Reduce Frequent Words (ClassTfidfTransformer): {config.reduce_frequent}",
@@ -646,6 +788,7 @@ def generate_metadata_report(
                 f"Embedding Backend: {backend_label}",
                 f"Embedding Model: {embedding_model_name}",
                 f"Training Speed: {config.top2vec_speed}",
+                f"Minimum Word Count (min_count): {config.top2vec_min_count}",
             ]
         )
     else:

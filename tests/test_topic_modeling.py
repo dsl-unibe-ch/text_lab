@@ -249,3 +249,83 @@ def test_metrics_without_keywords_are_not_reported_as_zero():
     )
 
     assert set(metrics.values()) == {None}
+
+
+class _WordTokenizer:
+    """Stand-in for a HuggingFace tokenizer: one token per word."""
+
+    def encode(self, text, add_special_tokens=False, truncation=False):
+        return text.split()
+
+    def decode(self, ids, skip_special_tokens=True):
+        return " ".join(ids)
+
+    def num_special_tokens_to_add(self, pair=False):
+        return 2
+
+
+class _FakeEmbeddingModel:
+    """Stand-in for a SentenceTransformer with a six-token context window."""
+
+    max_seq_length = 6
+    tokenizer = _WordTokenizer()
+
+    def __init__(self):
+        self.encoded = []
+
+    def encode(self, texts, show_progress_bar=False, convert_to_numpy=True):
+        import numpy as np
+
+        self.encoded.append(list(texts))
+        vectors = np.array([[len(text.split()), 1.0] for text in texts])
+        return vectors / np.linalg.norm(vectors, axis=1, keepdims=True)
+
+
+def test_long_document_is_split_into_token_chunks():
+    chunks = _topic_utils().split_into_token_chunks(
+        "a b c d e f g h i j", _WordTokenizer(), 4
+    )
+
+    assert chunks == [("a b c d", 4), ("e f g h", 4), ("i j", 2)]
+
+
+def test_short_documents_are_embedded_as_before():
+    np = pytest.importorskip("numpy")
+    utils = _topic_utils()
+    texts = ["a b", "c d e"]
+
+    plain = utils.embed_documents(_FakeEmbeddingModel(), texts)
+    model = _FakeEmbeddingModel()
+    chunked = utils.embed_documents(model, texts, chunk_long_documents=True)
+
+    assert np.allclose(plain, chunked)
+    assert model.encoded == [texts]
+
+
+def test_long_documents_are_embedded_in_chunks_that_fit():
+    model = _FakeEmbeddingModel()
+    long_text = "w1 w2 w3 w4 w5 w6 w7 w8 w9"
+
+    embeddings = _topic_utils().embed_documents(
+        model, ["a b", long_text], chunk_long_documents=True
+    )
+
+    # Six tokens minus two special tokens leaves four words per chunk.
+    assert model.encoded == [["a b", "w1 w2 w3 w4", "w5 w6 w7 w8", "w9"]]
+    assert embeddings.shape == (2, 2)
+
+
+def test_chunk_average_is_weighted_by_length_and_keeps_scale():
+    np = pytest.importorskip("numpy")
+    chunk_embeddings = np.array([[1.0, 0.0], [0.0, 1.0], [3.0, 4.0]])
+
+    averages = _topic_utils().average_chunk_embeddings(
+        chunk_embeddings,
+        owners=np.array([0, 0, 1]),
+        weights=np.array([3.0, 1.0, 2.0]),
+        n_documents=2,
+    )
+
+    expected_direction = np.array([3.0, 1.0]) / np.linalg.norm([3.0, 1.0])
+    assert np.allclose(averages[0], expected_direction)
+    assert np.allclose(averages[1], [3.0, 4.0])
