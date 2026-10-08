@@ -204,23 +204,43 @@ def plot_barchart_impl(
         if x_column not in df.columns or y_column not in df.columns:
             return f"Error: Columns '{x_column}' or '{y_column}' not found."
 
-        if color_column and color_column not in df.columns:
+        # Colouring by the x or y column adds nothing and would duplicate a
+        # grouping key, so it is dropped.
+        if color_column and (
+            color_column not in df.columns or color_column in (x_column, y_column)
+        ):
             color_column = None
 
         valid_aggs = {"mean", "sum", "count", "median"}
         if aggregation not in valid_aggs:
             aggregation = "mean"
 
-        agg_fn = getattr(df.groupby([x_column] + ([color_column] if color_column else []))[y_column], aggregation)
-        agg_df = agg_fn().reset_index()
+        group_cols = [x_column] + ([color_column] if color_column else [])
+        if y_column in group_cols:
+            # e.g. x=y='diagnosis' to count rows per category. Aggregating a
+            # grouping key fails on reset_index ("cannot insert ..., already
+            # exists"), so count the rows per group instead.
+            agg_df = df.groupby(group_cols).size().reset_index(name="count")
+            plot_y = "count"
+            agg_code = (
+                f"agg_df = df.groupby({group_cols!r}).size().reset_index(name='count')"
+            )
+        else:
+            agg_df = getattr(df.groupby(group_cols)[y_column], aggregation)().reset_index()
+            plot_y = y_column
+            agg_code = (
+                f"agg_df = df.groupby({group_cols!r})['{y_column}'].{aggregation}()"
+                ".reset_index()"
+            )
 
         color_arg = f", color='{color_column}'" if color_column else ""
+        barmode = "group" if color_column else "relative"
         fig = px.bar(
             agg_df,
             x=x_column,
-            y=y_column,
+            y=plot_y,
             color=color_column,
-            barmode="group" if color_column else "relative",
+            barmode=barmode,
             title=title,
             template="plotly_white",
         )
@@ -231,10 +251,9 @@ def plot_barchart_impl(
         fig.write_json(plot_path)
 
         code_logic = (
-            f"agg_df = df.groupby(['{x_column}'{(', ' + repr(color_column)) if color_column else ''}])"
-            f"['{y_column}'].{aggregation}().reset_index()\n"
-            f"fig = px.bar(agg_df, x='{x_column}', y='{y_column}'{color_arg},\n"
-            f"    barmode='group', title='{title}', template='plotly_white')"
+            f"{agg_code}\n"
+            f"fig = px.bar(agg_df, x='{x_column}', y='{plot_y}'{color_arg},\n"
+            f"    barmode='{barmode}', title='{title}', template='plotly_white')"
         )
         code = generate_code_snippet(code_logic, data_file_path)
         return f"{plot_path}|||{code}"

@@ -3,6 +3,7 @@ Utility functions for the AI Visualization Engine.
 Handles file I/O, memory-safe data loading, and path generation.
 """
 
+import hashlib
 import os
 import re
 import sys
@@ -15,6 +16,10 @@ from core.visualization.viz_config import MAX_ROWS
 # Tracks whether the most recent load_data_safely call truncated the file at MAX_ROWS.
 # Read by tools so they can surface a warning to the agent / UI.
 LAST_LOAD_TRUNCATED: dict[str, bool] = {}
+
+# Plot names are built from column lists and can get very long (e.g. a heatmap
+# over 30 columns). Most filesystems cap a file name at 255 bytes.
+MAX_PLOT_NAME_CHARS: int = 100
 
 
 def _read_csv_with_fallback(file_path: str, sep: str = ",", nrows: int | None = None) -> pd.DataFrame:
@@ -164,6 +169,9 @@ def get_plot_path(data_file_path: str, plot_name: str, ext: str = ".json") -> st
     """
     Generate a safe, unique file path for saving a generated plot.
 
+    The name is sanitised to word characters and hyphens; names longer than
+    ``MAX_PLOT_NAME_CHARS`` are shortened and suffixed with a hash.
+
     Args:
         data_file_path: The path to the source data file (used to locate the run directory).
         plot_name: The descriptive name of the plot.
@@ -180,6 +188,11 @@ def get_plot_path(data_file_path: str, plot_name: str, ext: str = ".json") -> st
     safe_plot_name = re.sub(r"[^\w\-]", "", plot_name.replace(" ", "_")).rstrip("_")
     if not safe_plot_name:
         safe_plot_name = "plot"
+    if len(safe_plot_name) > MAX_PLOT_NAME_CHARS:
+        # Keep a readable prefix and add a short hash of the full name so
+        # different long names still map to different files.
+        digest = hashlib.sha1(safe_plot_name.encode("utf-8")).hexdigest()[:10]
+        safe_plot_name = f"{safe_plot_name[:MAX_PLOT_NAME_CHARS]}_{digest}"
 
     return os.path.join(plot_dir, f"{safe_plot_name}{ext}")
 

@@ -113,6 +113,7 @@ def chat_no_think(
     model: str,
     messages: List[Dict[str, Any]],
     tools: List[Dict[str, Any]] | None = None,
+    options: Dict[str, Any] | None = None,
 ) -> Any:
     """Non-streaming ``ollama.chat`` with reasoning disabled.
 
@@ -124,10 +125,23 @@ def chat_no_think(
 
     Falls back gracefully when the installed client/model/server does not accept
     the ``think`` argument.
+
+    Args:
+        model: The Ollama model name.
+        messages: The chat history to send.
+        tools: Optional tool definitions in Ollama function-calling format.
+        options: Optional Ollama runtime options (e.g. ``temperature``,
+            ``num_ctx``). Note that a ``num_ctx`` differing from the one the
+            model is loaded with makes Ollama reload the model.
+
+    Returns:
+        The normalised response dict with a plain-dict ``message``.
     """
     kwargs: Dict[str, Any] = {"model": model, "messages": messages}
     if tools is not None:
         kwargs["tools"] = tools
+    if options:
+        kwargs["options"] = options
     try:
         return _normalize_response(ollama.chat(think=False, **kwargs))
     except TypeError:

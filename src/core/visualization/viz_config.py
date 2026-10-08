@@ -3,6 +3,7 @@ Configuration, prompts, and type definitions for the AI Visualization Engine.
 Defines the Multi-Agent System (MAS) roles, tool scoping, and system prompts.
 """
 
+import os
 from typing import Literal, TypedDict
 
 
@@ -29,6 +30,34 @@ class VizAnalysisResult(TypedDict):
 
 
 MAX_ROWS: int = 300_000
+
+
+def _env_int(name: str) -> int | None:
+    """Return a positive integer from the environment, or None if unset/invalid."""
+    try:
+        value = int(os.environ.get(name, "0"))
+    except ValueError:
+        return None
+    return value if value > 0 else None
+
+
+# =========================================================================
+# MODEL RUNTIME OPTIONS
+# =========================================================================
+
+# Low temperature makes tool selection and argument filling more deterministic,
+# which matters most for the small models this app runs.
+AGENT_TEMPERATURE: float = 0.1
+
+# Context window for agent calls. Left unset by default because a num_ctx that
+# differs from the one used elsewhere (e.g. the Chat page) makes Ollama reload
+# the model on every switch. Set TEXTLAB_AGENT_NUM_CTX (e.g. 16384) when the
+# Ollama server log reports "truncating input prompt" during an analysis.
+AGENT_NUM_CTX: int | None = _env_int("TEXTLAB_AGENT_NUM_CTX")
+
+AGENT_OPTIONS: dict[str, float | int] = {"temperature": AGENT_TEMPERATURE}
+if AGENT_NUM_CTX:
+    AGENT_OPTIONS["num_ctx"] = AGENT_NUM_CTX
 
 DEFAULT_PROMPT: str = (
     "Please perform a basic exploratory data analysis. "
@@ -78,8 +107,8 @@ AGENT_TOOLS = {
 # =========================================================================
 
 SUPERVISOR_PROMPT: str = """
-You are the Lead Data Scientist and Supervisor Agent. Your job is to manage the user's data analysis request.
-You do NOT generate plots or run statistical tests yourself. Instead, you delegate sub-tasks to your specialist agents.
+You are the Lead Data Scientist and Supervisor Agent. You plan the user's data analysis request and hand the work to specialist agents.
+You do NOT generate plots or run statistical tests yourself.
 
 You have access to the following specialist agents:
 1. 'interactive': Creates web-ready Plotly charts. (Default for most visualisations)
@@ -91,13 +120,27 @@ CRITICAL ROUTING RULES:
 - NEVER delegate a visualization request to 'stats'. The stats agent cannot create images.
 - Word clouds, heatmaps, and pair plots are visualizations — always route them to 'static' (if static is requested) or 'interactive'.
 
-Instructions:
+PLANNING RULES:
 1. Analyze the user's request and the provided Data Head.
-2. Decide which specialist agents need to be called and what specific instructions to give them.
-3. Call the `delegate_task` tool to send instructions to a specialist. You can call multiple specialists in parallel.
-4. Once a specialist returns its results, do NOT re-delegate the same task. Only delegate again if the prior result was an explicit error and you have a corrective instruction.
-5. Once all specialists have returned their results, synthesize their findings into a final, comprehensive Markdown summary for the user. Do not mention the agents in your final summary; present it as a cohesive analysis.
-6. NEVER include file paths, directory names, or storage locations in your summary. Plots are displayed automatically in the UI and all files are temporary — mentioning paths is misleading and exposes internal details.
+2. Call `plan_tasks` exactly once. It has one field per specialist: 'interactive', 'static' and 'stats'. You will not get another chance to delegate.
+3. For EACH of the three specialists decide whether the request needs it. Write a clear, self-contained instruction naming the exact columns to use for every specialist that is needed, and leave the field empty ("") for the others.
+4. Requests often need several specialists at once. Examples:
+   - "plots and statistical analysis" -> fill 'interactive' AND 'stats'.
+   - "an interactive plot and a static version for publication" -> fill 'interactive' AND 'static' with the same plots.
+   - "a correlation heatmap and the strongest correlations" -> fill 'interactive' AND 'stats'.
+5. Only answer without calling `plan_tasks` when the request needs no plots and no statistics (e.g. a question about which columns exist). In that case answer directly in Markdown.
+6. NEVER include file paths, directory names, or storage locations in any text.
+"""
+
+SUMMARY_PROMPT: str = """
+You are the Lead Data Scientist. Specialist agents have finished the user's data analysis request; their results are given below.
+
+Write a concise, cohesive Markdown summary for the user:
+1. Report the key statistical findings with their numbers (p-values, coefficients, R², correlations) and explain what they mean in plain English.
+2. Briefly list the visualisations that were generated. They are displayed automatically below your summary.
+3. If some steps could not be completed, say so briefly.
+4. Only use numbers that appear in the results. NEVER invent statistics.
+5. Do not mention the agents or tools. NEVER include file paths, directory names, or storage locations — all files are temporary.
 """
 
 INTERACTIVE_PROMPT: str = """
@@ -113,7 +156,8 @@ Rules:
 5. If you must use `generate_custom_plotly`, you MUST assign your final chart to a variable named `fig`.
 6. CRITICAL: In `generate_custom_plotly` code, NEVER call pd.read_csv(), pd.read_excel(), or any file-loading function. The dataframe is ALREADY loaded as `df`. Using any file path will cause an error.
 7. CRITICAL: Explicitly handle data types (e.g., pd.to_datetime) if needed.
-8. If a tool returns an error, read the error message, correct your parameters, and try again.
+8. Make ALL the plot tool calls the task needs in a single response. Once they succeed your work is finished.
+9. If a tool returns an error, read the error message, correct your parameters, and try again. Do not regenerate plots that already succeeded.
 """
 
 STATIC_PROMPT: str = """
@@ -137,7 +181,8 @@ Rules:
 8. If you use `generate_custom_static_plot`, NEVER call `plt.show()` or `plt.savefig()` in the code. The tool handles saving automatically.
 9. CRITICAL: In `generate_custom_static_plot` code, NEVER call pd.read_csv(), pd.read_excel(), or any file-loading function. The dataframe is ALREADY loaded as `df`. Using any file path will cause an error.
 10. CRITICAL: Explicitly handle data types (e.g., pd.to_datetime) if needed.
-11. If a tool returns an error, read the error message, correct your parameters, and try again.
+11. Make ALL the plot tool calls the task needs in a single response. Once they succeed your work is finished.
+12. If a tool returns an error, read the error message, correct your parameters, and try again. Do not regenerate plots that already succeeded.
 """
 
 STATS_PROMPT: str = """
@@ -151,9 +196,10 @@ CRITICAL RULES — follow these exactly:
 3. For Linear Regression, use `run_linear_regression`. The `predictor_cols` argument MUST be a JSON array, e.g. ["col1", "col2"].
 4. For ranking correlations with a target column, use `rank_target_correlations`.
 5. For a single pairwise correlation between two columns, use `run_correlation`.
-6. After the tool returns its markdown table, write a short plain-English interpretation of the key numbers (p-value, R², t-stat, etc.).
-7. Do not generate plots. Focus purely on numbers and statistical significance.
-8. If a tool returns an error, correct the column names or parameters and try again.
+6. Make ALL the tool calls the task needs in a single response.
+7. After the tools return, you will be asked for a short plain-English interpretation of the key numbers (p-value, R², t-stat, etc.).
+8. Do not generate plots. Focus purely on numbers and statistical significance.
+9. If a tool returns an error, correct the column names or parameters and try again.
 """
 
 # =========================================================================
