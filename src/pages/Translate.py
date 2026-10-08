@@ -77,6 +77,7 @@ from core.translation import (  # noqa: E402
     translate_pptx,
     translate_xlsx,
 )
+from core import gpu_manager  # noqa: E402
 from core.translation.pdf_workflow import (  # noqa: E402
     translate_pdf_outputs,
 )
@@ -790,6 +791,9 @@ with text_tab:
                 )
 
         if do_load:
+            gpu_manager.free_gpu_for(
+                gpu_manager.TRANSLATION, ollama_model=ollama_model,
+            )
             with st.spinner(
                 f"Loading {backend_label} onto the compute device… "
                 "(first time can take 1-2 min)"
@@ -852,6 +856,9 @@ with text_tab:
         st.info(notice)
 
     if do_translate:
+        gpu_manager.free_gpu_for(
+            gpu_manager.TRANSLATION, ollama_model=ollama_model,
+        )
         st.session_state["translation_notices"] = []
         progress = st.progress(0.0, text="Translating…")
         retry_status = st.empty()
@@ -1019,6 +1026,9 @@ with doc_tab:
 
     if run_doc and docs:
         st.session_state["doc_results"] = None
+        gpu_manager.free_gpu_for(
+            gpu_manager.TRANSLATION, ollama_model=ollama_model,
+        )
         card = st.container(border=True)
         with card:
             title_ph = st.empty()

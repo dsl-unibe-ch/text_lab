@@ -21,6 +21,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from auth import check_token
 
+from core import gpu_manager
+
 # --- Import from new Core Engine ---
 from core.kg_engine import (
     ensure_grobid_server, 
@@ -383,6 +385,11 @@ if grobid_available:
                                     backend_ready = True
 
                             if st.button("🤖 Extract Topics", type="secondary", disabled=not backend_ready):
+                                if llm_backend == "Ollama (Local)":
+                                    gpu_manager.free_gpu_for(
+                                        gpu_manager.LLM,
+                                        ollama_model=extraction_model,
+                                    )
                                 topic_progress = st.progress(0)
                                 topic_status = st.empty()
                                 

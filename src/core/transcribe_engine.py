@@ -612,3 +612,19 @@ def generate_elan_csv(result, has_speakers=False):
             writer.writerow([format_time(start_time), format_time(end_time), text])
             
     return output.getvalue()
+
+def _release_for_other_feature() -> bool:
+    loaded = bool(get_language_detector.cache_info().currsize)
+    get_language_detector.cache_clear()
+    return loaded
+
+
+try:
+    from core import gpu_manager as _gpu_manager
+except ImportError:  # pragma: no cover - standalone imports
+    _gpu_manager = None
+if _gpu_manager is not None:
+    _gpu_manager.register(
+        _gpu_manager.TRANSCRIBE, "Unloaded audio language detector",
+        _release_for_other_feature,
+    )

@@ -46,6 +46,7 @@ from core.ocr_engine import (
 )
 from core import (
     auto_ocr,
+    gpu_manager,
     doc_ir,
     form_extract,
     html_safety,
@@ -86,6 +87,11 @@ SURVEY_EXTRACTION_UI_ENABLED = False
 def get_easyocr_reader(lang_code="en"):
     import easyocr
     return easyocr.Reader([lang_code], gpu=True)
+
+
+gpu_manager.register(
+    gpu_manager.OCR, "Unloaded EasyOCR model", get_easyocr_reader.clear,
+)
 
 def run_paddleocr_backend(image_paths, lang_code="en"):
     backend_python = os.environ.get("PADDLE_BACKEND_PYTHON", "/opt/conda/envs/paddle_backend/bin/python")
@@ -1341,6 +1347,7 @@ def auto_single_ui():
             st.warning("⏳ A job is currently running. The button is disabled until completion.")
         if st.button("📑 Parse document", type="primary",
                      disabled=st.session_state.ocr_running, key="auto_single_btn"):
+            gpu_manager.free_gpu_for(gpu_manager.OCR)
             run_auto_single(
                 uploaded_file,
                 native_fast_lane=not opts["highest_quality"],
@@ -1377,6 +1384,7 @@ def auto_batch_ui():
             st.warning("⏳ A job is currently running. The button is disabled until completion.")
         if st.button("📦 Parse batch", type="primary",
                      disabled=st.session_state.ocr_running, key="auto_batch_btn"):
+            gpu_manager.free_gpu_for(gpu_manager.OCR)
             run_auto_batch(
                 batch_zip,
                 native_fast_lane=not opts["highest_quality"],
@@ -1429,6 +1437,7 @@ def legacy_single_flow(ocr_engine, ocr_language, glm_mode):
         if st.button("Run OCR", disabled=st.session_state.ocr_running, key="legacy_single_btn"):
             if st.session_state.ocr_running:
                 st.stop()
+            gpu_manager.free_gpu_for(gpu_manager.OCR)
 
             clear_results(reset_running=False)
             st.session_state.ocr_running = True
@@ -1762,6 +1771,7 @@ def legacy_batch_flow(ocr_engine, ocr_language, glm_mode):
         if st.button("Run Batch OCR", disabled=st.session_state.ocr_running, key="legacy_batch_btn"):
             if st.session_state.ocr_running:
                 st.stop()
+            gpu_manager.free_gpu_for(gpu_manager.OCR)
 
             clear_results(reset_running=False)
             st.session_state.ocr_running = True

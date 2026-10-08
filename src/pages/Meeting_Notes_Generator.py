@@ -52,6 +52,7 @@ from core.chat_engine import (
     is_model_loaded,
     unload_all_models,
 )
+from core import gpu_manager
 from core.model_config import get_available_models, is_high_memory_gpu
 from core.upload_safety import safe_upload_name
 from core.summarize_engine import (
@@ -561,6 +562,8 @@ def _run_summarization(
     Returns:
         The generated summary as a string.
     """
+    # The transcription worker has exited; leave only the summary LLM.
+    gpu_manager.free_gpu_for(gpu_manager.LLM, ollama_model=model_name)
     token_count = estimate_tokens(transcript_text)
     needs_chunking = token_count > MAX_CONTEXT_TOKENS
 
@@ -746,6 +749,7 @@ def _render_audio_tab(gpu_name: str) -> None:
         if audio_file is None:
             st.error("Please upload an audio file before running.")
             st.stop()
+        gpu_manager.free_gpu_for(gpu_manager.TRANSCRIBE)
 
         try:
             # Read audio bytes once; reused for both language detection and transcription.

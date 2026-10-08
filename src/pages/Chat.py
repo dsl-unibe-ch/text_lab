@@ -28,6 +28,7 @@ st.set_page_config(
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from auth import check_token
+from core import gpu_manager
 from core.artifacts import ensure_artifacts_dir
 from core.chat_engine import (
     check_ollama_server,
@@ -661,6 +662,13 @@ def main():
         return
 
     user_text = st.chat_input("Type your message...")
+    if user_text:
+        # Chat keeps its LLM and its image generator; other features' models
+        # are released so they cannot starve the chat model of VRAM.
+        gpu_manager.free_gpu_for(
+            gpu_manager.LLM, ollama_model=model_name,
+            keep=(gpu_manager.IMAGE_GEN,),
+        )
 
     # Image generation fast-path: the explicit "Generate image" toggle only. Every
     # other message goes through the normal chat turn, where the model decides via

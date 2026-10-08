@@ -26,6 +26,7 @@ src_dir = os.path.dirname(current_dir)
 sys.path.append(src_dir)
 
 from auth import check_token
+from core import gpu_manager
 from core.artifacts import ensure_artifacts_dir
 from core.chat_engine import check_ollama_server, get_gpu_name
 from core.visualization.viz_agent import run_analysis
@@ -731,6 +732,7 @@ def main() -> None:
         st.button("Generating...", type="primary", disabled=True)
     else:
         if st.button("Generate Visualisations", type="primary", disabled=(not uploaded_file)):
+            gpu_manager.free_gpu_for(gpu_manager.LLM, ollama_model=selected_model)
             _start_analysis_thread(
                 file_bytes=uploaded_file.getvalue(),
                 file_name=uploaded_file.name,

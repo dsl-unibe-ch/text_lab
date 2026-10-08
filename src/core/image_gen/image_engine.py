@@ -211,3 +211,17 @@ def shutdown_backend() -> None:
         if _BACKEND is not None:
             _BACKEND.stop()
             _BACKEND = None
+
+
+def _release_for_other_feature() -> bool:
+    running = _BACKEND is not None
+    shutdown_backend()
+    return running
+
+
+from core import gpu_manager as _gpu_manager  # noqa: E402
+
+_gpu_manager.register(
+    _gpu_manager.IMAGE_GEN, "Stopped image generator",
+    _release_for_other_feature,
+)

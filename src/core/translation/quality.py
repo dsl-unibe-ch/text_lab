@@ -115,3 +115,20 @@ def quality_badge(score: float) -> Tuple[str, str, str]:
     if score >= 0.60:
         return ("medium", "\U0001F7E1", "#f9a825")
     return ("low", "\U0001F534", "#c62828")
+
+
+def _release_for_other_feature() -> bool:
+    loaded = bool(_try_load_model.cache_info().currsize)
+    _try_load_model.cache_clear()
+    return loaded
+
+
+try:
+    from core import gpu_manager as _gpu_manager
+except ImportError:  # pragma: no cover - standalone imports
+    _gpu_manager = None
+if _gpu_manager is not None:
+    _gpu_manager.register(
+        _gpu_manager.TRANSLATION, "Unloaded translation quality model",
+        _release_for_other_feature,
+    )

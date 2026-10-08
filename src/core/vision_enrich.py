@@ -77,8 +77,11 @@ def loaded_models(base_url: Optional[str] = None) -> list:
 
 
 def free_gpu(base_url: Optional[str] = None,
-             timeout: float = None) -> list:
-    """Evict every Ollama model and block until the VRAM is really released.
+             timeout: float = None, keep=()) -> list:
+    """Evict Ollama models and block until the VRAM is really released.
+
+    Models named in ``keep`` (``name:tag``) stay loaded; everything else is
+    evicted.
 
     For non-Ollama GPU consumers -- the PaddleOCR-VL worker allocates ~8.4 GiB
     in its own process, which does not fit beside the ~20 GiB vision model on a
@@ -88,7 +91,8 @@ def free_gpu(base_url: Optional[str] = None,
     if timeout is None:
         timeout = UNLOAD_WAIT_TIMEOUT
     url = _base_url(base_url)
-    resident = loaded_models(url)
+    keep = set(keep)
+    resident = [name for name in loaded_models(url) if name not in keep]
     if not resident:
         return []
     for name in resident:
@@ -101,7 +105,7 @@ def free_gpu(base_url: Optional[str] = None,
             pass
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if not loaded_models(url):
+        if not set(loaded_models(url)) - keep:
             break
         time.sleep(0.25)
     return resident

@@ -16,6 +16,7 @@ from language_mappings import (
     TRANSCRIBE_LANGUAGE_MAPPING as LANGUAGE_MAPPING,
 )
 
+from core import gpu_manager
 from core.transcribe_engine import (
     load_transcript_items,
     transcription_text_from_csv,
@@ -206,6 +207,7 @@ def main():
                     max_speakers = None
 
         if st.button("Start Batch Transcription", type="primary"):
+            gpu_manager.free_gpu_for(gpu_manager.TRANSCRIBE)
             if batch_zip is None:
                 st.error("Please upload a ZIP file first.")
             elif not is_auto_detect and language_name == "Swiss German (Flurin Turbo)" and not os.path.isdir(whisper_model):
@@ -506,6 +508,7 @@ def main():
             )
 
         if st.button("Start Transcription", type="primary"):
+            gpu_manager.free_gpu_for(gpu_manager.TRANSCRIBE)
             if transcribe_audio is None:
                 st.error("Please upload an audio file first.")
             elif language == "ch_de_flurin" and not os.path.isdir(whisper_model):

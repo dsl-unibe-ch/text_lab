@@ -745,3 +745,21 @@ def preload_backend(
         return
 
     raise ValueError(f"Unknown backend: {backend}")
+
+
+def _release_for_other_feature() -> bool:
+    """GPU-manager hook: another feature needs the card."""
+    loaded = _ACTIVE_HF_SIGNATURE is not None
+    free_translation_vram()
+    return loaded
+
+
+try:
+    from core import gpu_manager as _gpu_manager
+except ImportError:  # pragma: no cover - standalone imports
+    _gpu_manager = None
+if _gpu_manager is not None:
+    _gpu_manager.register(
+        _gpu_manager.TRANSLATION, "Unloaded translation model",
+        _release_for_other_feature,
+    )

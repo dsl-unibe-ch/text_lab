@@ -23,6 +23,7 @@ import json
 import os
 import subprocess
 import time
+import weakref
 from pathlib import Path
 from typing import Callable, List, Optional, Tuple
 
@@ -119,6 +120,10 @@ def _pages_from_result(stdout: str, stderr: str) -> List[dict]:
     )
 
 
+#: Open worker sessions, so another feature can stop them to free the GPU.
+_LIVE_SESSIONS: "weakref.WeakSet[VLWorkerSession]" = weakref.WeakSet()
+
+
 class VLWorkerSession:
     """A PaddleOCR-VL worker kept alive across many documents.
 
@@ -146,6 +151,7 @@ class VLWorkerSession:
         self._stderr: List[str] = []
         self._started_at = 0.0
         self.failed = False
+        _LIVE_SESSIONS.add(self)
         #: Documents this session has answered, so a log reader can tell a
         #: resident worker from one that keeps dying and being restarted.
         self.documents = 0
@@ -1245,3 +1251,22 @@ def document_summary(document: "doc_ir.Document") -> dict:
         "n_described_figures": n_described_figures,
         "routes": sorted(routes),
     }
+
+
+def _release_for_other_feature() -> bool:
+    """GPU-manager hook: stop resident PaddleOCR-VL workers."""
+    running = [session for session in list(_LIVE_SESSIONS)
+               if session._proc is not None and session._proc.poll() is None]
+    for session in running:
+        session.close()
+    return bool(running)
+
+
+try:
+    from core import gpu_manager as _gpu_manager
+except ImportError:  # pragma: no cover - standalone imports
+    _gpu_manager = None
+if _gpu_manager is not None:
+    _gpu_manager.register(
+        _gpu_manager.OCR, "Stopped OCR worker", _release_for_other_feature,
+    )

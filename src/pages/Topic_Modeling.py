@@ -16,6 +16,7 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 from auth import check_token
+from core import gpu_manager
 from core.topic_modeling.topic_config import TopicModelingConfig
 from core.topic_modeling.topic_pipeline import run_topic_modeling_pipeline
 from core.topic_modeling.evaluation import (
@@ -696,6 +697,7 @@ def main() -> None:
     st.header("3. Execution", divider="gray")
 
     if st.button("Run Topic Extraction", type="primary", disabled=(df is None)):
+        gpu_manager.free_gpu_for(gpu_manager.TOPIC_MODELING)
         try:
             prepared_df = drop_empty_text_rows(df, config.text_column)
 
