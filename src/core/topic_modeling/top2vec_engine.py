@@ -1,5 +1,5 @@
 import os
-from typing import List, Dict, Union
+from typing import Dict
 
 import numpy as np
 import pandas as pd
@@ -10,22 +10,22 @@ from plotly.subplots import make_subplots
 from . import small_corpus
 
 
-def _is_reduced_model(topic_model: Top2Vec, target_topics: Union[int, str]) -> bool:
+def _is_reduced_model(topic_model: Top2Vec) -> bool:
     """
-    Determine whether a reduced Top2Vec topic model should be used.
+    Determine whether hierarchical topic reduction was applied to the model.
+
+    Reduction is only performed when fewer topics are requested than Top2Vec
+    found. Asking Top2Vec for reduced topics when no reduction took place
+    raises an error, so the presence of the reduction hierarchy is checked
+    directly.
 
     Args:
         topic_model: A trained Top2Vec model.
-        target_topics: The requested number of topics, or "auto".
 
     Returns:
-        True if a reduced model exists and should be used, otherwise False.
+        True if the reduced topics should be used, otherwise False.
     """
-    if target_topics == "auto" or not isinstance(target_topics, int):
-        return False
-    return topic_model.get_num_topics(reduced=True) < topic_model.get_num_topics(
-        reduced=False
-    )
+    return getattr(topic_model, "hierarchy", None) is not None
 
 
 def train_top2vec_model(
@@ -93,16 +93,14 @@ def train_top2vec_model(
     return topic_model
 
 
-def generate_top2vec_keywords_df(
-    topic_model: Top2Vec,
-    target_topics: Union[int, str],
-) -> pd.DataFrame:
+def generate_top2vec_keywords_df(topic_model: Top2Vec) -> pd.DataFrame:
     """
     Generate a DataFrame of Top2Vec topics with counts and keywords.
 
+    Reduced topics are used when hierarchical topic reduction was applied.
+
     Args:
         topic_model: A trained Top2Vec model.
-        target_topics: The requested number of topics, or "auto".
 
     Returns:
         A pandas DataFrame with the columns:
@@ -110,7 +108,7 @@ def generate_top2vec_keywords_df(
             - "Count"
             - "Keywords"
     """
-    is_reduced = _is_reduced_model(topic_model, target_topics)
+    is_reduced = _is_reduced_model(topic_model)
 
     topic_words, _, topic_nums = topic_model.get_topics(reduced=is_reduced)
     topic_sizes, size_topic_nums = topic_model.get_topic_sizes(reduced=is_reduced)
@@ -136,15 +134,15 @@ def generate_top2vec_keywords_df(
 def generate_top2vec_document_topics_df(
     topic_model: Top2Vec,
     original_df: pd.DataFrame,
-    target_topics: Union[int, str],
 ) -> pd.DataFrame:
     """
     Generate a DataFrame with the dominant Top2Vec topic for each document.
 
+    Reduced topics are used when hierarchical topic reduction was applied.
+
     Args:
         topic_model: A trained Top2Vec model.
         original_df: The original DataFrame containing the source documents.
-        target_topics: The requested number of topics, or "auto".
 
     Returns:
         A copy of the original DataFrame with two additional columns:
@@ -158,7 +156,7 @@ def generate_top2vec_document_topics_df(
         ValueError: If the number of inferred topic assignments does not
             match the number of rows in the input DataFrame.
     """
-    is_reduced = _is_reduced_model(topic_model, target_topics)
+    is_reduced = _is_reduced_model(topic_model)
 
     doc_topics, doc_dist, _, _ = topic_model.get_documents_topics(
         doc_ids=list(range(len(original_df))),
@@ -184,21 +182,19 @@ def generate_top2vec_document_topics_df(
     return result_df[cols]
 
 
-def generate_top2vec_barchart_html(
-    topic_model: Top2Vec,
-    target_topics: Union[int, str],
-) -> str:
+def generate_top2vec_barchart_html(topic_model: Top2Vec) -> str:
     """
     Generate an HTML bar chart visualization for Top2Vec topics.
 
+    Reduced topics are used when hierarchical topic reduction was applied.
+
     Args:
         topic_model: A trained Top2Vec model.
-        target_topics: The requested number of topics, or "auto".
 
     Returns:
         An HTML string containing the Top2Vec bar chart visualization.
     """
-    is_reduced = _is_reduced_model(topic_model, target_topics)
+    is_reduced = _is_reduced_model(topic_model)
 
     num_topics = topic_model.get_num_topics(reduced=is_reduced)
     display_topics = min(num_topics, 12)

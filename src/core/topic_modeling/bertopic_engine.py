@@ -1,3 +1,4 @@
+import re
 import sys
 import traceback
 from typing import Any
@@ -18,6 +19,164 @@ from . import small_corpus
 
 _SUPPORTED_DIM_ALGOS = {"UMAP", "PCA", "Truncated SVD", "None"}
 _SUPPORTED_CLUSTERING_ALGOS = {"HDBSCAN", "KMeans"}
+
+OUTLIER_LABEL = "Outlier"
+_LABEL_KEYWORDS = 3
+_LABEL_MAX_CHARS = 32
+# BERTopic hard-codes its 0-based IDs as "Topic N" in a few chart elements.
+_RAW_TOPIC_REFERENCE = re.compile(r"Topic (-?\d+)")
+# scikit-learn messages raised when ``min_df`` prunes the whole vocabulary.
+_PRUNING_SIGNATURES = (
+    "max_df corresponds to < documents than min_df",
+    "after pruning, no terms remain",
+)
+
+
+def display_topic_id(topic_id: int) -> int | str:
+    """
+    Map a BERTopic topic ID to the identifier shown to users.
+
+    BERTopic numbers topics from 0 and marks outliers as -1. The page numbers
+    topics from 1 for every algorithm, so BERTopic IDs are shifted by one.
+
+    Args:
+        topic_id: The topic ID assigned by BERTopic.
+
+    Returns:
+        The 1-based topic number, or ``OUTLIER_LABEL`` for the outlier topic.
+    """
+    return OUTLIER_LABEL if topic_id == -1 else topic_id + 1
+
+
+def _topic_title(topic_id: int) -> str:
+    """
+    Build the short title ("Topic N" or "Outlier") for a BERTopic topic ID.
+
+    Args:
+        topic_id: The topic ID assigned by BERTopic.
+
+    Returns:
+        The title using the 1-based display number.
+    """
+    return OUTLIER_LABEL if topic_id == -1 else f"Topic {topic_id + 1}"
+
+
+def _renumber_topic_references(text: str) -> str:
+    """
+    Replace BERTopic's 0-based "Topic N" references in a chart string.
+
+    Args:
+        text: A label or hover text produced by a BERTopic visualization.
+
+    Returns:
+        The text with every "Topic N" reference renumbered for display.
+    """
+    return _RAW_TOPIC_REFERENCE.sub(
+        lambda match: _topic_title(int(match.group(1))),
+        text,
+    )
+
+
+def _apply_display_labels(topic_model: BERTopic) -> None:
+    """
+    Set custom topic labels that use the 1-based display numbering.
+
+    Visualizations called with ``custom_labels=True`` then show the same topic
+    numbers as the result tables, e.g. "Topic 3: tax, budget, spending".
+
+    Args:
+        topic_model: A fitted BERTopic model.
+    """
+    labels = []
+    for topic_id in sorted(set(topic_model.topics_)):
+        if topic_id == -1:
+            labels.append(OUTLIER_LABEL)
+            continue
+
+        words = [
+            word
+            for word, _ in (topic_model.get_topic(topic_id) or [])[:_LABEL_KEYWORDS]
+            if word
+        ]
+        label = f"{_topic_title(topic_id)}: {', '.join(words)}"
+        if len(label) > _LABEL_MAX_CHARS:
+            label = label[: _LABEL_MAX_CHARS - 3] + "..."
+        labels.append(label)
+
+    topic_model.set_topic_labels(labels)
+
+
+def _renumber_intertopic_map(fig: Any) -> None:
+    """
+    Renumber the topic IDs that the intertopic distance map hard-codes.
+
+    The hover header reads the raw topic ID from ``customdata[0]`` and the
+    slider steps are labelled "Topic N"; neither honours custom labels.
+
+    Args:
+        fig: The plotly figure returned by ``BERTopic.visualize_topics``.
+    """
+    for trace in fig.data:
+        customdata = getattr(trace, "customdata", None)
+        if customdata is None:
+            continue
+        rows = [list(row) for row in customdata]
+        for row in rows:
+            row[0] = display_topic_id(int(row[0]))
+        trace.customdata = rows
+
+    for slider in fig.layout.sliders or ():
+        for step in slider.steps:
+            if step.label:
+                step.label = _renumber_topic_references(step.label)
+
+
+def _renumber_hover_text(fig: Any) -> None:
+    """
+    Renumber the "Topic N" references in the hover text of every trace.
+
+    Args:
+        fig: A plotly figure produced by a BERTopic visualization.
+    """
+    for trace in fig.data:
+        hovertext = getattr(trace, "hovertext", None)
+        if hovertext is None or isinstance(hovertext, str):
+            continue
+        trace.hovertext = [_renumber_topic_references(str(text)) for text in hovertext]
+
+
+def _is_vocabulary_pruning_error(exc: BaseException) -> bool:
+    """
+    Check whether *exc* means ``min_df`` removed the whole vocabulary.
+
+    Args:
+        exc: The exception raised while extracting topic keywords.
+
+    Returns:
+        True if the exception matches a known scikit-learn pruning failure.
+    """
+    message = str(exc).lower()
+    return any(signature in message for signature in _PRUNING_SIGNATURES)
+
+
+def _vocabulary_pruning_error(min_df: int) -> ValueError:
+    """
+    Build the user-facing error for a vocabulary pruned away by ``min_df``.
+
+    Args:
+        min_df: The minimum topic frequency that was requested.
+
+    Returns:
+        A ValueError with guidance on how to fix the configuration.
+    """
+    return ValueError(
+        f"No topic keywords could be extracted with a Minimum Topic Frequency "
+        f"(min_df) of {min_df}. BERTopic applies this threshold to topics, not "
+        f"documents: a word must appear in at least {min_df} topic(s) to be "
+        f"kept, so the value must not exceed the number of topics found. Lower "
+        f"it (1 is a safe default) or remove some custom stopwords, then run "
+        f"again."
+    )
 
 
 def _notice_html(message: str) -> str:
@@ -72,9 +231,12 @@ def train_bertopic_model(
         clustering_algo: One of ``"HDBSCAN"`` or ``"KMeans"``.
         clustering_params: Optional parameters for the clustering model.
         ngram_range: The lower and upper boundary of the n-grams to extract.
-        min_df: Minimum document frequency for the vectorizer.
+        min_df: Minimum number of topics a word must appear in to be used as
+            a keyword. BERTopic fits the vectorizer on one joined document
+            per topic, so this counts topics rather than documents.
         reduce_outliers: Whether to reduce outlier assignments after fitting
-            when using HDBSCAN.
+            when using HDBSCAN. Topic sizes, keywords and embeddings are then
+            recomputed from the new assignments.
         reduce_frequent_words: Whether to reduce frequent words in the
             class-based TF-IDF transformer.
         random_state: Random seed for the dimensionality-reduction step. Set
@@ -90,12 +252,14 @@ def train_bertopic_model(
     Returns:
         A tuple ``(topic_model, topics, probabilities)`` where
         ``probabilities`` may be ``None`` if outlier reduction invalidated the
-        original probability matrix.
+        original probability matrix. The model carries custom topic labels
+        that use the 1-based display numbering.
 
     Raises:
         ValueError: If no texts are provided, ``ngram_range`` is invalid, an
             unsupported dimensionality-reduction/clustering algorithm is
-            requested, or the corpus is too small to cluster.
+            requested, the corpus is too small to cluster, or ``min_df``
+            leaves no keywords to extract.
     """
     if clustering_params is None:
         clustering_params = {}
@@ -232,6 +396,8 @@ def train_bertopic_model(
         # with too few documents to cluster.
         if small_corpus.is_corpus_too_small(e):
             raise small_corpus.too_small_error(len(texts), "BERTopic") from e
+        if _is_vocabulary_pruning_error(e):
+            raise _vocabulary_pruning_error(min_df) from e
         raise
 
     if reduce_outliers and clustering_algo == "HDBSCAN":
@@ -240,10 +406,27 @@ def train_bertopic_model(
             topics,
             strategy="c-tf-idf",
         )
+        # Recompute topic sizes, keywords and embeddings from the new
+        # assignments. The original vectorizer and c-TF-IDF models must be
+        # passed again, otherwise BERTopic falls back to defaults and drops the
+        # stopword, n-gram and min_df settings.
+        try:
+            topic_model.update_topics(
+                texts,
+                topics=topics,
+                vectorizer_model=vectorizer_model,
+                ctfidf_model=ctfidf_model,
+            )
+        except ValueError as e:
+            if _is_vocabulary_pruning_error(e):
+                raise _vocabulary_pruning_error(min_df) from e
+            raise
         # HDBSCAN probabilities correspond to the *original* topic assignments;
         # once outliers are re-assigned via c-TF-IDF those confidences are no
         # longer meaningful, so drop them rather than mislead the user.
         probabilities = None
+
+    _apply_display_labels(topic_model)
 
     return topic_model, topics, probabilities
 
@@ -278,7 +461,7 @@ def generate_bertopic_keywords_df(topic_model: BERTopic) -> pd.DataFrame:
             topic_keywords = ", ".join(word for word, _ in words[:10])
             topic_data.append(
                 {
-                    "Topic": topic_id + 1,
+                    "Topic": display_topic_id(topic_id),
                     "Count": int(row["Count"]),
                     "Keywords": topic_keywords,
                 }
@@ -303,7 +486,7 @@ def generate_bertopic_document_topics_df(
             f"dataframe length ({len(original_df)})."
         )
 
-    formatted_topics = [t + 1 if t != -1 else "Outlier" for t in topics]
+    formatted_topics = [display_topic_id(int(t)) for t in topics]
 
     result_df = original_df.copy()
     # Drop any pre-existing columns with our reserved names to avoid collisions.
@@ -364,6 +547,7 @@ def generate_bertopic_visualizations(topic_model: BERTopic) -> dict[str, str]:
 
     try:
         fig_distance = topic_model.visualize_topics()
+        _renumber_intertopic_map(fig_distance)
         visualizations["distance_map"] = fig_distance.to_html(
             full_html=False,
             include_plotlyjs="cdn",
@@ -378,7 +562,10 @@ def generate_bertopic_visualizations(topic_model: BERTopic) -> dict[str, str]:
         )
 
     try:
-        fig_barchart = topic_model.visualize_barchart(top_n_topics=12)
+        fig_barchart = topic_model.visualize_barchart(
+            top_n_topics=12,
+            custom_labels=True,
+        )
         visualizations["barchart"] = fig_barchart.to_html(
             full_html=False,
             include_plotlyjs="cdn",
@@ -393,7 +580,7 @@ def generate_bertopic_visualizations(topic_model: BERTopic) -> dict[str, str]:
         )
 
     try:
-        fig_heatmap = topic_model.visualize_heatmap()
+        fig_heatmap = topic_model.visualize_heatmap(custom_labels=True)
         visualizations["heatmap"] = fig_heatmap.to_html(
             full_html=False,
             include_plotlyjs="cdn",
@@ -440,7 +627,11 @@ def generate_topics_over_time_html(
 
     try:
         topics_over_time = topic_model.topics_over_time(texts, timestamps)
-        fig = topic_model.visualize_topics_over_time(topics_over_time)
+        fig = topic_model.visualize_topics_over_time(
+            topics_over_time,
+            custom_labels=True,
+        )
+        _renumber_hover_text(fig)
         return fig.to_html(full_html=False, include_plotlyjs="cdn")
     except Exception as e:
         print(

@@ -40,6 +40,29 @@ from core.topic_modeling.topic_utils import (
     resolve_bertopic_embedding_model_id,
 )
 
+_BASE_METRIC_KEYS = (
+    "Topic Diversity",
+    "Coherence (C_v)",
+    "Coherence (C_npmi)",
+    "Coherence (U_mass)",
+)
+
+
+def _format_metric(value: float | None, as_percent: bool = False) -> str:
+    """
+    Format an evaluation metric for display.
+
+    Args:
+        value: The metric value, or None if it could not be computed.
+        as_percent: Whether to format the value as a percentage.
+
+    Returns:
+        The formatted value, or "N/A" for missing values.
+    """
+    if value is None:
+        return "N/A"
+    return f"{value:.2%}" if as_percent else f"{value:.4f}"
+
 
 def _render_data_source_section() -> tuple[UploadedFile | None, pd.DataFrame | None, str | None, str | None, bool]:
     """
@@ -103,7 +126,7 @@ def _render_data_source_section() -> tuple[UploadedFile | None, pd.DataFrame | N
                         "Analyze Topics Over Time",
                         help=(
                             "Used only for BERTopic. Requires a column with "
-                            "parseable dates or timestamps."
+                            "dates, timestamps or whole years."
                         ),
                     )
                     if enable_dtm:
@@ -373,13 +396,18 @@ def _render_model_configuration(
                     )
                     ngram_range = (1, 2) if extract_phrases else (1, 1)
                     min_df = st.number_input(
-                        "Minimum Document Frequency (min_df)",
+                        "Minimum Topic Frequency (min_df)",
                         min_value=1,
                         max_value=500,
                         value=1,
                         help=(
-                            "Higher values reduce memory usage by ignoring "
-                            "extremely rare words."
+                            "A word is only used as a keyword if it appears "
+                            "in at least this many topics. BERTopic applies "
+                            "this to topics, not documents, so it must not "
+                            "exceed the number of topics found. Higher values "
+                            "reduce memory on very large vocabularies but "
+                            "remove topic-specific words; keep 1 unless "
+                            "memory is an issue."
                         ),
                     )
                     reduce_frequent = st.checkbox(
@@ -553,24 +581,68 @@ def _render_results(res: dict[str, Any]) -> None:
             )
 
         metrics = res["evaluation_metrics"]
-        
+
         # Base Coherence Metrics
         col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Topic Diversity", f"{metrics.get('Topic Diversity', 0.0):.2%}", help="Percentage of unique words across all topics (Higher is better).")
-        col2.metric("Coherence (C_v)", metrics.get("Coherence (C_v)", 0.0), help="Highly correlated with human interpretability. Range 0 to 1 (Higher is better).")
-        col3.metric("Coherence (C_npmi)", metrics.get("Coherence (C_npmi)", 0.0), help="Normalized Pointwise Mutual Information. Typically -1 to 1 (Higher is better).")
-        col4.metric("Coherence (U_mass)", metrics.get("Coherence (U_mass)", 0.0), help="Measures word co-occurrence within the corpus. Typically negative (Closer to 0 is better).")
-        
+        col1.metric(
+            "Topic Diversity",
+            _format_metric(metrics.get("Topic Diversity"), as_percent=True),
+            help="Percentage of unique words across all topics (Higher is better).",
+        )
+        col2.metric(
+            "Coherence (C_v)",
+            _format_metric(metrics.get("Coherence (C_v)")),
+            help=(
+                "Highly correlated with human interpretability. "
+                "Range 0 to 1 (Higher is better)."
+            ),
+        )
+        col3.metric(
+            "Coherence (C_npmi)",
+            _format_metric(metrics.get("Coherence (C_npmi)")),
+            help=(
+                "Normalized Pointwise Mutual Information. "
+                "Typically -1 to 1 (Higher is better)."
+            ),
+        )
+        col4.metric(
+            "Coherence (U_mass)",
+            _format_metric(metrics.get("Coherence (U_mass)")),
+            help=(
+                "Measures word co-occurrence within the corpus. "
+                "Typically negative (Closer to 0 is better)."
+            ),
+        )
+        if any(metrics.get(key) is None for key in _BASE_METRIC_KEYS):
+            st.caption(
+                "N/A: the metric could not be computed for this run, for "
+                "example because too few topic keywords occur in the corpus."
+            )
+
         # Dynamic Extra Metrics (Perplexity / Stability)
-        extra_keys = [k for k in metrics.keys() if k not in ["Topic Diversity", "Coherence (C_v)", "Coherence (C_npmi)", "Coherence (U_mass)"]]
+        extra_keys = [k for k in metrics if k not in _BASE_METRIC_KEYS]
         if extra_keys:
             extra_cols = st.columns(len(extra_keys))
             for col, key in zip(extra_cols, extra_keys):
                 if "Stability" in key:
-                    col.metric(key, f"{metrics[key]:.2%}", help="Jaccard Similarity across 3 runs. 100% means perfectly reproducible.")
+                    col.metric(
+                        key,
+                        _format_metric(metrics[key], as_percent=True),
+                        help=(
+                            "Jaccard Similarity across 3 runs. "
+                            "100% means perfectly reproducible."
+                        ),
+                    )
                 else:
-                    col.metric(key, metrics[key], help="Statistical measure of prediction accuracy. Lower is better.")
-                    
+                    col.metric(
+                        key,
+                        _format_metric(metrics[key]),
+                        help=(
+                            "Statistical measure of prediction accuracy. "
+                            "Lower is better."
+                        ),
+                    )
+
         st.divider()
 
     st.subheader("Topic Dictionary")

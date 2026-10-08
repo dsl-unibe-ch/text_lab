@@ -12,6 +12,21 @@ from core.topic_modeling.topic_utils import (
 )
 
 
+def _rounded_or_none(value: float) -> float | None:
+    """
+    Round a metric value for display, discarding non-finite results.
+
+    Args:
+        value: The raw metric value.
+
+    Returns:
+        The value rounded to 4 decimal places, or ``None`` if it is NaN or
+        infinite.
+    """
+    value = float(value)
+    return round(value, 4) if np.isfinite(value) else None
+
+
 def evaluate_topic_quality(
     topic_keywords: list[list[str]],
     raw_texts: list[str],
@@ -19,9 +34,13 @@ def evaluate_topic_quality(
     custom_stopwords_str: str,
     tokenized_texts: list[list[str]] | None = None,
     use_lemmatization: bool = True,
-) -> dict[str, float]:
+) -> dict[str, float | None]:
     """
     Calculate Topic Diversity and Gensim Coherence metrics (C_v, C_npmi, U_mass).
+
+    A metric that cannot be computed (no keywords, no keyword found in the
+    reference corpus, or a Gensim failure) is reported as ``None`` rather
+    than a number, so that it is never mistaken for a real score.
 
     Args:
         topic_keywords: A list of topics, where each topic is a list of top words.
@@ -41,13 +60,14 @@ def evaluate_topic_quality(
             produces artificially low scores.
 
     Returns:
-        A dictionary containing the calculated evaluation metrics.
+        A dictionary mapping metric names to their values, or ``None`` for
+        metrics that could not be computed.
     """
-    metrics = {
-        "Topic Diversity": 0.0,
-        "Coherence (C_v)": 0.0,
-        "Coherence (C_npmi)": 0.0,
-        "Coherence (U_mass)": 0.0
+    metrics: dict[str, float | None] = {
+        "Topic Diversity": None,
+        "Coherence (C_v)": None,
+        "Coherence (C_npmi)": None,
+        "Coherence (U_mass)": None,
     }
 
     if not topic_keywords or not raw_texts:
@@ -56,7 +76,8 @@ def evaluate_topic_quality(
     # 1. Calculate Topic Diversity (Percentage of unique words across all topics)
     all_words = [word for topic in topic_keywords for word in topic]
     unique_words = set(all_words)
-    metrics["Topic Diversity"] = round(len(unique_words) / len(all_words), 4) if all_words else 0.0
+    if all_words:
+        metrics["Topic Diversity"] = round(len(unique_words) / len(all_words), 4)
 
     # 2. Tokenize texts (or reuse a pre-computed tokenization) for Gensim.
     if tokenized_texts is None:
@@ -93,7 +114,7 @@ def evaluate_topic_quality(
         cm_cv = CoherenceModel(
             topics=safe_topics, texts=tokenized_texts, dictionary=dictionary, coherence="c_v"
         )
-        metrics["Coherence (C_v)"] = round(cm_cv.get_coherence(), 4)
+        metrics["Coherence (C_v)"] = _rounded_or_none(cm_cv.get_coherence())
     except Exception:
         print(f"--- C_v Coherence Error ---\n{traceback.format_exc()}", file=sys.stderr)
 
@@ -101,7 +122,7 @@ def evaluate_topic_quality(
         cm_npmi = CoherenceModel(
             topics=safe_topics, texts=tokenized_texts, dictionary=dictionary, coherence="c_npmi"
         )
-        metrics["Coherence (C_npmi)"] = round(cm_npmi.get_coherence(), 4)
+        metrics["Coherence (C_npmi)"] = _rounded_or_none(cm_npmi.get_coherence())
     except Exception:
         print(f"--- C_npmi Coherence Error ---\n{traceback.format_exc()}", file=sys.stderr)
 
@@ -109,7 +130,7 @@ def evaluate_topic_quality(
         cm_umass = CoherenceModel(
             topics=safe_topics, corpus=corpus, dictionary=dictionary, coherence="u_mass"
         )
-        metrics["Coherence (U_mass)"] = round(cm_umass.get_coherence(), 4)
+        metrics["Coherence (U_mass)"] = _rounded_or_none(cm_umass.get_coherence())
     except Exception:
         print(f"--- U_mass Coherence Error ---\n{traceback.format_exc()}", file=sys.stderr)
 

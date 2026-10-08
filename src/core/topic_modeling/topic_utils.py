@@ -60,6 +60,10 @@ SHARED_EMBEDDING_MODELS: Set[str] = {
 DEFAULT_EMBEDDING_MODEL_ENGLISH: str = "all-MiniLM-L6-v2"
 DEFAULT_EMBEDDING_MODEL_MULTILINGUAL: str = "paraphrase-multilingual-MiniLM-L12-v2"
 
+# Range of numeric values accepted as calendar years in a timestamp column.
+_MIN_YEAR = 1000
+_MAX_YEAR = 2999
+
 
 @lru_cache(maxsize=None)
 def _load_spacy_model(language: str) -> Optional[spacy.language.Language]:
@@ -157,6 +161,39 @@ def drop_empty_text_rows(df: pd.DataFrame, text_column: str) -> pd.DataFrame:
     return cleaned_df
 
 
+def _parse_timestamp_column(values: pd.Series) -> pd.Series:
+    """
+    Parse a column of dates, timestamps or years into timezone-naive datetimes.
+
+    Numeric columns are only accepted when they hold whole years (e.g. 2019),
+    which are mapped to 1 January of that year. pandas would otherwise read
+    numbers as nanoseconds since 1970, collapsing every row into the same
+    instant without any error.
+
+    Args:
+        values: The raw timestamp column.
+
+    Returns:
+        A datetime Series in which unparseable values are ``NaT``.
+
+    Raises:
+        ValueError: If the column is numeric but does not contain whole years.
+    """
+    if pd.api.types.is_numeric_dtype(values):
+        numbers = values.dropna()
+        is_year = (numbers % 1 == 0) & numbers.between(_MIN_YEAR, _MAX_YEAR)
+        if not is_year.all():
+            raise ValueError(
+                "The timestamp column contains numbers that are not years. "
+                "Use a column with dates (e.g. 2019-05-31) or whole years "
+                "(e.g. 2019)."
+            )
+        years = values.astype("Int64").astype("string")
+        return pd.to_datetime(years, format="%Y", errors="coerce")
+
+    return pd.to_datetime(values, errors="coerce", utc=True).dt.tz_localize(None)
+
+
 def prepare_timestamps(
     df: pd.DataFrame,
     date_column: str,
@@ -164,9 +201,11 @@ def prepare_timestamps(
     """
     Parse and validate timestamps from a selected date column.
 
+    Dates, date-times and whole years (numeric or text) are supported.
+
     Args:
         df: The input DataFrame.
-        date_column: The column containing timestamps or dates.
+        date_column: The column containing timestamps, dates or years.
 
     Returns:
         A tuple containing:
@@ -175,11 +214,10 @@ def prepare_timestamps(
             - The number of dropped rows
 
     Raises:
-        ValueError: If no valid timestamps remain after parsing.
+        ValueError: If the column is numeric but does not hold years, or if
+            no valid timestamps remain after parsing.
     """
-    parsed = pd.to_datetime(df[date_column], errors="coerce", utc=True).dt.tz_localize(
-        None
-    )
+    parsed = _parse_timestamp_column(df[date_column])
     valid_mask = parsed.notna()
     dropped = int((~valid_mask).sum())
 
@@ -428,7 +466,7 @@ def generate_metadata_report(
                 f"Target Topics: {config.bertopic_nr_topics}",
                 f"Embedding Model: {embedding_model_name}",
                 f"N-Gram Range: {config.ngram_range}",
-                f"Min Document Frequency (min_df): {config.min_df}",
+                f"Min Topic Frequency (min_df): {config.min_df}",
                 (
                     "Reduce Frequent Words (ClassTfidfTransformer): "
                     f"{config.reduce_frequent}"

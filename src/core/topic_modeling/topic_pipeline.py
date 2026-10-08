@@ -127,9 +127,9 @@ def _run_top2vec_pipeline(
         target_topics=config.num_topics,
     )
 
-    topic_df = generate_top2vec_keywords_df(topic_model, config.num_topics)
-    docs_df = generate_top2vec_document_topics_df(topic_model, df, config.num_topics)
-    html_string = generate_top2vec_barchart_html(topic_model, config.num_topics)
+    topic_df = generate_top2vec_keywords_df(topic_model)
+    docs_df = generate_top2vec_document_topics_df(topic_model, df)
+    html_string = generate_top2vec_barchart_html(topic_model)
 
     return {
         "topic_df": topic_df,

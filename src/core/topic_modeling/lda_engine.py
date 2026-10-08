@@ -171,6 +171,10 @@ def generate_lda_html(
     """
     Generate an HTML visualization for an LDA model using pyLDAvis.
 
+    Topics are kept in model order (``sort_topics=False``) so that topic N in
+    the dashboard is topic N in the keyword and document tables. pyLDAvis
+    otherwise renumbers topics by prevalence.
+
     Args:
         lda_model: A trained gensim LDA model.
         corpus: The bag-of-words corpus used for the model.
@@ -184,5 +188,6 @@ def generate_lda_html(
         corpus,
         id2word,
         mds="mmds",
+        sort_topics=False,
     )
     return pyLDAvis.prepared_data_to_html(vis)
