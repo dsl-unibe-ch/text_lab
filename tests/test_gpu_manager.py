@@ -23,9 +23,9 @@ def test_other_features_are_released_and_the_requested_one_kept():
                          lambda: calls.append("ocr") or True)
     gpu_manager.register("translation", "Unloaded translation model",
                          lambda: calls.append("translation") or False)
-    gpu_manager.register("image_gen", "Stopped image generator",
-                         lambda: calls.append("image_gen") or True)
-    freed = gpu_manager.prepare_gpu("translation", keep=("image_gen",))
+    gpu_manager.register("transcribe", "Unloaded audio language detector",
+                         lambda: calls.append("transcribe") or True)
+    freed = gpu_manager.prepare_gpu("translation", keep=("transcribe",))
     assert calls == ["ocr"]
     assert freed == ["Stopped OCR worker"]
 
@@ -77,7 +77,7 @@ def test_only_our_own_workers_of_released_features_are_stopped(monkeypatch):
     processes = {
         # pid: (parent, command line)
         101: (me, "python paddle_vl_worker.py --serve"),
-        102: (me, "python mcp_server.py"),
+        102: (me, "python transcribe_worker.py"),
         103: (1, "/usr/local/lib/ollama/llama-server"),       # Ollama
         104: (999, "python paddle_vl_worker.py --serve"),     # not ours
         105: (me, "python something_else.py"),                # unknown
@@ -101,7 +101,7 @@ def test_only_our_own_workers_of_released_features_are_stopped(monkeypatch):
         alive.discard(pid)
 
     monkeypatch.setattr(gpu_manager.os, "kill", fake_kill)
-    freed = gpu_manager.prepare_gpu("llm", keep=("image_gen",))
+    freed = gpu_manager.prepare_gpu("llm", keep=("transcribe",))
     assert killed == [(101, signal.SIGTERM)]
     assert freed == ["Stopped leftover ocr worker"]
 

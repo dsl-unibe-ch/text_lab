@@ -37,7 +37,6 @@ From: nvidia/cuda:12.8.0-cudnn-devel-ubuntu22.04
     export PADDLE_BACKEND_PYTHON=/opt/conda/envs/paddle_backend/bin/python
     export PADDLE_VL_BACKEND_PYTHON=/opt/conda/envs/paddle_vl_backend/bin/python
     export OLMOCR_BACKEND_PYTHON=/opt/conda/envs/olmocr_backend/bin/python
-    export TEXT_LAB_IMAGEGEN_PYTHON=/opt/conda/envs/imagegen_backend/bin/python
 
 %post
     set -e
@@ -224,37 +223,12 @@ EOF
     $OLM_PIP install --no-cache-dir "flashinfer-python>=0.5.2"
 
     # ===================================================================
-    # ENVIRONMENT 4: IMAGE GENERATION BACKEND
-    # Ideogram 4 nf4 needs Torch >=2.11 and Transformers 5.x for its Qwen3-VL
-    # text encoder config. Keep it away from WhisperX and OlmOCR/vLLM.
-    # ===================================================================
-    conda create -y -n imagegen_backend python=3.11
-    export IMG_PIP="/opt/conda/envs/imagegen_backend/bin/python -m pip"
-
-    $IMG_PIP install --no-cache-dir "pip>=25" "setuptools<82" "wheel>=0.47.0"
-
-    $IMG_PIP install --no-cache-dir torch==2.11.0 --index-url https://download.pytorch.org/whl/cu128
-
-    cat > /tmp/img_constraints.txt <<'EOF'
-torch==2.11.0+cu128
-transformers>=5,<6
-huggingface_hub<2.0.0
-EOF
-
-    # Use the maintained local fork/branch while these provider changes are
-    # unreleased upstream. Pin to a commit once the branch is finalized.
-    $IMG_PIP install --no-cache-dir \
-        "git+https://github.com/BoiMat/ideogram4.git@main" \
-        "transformers>=5,<6" "mcp[cli]>=1.28,<2" \
-        --constraint /tmp/img_constraints.txt
-
-    # ===================================================================
     # FINAL CLEANUP
     # ===================================================================
     conda clean -a -y
     apt-get clean
     rm -rf /var/lib/apt/lists/*
-    rm -f /tmp/main_constraints.txt /tmp/img_constraints.txt
+    rm -f /tmp/main_constraints.txt
 
 %runscript
     exec "$@"

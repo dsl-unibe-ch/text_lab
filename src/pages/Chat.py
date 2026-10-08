@@ -45,9 +45,6 @@ from core.chat_engine import (
     get_chunk_answer,
     get_synthesis_generator,
     decide_tool_use,
-    stream_chat_with_image_tool,
-    unload_all_models,
-    warm_model,
     MAX_CONTEXT_TOKENS,
 )
 
@@ -59,24 +56,8 @@ from core.visualization.viz_config import MAX_ROWS, get_tool_label
 from core.visualization.viz_utils import save_data_file, get_fast_data_preview
 from core.visualization.plot_data import get_all_columns_summary_impl
 
-# --- Image-generation tool integration (local Ideogram 4 via a persistent MCP) ---
-from core.image_gen import image_engine
-from core.image_gen.image_engine import ImageBlockedError
-from core.image_gen.magic_prompt import aspect_ratio_from_size, expand_prompt_ollama
-from core.image_gen.image_config import (
-    DEFAULT_PRESET,
-    DEFAULT_SIZE,
-    IMAGE_TIMEOUT_SECONDS,
-    PRESET_LABELS,
-    SIZE_OPTIONS,
-    is_image_gen_installed,
-    is_image_gen_supported,
-    model_repo_for_gpu,
-)
-
 _SRC_DIR = pathlib.Path(__file__).resolve().parent.parent
 MCP_SERVER_SCRIPT = str(_SRC_DIR / "core" / "visualization" / "mcp_server.py")
-IMAGE_MCP_SERVER_SCRIPT = str(_SRC_DIR / "core" / "image_gen" / "mcp_server.py")
 ANALYSIS_TIMEOUT_SECONDS = 600
 TABULAR_EXTENSIONS = (".csv", ".tsv", ".xls", ".xlsx", ".json")
 
@@ -84,9 +65,6 @@ TABULAR_EXTENSIONS = (".csv", ".tsv", ".xls", ".xlsx", ".json")
 # directories are 0700, and a single shared one can only ever serve whoever
 # created it. See core.artifacts.
 ARTIFACTS_DIR = ensure_artifacts_dir()
-IMAGE_ARTIFACTS_DIR = ensure_artifacts_dir("images")
-# Keep the MCP subprocess and Streamlit in agreement on where PNGs are written.
-os.environ.setdefault("IMAGE_GEN_ARTIFACTS_DIR", IMAGE_ARTIFACTS_DIR)
 
 check_token()
 
@@ -256,130 +234,6 @@ def _start_chat_analysis_thread(
     threading.Thread(target=_worker, daemon=True).start()
 
 
-def _caption_summary(caption: str) -> str:
-    """Short, human-readable preview of the generated JSON caption for the UI."""
-    import json as _json
-
-    try:
-        data = _json.loads(caption)
-        hld = data.get("high_level_description")
-        if isinstance(hld, str) and hld.strip():
-            return hld.strip()[:200]
-    except Exception:
-        pass
-    return caption[:120]
-
-
-def _start_image_gen_thread(
-    prompt: str,
-    width: int,
-    height: int,
-    sampler_preset: str,
-    seed: int,
-    low_vram: bool = False,
-    active_model: str = "",
-) -> None:
-    """Run image generation in a daemon thread so the chat UI stays responsive.
-
-    Results are stored in the same session-state slots the data-analysis run uses,
-    so `_render_tool_run_section` renders and archives the turn unchanged: the
-    generated PNG is packaged as a standard analysis artifact (bytes + tool_name).
-    """
-    cancel_event = threading.Event()
-    live_logs: list[tuple[str, str]] = []
-    thread_result: dict = {"status": "running", "result": None, "artifacts": [], "error": None}
-    run_id = f"img-{uuid.uuid4().hex[:8]}"
-
-    def _restore_chat_model() -> None:
-        """Low-VRAM only: tear down the image backend to free the ~20 GB diffusion
-        pipeline (it stays resident in the MCP subprocess and would otherwise starve
-        the chat model of VRAM, hanging its reload), then warm the chat model back."""
-        if not low_vram:
-            return
-        try:
-            live_logs.append(("info", "Unloading the image model to free GPU memory..."))
-            image_engine.shutdown_backend()
-        except Exception:
-            pass
-        if active_model:
-            try:
-                live_logs.append(("info", f"Reloading chat model ({active_model})..."))
-                warm_model(active_model)
-            except Exception:
-                pass
-
-    def _worker() -> None:
-        try:
-            # Expand the free-form prompt into Ideogram's required JSON caption
-            # FIRST, while the chat model is still warm — this reuses the loaded
-            # model (no extra VRAM) and must happen before any low-VRAM unload.
-            # Ideogram gray-blocks raw text, so a good caption is essential.
-            caption = prompt
-            if active_model:
-                live_logs.append(("info", "Rewriting your prompt into a structured caption..."))
-                try:
-                    caption = expand_prompt_ollama(
-                        prompt, active_model, aspect_ratio_from_size(width, height)
-                    )
-                    live_logs.append(("info", f"Caption ready: {_caption_summary(caption)}"))
-                except Exception as exc:  # never block generation on the rewrite step
-                    live_logs.append(("warning", f"Prompt rewrite failed ({exc}); using the raw prompt."))
-                    caption = prompt
-
-            if low_vram:
-                live_logs.append(("info", "Freeing GPU memory for image generation..."))
-                unload_all_models()
-            live_logs.append(("info", "Loading the image model (first run may take ~1 minute)..."))
-            artifact = image_engine.generate_image(
-                caption,
-                IMAGE_MCP_SERVER_SCRIPT,
-                width=width,
-                height=height,
-                sampler_preset=sampler_preset,
-                seed=seed,
-                timeout=float(IMAGE_TIMEOUT_SECONDS),
-            )
-            if cancel_event.is_set():
-                thread_result["status"] = "cancelled"
-                _restore_chat_model()
-                return
-
-            _restore_chat_model()
-
-            path = artifact["path"]
-            with open(path, "rb") as f:
-                image_bytes = f.read()
-            thread_result["artifacts"] = [{
-                "filename": os.path.basename(path),
-                "bytes": image_bytes,
-                "code": "",
-                "tool_name": "generate_image",
-                "fig_json": None,
-            }]
-            thread_result["result"] = {
-                "summary": f"Here's the image for: *{prompt}*",
-                "stats": [],
-            }
-            thread_result["status"] = "done"
-        except ImageBlockedError:
-            thread_result["status"] = "blocked"
-            _restore_chat_model()
-        except Exception as e:
-            thread_result["error"] = str(e)
-            thread_result["status"] = "error"
-            _restore_chat_model()
-
-    st.session_state["chat_tool_cancel"] = cancel_event
-    st.session_state["chat_tool_logs"] = live_logs
-    st.session_state["chat_tool_result"] = thread_result
-    st.session_state["chat_tool_run_id"] = run_id
-    st.session_state["chat_tool_instruction"] = prompt
-    st.session_state["chat_tool_title"] = "Generating image..."
-    st.session_state["chat_tool_state"] = "running"
-
-    threading.Thread(target=_worker, daemon=True).start()
-
-
 def _render_tool_run_section() -> bool:
     """
     Poll the running analysis thread, render its live activity log, and on completion
@@ -433,14 +287,6 @@ def _render_tool_run_section() -> bool:
     elif status == "cancelled":
         st.session_state["messages"].append(
             {"role": "assistant", "content": "Analysis was cancelled."}
-        )
-    elif status == "blocked":
-        st.session_state["messages"].append(
-            {"role": "assistant", "content": (
-                "The image model's built-in safety filter blocked this prompt, even after a "
-                "retry. This filter is known to over-trigger — try rephrasing (more neutral, "
-                "concrete wording usually helps) or adjust the seed and try again."
-            )}
         )
     elif status == "error":
         st.session_state["messages"].append(
@@ -530,81 +376,7 @@ def main():
             "Ask for plots or statistics and I'll analyse it."
         )
 
-    # --- Image generation controls (local Ideogram 4) ---
     st.sidebar.markdown("---")
-    st.sidebar.subheader("🎨 Image Generation")
-    image_gen_installed = is_image_gen_installed()
-    image_gen_ok = image_gen_installed and is_image_gen_supported(current_gpu)
-
-    # Defaults used when the feature is unavailable or the controls are hidden.
-    image_mode = False
-    image_width, image_height = SIZE_OPTIONS[DEFAULT_SIZE]
-    image_preset_key = DEFAULT_PRESET
-    image_seed = 0
-    image_unload_chat_model = False
-
-    if not image_gen_installed:
-        st.sidebar.caption("Unavailable in this build (the `ideogram4` package is missing).")
-    elif not image_gen_ok:
-        st.sidebar.caption(f"Needs a GPU with ≥20 GB VRAM. Current: {current_gpu}.")
-    else:
-        # Pick the weights repo for this GPU (fp8 on high-memory cards, nf4 else)
-        # and hand it to the MCP subprocess, which inherits this process's env.
-        selected_image_repo = model_repo_for_gpu(current_gpu)
-        os.environ["TEXT_LAB_IMAGEGEN_MODEL_REPO"] = selected_image_repo
-        # On 80+ GB A100/H100 nodes, FP8 and the chat model can coexist. Keep the
-        # low-VRAM unload behavior for smaller cards, with an override for admins.
-        image_unload_chat_model = (
-            os.environ.get("TEXT_LAB_IMAGEGEN_UNLOAD_CHAT", "").strip() == "1"
-            or not is_high_memory_gpu(current_gpu)
-        )
-        if is_high_memory_gpu(current_gpu):
-            st.sidebar.caption(
-                "✨ Using the higher-quality Ideogram 4 (fp8) model, enabled by this "
-                "GPU's larger memory."
-            )
-        else:
-            st.sidebar.caption(
-                f"⚠️ Image generation is slow on this GPU ({current_gpu}): with limited "
-                "VRAM the chat model is unloaded and reloaded around each image, so "
-                "expect a wait of a few minutes per generation."
-            )
-        image_mode = st.sidebar.toggle(
-            "🖼️ Generate image",
-            value=st.session_state.get("image_mode", False),
-            help=(
-                "On: every message is turned into an image. "
-                "Off: I still generate an image when a message clearly asks for one "
-                "(e.g. \"draw a cat\", \"create a visual of a mountain\")."
-            ),
-        )
-        st.session_state["image_mode"] = image_mode
-
-        size_labels = list(SIZE_OPTIONS.keys())
-        size_label = st.sidebar.selectbox(
-            "Image size", size_labels,
-            index=size_labels.index(st.session_state.get("image_size_label", DEFAULT_SIZE)),
-        )
-        st.session_state["image_size_label"] = size_label
-        image_width, image_height = SIZE_OPTIONS[size_label]
-
-        preset_labels = list(PRESET_LABELS.keys())
-        default_preset_label = next(
-            (k for k, v in PRESET_LABELS.items() if v == DEFAULT_PRESET), preset_labels[0]
-        )
-        preset_label = st.sidebar.selectbox(
-            "Quality", preset_labels,
-            index=preset_labels.index(st.session_state.get("image_preset_label", default_preset_label)),
-        )
-        st.session_state["image_preset_label"] = preset_label
-        image_preset_key = PRESET_LABELS[preset_label]
-
-        image_seed = int(st.sidebar.number_input(
-            "Seed", min_value=0, value=int(st.session_state.get("image_seed", 0)), step=1,
-            help="Same seed + prompt + settings reproduces the same image.",
-        ))
-        st.session_state["image_seed"] = image_seed
-
     if st.sidebar.button("🗑️ Start New Chat"):
         st.session_state["messages"] = []
         for key in (
@@ -663,30 +435,9 @@ def main():
 
     user_text = st.chat_input("Type your message...")
     if user_text:
-        # Chat keeps its LLM and its image generator; other features' models
-        # are released so they cannot starve the chat model of VRAM.
-        gpu_manager.free_gpu_for(
-            gpu_manager.LLM, ollama_model=model_name,
-            keep=(gpu_manager.IMAGE_GEN,),
-        )
-
-    # Image generation fast-path: the explicit "Generate image" toggle only. Every
-    # other message goes through the normal chat turn, where the model decides via
-    # its generate_image tool — it understands intent/context (a request vs. a
-    # question *about* images, a confirming "yes", etc.) far better than a keyword
-    # matcher, and crafts a context-aware prompt.
-    wants_image = bool(user_text and image_gen_ok and image_mode)
-    if wants_image:
-        with st.chat_message("user"):
-            st.markdown(user_text)
-        st.session_state["messages"].append({"role": "user", "content": user_text})
-        _start_image_gen_thread(
-            user_text, image_width, image_height, image_preset_key, image_seed,
-            low_vram=not is_high_memory_gpu(current_gpu),
-            active_model=st.session_state.get("selected_model", ""),
-        )
-        st.rerun()
-        return
+        # Chat keeps its LLM; other features' models are released so they
+        # cannot starve the chat model of VRAM.
+        gpu_manager.free_gpu_for(gpu_manager.LLM, ollama_model=model_name)
 
     if user_text and data_file_path:
         # Router/supervisor: decide whether this message needs the data-analysis tools.
@@ -771,25 +522,22 @@ def main():
                 st.session_state["messages"].append({"role": "assistant", "content": assistant_reply})
             else:
                 last_msg_obj["content"] = full_prompt
+                stream = get_response_generator(
+                    model_name, _ollama_messages(st.session_state["messages"]),
+                )
+                # The generator is lazy: pull the first chunk under the spinner
+                # so "Loading model..." / "Thinking..." stays visible until the
+                # model is loaded and starts answering.
                 with st.spinner(spinner_text):
-                    # Offer the model the real generate_image tool so it can produce
-                    # images mid-conversation (e.g. after the user confirms "yes").
-                    kind, payload = stream_chat_with_image_tool(
-                        model_name,
-                        _ollama_messages(st.session_state["messages"]),
-                        offer_image=image_gen_ok,
-                    )
-                if kind == "image":
-                    last_msg_obj["content"] = original_content
-                    _start_image_gen_thread(
-                        payload, image_width, image_height, image_preset_key, image_seed,
-                        low_vram=image_unload_chat_model,
-                        active_model=model_name,
-                    )
-                    st.rerun()
-                    return
+                    first_chunk = next(stream, "")
+
+                def _reply():
+                    if first_chunk:
+                        yield first_chunk
+                    yield from stream
+
                 with st.chat_message("assistant"):
-                    assistant_reply = st.write_stream(payload)
+                    assistant_reply = st.write_stream(_reply())
                 st.session_state["messages"].append({"role": "assistant", "content": assistant_reply})
         except ResponseError as e:
             status = getattr(e, "status_code", "?")

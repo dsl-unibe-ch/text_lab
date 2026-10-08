@@ -11,8 +11,8 @@ GPU memory lives in three places, each released differently:
 
 * **Ollama** (a separate server) -- models are unloaded through its API,
   except the one the feature is about to use. The server keeps running.
-* **Helper processes** this app starts (PaddleOCR workers, the image
-  generator, the transcription worker) -- stopped through their owner's
+* **Helper processes** this app starts (PaddleOCR workers, the
+  transcription worker) -- stopped through their owner's
   release hook; as a last resort a leftover worker still holding GPU memory
   is terminated. Only descendants of this process are ever touched.
 * **This Streamlit process** (translation models, EasyOCR, Whisper language
@@ -41,7 +41,6 @@ LOGGER = logging.getLogger(__name__)
 OCR = "ocr"
 TRANSCRIBE = "transcribe"
 TRANSLATION = "translation"
-IMAGE_GEN = "image_gen"
 TOPIC_MODELING = "topic_modeling"
 #: Pure LLM features (summaries, knowledge graph, visualisation) own nothing
 #: beyond their Ollama model.
@@ -54,7 +53,6 @@ _WORKER_SCRIPTS = {
     "paddle_vl_worker.py": OCR,
     "paddle_ocr_worker.py": OCR,
     "transcribe_worker.py": TRANSCRIBE,
-    "mcp_server.py": IMAGE_GEN,
 }
 
 _RELEASERS: Dict[str, Dict[str, Callable[[], object]]] = {}
