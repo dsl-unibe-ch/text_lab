@@ -10,39 +10,9 @@ from .format import (
     translate_pdf,
     translate_pdf_to_markdown,
 )
-from .chunking import InputTooLongError, OutputTruncatedError
+from .messages import describe_error
 from .pdf_checks import PDFIntegrityError, inspect_pdf, require_native_coverage
-from .shield import ProtectedContentError
-
-
-def describe_error(error: Exception) -> str:
-    """A short, user-facing explanation; technical detail stays in reports."""
-    if isinstance(error, InputTooLongError):
-        return ("Part of the text is too long for the selected model to "
-                "translate in one piece. Try a different model.")
-    if isinstance(error, OutputTruncatedError):
-        return ("The model could not finish translating part of the text. "
-                "Try a different model.")
-    if isinstance(error, ProtectedContentError):
-        return ("The model did not keep the document's formatting (links, "
-                "code, tables) intact. Try a different model.")
-    if isinstance(error, PDFIntegrityError):
-        pages = getattr(error, "pages", ())
-        where = (" (pages " + ", ".join(map(str, pages)) + ")") if pages else ""
-        if "scanned or unreadable" in str(error):
-            return ("This PDF contains scanned or image-only pages" + where
-                    + ", so only the Markdown version can be produced.")
-        if "password" in str(error):
-            return "This PDF is password-protected. Remove the password first."
-        if "font" in str(error):
-            return ("The PDF's font cannot display some translated "
-                    "characters" + where + ". Use the Markdown version.")
-        if "OCR" in str(error):
-            return ("Scanned pages" + where + " could not be read. Relaunch "
-                    "the app on a larger GPU and try again.")
-        return ("The translated text could not be placed back into the PDF "
-                "layout" + where + ". Use the Markdown version instead.")
-    return "An unexpected error occurred while translating this document."
+from .shield import record_translations
 
 
 @dataclass
@@ -51,6 +21,8 @@ class PDFTranslationResult:
     blocked: list[dict] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     pages: list[dict] = field(default_factory=list)
+    # (source, translation) units for the side-by-side review file.
+    pairs: list[tuple[str, str]] = field(default_factory=list)
 
     def report_bytes(self) -> bytes:
         report = {
@@ -82,6 +54,7 @@ def translate_pdf_outputs(
     ocr_allowed: bool | None = None,
     outputs=("markdown", "pdf"),
     math_ocr: bool = False,
+    backend: str | None = None,
 ) -> PDFTranslationResult:
     """Attempt the requested outputs separately, returning only checked bytes.
 
@@ -114,7 +87,7 @@ def translate_pdf_outputs(
     def blocked(output: str, error: Exception) -> None:
         result.blocked.append({
             "output": output,
-            "message": describe_error(error),
+            "message": describe_error(error, backend),
             "reason": str(error),
             "pages": list(getattr(error, "pages", ())),
         })
@@ -128,12 +101,14 @@ def translate_pdf_outputs(
                     "supported GPU; no pages will be silently skipped.",
                     needs_ocr,
                 )
-            markdown, assets = translate_pdf_to_markdown(
-                pdf_bytes, translate_fn, progress_cb=progress_cb,
-                glossary=glossary,
-                glossary_case_sensitive=glossary_case_sensitive,
-                source_name=source_name, math_ocr=math_ocr,
-            )
+            with record_translations() as markdown_pairs:
+                markdown, assets = translate_pdf_to_markdown(
+                    pdf_bytes, translate_fn, progress_cb=progress_cb,
+                    glossary=glossary,
+                    glossary_case_sensitive=glossary_case_sensitive,
+                    source_name=source_name, math_ocr=math_ocr,
+                )
+            result.pairs = markdown_pairs
             data, name = pack_markdown_bundle(markdown, assets, stem=stem)
             result.outputs.append((name, data))
         except Exception as error:
@@ -143,12 +118,15 @@ def translate_pdf_outputs(
         try:
             require_native_coverage(plans)
             layout_warnings: list[str] = []
-            data = translate_pdf(
-                pdf_bytes, translate_fn, progress_cb=progress_cb,
-                glossary=glossary,
-                glossary_case_sensitive=glossary_case_sensitive,
-                warnings=layout_warnings,
-            )
+            with record_translations() as pdf_pairs:
+                data = translate_pdf(
+                    pdf_bytes, translate_fn, progress_cb=progress_cb,
+                    glossary=glossary,
+                    glossary_case_sensitive=glossary_case_sensitive,
+                    warnings=layout_warnings,
+                )
+            # Whole reflowed paragraphs read better than Markdown lines.
+            result.pairs = pdf_pairs
             result.warnings.extend(layout_warnings)
             result.outputs.append((f"{stem}.pdf", data))
         except Exception as error:

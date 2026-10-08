@@ -61,10 +61,15 @@ from core.translation import (  # noqa: E402
     ProtectedContentError,
     backend_is_loaded,
     backend_load_signature,
+    build_review_docx,
+    build_review_html,
+    describe_error,
+    detect_document_language,
     detect_gpu_profile,
     detect_language,
     make_translate_fn,
     preload_backend,
+    record_translations,
     reflow_soft_wraps,
     shielded_translate,
     translate_docx,
@@ -73,7 +78,6 @@ from core.translation import (  # noqa: E402
     translate_xlsx,
 )
 from core.translation.pdf_workflow import (  # noqa: E402
-    describe_error,
     translate_pdf_outputs,
 )
 
@@ -334,6 +338,8 @@ def _mime_for(name: str) -> str:
         return "text/markdown"
     if lower.endswith(".zip"):
         return "application/zip"
+    if lower.endswith(".html"):
+        return "text/html"
     return "text/plain"
 
 
@@ -346,6 +352,7 @@ def _translate_one(
     pdf_result_cb=None,
     pdf_outputs=("markdown", "pdf"),
     math_ocr=False,
+    backend_key_=None,
 ) -> list[tuple[str, bytes]]:
     """Return checked outputs, keeping PDF deliverable failures independent."""
     base, ext = os.path.splitext(name)
@@ -368,7 +375,7 @@ def _translate_one(
             data, tfn, stem=out_stem, source_name=os.path.basename(name),
             progress_cb=progress_stage_cb, glossary=glossary,
             glossary_case_sensitive=glossary_case_sensitive,
-            outputs=pdf_outputs, math_ocr=math_ocr,
+            outputs=pdf_outputs, math_ocr=math_ocr, backend=backend_key_,
         )
         if pdf_result_cb is not None:
             pdf_result_cb(result)
@@ -462,11 +469,39 @@ def _zip_file_outputs(file_outputs, errors) -> bytes:
     return buffer.getvalue()
 
 
+def _review_files(
+    source: str, pairs, source_language: str, target_language: str,
+    tgt_code_: str,
+) -> list[tuple[str, bytes]]:
+    """Side-by-side HTML (and Word, when python-docx is available)."""
+    if not pairs:
+        return []
+    title = os.path.basename(source)
+    stem = f"{os.path.splitext(title)[0]}.{tgt_code_}.side-by-side"
+    options = dict(
+        title=title, source_language=source_language,
+        target_language=target_language,
+    )
+    files = [(f"{stem}.html", build_review_html(pairs, **options))]
+    docx_bytes = build_review_docx(pairs, **options)
+    if docx_bytes is not None:
+        files.append((f"{stem}.docx", docx_bytes))
+    return files
+
+
 def _render_doc_results(results: dict) -> None:
     file_outputs = results["file_outputs"]
     errors = results["errors"]
     pdf_reports = results["pdf_reports"]
     outputs = [item for _, items in file_outputs for item in items]
+
+    elapsed = int(results.get("elapsed", 0))
+    details = [f"Finished in {elapsed // 60}:{elapsed % 60:02d}"]
+    details += [
+        f"{os.path.basename(name)}: {language}"
+        for name, language in results.get("languages", {}).items()
+    ]
+    st.caption(" · ".join(details))
 
     blocked_count = sum(len(result.blocked) for _, result in pdf_reports)
     if pdf_reports:
@@ -859,7 +894,9 @@ with text_tab:
             st.session_state["translate_traceback"] = None
         except (TranslationLimitError, ProtectedContentError) as exc:
             st.session_state["target_text"] = ""
-            st.session_state["translate_error"] = describe_error(exc)
+            st.session_state["translate_error"] = describe_error(
+                exc, backend_key,
+            )
             st.session_state["translate_traceback"] = None
         except Exception as exc:
             import traceback as _tb
@@ -938,15 +975,31 @@ with doc_tab:
                      "are kept as they appear in the PDF, untranslated.",
             )
 
+    opt_detect, opt_review = st.columns(2)
+    with opt_detect:
+        detect_source = st.checkbox(
+            "Detect each document's language",
+            value=True, key="doc_detect_source",
+            help=f"Uses {src_name} (selected above) when a document's "
+                 "language cannot be identified with confidence.",
+        )
+    with opt_review:
+        make_review = st.checkbox(
+            "Add side-by-side review file",
+            value=True, key="doc_review",
+            help="Source and translation paragraph by paragraph, as HTML "
+                 "and Word. The easiest way to check a translation.",
+        )
+
     total_size = sum(d.size for d in docs) if docs else 0
     if total_size > 5_000_000:
         st.warning(
             "Large files detected. Translation may take several minutes."
         )
 
-    if src_code == tgt_code:
+    if src_code == tgt_code and not detect_source:
         st.warning("Source and target languages are the same.")
-    elif not opus_mt_supported:
+    elif not opus_mt_supported and not detect_source:
         st.error(
             "OPUS-MT does not support direct translation between "
             f"{src_name} and {tgt_name}."
@@ -955,10 +1008,14 @@ with doc_tab:
     run_doc = st.button(
         "Translate document(s)",
         type="primary",
-        disabled=(not docs or src_code == tgt_code or not opus_mt_supported
+        disabled=(not docs
+                  or (not detect_source
+                      and (src_code == tgt_code or not opus_mt_supported))
                   or (has_pdf and not pdf_outputs)),
         key="translate_doc_btn",
     )
+    if st.session_state.pop("doc_cancelled", False):
+        st.info("Translation cancelled. No files were produced.")
 
     if run_doc and docs:
         st.session_state["doc_results"] = None
@@ -968,19 +1025,40 @@ with doc_tab:
             stage_ph = st.empty()
             bar = st.progress(0.0)
             info_ph = st.empty()
+            # Clicking reruns the page, which stops this run at its next
+            # progress update (Streamlit interrupts the running script).
+            st.button(
+                "Cancel", key="cancel_doc_btn",
+                on_click=lambda: st.session_state.update(doc_cancelled=True),
+            )
+        run_started = time.monotonic()
 
         def _stage(stage: str) -> None:
-            stage_ph.markdown(f"**Stage:** {stage}")
-
-        retry_notices: set[str] = set()
+            elapsed = int(time.monotonic() - run_started)
+            stage_ph.markdown(
+                f"**Stage:** {stage}  \n"
+                f"Elapsed {elapsed // 60}:{elapsed % 60:02d}"
+            )
 
         def _document_retry_notice(message: str) -> None:
-            _stage(message)
-            if message not in retry_notices:
-                retry_notices.add(message)
-                st.warning(message)
+            # Retries are routine; the stage line is enough.
+            _stage("retrying some text in smaller pieces")
 
         last_update = {"time": 0.0, "stage": None}
+        rate = {"start": 0.0, "done": 0, "total": 0}
+
+        def _time_left(done: int, total: int) -> str:
+            now = time.monotonic()
+            if total != rate["total"] or done < rate["done"]:
+                rate.update(start=now, total=total)
+            rate["done"] = done
+            elapsed = now - rate["start"]
+            if done <= 0 or done >= total or elapsed < 5:
+                return ""
+            remaining = elapsed / done * (total - done)
+            if remaining < 60:
+                return " · less than a minute left"
+            return f" · about {round(remaining / 60)} min left"
 
         def _show_progress(done: int, total: int, stage: str,
                            label: str | None = None) -> None:
@@ -996,24 +1074,33 @@ with doc_tab:
                 bar.progress(min(done / total, 1.0))
 
         def _prog_translate(done: int, total: int) -> None:
+            eta = _time_left(done, total)
             _show_progress(done, total, "translating",
-                           f"translating sentences {done}/{total}")
+                           f"translating sentences {done}/{total}{eta}")
 
         def _prog_stage(done: int, total: int, stage: str) -> None:
             _show_progress(done, total, stage)
 
-        tfn = make_translate_fn(
-            src_lang=src_code, tgt_lang=tgt_code,
-            backend=backend_key,
-            ollama_model=ollama_model,
-            src_lang_name=src_name, tgt_lang_name=tgt_name,
-            formality=formality,
-            progress_cb=_prog_translate,
-            status_cb=_document_retry_notice,
-        )
+        translators = {}
 
+        def _translator(code: str, name: str):
+            # One per source language, so its sentence cache is shared by
+            # all outputs of all files in that language.
+            if code not in translators:
+                translators[code] = make_translate_fn(
+                    src_lang=code, tgt_lang=tgt_code,
+                    backend=backend_key,
+                    ollama_model=ollama_model,
+                    src_lang_name=name, tgt_lang_name=tgt_name,
+                    formality=formality,
+                    progress_cb=_prog_translate,
+                    status_cb=_document_retry_notice,
+                )
+            return translators[code]
+
+        source_label = "auto-detect" if detect_source else src_name
         info_ph.markdown(
-            f"**{src_name} → {tgt_name}** · engine: `{backend_label}` · "
+            f"**{source_label} → {tgt_name}** · engine: `{backend_label}` · "
             f"glossary: {len(glossary)} term(s)"
         )
 
@@ -1056,20 +1143,51 @@ with doc_tab:
         file_outputs: list[tuple[str, list[tuple[str, bytes]]]] = []
         errors: list[tuple[str, str]] = []
         pdf_reports = []
+        languages: dict[str, str] = {}
 
         for i, (entry_name, entry_data) in enumerate(flat_inputs, start=1):
-            _stage(f"[{i}/{len(flat_inputs)}] {entry_name}")
+            prefix = f"[{i}/{len(flat_inputs)}] {entry_name}"
+            _stage(prefix)
             bar.progress((i - 1) / len(flat_inputs))
+            file_src_code, file_src_name = src_code, src_name
+            if detect_source:
+                _stage(f"{prefix}: detecting language")
+                detection = detect_document_language(entry_name, entry_data)
+                if detection is not None and detection.display_name:
+                    file_src_code = detection.flores_code
+                    file_src_name = detection.display_name
+                    languages[entry_name] = f"{file_src_name} (detected)"
+                else:
+                    languages[entry_name] = (
+                        f"{src_name} (not detected, using your selection)"
+                    )
+            if file_src_code == tgt_code:
+                errors.append((
+                    entry_name,
+                    f"This document already appears to be in {tgt_name}.",
+                ))
+                continue
             try:
-                file_outputs.append((entry_name, _translate_one(
-                    entry_name, entry_data, tfn, _prog_stage, tgt_code,
-                    pdf_result_cb=lambda result: pdf_reports.append(
-                        (entry_name, result)
-                    ),
-                    pdf_outputs=pdf_outputs, math_ocr=math_ocr,
-                )))
+                with record_translations() as pairs:
+                    outputs = _translate_one(
+                        entry_name, entry_data,
+                        _translator(file_src_code, file_src_name),
+                        _prog_stage, tgt_code,
+                        pdf_result_cb=lambda result: pdf_reports.append(
+                            (entry_name, result)
+                        ),
+                        pdf_outputs=pdf_outputs, math_ocr=math_ocr,
+                        backend_key_=backend_key,
+                    )
+                if make_review:
+                    if pdf_reports and pdf_reports[-1][0] == entry_name:
+                        pairs = pdf_reports[-1][1].pairs
+                    outputs += _review_files(
+                        entry_name, pairs, file_src_name, tgt_name, tgt_code,
+                    )
+                file_outputs.append((entry_name, outputs))
             except Exception as exc:
-                errors.append((entry_name, str(exc)))
+                errors.append((entry_name, describe_error(exc, backend_key)))
 
         _stage("done")
         bar.progress(1.0)
@@ -1081,6 +1199,8 @@ with doc_tab:
             "pdf_reports": pdf_reports,
             "total": len(flat_inputs),
             "tgt_code": tgt_code,
+            "languages": languages,
+            "elapsed": time.monotonic() - run_started,
         }
 
     if st.session_state.get("doc_results"):

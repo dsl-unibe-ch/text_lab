@@ -148,3 +148,50 @@ def detect_language(text: str) -> Optional[DetectionResult]:
 def supported_iso639_1_codes() -> list[str]:
     """Return the sorted list of ISO 639-1 codes the classifier can predict."""
     return sorted(_ISO2_TO_FLORES.keys())
+
+
+def detect_document_language(
+    name: str, data: bytes, *, samples: int = 5,
+) -> Optional[DetectionResult]:
+    """Detect a document's language from paragraphs spread across it.
+
+    A title page, an English abstract or a reference list would mislead a
+    detector that only reads the beginning, so several paragraphs are
+    classified and their confidences summed per language. Returns ``None``
+    for unsupported formats, too little text, or an uncertain result.
+    """
+    from .engine import read_text_from_upload
+
+    try:
+        text = read_text_from_upload(name, data)
+    except Exception:
+        return None
+    paragraphs = [
+        " ".join(part.split()) for part in text.split("\n\n")
+        if sum(char.isalpha() for char in part) >= 60
+    ]
+    if not paragraphs:
+        return None
+    step = max(1, len(paragraphs) // samples)
+    picked = paragraphs[::step][:samples]
+    votes: dict[str, float] = {}
+    results: dict[str, DetectionResult] = {}
+    for paragraph in picked:
+        result = detect_language(paragraph)
+        if result is None or result.flores_code is None:
+            continue
+        votes[result.flores_code] = (
+            votes.get(result.flores_code, 0.0) + result.confidence
+        )
+        results.setdefault(result.flores_code, result)
+    if not votes:
+        return None
+    best = max(votes, key=votes.__getitem__)
+    confidence = votes[best] / len(picked)
+    if confidence < 0.60:
+        return None
+    winner = results[best]
+    return DetectionResult(
+        iso639_1=winner.iso639_1, confidence=confidence,
+        flores_code=winner.flores_code, display_name=winner.display_name,
+    )

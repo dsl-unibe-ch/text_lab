@@ -18,8 +18,10 @@ from __future__ import annotations
 
 import re
 from bisect import bisect_left
+from contextlib import contextmanager
+from contextvars import ContextVar
 from secrets import token_hex
-from typing import List, Mapping, Optional, Tuple
+from typing import Iterator, List, Mapping, Optional, Tuple
 
 from .chunking import InputTooLongError
 
@@ -398,6 +400,26 @@ def shielded_translate(
     )[0]
 
 
+_RECORDER: ContextVar[Optional[List[Tuple[str, str]]]] = ContextVar(
+    "translation_recorder", default=None,
+)
+
+
+@contextmanager
+def record_translations() -> Iterator[List[Tuple[str, str]]]:
+    """Collect ``(source, translation)`` pairs of every unit translated here.
+
+    Used for side-by-side review files. Nested scopes record only into the
+    innermost list.
+    """
+    pairs: List[Tuple[str, str]] = []
+    token = _RECORDER.set(pairs)
+    try:
+        yield pairs
+    finally:
+        _RECORDER.reset(token)
+
+
 def shielded_translate_many(
     texts: List[str],
     translate_fn,
@@ -415,9 +437,29 @@ def shielded_translate_many(
     On failure, ``ProtectedContentError.partial_results`` retains only
     independently verified units; ``None`` entries must not be published.
     """
-    if not fallback:
-        return _translate_with_markers(texts, translate_fn, glossary,
-                                       glossary_case_sensitive)
+    if fallback:
+        result = _translate_with_fallback(
+            texts, translate_fn, glossary, glossary_case_sensitive,
+        )
+    else:
+        result = _translate_with_markers(
+            texts, translate_fn, glossary, glossary_case_sensitive,
+        )
+    recorder = _RECORDER.get()
+    if recorder is not None:
+        recorder.extend(
+            (text, output) for text, output in zip(texts, result)
+            if text.strip()
+        )
+    return result
+
+
+def _translate_with_fallback(
+    texts: List[str],
+    translate_fn,
+    glossary: Optional[Mapping[str, str]],
+    glossary_case_sensitive: bool,
+) -> List[str]:
     result = [text if not text.strip() else None for text in texts]
     prepared = {
         i: _prepare(text, glossary, glossary_case_sensitive)

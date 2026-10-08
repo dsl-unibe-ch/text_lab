@@ -71,6 +71,7 @@ from .format import (
 )
 from .lang_detect import (
     DetectionResult,
+    detect_document_language,
     detect_language,
     supported_iso639_1_codes,
 )
@@ -88,10 +89,13 @@ from .quality import (
     is_available,
     quality_badge,
 )
+from .messages import describe_error, suggest_backend
 from .pdf_checks import PDFIntegrityError
 from .pdf_workflow import PDFTranslationResult, translate_pdf_outputs
+from .review import build_review_docx, build_review_html
 from .shield import (
     ProtectedContentError,
+    record_translations,
     shield,
     shielded_translate,
     shielded_translate_many,
@@ -106,6 +110,12 @@ __all__ = [
     "PDFIntegrityError",
     "PDFTranslationResult",
     "translate_pdf_outputs",
+    "describe_error",
+    "suggest_backend",
+    # Side-by-side review
+    "build_review_docx",
+    "build_review_html",
+    "record_translations",
     # Engine
     "FORMALITY_CAPABLE_BACKENDS",
     "FORMALITY_CHOICES",
@@ -141,6 +151,7 @@ __all__ = [
     "pack_markdown_bundle",
     # Language detection
     "DetectionResult",
+    "detect_document_language",
     "detect_language",
     "supported_iso639_1_codes",
     # GPU profile
