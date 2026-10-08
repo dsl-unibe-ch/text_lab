@@ -38,8 +38,14 @@ def _corrupt_text(text: str) -> bool:
     return private_count >= 4
 
 
-def inspect_pdf(pdf_bytes: bytes) -> list[PDFPagePlan]:
+def inspect_pdf(
+    pdf_bytes: bytes, *, math_ocr: bool = False,
+) -> list[PDFPagePlan]:
     """Classify every page; a document-wide text count cannot hide scans.
+
+    With ``math_ocr``, pages with native equations are also sent to OCR so
+    the Markdown gets LaTeX formulas. That costs a model swap and an OCR
+    pass, so by default they stay native and equations are kept verbatim.
 
     Raster-dominated pages need OCR even when a header or an old hidden text
     layer is present. Truly empty pages can pass through without loading OCR.
@@ -87,7 +93,7 @@ def inspect_pdf(pdf_bytes: bytes) -> list[PDFPagePlan]:
                 plans.append(PDFPagePlan(
                     number, "ocr", False, reason, bool(image_boxes),
                 ))
-            elif has_math:
+            elif has_math and math_ocr:
                 plans.append(PDFPagePlan(
                     number, "ocr", True,
                     "equations need structured extraction for Markdown",

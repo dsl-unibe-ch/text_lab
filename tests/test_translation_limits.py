@@ -166,8 +166,9 @@ def test_hf_multibyte_input_is_split_by_tokens_not_characters():
     )
     assert result == [source.upper()]
     batches = [texts for texts, _ in model.calls]
-    assert len(batches) >= 2
-    assert all(len(texts) <= 2 for texts in batches)
+    # Batches share a token budget of batch_size full windows (2 x 24).
+    assert all(len(texts) * (len(texts[0].encode()) + 2) <= 48
+               for texts in batches)
     assert all(len(text.encode()) + 2 <= 24
                for batch in batches for text in batch)
     assert progress[-1][0] == progress[-1][1]
@@ -298,7 +299,6 @@ def test_512_token_cap_retains_input_under_the_old_character_limit():
     chunks = [text for texts, _ in model.calls for text in texts]
     assert len(chunks) > 1
     assert all(len(text.encode()) + 2 <= 512 for text in chunks)
-    assert "".join(chunks) == source
 
 
 @pytest.mark.parametrize("backend", ["nllb", "madlad-3b", "opus-mt"])
@@ -354,3 +354,61 @@ def test_status_callback_and_errors_propagate_through_factory(monkeypatch):
     assert len(notices) == 2
     with pytest.raises(InputTooLongError):
         fn("indivisible" * 30)
+
+
+def test_sentences_are_translated_separately_and_rejoined_exactly():
+    tokenizer, model = Tokenizer(), Model()
+    tokenizer.model_max_length = 512
+    model.config.max_position_embeddings = 512
+    source = "First one.  Second (et al. 2020) here! Third, e.g. this."
+    assert generate_translations(model, tokenizer, [source], "cpu") == [
+        "FIRST ONE.  SECOND (ET AL. 2020) HERE! THIRD, E.G. THIS."
+    ]
+    sent = sorted(text for texts, _ in model.calls for text in texts)
+    assert sent == sorted([
+        "First one.", "Second (et al. 2020) here!", "Third, e.g. this.",
+    ])
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("One. Two.", ["One. ", "Two."]),
+    ("See Fig. 3 and Eq. 2. Next.", ["See Fig. 3 and Eq. 2. ", "Next."]),
+    ("Smith et al. Found it. J. Doe agreed.",
+     ["Smith et al. Found it. ", "J. Doe agreed."]),
+    ("Values, i.e. Means. Done.", ["Values, i.e. Means. ", "Done."]),
+    ("e.g. lowercase follows. Then.", ["e.g. lowercase follows. ", "Then."]),
+    ("你好。世界。", ["你好。", "世界。"]),
+    ("no punctuation at all", ["no punctuation at all"]),
+])
+def test_sentence_slices_skip_abbreviations_and_are_lossless(text, expected):
+    from core.translation.chunking import sentence_slices
+
+    assert sentence_slices(text) == expected
+    assert "".join(sentence_slices(text)) == text
+
+
+def test_repeated_sentences_are_translated_once_and_cache_is_reused():
+    tokenizer, model = Tokenizer(), Model()
+    tokenizer.model_max_length = 512
+    model.config.max_position_embeddings = 512
+    cache = {}
+    texts = ["Header text. Body one.", "Header  text. Body two."]
+    assert generate_translations(
+        model, tokenizer, texts, "cpu", cache=cache,
+    ) == ["HEADER TEXT. BODY ONE.", "HEADER TEXT. BODY TWO."]
+    sent = [text for texts, _ in model.calls for text in texts]
+    assert sorted(sent) == ["Body one.", "Body two.", "Header text."]
+    model.calls.clear()
+    assert generate_translations(
+        model, tokenizer, ["Body two. Header text."], "cpu", cache=cache,
+    ) == ["BODY TWO. HEADER TEXT."]
+    assert not model.calls
+
+
+def test_short_sentences_share_one_length_sorted_batch():
+    tokenizer, model = Tokenizer(), Model()
+    words = ["a", "bbbb", "cc", "ddd"]
+    assert generate_translations(
+        model, tokenizer, words, "cpu", batch_size=2,
+    ) == [word.upper() for word in words]
+    assert [texts for texts, _ in model.calls] == [["bbbb", "ddd", "cc", "a"]]

@@ -21,6 +21,7 @@ from .chunking import (
     MAX_SPLIT_RETRIES,
     OutputTruncatedError,
     join_translations,
+    sentence_slices,
     split_for_retry,
     split_text,
 )
@@ -31,6 +32,9 @@ DEFAULT_INPUT_TOKENS = 512
 DEFAULT_OUTPUT_TOKENS = 512
 DEFAULT_NUM_BEAMS = 1
 DEFAULT_BATCH_SIZE = 16
+# ``batch_size`` is calibrated for full-window inputs; short sentences can
+# share that token budget, up to this many sentences per budgeted slot.
+SENTENCES_PER_SLOT = 8
 
 
 def input_token_limit(tokenizer, model) -> int:
@@ -79,14 +83,22 @@ def generate_translations(
     batch_size: int = DEFAULT_BATCH_SIZE,
     progress_cb: Callable[[int, int], None] | None = None,
     status_cb: Callable[[str], None] | None = None,
+    cache: dict[str, str] | None = None,
 ) -> list[str]:
     """Translate complete inputs; never accept input or output truncation.
 
-    Token counts include special tokens and the MADLAD target prefix. GPU
-    work remains batched; only unfinished outputs are retried on smaller
-    source spans, with unchanged per-call token and memory budgets. CUDA OOM
-    halves the microbatch independently of split-retry depth, stopping at
-    one; failed tensors/tracebacks are released before clearing the cache.
+    Inputs are translated sentence by sentence (what these models are
+    trained on). Identical sentences are translated once, and ``cache``
+    (normalized sentence -> translation) carries results across calls, e.g.
+    between the Markdown and PDF outputs of one document. Sentences are
+    sorted by length and batched by total tokens (``batch_size`` full-window
+    inputs), so short sentences share a batch without padding waste.
+
+    Token counts include special tokens and the MADLAD target prefix. Only
+    unfinished outputs are retried on smaller source spans, with unchanged
+    per-call token and memory budgets. CUDA OOM halves the microbatch
+    independently of split-retry depth, stopping at one; failed
+    tensors/tracebacks are released before clearing the cache.
     """
     if batch_size <= 0 or max_new_tokens <= 0:
         raise ValueError(
@@ -107,8 +119,32 @@ def generate_translations(
         )
         return len(encoded["input_ids"])
 
-    pieces = [split_text(text, measure, limit) for text in texts]
-    flat = [chunk for chunks in pieces for chunk in chunks]
+    lengths: dict[str, int] = {}
+
+    def measured(text: str) -> int:
+        if text not in lengths:
+            lengths[text] = measure(text)
+        return lengths[text]
+
+    def model_pieces(text: str) -> list[str]:
+        result = []
+        for sentence in sentence_slices(text):
+            if measured(sentence) <= limit:
+                result.append(sentence)
+            else:
+                result.extend(split_text(sentence, measured, limit))
+        return result
+
+    pieces = [model_pieces(text) for text in texts]
+    store = cache if cache is not None else {}
+    key_tokens: dict[str, int] = {}
+    for chunks in pieces:
+        for chunk in chunks:
+            key = " ".join(chunk.split())
+            if key and key not in store:
+                key_tokens.setdefault(key, measured(chunk))
+    # Longest first: padding stays minimal and any OOM surfaces early.
+    pending = sorted(key_tokens, key=key_tokens.__getitem__, reverse=True)
     kwargs = {
         "max_new_tokens": max_new_tokens,
         "num_beams": num_beams,
@@ -119,7 +155,19 @@ def generate_translations(
     if forced_bos_token_id is not None:
         kwargs["forced_bos_token_id"] = forced_bos_token_id
 
-    microbatch_size = batch_size
+    max_items = batch_size * SENTENCES_PER_SLOT
+    token_budget = batch_size * limit
+    batches: list[list[str]] = []
+    for key in pending:
+        if batches and (
+            len(batches[-1]) < max_items
+            and (len(batches[-1]) + 1) * key_tokens[batches[-1][0]]
+            <= token_budget
+        ):
+            batches[-1].append(key)
+        else:
+            batches.append([key])
+    microbatch_size = max_items
 
     def infer(chunks: list[str]):
         # Return CPU data only so output retries never retain GPU tensors.
@@ -232,20 +280,17 @@ def generate_translations(
                 )
         return results
 
-    translated = []
-    start = 0
-    while start < len(flat):
-        batch = flat[start:start + microbatch_size]
-        translated.extend(generate_pending(batch, 0))
-        start += len(batch)
+    done = 0
+    for batch in batches:
+        for key, output in zip(batch, generate_pending(batch, 0)):
+            store[key] = output
+        done += len(batch)
         if progress_cb is not None:
-            progress_cb(start, len(flat))
+            progress_cb(done, len(pending))
 
-    results = []
-    offset = 0
-    for chunks in pieces:
-        results.append(join_translations(
-            chunks, translated[offset:offset + len(chunks)],
-        ))
-        offset += len(chunks)
-    return results
+    return [
+        join_translations(chunks, [
+            store.get(" ".join(chunk.split()), "") for chunk in chunks
+        ])
+        for chunks in pieces
+    ]

@@ -31,6 +31,7 @@ import html
 import io
 import os
 import sys
+import time
 import zipfile
 
 import streamlit as st
@@ -343,6 +344,8 @@ def _translate_one(
     progress_stage_cb,
     tgt_code_,
     pdf_result_cb=None,
+    pdf_outputs=("markdown", "pdf"),
+    math_ocr=False,
 ) -> list[tuple[str, bytes]]:
     """Return checked outputs, keeping PDF deliverable failures independent."""
     base, ext = os.path.splitext(name)
@@ -365,6 +368,7 @@ def _translate_one(
             data, tfn, stem=out_stem, source_name=os.path.basename(name),
             progress_cb=progress_stage_cb, glossary=glossary,
             glossary_case_sensitive=glossary_case_sensitive,
+            outputs=pdf_outputs, math_ocr=math_ocr,
         )
         if pdf_result_cb is not None:
             pdf_result_cb(result)
@@ -907,6 +911,33 @@ with doc_tab:
             "deliverable instead of skipping pages."
         )
 
+    has_pdf = any(
+        d.name.lower().endswith((".pdf", ".zip")) for d in docs or []
+    )
+    pdf_output_labels = {
+        "markdown": "Markdown (text, tables and figures; best for reading)",
+        "pdf": "PDF (same layout as the original)",
+    }
+    pdf_outputs = ("markdown", "pdf")
+    math_ocr = False
+    if has_pdf:
+        pdf_outputs = tuple(st.multiselect(
+            "PDF outputs",
+            list(pdf_output_labels),
+            default=list(pdf_output_labels),
+            format_func=pdf_output_labels.__getitem__,
+            key="pdf_outputs",
+            help="Choose only what you need: each output is extracted "
+                 "separately. Text shared by both is translated once.",
+        ))
+        if "markdown" in pdf_outputs:
+            math_ocr = st.checkbox(
+                "Convert equations to LaTeX in the Markdown (slower)",
+                key="pdf_math_ocr",
+                help="Runs OCR on pages with equations. Otherwise equations "
+                     "are kept as they appear in the PDF, untranslated.",
+            )
+
     total_size = sum(d.size for d in docs) if docs else 0
     if total_size > 5_000_000:
         st.warning(
@@ -924,7 +955,8 @@ with doc_tab:
     run_doc = st.button(
         "Translate document(s)",
         type="primary",
-        disabled=not docs or src_code == tgt_code or not opus_mt_supported,
+        disabled=(not docs or src_code == tgt_code or not opus_mt_supported
+                  or (has_pdf and not pdf_outputs)),
         key="translate_doc_btn",
     )
 
@@ -948,15 +980,27 @@ with doc_tab:
                 retry_notices.add(message)
                 st.warning(message)
 
-        def _prog_translate(done: int, total: int) -> None:
-            _stage(f"translating chunk {done}/{total}")
+        last_update = {"time": 0.0, "stage": None}
+
+        def _show_progress(done: int, total: int, stage: str,
+                           label: str | None = None) -> None:
+            # Each update is a browser round-trip; per-line reports from the
+            # parsers would otherwise slow the run itself.
+            now = time.monotonic()
+            if (stage == last_update["stage"] and done < total
+                    and now - last_update["time"] < 0.25):
+                return
+            last_update.update(time=now, stage=stage)
+            _stage(label or stage)
             if total > 0:
                 bar.progress(min(done / total, 1.0))
 
+        def _prog_translate(done: int, total: int) -> None:
+            _show_progress(done, total, "translating",
+                           f"translating sentences {done}/{total}")
+
         def _prog_stage(done: int, total: int, stage: str) -> None:
-            _stage(stage)
-            if total > 0:
-                bar.progress(min(done / total, 1.0))
+            _show_progress(done, total, stage)
 
         tfn = make_translate_fn(
             src_lang=src_code, tgt_lang=tgt_code,
@@ -1022,6 +1066,7 @@ with doc_tab:
                     pdf_result_cb=lambda result: pdf_reports.append(
                         (entry_name, result)
                     ),
+                    pdf_outputs=pdf_outputs, math_ocr=math_ocr,
                 )))
             except Exception as exc:
                 errors.append((entry_name, str(exc)))

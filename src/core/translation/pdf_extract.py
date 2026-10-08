@@ -18,6 +18,8 @@ from .pdf_checks import (
 def _native_page(page, number):
     from core import doc_ir
 
+    from .format import _is_math_block
+
     regions = []
     for block in page.get_text("dict").get("blocks", []):
         content = {}
@@ -31,6 +33,9 @@ def _native_page(page, number):
             if not text:
                 continue
             kind = doc_ir.TEXT
+            if _is_math_block(block):
+                # Verbatim, never translated: Markdown passes fences through.
+                text = "~~~text\n" + text.replace("~~~", "~ ~ ~") + "\n~~~"
             content = {"text": text}
         elif block.get("type") == 1 and block.get("image"):
             kind = doc_ir.FIGURE
@@ -56,6 +61,7 @@ def extract_document(
     source_name: str = "input.pdf",
     progress=None,
     free_translation_vram_first: bool = False,
+    math_ocr: bool = False,
 ):
     """Extract native/blank pages directly and OCR only the required subset.
 
@@ -67,7 +73,7 @@ def extract_document(
 
     if pdf_type not in {"auto", "force_ocr"}:
         raise ValueError("pdf_type must be auto or force_ocr.")
-    plans = inspect_pdf(pdf_bytes)
+    plans = inspect_pdf(pdf_bytes, math_ocr=math_ocr)
     if pdf_type == "force_ocr":
         plans = [replace(plan, route="ocr") if plan.route != "blank"
                  else plan for plan in plans]

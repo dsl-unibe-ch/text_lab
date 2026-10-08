@@ -185,7 +185,9 @@ def test_engine_caps_default_and_explicit_batch_after_model_load(
             ["one", "two", "three", "four", "five"], "deu_Latn",
             "fra_Latn", batch_size=requested,
         ) == ["ONE", "TWO", "THREE", "FOUR", "FIVE"]
-        assert [len(texts) for texts, _ in model.calls] == [2, 2, 1]
+        # The memory cap of 2 full windows (2 x 24 tokens) fits all five
+        # short inputs in one length-sorted batch.
+        assert [len(texts) for texts, _ in model.calls] == [5]
     assert all(args[1:] == ("cuda:1", "float16") for args in events)
 
 
@@ -203,7 +205,8 @@ def test_explicit_cpu_uses_float32_and_small_batch(monkeypatch, offline):
         batch_size=64,
     )
     assert calls[0][1:] == ("cpu", "float32")
-    assert [len(texts) for texts, _ in model.calls] == [4, 4, 1]
+    # Identical inputs are translated once.
+    assert [len(texts) for texts, _ in model.calls] == [1]
 
 
 class OomModel(Model):
@@ -240,15 +243,18 @@ def test_oom_retries_are_bounded_lossless_ordered_and_release_tensors(
         progress_cb=lambda *args: progress.append(args),
     )
     assert outputs == [text.upper() for text in sources]
-    assert [len(texts) for texts, _ in model.attempts] == [6, 3] + [1] * 7
-    assert [text for batch, _ in model.calls for text in batch] == sources
+    assert [len(texts) for texts, _ in model.attempts] == [7, 3] + [1] * 7
+    # Longest first; outputs are still returned in input order.
+    assert [text for batch, _ in model.calls for text in batch] == [
+        "three", "seven", "four", "five", "one", "two", "six",
+    ]
     assert all(options["max_new_tokens"] == 17
                and options["num_beams"] == 2
                for _, options in model.attempts)
     assert len(statuses) == 2
     assert all("Token budgets unchanged" in status for status in statuses)
     assert offline.cleanups == [1, 1]
-    assert progress == [(6, 7), (7, 7)]
+    assert progress == [(7, 7)]
 
 
 def test_tensor_transfer_oom_releases_failed_allocations(offline):

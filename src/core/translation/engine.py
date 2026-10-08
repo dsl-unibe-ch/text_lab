@@ -204,6 +204,7 @@ def _translate_chunks_hf(
     batch_size: Optional[int] = None,
     progress_cb: Optional[Callable[[int, int], None]] = None,
     status_cb: Optional[Callable[[str], None]] = None,
+    cache: Optional[Dict[str, str]] = None,
 ) -> List[str]:
     """Load a backend, then split and batch inputs with its real tokenizer.
 
@@ -259,6 +260,7 @@ def _translate_chunks_hf(
         batch_size=batch_size,
         progress_cb=progress_cb,
         status_cb=status_cb,
+        cache=cache,
     )
 
 
@@ -274,6 +276,7 @@ def _translate_hf_texts(
     batch_size: Optional[int] = None,
     progress_cb: Optional[Callable[[int, int], None]] = None,
     status_cb: Optional[Callable[[str], None]] = None,
+    cache: Optional[Dict[str, str]] = None,
 ) -> List[str]:
     """Use the same layout and generation path for single and batch inputs."""
     translator = functools.partial(
@@ -281,6 +284,7 @@ def _translate_hf_texts(
         src_lang=src_lang, tgt_lang=tgt_lang, backend=backend,
         device=device, num_beams=num_beams, max_new_tokens=max_new_tokens,
         batch_size=batch_size, progress_cb=progress_cb, status_cb=status_cb,
+        cache=cache,
     )
     return translate_lines(texts, translator)
 
@@ -427,8 +431,13 @@ def translate(
     progress_cb: Optional[Callable[[int, int], None]] = None,
     *,
     status_cb: Optional[Callable[[str], None]] = None,
+    cache: Optional[Dict[str, str]] = None,
 ) -> str:
-    """Dispatch to a backend; limit failures propagate to the caller."""
+    """Dispatch to a backend; limit failures propagate to the caller.
+
+    ``cache`` (HF backends only) reuses sentence translations across calls
+    with the same backend and language pair; see :func:`make_translate_fn`.
+    """
     if not text or not text.strip():
         return ""
 
@@ -436,7 +445,7 @@ def translate(
             or backend == "opus-mt"):
         return _translate_hf_texts(
             [text], src_lang, tgt_lang, backend,
-            progress_cb=progress_cb, status_cb=status_cb,
+            progress_cb=progress_cb, status_cb=status_cb, cache=cache,
         )[0]
     if backend == "ollama":
         if not ollama_model:
@@ -467,6 +476,7 @@ def translate_many(
     progress_cb: Optional[Callable[[int, int], None]] = None,
     *,
     status_cb: Optional[Callable[[str], None]] = None,
+    cache: Optional[Dict[str, str]] = None,
 ) -> List[str]:
     """
     Translate a list of independent texts, returning one output per input.
@@ -494,7 +504,7 @@ def translate_many(
             or backend == "opus-mt"):
         return _translate_hf_texts(
             texts, src_lang, tgt_lang, backend, batch_size=batch_size,
-            progress_cb=progress_cb, status_cb=status_cb,
+            progress_cb=progress_cb, status_cb=status_cb, cache=cache,
         )
 
     # Ollama (and any other non-batchable backend): per-text loop.
@@ -537,7 +547,13 @@ def make_translate_fn(
     ``List[str] -> List[str]`` batched translator with the same parameters
     baked in. Format-preserving pipelines use it to translate all units of
     a document in a few padded GPU passes instead of one call per unit.
+
+    Both share one sentence cache for the lifetime of the returned callable,
+    so text repeated across a run (running headers, the Markdown and PDF
+    outputs of the same document) is translated only once.
     """
+    cache: Dict[str, str] = {}
+
     def _fn(text: str) -> str:
         return translate(
             text,
@@ -550,6 +566,7 @@ def make_translate_fn(
             formality=formality,
             progress_cb=progress_cb,
             status_cb=status_cb,
+            cache=cache,
         )
 
     def _many(texts: List[str]) -> List[str]:
@@ -564,6 +581,7 @@ def make_translate_fn(
             formality=formality,
             progress_cb=progress_cb,
             status_cb=status_cb,
+            cache=cache,
         )
 
     _fn.many = _many  # type: ignore[attr-defined]

@@ -269,3 +269,18 @@ def test_xlsx_glossary_case_setting_preserves_formulas():
     result = load_workbook(io.BytesIO(output))
     assert result.active["A1"].value == "Berne bern"
     assert result.active["A2"].value == "=1+1"
+
+
+def test_only_requested_pdf_output_is_built(monkeypatch):
+    def no_markdown(*args, **kwargs):
+        raise AssertionError("Markdown was not requested.")
+
+    monkeypatch.setattr(
+        pdf_workflow, "translate_pdf_to_markdown", no_markdown,
+    )
+    result = pdf_workflow.translate_pdf_outputs(
+        make_pdf("native"), lambda text: text,
+        stem="example.en", source_name="example.pdf", outputs=("pdf",),
+    )
+    assert [name for name, _ in result.outputs] == ["example.en.pdf"]
+    assert not result.blocked

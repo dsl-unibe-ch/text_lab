@@ -45,6 +45,50 @@ def split_into_sentences(text: str) -> list[str]:
     return result
 
 
+# Sentence ends for model input. Unlike _SENTENCE_RE this also skips
+# abbreviations ("et al.", "e.g.", "Fig. 3", initials), which are common in
+# research text and would otherwise cut a sentence in half.
+_SENTENCE_END_RE = re.compile(
+    r"[.!?…][\"'”’)\]]*\s+|[。！？]+[\"'”’）】]*\s*"
+)
+_ABBREVIATIONS = frozenset("""
+    al approx abb art bd bzw ca cf ch chap co corp dept dr ed eds eq eqs
+    etc fig figs ggf hrsg inc incl inkl jr ltd mr mrs ms nr no nos op pp
+    prof ref refs resp sec sect sr st str tab univ usw vgl vol vols vs
+""".split())
+
+
+def sentence_slices(text: str) -> list[str]:
+    """Split into exact, lossless sentence slices (``"".join`` == text).
+
+    Seq2seq translators are trained on single sentences; whole paragraphs
+    make them drop, repeat or invent text. Each slice keeps its trailing
+    whitespace so translations can be rejoined with the original spacing.
+    """
+    cuts = []
+    for match in _SENTENCE_END_RE.finditer(text):
+        end = match.end()
+        if end >= len(text):
+            continue
+        if match.group()[0] == ".":
+            following = text[end]
+            if following.islower() or following.isdigit():
+                continue
+            before = text[:match.start()].rsplit(None, 1)
+            token = before[-1].lstrip("([\"'“‘") if before else ""
+            if ("." in token or token.lower() in _ABBREVIATIONS
+                    or (len(token) == 1 and token.isalpha())):
+                continue
+        cuts.append(end)
+    slices = []
+    start = 0
+    for end in cuts + [len(text)]:
+        if end > start:
+            slices.append(text[start:end])
+        start = end
+    return slices
+
+
 def split_text(
     text: str,
     measure: Callable[[str], int],
@@ -138,6 +182,9 @@ def join_translations(
         )
     parts = []
     for source, translation in zip(sources, translations):
+        if not source.strip():
+            parts.append(source)
+            continue
         leading = source[:len(source) - len(source.lstrip())]
         trailing = source[len(source.rstrip()):]
         parts.append(leading + translation.strip() + trailing)

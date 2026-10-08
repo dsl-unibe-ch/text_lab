@@ -80,10 +80,18 @@ def translate_pdf_outputs(
     glossary_case_sensitive: bool = False,
     progress_cb=None,
     ocr_allowed: bool | None = None,
+    outputs=("markdown", "pdf"),
+    math_ocr: bool = False,
 ) -> PDFTranslationResult:
-    """Attempt Markdown and PDF separately, returning only checked bytes."""
+    """Attempt the requested outputs separately, returning only checked bytes.
+
+    ``outputs`` selects ``"markdown"`` and/or ``"pdf"``; skipping one skips
+    its extraction (and, for Markdown, any OCR). When both are built,
+    ``translate_fn``'s sentence cache makes the second mostly free.
+    ``math_ocr`` sends equation pages to OCR for LaTeX in the Markdown.
+    """
     result = PDFTranslationResult()
-    plans = inspect_pdf(pdf_bytes)
+    plans = inspect_pdf(pdf_bytes, math_ocr=math_ocr)
     result.pages = [asdict(plan) for plan in plans]
     if any(plan.has_images for plan in plans):
         result.warnings.append(
@@ -96,6 +104,8 @@ def translate_pdf_outputs(
         "than translated. Layout and OCR checks cannot verify meaning."
     )
     needs_ocr = [plan.number for plan in plans if plan.route == "ocr"]
+    if "markdown" not in outputs:
+        needs_ocr = []
     if ocr_allowed is None and needs_ocr:
         from .gpu_profile import sequential_ocr_allowed
 
@@ -109,36 +119,38 @@ def translate_pdf_outputs(
             "pages": list(getattr(error, "pages", ())),
         })
 
-    try:
-        if needs_ocr and not ocr_allowed:
-            raise PDFIntegrityError(
-                "Markdown requires OCR, but the allocated GPU is not "
-                "eligible for sequential OCR/translation. Relaunch on a "
-                "supported GPU; no pages will be silently skipped.",
-                needs_ocr,
+    if "markdown" in outputs:
+        try:
+            if needs_ocr and not ocr_allowed:
+                raise PDFIntegrityError(
+                    "Markdown requires OCR, but the allocated GPU is not "
+                    "eligible for sequential OCR/translation. Relaunch on a "
+                    "supported GPU; no pages will be silently skipped.",
+                    needs_ocr,
+                )
+            markdown, assets = translate_pdf_to_markdown(
+                pdf_bytes, translate_fn, progress_cb=progress_cb,
+                glossary=glossary,
+                glossary_case_sensitive=glossary_case_sensitive,
+                source_name=source_name, math_ocr=math_ocr,
             )
-        markdown, assets = translate_pdf_to_markdown(
-            pdf_bytes, translate_fn, progress_cb=progress_cb,
-            glossary=glossary,
-            glossary_case_sensitive=glossary_case_sensitive,
-            source_name=source_name,
-        )
-        data, name = pack_markdown_bundle(markdown, assets, stem=stem)
-        result.outputs.append((name, data))
-    except Exception as error:
-        blocked("Markdown", error)
+            data, name = pack_markdown_bundle(markdown, assets, stem=stem)
+            result.outputs.append((name, data))
+        except Exception as error:
+            blocked("Markdown", error)
 
-    try:
-        require_native_coverage(plans)
-        layout_warnings: list[str] = []
-        data = translate_pdf(
-            pdf_bytes, translate_fn, progress_cb=progress_cb,
-            glossary=glossary,
-            glossary_case_sensitive=glossary_case_sensitive,
-            warnings=layout_warnings,
-        )
-        result.warnings.extend(layout_warnings)
-        result.outputs.append((f"{stem}.pdf", data))
-    except Exception as error:
-        blocked("Reconstructed PDF", error)
+    if "pdf" in outputs:
+        try:
+            require_native_coverage(plans)
+            layout_warnings: list[str] = []
+            data = translate_pdf(
+                pdf_bytes, translate_fn, progress_cb=progress_cb,
+                glossary=glossary,
+                glossary_case_sensitive=glossary_case_sensitive,
+                warnings=layout_warnings,
+            )
+            result.warnings.extend(layout_warnings)
+            result.outputs.append((f"{stem}.pdf", data))
+        except Exception as error:
+            blocked("Reconstructed PDF", error)
     return result

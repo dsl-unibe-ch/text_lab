@@ -659,6 +659,25 @@ def _block_median_fontsize(block: dict) -> float:
     return sizes[len(sizes) // 2]
 
 
+# A list item or bullet; a bare number would also match "12 participants".
+_STARTS_ITEM_RE = re.compile(
+    r"^\s*(?:\d+(?:\.\d+)*[.)]|[IVXLC]+\.|[a-zA-Z][.)]|[•▪◦‣–—*])\s+\S"
+)
+# Section numbers as headings print them: "2", "2.1", "2.1.", "IV.".
+_SECTION_NUMBER_RE = re.compile(r"^\s*(?:\d+(?:\.\d+)*\.?|[IVXLC]+\.)\s+\S")
+
+
+def _looks_like_heading(text: str) -> bool:
+    """A short, unpunctuated numbered or all-caps line ("2.1 Methods")."""
+    words = text.split()
+    if not words or len(words) > 12:
+        return False
+    letters = [char for char in text if char.isalpha()]
+    return bool(_SECTION_NUMBER_RE.match(text)) or (
+        len(letters) > 3 and all(char.isupper() for char in letters)
+    )
+
+
 def _semantic_paragraphs(
     all_blocks: List[Tuple[int, tuple, str, float]],
 ) -> List[List[int]]:
@@ -671,7 +690,7 @@ def _semantic_paragraphs(
     """
     groups: List[List[int]] = []
     current: List[int] = []
-    for idx, (_page, _bbox, text, _size) in enumerate(all_blocks):
+    for idx, (_page, _bbox, text, size) in enumerate(all_blocks):
         if not text.strip():
             if current:
                 groups.append(current)
@@ -680,8 +699,13 @@ def _semantic_paragraphs(
         if not current:
             current = [idx]
             continue
-        prev_text = all_blocks[current[-1]][2]
-        if _ENDS_SENTENCE_RE.search(prev_text):
+        _prev_page, _prev_bbox, prev_text, prev_size = all_blocks[current[-1]]
+        if (_ENDS_SENTENCE_RE.search(prev_text)
+                # Headings, captions and footnotes rarely end with a period;
+                # a font-size change or heading shape marks the boundary.
+                or abs(size - prev_size) > 0.5
+                or _looks_like_heading(prev_text)
+                or _STARTS_ITEM_RE.match(text)):
             groups.append(current)
             current = [idx]
         else:
@@ -885,6 +909,7 @@ def pdf_to_markdown_bundle(
     source_name: str = "input.pdf",
     progress_cb: ProgressCb = None,
     free_translation_vram_first: bool = False,
+    math_ocr: bool = False,
 ) -> Tuple[str, Dict[str, bytes]]:
     """Extract a coverage-checked document and its assets.
 
@@ -898,6 +923,7 @@ def pdf_to_markdown_bundle(
         pdf_bytes, pdf_type=pdf_type, source_name=source_name,
         progress=_ocr_progress_bridge(progress_cb, "OCR"),
         free_translation_vram_first=free_translation_vram_first,
+        math_ocr=math_ocr,
     )
     return (
         doc_ir.to_markdown(document, asset_dir="assets", embed_assets=True),
@@ -914,6 +940,7 @@ def translate_pdf_to_markdown(
     pdf_type: str = "auto",
     source_name: str = "input.pdf",
     glossary_case_sensitive: bool = False,
+    math_ocr: bool = False,
 ) -> Tuple[str, Dict[str, bytes]]:
     """OCR the PDF into markdown, translate that markdown.
 
@@ -933,6 +960,7 @@ def translate_pdf_to_markdown(
         md_source, assets = pdf_to_markdown_bundle(
             pdf_bytes, pdf_type=pdf_type, source_name=source_name,
             progress_cb=progress_cb, free_translation_vram_first=True,
+            math_ocr=math_ocr,
         )
         md_translated = translate_markdown(
             md_source, translate_fn, progress_cb=progress_cb,

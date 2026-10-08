@@ -120,3 +120,21 @@ def test_nonblank_page_with_empty_ocr_result_is_blocked():
     with pytest.raises(PDFIntegrityError, match="empty") as error:
         validate_document_pages(document, plans)
     assert error.value.pages == (1,)
+
+
+def test_headings_items_and_size_changes_start_new_paragraphs():
+    def block(text, size=10.0):
+        return (0, (0, 0, 1, 1), text, size)
+
+    blocks = [
+        block("2.1 Methods", 12.0),
+        block("We measured the effect of"),
+        block("12 participants over a year."),
+        block("INTRODUCTION"),
+        block("Some text"),
+        block("1. first item"),
+        block("Footnote text", 7.0),
+    ]
+    assert formats._semantic_paragraphs(blocks) == [
+        [0], [1, 2], [3], [4], [5], [6],
+    ]
