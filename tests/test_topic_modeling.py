@@ -1,9 +1,13 @@
 """Topic-modeling guard rails.
 
-Kept to :mod:`core.topic_modeling.small_corpus` and
-:mod:`core.topic_modeling.topic_utils`, neither of which imports a modeling
+Kept to :mod:`core.topic_modeling.small_corpus`,
+:mod:`core.topic_modeling.topic_utils` and
+:mod:`core.topic_modeling.evaluation`, none of which imports a modeling
 engine: pulling in either engine costs about half a minute.
 """
+
+import io
+import zipfile
 
 import conftest_path  # noqa: F401
 
@@ -60,13 +64,17 @@ def test_the_message_says_what_to_do_instead():
     assert "BERTopic" in str(small_corpus.too_small_error(9, "BERTopic"))
 
 
-def _prepare_timestamps():
+def _topic_utils():
     """Import lazily so the small-corpus tests run without spaCy and NLTK."""
     pytest.importorskip("spacy")
     pytest.importorskip("nltk")
-    from core.topic_modeling.topic_utils import prepare_timestamps
+    from core.topic_modeling import topic_utils
 
-    return prepare_timestamps
+    return topic_utils
+
+
+def _prepare_timestamps():
+    return _topic_utils().prepare_timestamps
 
 
 def test_integer_years_are_read_as_years():
@@ -109,3 +117,135 @@ def test_date_strings_are_still_parsed():
 
     assert [str(ts.date()) for ts in timestamps] == ["2019-12-31", "2020-03-01"]
     assert dropped == 1
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "Text;Year\nfirst doc;2019\nsecond doc;2020\n",
+        "Text\tYear\nfirst doc\t2019\nsecond doc\t2020\n",
+        "Text,Year\nfirst doc,2019\nsecond doc,2020\n",
+    ],
+    ids=["semicolon", "tab", "comma"],
+)
+def test_csv_delimiter_is_detected(content):
+    df = _topic_utils().read_uploaded_table("data.csv", content.encode("utf-8"))
+
+    assert df.columns.tolist() == ["Text", "Year"]
+    assert df["Text"].tolist() == ["first doc", "second doc"]
+
+
+def test_quoted_text_with_semicolons_keeps_comma_delimiter():
+    content = 'Text,Year\n"one; two; three",2019\n"four; five",2020\n'
+
+    df = _topic_utils().read_uploaded_table("data.csv", content.encode("utf-8"))
+
+    assert df.columns.tolist() == ["Text", "Year"]
+    assert df["Text"].tolist() == ["one; two; three", "four; five"]
+
+
+def test_windows_encoded_csv_keeps_accents():
+    """Excel on Windows saves CSV as cp1252, which is not valid UTF-8."""
+    content = "Text;Ort\nÜber die Brücke;Zürich\n".encode("cp1252")
+
+    df = _topic_utils().read_uploaded_table("data.csv", content)
+
+    assert df.loc[0, "Text"] == "Über die Brücke"
+    assert df.loc[0, "Ort"] == "Zürich"
+
+
+def test_legacy_xls_is_rejected_with_guidance():
+    with pytest.raises(ValueError, match=".xlsx"):
+        _topic_utils().read_uploaded_table("data.xls", b"irrelevant")
+
+
+def test_zip_text_files_are_decoded_without_losing_characters():
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("utf8.txt", "Café crème".encode("utf-8"))
+        archive.writestr("windows.txt", "Café crème".encode("cp1252"))
+        archive.writestr("empty.txt", b"   ")
+
+    df = _topic_utils().load_zip_texts(buffer.getvalue())
+
+    assert sorted(df["Filename"]) == ["utf8.txt", "windows.txt"]
+    assert set(df["Text"]) == {"Café crème"}
+
+
+@pytest.mark.parametrize("max_chars", [5, 7, 1000])
+def test_long_text_is_split_without_losing_content(max_chars):
+    text = "alpha beta gamma delta epsilon zetaetaeta"
+
+    chunks = _topic_utils().split_long_text(text, max_chars)
+
+    assert "".join(chunks) == text
+    assert all(len(chunk) <= max_chars for chunk in chunks)
+
+
+def test_long_text_is_split_at_spaces():
+    chunks = _topic_utils().split_long_text("aaa bbb ccc", 6)
+
+    assert chunks == ["aaa", " bbb", " ccc"]
+
+
+def test_time_bins_only_apply_when_there_are_more_timestamps():
+    resolve_time_bins = _topic_utils().resolve_time_bins
+
+    assert resolve_time_bins([2019, 2020, 2020, 2021], 20) is None
+    assert resolve_time_bins(list(range(50)), 20) == 20
+
+
+def test_topic_table_joins_keywords():
+    from core.topic_modeling.topic_config import TopicKeywords
+
+    topics = [
+        TopicKeywords(topic=1, keywords=["tax", "budget"], count=12),
+        TopicKeywords(topic=2, keywords=["rail"], count=3),
+    ]
+    utils = _topic_utils()
+
+    with_counts = utils.build_topic_table(topics)
+    without_counts = utils.build_topic_table(topics, with_counts=False)
+
+    assert with_counts.columns.tolist() == ["Topic", "Count", "Keywords"]
+    assert with_counts["Keywords"].tolist() == ["tax, budget", "rail"]
+    assert without_counts.columns.tolist() == ["Topic", "Keywords"]
+
+
+def test_empty_topic_table_keeps_its_columns():
+    table = _topic_utils().build_topic_table([])
+
+    assert table.empty
+    assert table.columns.tolist() == ["Topic", "Count", "Keywords"]
+
+
+def _evaluation():
+    _topic_utils()
+    pytest.importorskip("gensim")
+    from core.topic_modeling import evaluation
+
+    return evaluation
+
+
+def test_identical_runs_are_perfectly_stable():
+    topics = [["tax", "budget"], ["rail", "train"]]
+
+    assert _evaluation().calculate_jaccard_stability(topics, topics) == 1.0
+
+
+def test_disjoint_runs_have_zero_stability():
+    stability = _evaluation().calculate_jaccard_stability([["a", "b"]], [["c", "d"]])
+
+    assert stability == 0.0
+
+
+def test_metrics_without_keywords_are_not_reported_as_zero():
+    """0.0 would read as a perfect U_mass score."""
+    metrics = _evaluation().evaluate_topic_quality(
+        topic_keywords=[],
+        raw_texts=["some text"],
+        language="English",
+        custom_stopwords_str="",
+    )
+
+    assert set(metrics.values()) == {None}

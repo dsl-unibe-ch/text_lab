@@ -1,15 +1,17 @@
-import sys
-import traceback
+"""Evaluation metrics for topic models: diversity, coherence, perplexity and
+stability."""
+
+import logging
 from typing import Any
 
 import numpy as np
 from gensim.corpora import Dictionary
 from gensim.models.coherencemodel import CoherenceModel
 
-from core.topic_modeling.topic_utils import (
-    preprocess_texts_for_lda,
-    tokenize_texts_for_coherence,
-)
+from .topic_config import Algorithm, TopicModelingConfig, TopicModelingRunResult
+from .topic_utils import preprocess_texts_for_lda, tokenize_texts_for_coherence
+
+LOGGER = logging.getLogger(__name__)
 
 
 def _rounded_or_none(value: float) -> float | None:
@@ -94,14 +96,15 @@ def evaluate_topic_quality(
                 language=language,
                 custom_stopwords_str=custom_stopwords_str,
             )
-    
+
     dictionary = Dictionary(tokenized_texts)
-    
-    # Filter out out-of-vocabulary words to prevent Gensim KeyErrors
+
+    # Filter out out-of-vocabulary words to prevent Gensim KeyErrors, and keep
+    # only topics with at least two words, the minimum for co-occurrence.
     safe_topics = []
     for topic in topic_keywords:
         safe_topic = [w for w in topic if w in dictionary.token2id]
-        if len(safe_topic) >= 2: # Need at least 2 words to measure co-occurrence
+        if len(safe_topic) >= 2:
             safe_topics.append(safe_topic)
 
     if not safe_topics:
@@ -109,35 +112,65 @@ def evaluate_topic_quality(
 
     corpus = [dictionary.doc2bow(text) for text in tokenized_texts]
 
-    # 3. Calculate Coherence Metrics safely
-    try:
-        cm_cv = CoherenceModel(
-            topics=safe_topics, texts=tokenized_texts, dictionary=dictionary, coherence="c_v"
-        )
-        metrics["Coherence (C_v)"] = _rounded_or_none(cm_cv.get_coherence())
-    except Exception:
-        print(f"--- C_v Coherence Error ---\n{traceback.format_exc()}", file=sys.stderr)
-
-    try:
-        cm_npmi = CoherenceModel(
-            topics=safe_topics, texts=tokenized_texts, dictionary=dictionary, coherence="c_npmi"
-        )
-        metrics["Coherence (C_npmi)"] = _rounded_or_none(cm_npmi.get_coherence())
-    except Exception:
-        print(f"--- C_npmi Coherence Error ---\n{traceback.format_exc()}", file=sys.stderr)
-
-    try:
-        cm_umass = CoherenceModel(
-            topics=safe_topics, corpus=corpus, dictionary=dictionary, coherence="u_mass"
-        )
-        metrics["Coherence (U_mass)"] = _rounded_or_none(cm_umass.get_coherence())
-    except Exception:
-        print(f"--- U_mass Coherence Error ---\n{traceback.format_exc()}", file=sys.stderr)
+    # 3. Calculate Coherence Metrics; a failing measure is left as None.
+    coherence_inputs = {
+        "Coherence (C_v)": ("c_v", {"texts": tokenized_texts}),
+        "Coherence (C_npmi)": ("c_npmi", {"texts": tokenized_texts}),
+        "Coherence (U_mass)": ("u_mass", {"corpus": corpus}),
+    }
+    for metric_name, (measure, reference) in coherence_inputs.items():
+        try:
+            coherence_model = CoherenceModel(
+                topics=safe_topics,
+                dictionary=dictionary,
+                coherence=measure,
+                **reference,
+            )
+            metrics[metric_name] = _rounded_or_none(coherence_model.get_coherence())
+        except Exception:
+            LOGGER.exception("Could not compute %s.", metric_name)
 
     return metrics
 
 
-def calculate_lda_perplexity(lda_model: Any, corpus: list[list[tuple[int, int]]]) -> float | None:
+def evaluate_run(
+    run_result: TopicModelingRunResult,
+    raw_texts: list[str],
+    config: TopicModelingConfig,
+) -> dict[str, float | None]:
+    """
+    Calculate all evaluation metrics that apply to a finished run.
+
+    Args:
+        run_result: The output of the topic modeling pipeline.
+        raw_texts: The documents the model was trained on.
+        config: The configuration of the run.
+
+    Returns:
+        Topic diversity and coherence metrics, plus ``"LDA Perplexity"`` for
+        LDA runs when it could be computed.
+    """
+    metrics = evaluate_topic_quality(
+        topic_keywords=run_result["topic_keywords"],
+        raw_texts=raw_texts,
+        language=config.language,
+        custom_stopwords_str=config.custom_stopwords,
+        tokenized_texts=run_result.get("tokenized_texts"),
+        use_lemmatization=config.algorithm == Algorithm.LDA,
+    )
+
+    if "lda_model" in run_result and "corpus" in run_result:
+        perplexity = calculate_lda_perplexity(run_result["lda_model"], run_result["corpus"])
+        if perplexity is not None:
+            metrics["LDA Perplexity"] = perplexity
+
+    return metrics
+
+
+def calculate_lda_perplexity(
+    lda_model: Any,
+    corpus: list[list[tuple[int, int]]],
+) -> float | None:
     """
     Calculate the perplexity of a trained Gensim LDA model.
 
@@ -159,21 +192,21 @@ def calculate_lda_perplexity(lda_model: Any, corpus: list[list[tuple[int, int]]]
         if not np.isfinite(perplexity):
             return None
         return round(perplexity, 4)
-    except Exception as e:
-        print(f"--- LDA Perplexity Error ---\n{e}", file=sys.stderr)
+    except Exception:
+        LOGGER.exception("Could not compute the LDA perplexity.")
         return None
 
 
 def calculate_jaccard_stability(
-    run_1_topics: list[list[str]], 
+    run_1_topics: list[list[str]],
     run_2_topics: list[list[str]]
 ) -> float:
     """
     Calculate the Topic Stability between two independent model runs.
-    
-    This function uses Jaccard Similarity to compare topic keywords. It finds 
-    the best-matching topic in Run 2 for every topic in Run 1 and averages 
-    the maximum similarity scores. A score of 1.0 means perfectly identical 
+
+    This function uses Jaccard Similarity to compare topic keywords. It finds
+    the best-matching topic in Run 2 for every topic in Run 1 and averages
+    the maximum similarity scores. A score of 1.0 means perfectly identical
     topics; 0.0 means completely different.
 
     Args:
@@ -181,7 +214,7 @@ def calculate_jaccard_stability(
         run_2_topics: A list of topics from the second run (each topic is a list of words).
 
     Returns:
-        The average Jaccard stability score across all topics as a float, 
+        The average Jaccard stability score across all topics as a float,
         rounded to 4 decimal places.
     """
     if not run_1_topics or not run_2_topics:
@@ -191,7 +224,7 @@ def calculate_jaccard_stability(
     for topic1 in run_1_topics:
         set1 = set(topic1)
         max_sim = 0.0
-        
+
         for topic2 in run_2_topics:
             set2 = set(topic2)
             intersection = len(set1.intersection(set2))
@@ -199,7 +232,7 @@ def calculate_jaccard_stability(
             sim = float(intersection / union) if union > 0 else 0.0
             if sim > max_sim:
                 max_sim = sim
-                
+
         total_similarity += max_sim
 
     return round(total_similarity / len(run_1_topics), 4)

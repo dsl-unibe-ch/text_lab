@@ -1,26 +1,32 @@
+"""BERTopic engine: training, topic extraction and visualizations."""
+
+import html
+import logging
 import re
-import sys
-import traceback
 from typing import Any
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 from bertopic import BERTopic
 from bertopic.dimensionality import BaseDimensionalityReduction
 from bertopic.vectorizers import ClassTfidfTransformer
-from sklearn.feature_extraction.text import CountVectorizer
-from sklearn.decomposition import PCA, TruncatedSVD
-from sklearn.cluster import KMeans
 from hdbscan import HDBSCAN
+from sklearn.cluster import KMeans
+from sklearn.decomposition import PCA, TruncatedSVD
+from sklearn.feature_extraction.text import CountVectorizer
 from umap import UMAP
 
 from . import small_corpus
+from .topic_config import TopicKeywords
+
+LOGGER = logging.getLogger(__name__)
 
 
 _SUPPORTED_DIM_ALGOS = {"UMAP", "PCA", "Truncated SVD", "None"}
 _SUPPORTED_CLUSTERING_ALGOS = {"HDBSCAN", "KMeans"}
 
 OUTLIER_LABEL = "Outlier"
+_TOP_N_KEYWORDS = 10
 _LABEL_KEYWORDS = 3
 _LABEL_MAX_CHARS = 32
 # BERTopic hard-codes its 0-based IDs as "Topic N" in a few chart elements.
@@ -303,10 +309,8 @@ def train_bertopic_model(
 
             tokenizer = tokenize_zh
         except ImportError:
-            print(
-                "Warning: 'jieba' library is missing. Default tokenization "
-                "will be used for Chinese.",
-                file=sys.stderr,
+            LOGGER.warning(
+                "'jieba' is missing. Default tokenization will be used for Chinese."
             )
 
     vectorizer_model = CountVectorizer(
@@ -322,9 +326,9 @@ def train_bertopic_model(
         reduce_frequent_words=reduce_frequent_words
     )
 
-    # Configure Dimensionality Reduction. The top-level ``random_state`` is the
-    # source of truth; only fall back to ``dim_params`` if the caller did not
-    # pass ``random_state`` explicitly through ``dim_params`` either.
+    # Configure Dimensionality Reduction. A ``random_state`` in ``dim_params``
+    # (the UI's "Lock Seed" option) takes precedence; the top-level
+    # ``random_state`` is only used when ``dim_params`` does not set one.
     n_components = int(dim_params.get("n_components", 5))
     effective_random_state = dim_params.get("random_state", random_state)
 
@@ -431,43 +435,38 @@ def train_bertopic_model(
     return topic_model, topics, probabilities
 
 
-def generate_bertopic_keywords_df(topic_model: BERTopic) -> pd.DataFrame:
+def extract_bertopic_topics(topic_model: BERTopic) -> list[TopicKeywords]:
     """
-    Generate a DataFrame containing BERTopic topic keywords and counts.
+    Extract the keywords and sizes of every BERTopic topic.
 
-    This function extracts topic information from a fitted BERTopic model,
-    skips the outlier topic (-1), and creates a DataFrame with the topic
-    number, document count, and top keywords for each topic.
+    The outlier topic (-1) is skipped. BERTopic pads topics that have fewer
+    than ten distinct words with empty strings; those are dropped so that
+    they do not count as keywords in the evaluation metrics.
 
     Args:
         topic_model: A fitted BERTopic model.
 
     Returns:
-        A pandas DataFrame with the columns:
-            - "Topic"
-            - "Count"
-            - "Keywords"
+        One entry per topic, numbered with :func:`display_topic_id`.
     """
-    topic_info = topic_model.get_topic_info()
-    topic_data = []
-
-    for _, row in topic_info.iterrows():
+    topics = []
+    for _, row in topic_model.get_topic_info().iterrows():
         topic_id = int(row["Topic"])
         if topic_id == -1:
             continue
 
-        words = topic_model.get_topic(topic_id)
-        if words:
-            topic_keywords = ", ".join(word for word, _ in words[:10])
-            topic_data.append(
-                {
-                    "Topic": display_topic_id(topic_id),
-                    "Count": int(row["Count"]),
-                    "Keywords": topic_keywords,
-                }
+        words = topic_model.get_topic(topic_id) or []
+        keywords = [word for word, _ in words[:_TOP_N_KEYWORDS] if word]
+        if keywords:
+            topics.append(
+                TopicKeywords(
+                    topic=display_topic_id(topic_id),
+                    keywords=keywords,
+                    count=int(row["Count"]),
+                )
             )
 
-    return pd.DataFrame(topic_data)
+    return topics
 
 
 def generate_bertopic_document_topics_df(
@@ -553,10 +552,7 @@ def generate_bertopic_visualizations(topic_model: BERTopic) -> dict[str, str]:
             include_plotlyjs="cdn",
         )
     except Exception:
-        print(
-            f"--- BERTopic distance map error ---\n{traceback.format_exc()}",
-            file=sys.stderr,
-        )
+        LOGGER.exception("Could not generate the BERTopic distance map.")
         visualizations["distance_map"] = _notice_html(
             "Could not generate the intertopic distance map."
         )
@@ -571,10 +567,7 @@ def generate_bertopic_visualizations(topic_model: BERTopic) -> dict[str, str]:
             include_plotlyjs="cdn",
         )
     except Exception:
-        print(
-            f"--- BERTopic barchart error ---\n{traceback.format_exc()}",
-            file=sys.stderr,
-        )
+        LOGGER.exception("Could not generate the BERTopic barchart.")
         visualizations["barchart"] = _notice_html(
             "Could not generate the topic word-score chart."
         )
@@ -586,10 +579,7 @@ def generate_bertopic_visualizations(topic_model: BERTopic) -> dict[str, str]:
             include_plotlyjs="cdn",
         )
     except Exception:
-        print(
-            f"--- BERTopic heatmap error ---\n{traceback.format_exc()}",
-            file=sys.stderr,
-        )
+        LOGGER.exception("Could not generate the BERTopic heatmap.")
         visualizations["heatmap"] = _notice_html(
             "Could not generate the topic similarity heatmap."
         )
@@ -601,6 +591,7 @@ def generate_topics_over_time_html(
     topic_model: BERTopic,
     texts: list[str],
     timestamps: list[Any],
+    nr_bins: int | None = None,
 ) -> str:
     """
     Generate an HTML visualization of topics over time using a BERTopic model.
@@ -609,6 +600,8 @@ def generate_topics_over_time_html(
         topic_model: A fitted BERTopic model.
         texts: A list of input texts used for the topics-over-time analysis.
         timestamps: A list of timestamps corresponding to each input text.
+        nr_bins: Number of equal-width time intervals to group the
+            timestamps into, or ``None`` to keep every distinct timestamp.
 
     Returns:
         An HTML string containing the topics-over-time visualization. If an
@@ -626,20 +619,19 @@ def generate_topics_over_time_html(
         )
 
     try:
-        topics_over_time = topic_model.topics_over_time(texts, timestamps)
+        topics_over_time = topic_model.topics_over_time(
+            texts,
+            timestamps,
+            nr_bins=nr_bins,
+        )
         fig = topic_model.visualize_topics_over_time(
             topics_over_time,
             custom_labels=True,
         )
         _renumber_hover_text(fig)
         return fig.to_html(full_html=False, include_plotlyjs="cdn")
-    except Exception as e:
-        print(
-            f"--- Topics Over Time Error ---\n{traceback.format_exc()}",
-            file=sys.stderr,
-        )
-        return (
-            "<div style='padding:20px; color:red;'>"
-            f"Failed to generate topics over time: {str(e)}"
-            "</div>"
+    except Exception as exc:
+        LOGGER.exception("Could not generate the topics-over-time chart.")
+        return _notice_html(
+            f"Failed to generate topics over time: {html.escape(str(exc))}"
         )

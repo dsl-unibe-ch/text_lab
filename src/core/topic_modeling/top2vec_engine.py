@@ -1,13 +1,17 @@
+"""Top2Vec engine: training, topic extraction and the keyword bar chart."""
+
 import os
-from typing import Dict
 
 import numpy as np
 import pandas as pd
-from top2vec import Top2Vec
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+from top2vec import Top2Vec
 
 from . import small_corpus
+from .topic_config import TopicKeywords
+
+_TOP_N_KEYWORDS = 10
 
 
 def _is_reduced_model(topic_model: Top2Vec) -> bool:
@@ -66,11 +70,12 @@ def train_top2vec_model(
             else "paraphrase-multilingual-MiniLM-L12-v2"
         )
 
-    # allows Gensim to utilize every single CPU core allocated 
-    # workers = os.cpu_count() or 1
-    # this allowers to use only the CLU cores requested by slurm job and not all in node
-    workers = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)
-
+    # Use only the CPU cores allocated to the Slurm job, not every core of
+    # the node.
+    if hasattr(os, "sched_getaffinity"):
+        workers = len(os.sched_getaffinity(0))
+    else:
+        workers = os.cpu_count() or 1
 
     try:
         topic_model = Top2Vec(
@@ -79,7 +84,7 @@ def train_top2vec_model(
             min_count=min_count,
             embedding_model=embed_model,
             workers=workers,
-            )
+        )
     except (ValueError, TypeError) as e:
         if small_corpus.is_corpus_too_small(e):
             raise small_corpus.too_small_error(len(texts), "Top2Vec") from e
@@ -93,9 +98,9 @@ def train_top2vec_model(
     return topic_model
 
 
-def generate_top2vec_keywords_df(topic_model: Top2Vec) -> pd.DataFrame:
+def extract_top2vec_topics(topic_model: Top2Vec) -> list[TopicKeywords]:
     """
-    Generate a DataFrame of Top2Vec topics with counts and keywords.
+    Extract the keywords and sizes of every Top2Vec topic.
 
     Reduced topics are used when hierarchical topic reduction was applied.
 
@@ -103,32 +108,25 @@ def generate_top2vec_keywords_df(topic_model: Top2Vec) -> pd.DataFrame:
         topic_model: A trained Top2Vec model.
 
     Returns:
-        A pandas DataFrame with the columns:
-            - "Topic"
-            - "Count"
-            - "Keywords"
+        One entry per topic, numbered from 1.
     """
     is_reduced = _is_reduced_model(topic_model)
 
     topic_words, _, topic_nums = topic_model.get_topics(reduced=is_reduced)
     topic_sizes, size_topic_nums = topic_model.get_topic_sizes(reduced=is_reduced)
-    size_map: Dict[int, int] = {
+    size_map = {
         int(topic_num): int(size)
         for size, topic_num in zip(topic_sizes, size_topic_nums)
     }
 
-    topic_data = []
-    for idx, t_num in enumerate(topic_nums):
-        keywords = ", ".join(topic_words[idx][:10])
-        topic_data.append(
-            {
-                "Topic": int(t_num) + 1,
-                "Count": size_map.get(int(t_num), 0),
-                "Keywords": keywords,
-            }
+    return [
+        TopicKeywords(
+            topic=int(t_num) + 1,
+            keywords=[str(word) for word in topic_words[idx][:_TOP_N_KEYWORDS]],
+            count=size_map.get(int(t_num), 0),
         )
-
-    return pd.DataFrame(topic_data)
+        for idx, t_num in enumerate(topic_nums)
+    ]
 
 
 def generate_top2vec_document_topics_df(

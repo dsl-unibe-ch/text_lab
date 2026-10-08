@@ -1,17 +1,24 @@
-from typing import List, Tuple
-import pandas as pd
+"""Latent Dirichlet Allocation (LDA) engine based on gensim and pyLDAvis."""
+
 import gensim
 import gensim.corpora as corpora
+import pandas as pd
 import pyLDAvis
 import pyLDAvis.gensim_models
 
+from .topic_config import TopicKeywords
+
+_TOP_N_KEYWORDS = 10
+
+BagOfWords = list[list[tuple[int, int]]]
+
 
 def train_lda_model(
-    processed_texts: List[List[str]],
+    processed_texts: list[list[str]],
     num_topics: int,
     passes: int,
     random_state: int | None = 42,
-) -> Tuple[gensim.models.LdaModel, List[List[Tuple[int, int]]], corpora.Dictionary]:
+) -> tuple[gensim.models.LdaModel, BagOfWords, corpora.Dictionary]:
     """
     Train an LDA model from preprocessed tokenized texts.
 
@@ -24,6 +31,8 @@ def train_lda_model(
         num_topics: The number of topics to generate.
         passes: The number of full passes through the corpus during
             training.
+        random_state: Random seed for training, or ``None`` for a
+            non-deterministic run.
 
     Returns:
         A tuple containing the trained LDA model, the bag-of-words corpus,
@@ -81,33 +90,33 @@ def train_lda_model(
     return lda_model, corpus, id2word
 
 
-def generate_lda_keywords_df(
+def extract_lda_topics(
     lda_model: gensim.models.LdaModel,
     num_topics: int,
-) -> pd.DataFrame:
+) -> list[TopicKeywords]:
     """
-    Generate a DataFrame of top keywords for each LDA topic.
+    Extract the top keywords of every LDA topic.
 
     Args:
         lda_model: A trained gensim LDA model.
-        num_topics: The number of topics to extract from the model.
+        num_topics: The number of topics in the model.
 
     Returns:
-        A pandas DataFrame with the columns:
-            - "Topic"
-            - "Keywords"
+        One entry per topic, numbered from 1. LDA has no hard topic sizes,
+        so ``count`` is left empty.
     """
-    topic_data = []
-    for i in range(num_topics):
-        word_probs = lda_model.show_topic(i, topn=10)
-        topic_keywords = ", ".join(word for word, _ in word_probs)
-        topic_data.append({"Topic": i + 1, "Keywords": topic_keywords})
-    return pd.DataFrame(topic_data)
+    return [
+        TopicKeywords(
+            topic=i + 1,
+            keywords=[word for word, _ in lda_model.show_topic(i, topn=_TOP_N_KEYWORDS)],
+        )
+        for i in range(num_topics)
+    ]
 
 
 def generate_lda_document_topics_df(
     lda_model: gensim.models.LdaModel,
-    corpus: List[List[Tuple[int, int]]],
+    corpus: BagOfWords,
     original_df: pd.DataFrame,
 ) -> pd.DataFrame:
     """
@@ -165,7 +174,7 @@ def generate_lda_document_topics_df(
 
 def generate_lda_html(
     lda_model: gensim.models.LdaModel,
-    corpus: List[List[Tuple[int, int]]],
+    corpus: BagOfWords,
     id2word: corpora.Dictionary,
 ) -> str:
     """

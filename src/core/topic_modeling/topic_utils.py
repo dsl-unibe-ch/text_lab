@@ -1,11 +1,18 @@
+"""Data loading, text preprocessing and reporting helpers for topic modeling.
+
+This module deliberately imports no modeling engine, so it stays cheap to
+import from the page and from tests.
+"""
+
+import csv
 import datetime
 import io
+import logging
 import os
-import sys
 import re
 import zipfile
 from functools import lru_cache
-from typing import Any, Dict, List, Optional, Set
+from typing import Any
 
 import nltk
 import pandas as pd
@@ -13,12 +20,19 @@ import spacy
 from nltk.corpus import stopwords
 
 from core import upload_safety
-from .topic_config import TopicModelingConfig
+from .topic_config import (
+    TOP2VEC_BACKEND_LABELS,
+    Algorithm,
+    TopicKeywords,
+    TopicModelingConfig,
+)
+
+LOGGER = logging.getLogger(__name__)
 
 if "NLTK_DATA" in os.environ:
     nltk.data.path.append(os.environ["NLTK_DATA"])
 
-SUPPORTED_LANGUAGES: List[str] = [
+SUPPORTED_LANGUAGES: list[str] = [
     "English",
     "German",
     "French",
@@ -32,13 +46,13 @@ SUPPORTED_LANGUAGES: List[str] = [
     "Other / Mixed",
 ]
 
-SPACY_MODELS: Dict[str, str] = {
+SPACY_MODELS: dict[str, str] = {
     "English": "en_core_web_sm",
     "German": "de_core_news_sm",
     "French": "fr_core_news_sm",
 }
 
-NLTK_LANGUAGES: Dict[str, str] = {
+NLTK_LANGUAGES: dict[str, str] = {
     "Spanish": "spanish",
     "Italian": "italian",
     "Dutch": "dutch",
@@ -50,7 +64,7 @@ NLTK_LANGUAGES: Dict[str, str] = {
 # Sentence-transformer models pre-downloaded into the shared read-only cache.
 # Anything else is treated as a "custom" model and will be downloaded to the
 # calling user's own HuggingFace cache directory.
-SHARED_EMBEDDING_MODELS: Set[str] = {
+SHARED_EMBEDDING_MODELS: set[str] = {
     "all-MiniLM-L6-v2",
     "sentence-transformers/all-MiniLM-L6-v2",
     "paraphrase-multilingual-MiniLM-L12-v2",
@@ -60,13 +74,22 @@ SHARED_EMBEDDING_MODELS: Set[str] = {
 DEFAULT_EMBEDDING_MODEL_ENGLISH: str = "all-MiniLM-L6-v2"
 DEFAULT_EMBEDDING_MODEL_MULTILINGUAL: str = "paraphrase-multilingual-MiniLM-L12-v2"
 
+#: Tabular file extensions accepted by :func:`read_uploaded_table`.
+TABLE_EXTENSIONS: tuple[str, ...] = ("csv", "xlsx")
+
 # Range of numeric values accepted as calendar years in a timestamp column.
 _MIN_YEAR = 1000
 _MAX_YEAR = 2999
 
+# Encodings tried, in order, before falling back to Latin-1 (which accepts any
+# byte sequence). Windows-1252 covers files saved by Excel on Windows.
+_TEXT_ENCODINGS = ("utf-8-sig", "cp1252")
+_CSV_DELIMITERS = ",;\t|"
+_SNIFF_SAMPLE_CHARS = 64 * 1024
+
 
 @lru_cache(maxsize=None)
-def _load_spacy_model(language: str) -> Optional[spacy.language.Language]:
+def _load_spacy_model(language: str) -> spacy.language.Language | None:
     """
     Load and cache a spaCy language model for the given language.
 
@@ -82,22 +105,68 @@ def _load_spacy_model(language: str) -> Optional[spacy.language.Language]:
     try:
         return spacy.load(model_name, disable=["parser", "ner"])
     except OSError:
-        print(
-            f"WARNING (Text Lab): spaCy model '{model_name}' for {language} is not installed! "
-            f"Please run 'python -m spacy download {model_name}' in the host environment. "
-            f"Falling back to basic regex tokenization for this job.",
-            file=sys.stderr
+        LOGGER.warning(
+            "spaCy model '%s' for %s is not installed. Run 'python -m spacy "
+            "download %s' in the host environment. Falling back to basic "
+            "regex tokenization for this job.",
+            model_name,
+            language,
+            model_name,
         )
         return None
 
 
-def read_uploaded_table(filename: str, uploaded_file: Any) -> pd.DataFrame:
+def decode_text_bytes(data: bytes) -> str:
     """
-    Read an uploaded CSV or Excel file into a pandas DataFrame.
+    Decode uploaded text without silently dropping characters.
+
+    UTF-8 (with or without a byte-order mark) is tried first, then
+    Windows-1252, and finally Latin-1, which accepts any byte sequence.
+
+    Args:
+        data: The raw file content.
+
+    Returns:
+        The decoded text.
+    """
+    for encoding in _TEXT_ENCODINGS:
+        try:
+            return data.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return data.decode("latin-1")
+
+
+def _sniff_delimiter(text: str) -> str:
+    """
+    Guess the delimiter of CSV text, defaulting to a comma.
+
+    Args:
+        text: The decoded CSV content.
+
+    Returns:
+        One of the supported delimiters (comma, semicolon, tab or pipe).
+    """
+    sample = text[:_SNIFF_SAMPLE_CHARS]
+    if len(text) > _SNIFF_SAMPLE_CHARS and "\n" in sample:
+        # Only sniff complete lines; a truncated last line skews the guess.
+        sample = sample[: sample.rfind("\n")]
+    try:
+        return csv.Sniffer().sniff(sample, delimiters=_CSV_DELIMITERS).delimiter
+    except csv.Error:
+        return ","
+
+
+def read_uploaded_table(filename: str, data: bytes) -> pd.DataFrame:
+    """
+    Read an uploaded CSV or Excel (.xlsx) file into a pandas DataFrame.
+
+    CSV files may use a comma, semicolon, tab or pipe as delimiter and may be
+    encoded in UTF-8, Windows-1252 or Latin-1.
 
     Args:
         filename: The uploaded file name.
-        uploaded_file: The uploaded file object.
+        data: The raw file content.
 
     Returns:
         The loaded pandas DataFrame.
@@ -107,9 +176,15 @@ def read_uploaded_table(filename: str, uploaded_file: Any) -> pd.DataFrame:
     """
     lower_name = filename.lower()
     if lower_name.endswith(".csv"):
-        return pd.read_csv(uploaded_file)
-    if lower_name.endswith((".xlsx", ".xls")):
-        return pd.read_excel(uploaded_file)
+        text = decode_text_bytes(data)
+        return pd.read_csv(io.StringIO(text), sep=_sniff_delimiter(text))
+    if lower_name.endswith(".xlsx"):
+        return pd.read_excel(io.BytesIO(data))
+    if lower_name.endswith(".xls"):
+        raise ValueError(
+            "Legacy Excel files (.xls) are not supported. Please save the "
+            "file as .xlsx or .csv and upload it again."
+        )
     raise ValueError("Unsupported tabular file format.")
 
 
@@ -117,7 +192,8 @@ def load_zip_texts(zip_bytes: bytes) -> pd.DataFrame:
     """
     Load non-empty text files from a ZIP archive into a DataFrame.
 
-    Files whose basename starts with ``._`` are ignored.
+    Files whose basename starts with ``._`` are ignored. Each file is decoded
+    with :func:`decode_text_bytes`.
 
     Args:
         zip_bytes: The ZIP archive content as bytes.
@@ -126,16 +202,16 @@ def load_zip_texts(zip_bytes: bytes) -> pd.DataFrame:
         A pandas DataFrame with columns ``Filename`` and ``Text``.
     """
     data = []
-    with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as z:
-        for info in upload_safety.safe_zip_members(z, allowed_extensions={".txt"}):
+    with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as archive:
+        for info in upload_safety.safe_zip_members(
+            archive, allowed_extensions={".txt"}
+        ):
             filename = info.filename
-            lower_name = filename.lower()
-            if lower_name.endswith(".txt") and not os.path.basename(
-                filename
-            ).startswith("._"):
-                content = z.read(info).decode("utf-8", errors="ignore")
-                if content.strip():
-                    data.append({"Filename": filename, "Text": content})
+            if os.path.basename(filename).startswith("._"):
+                continue
+            content = decode_text_bytes(archive.read(info))
+            if content.strip():
+                data.append({"Filename": filename, "Text": content})
     return pd.DataFrame(data, columns=["Filename", "Text"])
 
 
@@ -233,7 +309,23 @@ def prepare_timestamps(
     return filtered_df, filtered_df[date_column].tolist(), dropped
 
 
-def validate_minimum_documents(texts: List[str], minimum_docs: int = 5) -> None:
+def resolve_time_bins(timestamps: list[Any], requested_bins: int) -> int | None:
+    """
+    Decide how many intervals the topics-over-time analysis should use.
+
+    Args:
+        timestamps: The parsed document timestamps.
+        requested_bins: The number of intervals selected by the user.
+
+    Returns:
+        ``requested_bins`` if there are more distinct timestamps than that,
+        otherwise ``None`` so that every distinct timestamp is kept as its own
+        point instead of being spread over mostly empty intervals.
+    """
+    return requested_bins if len(set(timestamps)) > requested_bins else None
+
+
+def validate_minimum_documents(texts: list[str], minimum_docs: int = 5) -> None:
     """
     Validate that the dataset contains a minimum number of documents.
 
@@ -251,6 +343,33 @@ def validate_minimum_documents(texts: List[str], minimum_docs: int = 5) -> None:
         )
 
 
+def build_topic_table(
+    topics: list[TopicKeywords],
+    with_counts: bool = True,
+) -> pd.DataFrame:
+    """
+    Build the topic table shown on the page and exported as CSV.
+
+    Args:
+        topics: The topics, in display order.
+        with_counts: Whether to include the ``Count`` column.
+
+    Returns:
+        A DataFrame with the columns ``Topic``, ``Count`` (optional) and
+        ``Keywords`` (comma-separated).
+    """
+    columns = ["Topic", "Count", "Keywords"] if with_counts else ["Topic", "Keywords"]
+    rows = [
+        {
+            "Topic": topic.topic,
+            "Count": topic.count,
+            "Keywords": ", ".join(topic.keywords),
+        }
+        for topic in topics
+    ]
+    return pd.DataFrame(rows, columns=columns)
+
+
 def get_embedding_model_name(config: TopicModelingConfig) -> str:
     """
     Resolve the human-readable embedding model name for the selected configuration.
@@ -261,10 +380,10 @@ def get_embedding_model_name(config: TopicModelingConfig) -> str:
     Returns:
         The resolved embedding model name.
     """
-    if "BERTopic" in config.algorithm:
+    if config.algorithm == Algorithm.BERTOPIC:
         return resolve_bertopic_embedding_model_id(config)
 
-    if "Top2Vec" in config.algorithm:
+    if config.algorithm == Algorithm.TOP2VEC:
         if config.top2vec_backend == "transformer":
             return (
                 DEFAULT_EMBEDDING_MODEL_ENGLISH
@@ -278,8 +397,7 @@ def get_embedding_model_name(config: TopicModelingConfig) -> str:
 
 def resolve_bertopic_embedding_model_id(config: TopicModelingConfig) -> str:
     """
-    Resolve the concrete HuggingFace sentence-transformer model ID that BERTopic
-    should use, based on the user's configuration.
+    Resolve the HuggingFace sentence-transformer model ID used by BERTopic.
 
     Args:
         config: The topic modeling configuration.
@@ -299,33 +417,38 @@ def resolve_bertopic_embedding_model_id(config: TopicModelingConfig) -> str:
 
 def is_shared_embedding_model(model_id: str) -> bool:
     """
-    Return True if the given HuggingFace model ID is expected to be present in
-    the shared read-only cache. Non-shared models must be downloaded to the
-    calling user's home cache directory.
+    Check whether a model is expected in the shared read-only cache.
+
+    Non-shared models must be downloaded to the calling user's home cache.
+
+    Args:
+        model_id: The HuggingFace model ID.
+
+    Returns:
+        True if the model is one of the pre-downloaded shared models.
     """
     return model_id in SHARED_EMBEDDING_MODELS
 
 
 def get_user_hf_cache_dir() -> str:
     """
-    Return the path to the calling user's writable HuggingFace cache directory,
-    creating it if necessary.
+    Return the calling user's writable HuggingFace cache, creating it if needed.
 
     This is used for user-selected custom embedding models so they do not need
     write access to the shared model cache.
+
+    Returns:
+        The absolute path of the cache directory.
     """
     cache_dir = os.path.expanduser("~/.cache/huggingface/hub")
     try:
         os.makedirs(cache_dir, exist_ok=True)
-    except OSError as e:
-        print(
-            f"WARNING (Text Lab): Could not create user HF cache dir '{cache_dir}': {e}",
-            file=sys.stderr,
-        )
+    except OSError as exc:
+        LOGGER.warning("Could not create user HF cache dir '%s': %s", cache_dir, exc)
     return cache_dir
 
 
-def load_sentence_transformer(model_id: str) -> Any:
+def load_sentence_transformer(model_id: str, trust_remote_code: bool = False) -> Any:
     """
     Instantiate a SentenceTransformer for the given model ID.
 
@@ -336,6 +459,9 @@ def load_sentence_transformer(model_id: str) -> Any:
 
     Args:
         model_id: The HuggingFace sentence-transformer model ID.
+        trust_remote_code: Whether a custom model may run Python code shipped
+            in its repository (needed by some long-context models such as
+            Jina or Nomic). Ignored for the shared models.
 
     Returns:
         A ready-to-use SentenceTransformer instance.
@@ -345,18 +471,16 @@ def load_sentence_transformer(model_id: str) -> Any:
     if is_shared_embedding_model(model_id):
         return SentenceTransformer(model_id)
 
-    # Custom user-selected model — download into the user's own cache and allow
-    # remote code so common long-context models (Jina, Nomic, …) work.
     return SentenceTransformer(
         model_id,
         cache_folder=get_user_hf_cache_dir(),
-        trust_remote_code=True,
+        trust_remote_code=trust_remote_code,
     )
 
 
 def count_docs_exceeding_context(
     embedding_model: Any,
-    texts: List[str],
+    texts: list[str],
 ) -> tuple[int, int, int]:
     """
     Count how many documents would be truncated by the embedding model.
@@ -394,11 +518,99 @@ def count_docs_exceeding_context(
     return over, len(texts), max_seq_length
 
 
+def _report_header(filename: str, config: TopicModelingConfig) -> list[str]:
+    """
+    Build the source and core-settings part of the metadata report.
+
+    Args:
+        filename: The source file name.
+        config: The topic modeling configuration.
+
+    Returns:
+        The report lines.
+    """
+    lines = [
+        "=========================================",
+        " TEXT LAB - TOPIC MODELING CONFIGURATION ",
+        "=========================================",
+        f"Timestamp: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"Source File: {filename}",
+        f"Target Text Column: {config.text_column}",
+    ]
+
+    if config.enable_dtm and config.date_column:
+        lines.append(f"Timestamp Column (DTM): {config.date_column}")
+        lines.append(f"Time Bins (DTM): {config.time_bins}")
+
+    stopword_text = config.custom_stopwords if config.custom_stopwords.strip() else "None"
+    lines.extend(
+        [
+            "",
+            "--- CORE SETTINGS ---",
+            f"Framework: {config.algorithm.label}",
+            f"Primary Language: {config.language}",
+            f"Custom Stopwords: {stopword_text}",
+            "",
+        ]
+    )
+    return lines
+
+
+def _report_bertopic_parameters(
+    config: TopicModelingConfig,
+    embedding_model_name: str,
+) -> list[str]:
+    """
+    Build the BERTopic-specific part of the metadata report.
+
+    Args:
+        config: The topic modeling configuration.
+        embedding_model_name: The resolved embedding model name.
+
+    Returns:
+        The report lines.
+    """
+    lines = [
+        "--- BERTOPIC PARAMETERS ---",
+        f"Target Topics: {config.num_topics}",
+        f"Embedding Model: {embedding_model_name}",
+        f"Trust Remote Code: {config.trust_remote_code}",
+        f"N-Gram Range: {config.ngram_range}",
+        f"Min Topic Frequency (min_df): {config.min_df}",
+        f"Reduce Frequent Words (ClassTfidfTransformer): {config.reduce_frequent}",
+        "",
+        f"--- DIMENSIONALITY REDUCTION ({config.dim_reduction_algo}) ---",
+    ]
+
+    if config.dim_reduction_algo != "None":
+        lines.append(f"N Components: {config.dim_params.get('n_components')}")
+        if config.dim_reduction_algo == "UMAP":
+            lines.append(f"N Neighbors: {config.dim_params.get('n_neighbors')}")
+            lines.append(f"Min Distance: {config.dim_params.get('min_dist')}")
+        lines.append(f"Random State: {config.dim_params.get('random_state', 'None')}")
+
+    lines.extend(["", f"--- CLUSTERING ({config.clustering_algo}) ---"])
+
+    params = config.clustering_params
+    if config.clustering_algo == "KMeans":
+        lines.append(f"N Clusters: {params.get('n_clusters')}")
+    else:
+        min_samples = params.get("min_samples", "Default (equals min_cluster_size)")
+        lines.extend(
+            [
+                f"Min Cluster Size: {params.get('min_cluster_size')}",
+                f"Min Samples: {min_samples}",
+                f"Force-reduce Outliers: {config.reduce_outliers}",
+            ]
+        )
+    return lines
+
+
 def generate_metadata_report(
     filename: str,
     config: TopicModelingConfig,
     embedding_model_name: str,
-    evaluation_metrics: dict[str, float] | None = None
+    evaluation_metrics: dict[str, float | None] | None = None,
 ) -> str:
     """
     Compile a formatted metadata report for reproducibility.
@@ -412,33 +624,9 @@ def generate_metadata_report(
     Returns:
         A formatted metadata report string.
     """
-    report = [
-        "=========================================",
-        " TEXT LAB - TOPIC MODELING CONFIGURATION ",
-        "=========================================",
-        f"Timestamp: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-        f"Source File: {filename}",
-        f"Target Text Column: {config.text_column}",
-    ]
+    report = _report_header(filename, config)
 
-    if config.enable_dtm and config.date_column:
-        report.append(f"Timestamp Column (DTM): {config.date_column}")
-
-    report.extend(
-        [
-            "",
-            "--- CORE SETTINGS ---",
-            f"Framework: {config.algorithm}",
-            f"Primary Language: {config.language}",
-            (
-                "Custom Stopwords: "
-                f"{config.custom_stopwords if config.custom_stopwords.strip() else 'None'}"
-            ),
-            "",
-        ]
-    )
-
-    if "LDA" in config.algorithm:
+    if config.algorithm == Algorithm.LDA:
         report.extend(
             [
                 "--- LDA PARAMETERS ---",
@@ -447,75 +635,31 @@ def generate_metadata_report(
                 f"Extract Bigrams: {config.use_bigrams}",
             ]
         )
-
-    elif "Top2Vec" in config.algorithm:
+    elif config.algorithm == Algorithm.TOP2VEC:
+        backend_label = TOP2VEC_BACKEND_LABELS.get(
+            config.top2vec_backend, config.top2vec_backend
+        )
         report.extend(
             [
                 "--- TOP2VEC PARAMETERS ---",
                 f"Target Topics: {config.num_topics}",
-                f"Embedding Backend: {config.top2vec_backend_label}",
+                f"Embedding Backend: {backend_label}",
                 f"Embedding Model: {embedding_model_name}",
                 f"Training Speed: {config.top2vec_speed}",
             ]
         )
-
     else:
-        report.extend(
-            [
-                "--- BERTOPIC PARAMETERS ---",
-                f"Target Topics: {config.bertopic_nr_topics}",
-                f"Embedding Model: {embedding_model_name}",
-                f"N-Gram Range: {config.ngram_range}",
-                f"Min Topic Frequency (min_df): {config.min_df}",
-                (
-                    "Reduce Frequent Words (ClassTfidfTransformer): "
-                    f"{config.reduce_frequent}"
-                ),
-                "",
-                f"--- DIMENSIONALITY REDUCTION ({config.dim_reduction_algo}) ---",
-            ]
-        )
-
-        if config.dim_reduction_algo != "None":
-            report.append(f"N Components: {config.dim_params.get('n_components')}")
-            if config.dim_reduction_algo == "UMAP":
-                report.append(f"N Neighbors: {config.dim_params.get('n_neighbors')}")
-                report.append(f"Min Distance: {config.dim_params.get('min_dist')}")
-            report.append(
-                f"Random State: {config.dim_params.get('random_state', 'None')}"
-            )
-
-        report.extend(
-            [
-                "",
-                f"--- CLUSTERING ({config.clustering_algo}) ---",
-            ]
-        )
-
-        if config.clustering_algo == "KMeans":
-            report.append(f"N Clusters: {config.clustering_params.get('n_clusters')}")
-        else:
-            report.extend(
-                [
-                    (
-                        "Min Cluster Size: "
-                        f"{config.clustering_params.get('min_cluster_size')}"
-                    ),
-                    (
-                        "Min Samples: "
-                        f"{config.clustering_params.get('min_samples', 'Default (equals min_cluster_size)')}"
-                    ),
-                    f"Force-reduce Outliers: {config.reduce_outliers}",
-                ]
-            )
+        report.extend(_report_bertopic_parameters(config, embedding_model_name))
 
     if evaluation_metrics:
-        report.extend([
-            "",
-            "=========================================",
-            " MODEL EVALUATION METRICS                ",
-            "========================================="
-        ])
+        report.extend(
+            [
+                "",
+                "=========================================",
+                " MODEL EVALUATION METRICS                ",
+                "=========================================",
+            ]
+        )
         for metric_name, score in evaluation_metrics.items():
             report.append(f"{metric_name}: {'N/A' if score is None else score}")
 
@@ -560,7 +704,7 @@ def build_results_zip(
     return zip_buffer.getvalue()
 
 
-def get_stopword_set(language: str, custom_stopwords_str: str) -> Set[str]:
+def get_stopword_set(language: str, custom_stopwords_str: str) -> set[str]:
     """
     Build a stopword set from custom, spaCy, and NLTK sources.
 
@@ -571,7 +715,7 @@ def get_stopword_set(language: str, custom_stopwords_str: str) -> Set[str]:
     Returns:
         A set of lowercase stopwords.
     """
-    stop_set: Set[str] = set()
+    stop_set: set[str] = set()
 
     if custom_stopwords_str:
         stop_set.update(
@@ -585,26 +729,115 @@ def get_stopword_set(language: str, custom_stopwords_str: str) -> Set[str]:
         try:
             stop_set.update(stopwords.words(NLTK_LANGUAGES[language]))
         except LookupError:
-            print(
-                f"WARNING (Text Lab): NLTK stopwords for '{language}' are not "
-                "installed. Only custom stopwords will be applied.",
-                file=sys.stderr,
+            LOGGER.warning(
+                "NLTK stopwords for '%s' are not installed. Only custom "
+                "stopwords will be applied.",
+                language,
             )
     else:
-        print(
-            f"NOTICE (Text Lab): No default stopword list is bundled for "
-            f"'{language}'. Only custom stopwords will be applied.",
-            file=sys.stderr,
+        LOGGER.info(
+            "No default stopword list is bundled for '%s'. Only custom "
+            "stopwords will be applied.",
+            language,
         )
 
     return stop_set
 
 
-def tokenize_texts_for_coherence(
-    texts: List[str],
+def split_long_text(text: str, max_chars: int) -> list[str]:
+    """
+    Split a text into consecutive chunks of at most ``max_chars`` characters.
+
+    Chunks end at the last space before the limit when possible, so words are
+    not cut in half. Joining the chunks gives back the original text.
+
+    Args:
+        text: The text to split.
+        max_chars: The maximum chunk length; must be positive.
+
+    Returns:
+        The chunks, in order. Short texts are returned as a single chunk.
+    """
+    if len(text) <= max_chars:
+        return [text]
+
+    chunks = []
+    start = 0
+    while start < len(text):
+        end = min(start + max_chars, len(text))
+        if end < len(text):
+            split_at = text.rfind(" ", start, end)
+            if split_at > start:
+                end = split_at
+        chunks.append(text[start:end])
+        start = end
+    return chunks
+
+
+def _regex_tokens(text: str, stop_set: set[str]) -> list[str]:
+    """
+    Tokenize a text with a simple regex, for languages without a spaCy model.
+
+    Args:
+        text: The document to tokenize.
+        stop_set: Lowercase stopwords to remove.
+
+    Returns:
+        Lowercase, non-numeric tokens of at least three characters.
+    """
+    words = re.findall(r"\b\w{3,}\b", text.lower())
+    return [w for w in words if w not in stop_set and not w.isnumeric()]
+
+
+def _tokenize_texts(
+    texts: list[str],
     language: str,
     custom_stopwords_str: str,
-) -> List[List[str]]:
+    lemmatize: bool,
+) -> list[list[str]]:
+    """
+    Tokenize documents with spaCy when available, otherwise with a regex.
+
+    spaCy refuses texts longer than ``nlp.max_length`` characters, so long
+    documents are processed in chunks and their tokens concatenated.
+
+    Args:
+        texts: The documents to tokenize.
+        language: The language name.
+        custom_stopwords_str: A comma-separated string of custom stopwords.
+        lemmatize: Whether to return lemmas (``True``) or surface forms.
+
+    Returns:
+        One list of lowercase alphabetic tokens (longer than two characters,
+        stopwords removed) per document.
+    """
+    stop_set = get_stopword_set(language, custom_stopwords_str)
+    nlp = _load_spacy_model(language)
+    if nlp is None:
+        return [_regex_tokens(text, stop_set) for text in texts]
+
+    processed_texts: list[list[str]] = [[] for _ in texts]
+    chunks = (
+        (chunk, index)
+        for index, text in enumerate(texts)
+        for chunk in split_long_text(text, nlp.max_length)
+    )
+    for doc, index in nlp.pipe(chunks, as_tuples=True, batch_size=50):
+        for token in doc:
+            if not token.is_alpha or len(token) <= 2:
+                continue
+            form = (token.lemma_ if lemmatize else token.text).lower()
+            if form not in stop_set:
+                processed_texts[index].append(form)
+
+    return processed_texts
+
+
+def tokenize_texts_for_coherence(
+    texts: list[str],
+    language: str,
+    custom_stopwords_str: str,
+) -> list[list[str]]:
     """
     Tokenize texts into surface-form tokens for coherence evaluation.
 
@@ -627,40 +860,20 @@ def tokenize_texts_for_coherence(
         A list of tokenized documents, where each document is a list of
         surface-form tokens.
     """
-    stop_set = get_stopword_set(language, custom_stopwords_str)
-    processed_texts: List[List[str]] = []
-
-    nlp = _load_spacy_model(language)
-    if nlp is not None:
-        for doc in nlp.pipe(texts, batch_size=50):
-            tokens = [
-                token.text.lower()
-                for token in doc
-                if token.is_alpha
-                and len(token) > 2
-                and token.text.lower() not in stop_set
-            ]
-            processed_texts.append(tokens)
-    else:
-        for text in texts:
-            words = re.findall(r"\b\w{3,}\b", text.lower())
-            tokens = [w for w in words if w not in stop_set and not w.isnumeric()]
-            processed_texts.append(tokens)
-
-    return processed_texts
+    return _tokenize_texts(texts, language, custom_stopwords_str, lemmatize=False)
 
 
 def preprocess_texts_for_lda(
-    texts: List[str],
+    texts: list[str],
     language: str,
     custom_stopwords_str: str,
     use_bigrams: bool,
-) -> List[List[str]]:
+) -> list[list[str]]:
     """
     Preprocess texts for LDA topic modeling.
 
-    Texts are tokenized, normalized, filtered by stopwords, and optionally
-    enriched with bigrams.
+    Texts are tokenized, lemmatized when a spaCy model is available, filtered
+    by stopwords, and optionally enriched with bigrams.
 
     Args:
         texts: The input documents to preprocess.
@@ -673,25 +886,9 @@ def preprocess_texts_for_lda(
     """
     import gensim
 
-    stop_set = get_stopword_set(language, custom_stopwords_str)
-    processed_texts: List[List[str]] = []
-
-    nlp = _load_spacy_model(language)
-    if nlp is not None:
-        for doc in nlp.pipe(texts, batch_size=50):
-            tokens = [
-                token.lemma_.lower()
-                for token in doc
-                if token.is_alpha
-                and len(token) > 2
-                and token.lemma_.lower() not in stop_set
-            ]
-            processed_texts.append(tokens)
-    else:
-        for text in texts:
-            words = re.findall(r"\b\w{3,}\b", text.lower())
-            tokens = [w for w in words if w not in stop_set and not w.isnumeric()]
-            processed_texts.append(tokens)
+    processed_texts = _tokenize_texts(
+        texts, language, custom_stopwords_str, lemmatize=True
+    )
 
     if use_bigrams and processed_texts:
         bigram = gensim.models.Phrases(processed_texts, min_count=5, threshold=10)
