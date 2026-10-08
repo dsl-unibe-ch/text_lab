@@ -39,9 +39,7 @@ import functools
 import io
 import os
 import re
-import tempfile
 import zipfile
-from pathlib import Path
 from typing import Callable, Dict, List, Mapping, Optional, Tuple
 from xml.etree import ElementTree as ET
 
@@ -75,6 +73,15 @@ _MD_LIST_RE = re.compile(r"^(\s*(?:[-*+]|\d+[\.\)])\s+(?:\[[ xX]\]\s+)?)(.+)$")
 _MD_BLOCKQUOTE_RE = re.compile(r"^(\s*>+\s*)(.*)$")
 _MD_FENCE_RE = re.compile(r"^\s*(?:```|~~~)")
 _MD_HR_RE = re.compile(r"^\s*(?:-{3,}|_{3,}|\*{3,})\s*$")
+_LITERAL_BLOCKS = (("$$", "$$"), (r"\[", r"\]"), ("<!--", "-->"))
+
+
+def _literal_block(line: str):
+    for opening, closing in _LITERAL_BLOCKS:
+        if line.lstrip().startswith(opening):
+            tail = line.lstrip()[len(opening):]
+            return True, None if closing in tail else closing
+    return False, None
 
 
 def translate_markdown(
@@ -82,6 +89,8 @@ def translate_markdown(
     translate_fn: TranslateFn,
     progress_cb: ProgressCb = None,
     glossary: Glossary = None,
+    *,
+    glossary_case_sensitive: bool = False,
 ) -> str:
     """
     Translate a Markdown document while preserving structure.
@@ -107,6 +116,7 @@ def translate_markdown(
     lines = reflow_soft_wraps(md_text).splitlines(keepends=False)
     out: List[Optional[str]] = []
     in_fence = False
+    literal_end = None
     total = len(lines)
 
     # Gather translatable bodies; each slot records where/how to reinsert.
@@ -120,6 +130,17 @@ def translate_markdown(
 
     for i, line in enumerate(lines, start=1):
         _report(progress_cb, i, total, "parsing markdown")
+
+        if literal_end:
+            out.append(line)
+            if literal_end in line:
+                literal_end = None
+            continue
+        if not in_fence:
+            protected, literal_end = _literal_block(line)
+            if protected:
+                out.append(line)
+                continue
 
         # Code fences: toggle and passthrough (fence + contents).
         if _MD_FENCE_RE.match(line):
@@ -164,7 +185,9 @@ def translate_markdown(
 
     _report(progress_cb, total, total, "translating markdown")
     translated = shielded_translate_many(
-        bodies, translate_fn, glossary=glossary)
+        bodies, translate_fn, glossary=glossary,
+        glossary_case_sensitive=glossary_case_sensitive,
+    )
     for (idx, prefix, suffix), tr in zip(slots, translated):
         out[idx] = f"{prefix}{tr}{suffix}"
 
@@ -230,6 +253,8 @@ def _translate_docx_part(
     counter: List[int],
     total_est: int,
     glossary: Glossary = None,
+    *,
+    glossary_case_sensitive: bool = False,
 ) -> bytes:
     """Translate a single DOCX XML part and return new bytes."""
     if not xml_bytes.strip():
@@ -245,7 +270,9 @@ def _translate_docx_part(
     _report(progress_cb, counter[0], total_est, stage)
 
     translated_list = shielded_translate_many(
-        texts, translate_fn, glossary=glossary)
+        texts, translate_fn, glossary=glossary,
+        glossary_case_sensitive=glossary_case_sensitive,
+    )
     for p, text, translated in zip(paragraphs, texts, translated_list):
         if not text.strip():
             continue
@@ -277,6 +304,8 @@ def translate_docx(
     translate_fn: TranslateFn,
     progress_cb: ProgressCb = None,
     glossary: Glossary = None,
+    *,
+    glossary_case_sensitive: bool = False,
 ) -> bytes:
     """
     Translate a .docx file, returning a new .docx file.
@@ -322,6 +351,7 @@ def translate_docx(
                 counter,
                 total_paragraphs,
                 glossary=glossary,
+                glossary_case_sensitive=glossary_case_sensitive,
             )
         dst.writestr(info, data)
 
@@ -556,7 +586,23 @@ def reflow_soft_wraps(text: str) -> str:
     lines = text.split("\n")
     out: List[str] = []
     in_fence = False
+    literal_end = None
+    previous_protected = False
     for i, line in enumerate(lines):
+        was_protected = previous_protected
+        previous_protected = False
+        if literal_end:
+            out.append(line)
+            previous_protected = True
+            if literal_end in line:
+                literal_end = None
+            continue
+        if not in_fence:
+            protected, literal_end = _literal_block(line)
+            if protected:
+                out.append(line)
+                previous_protected = True
+                continue
         if _MD_FENCE_RE.match(line):
             # The fence markers themselves are structural, so _is_soft_wrap
             # already refuses them; this is about the arbitrary code between.
@@ -566,7 +612,7 @@ def reflow_soft_wraps(text: str) -> str:
         if in_fence:
             out.append(line)
             continue
-        if out and _is_soft_wrap(lines[i - 1], line):
+        if out and not was_protected and _is_soft_wrap(lines[i - 1], line):
             previous = out.pop().rstrip()
             if previous.endswith("-") and line.lstrip()[:1].islower():
                 out.append(previous[:-1] + line.strip())  # de-hyphenate
@@ -650,184 +696,134 @@ def translate_pdf(
     translate_fn: TranslateFn,
     progress_cb: ProgressCb = None,
     glossary: Glossary = None,
+    *,
+    glossary_case_sensitive: bool = False,
+    warnings: Optional[List[str]] = None,
 ) -> bytes:
+    """Reconstruct a native PDF with every translated block placed in full.
+
+    Scanned/corrupt pages, empty translations and unsupported glyphs block
+    this deliverable. Equations, and text drawn over images (figure labels),
+    keep their source text. A translation longer than its box is shrunk to
+    fit, never shortened. Such layout compromises are appended to
+    ``warnings`` rather than blocking the whole document. The independently
+    translated Markdown output is not affected by a reconstruction failure.
     """
-    Translate a PDF, returning a new PDF with the same page layout, images,
-    and vector graphics but with the natural-language text translated.
+    import fitz
 
-    Strategy
-    --------
-    1. Extract text blocks with bounding boxes using ``get_text('dict')``.
-    2. Reflow lines within each block (hyphen joining, whitespace).
-    3. Skip blocks that look like equations (font-based + Unicode-block
-       heuristics) or that are heavily enclosed by an image bbox
-       (figure captions embedded in images, chart legends, ...). Those
-       blocks are left completely untouched.
-    4. Group the surviving blocks into *semantic paragraphs* across page
-       and column boundaries so the model always sees full logical units.
-    5. Translate each paragraph through :func:`shielded_translate`.
-    6. Redact only the original text bboxes we translated; keep images and
-       vector line-art untouched.
-    7. Insert the translated text back into the same bboxes with an
-       auto-shrunk font size, using a system Unicode font when available.
-
-    Limitations
-    -----------
-    * Complex equations that pymupdf mis-classifies as ordinary text still
-      slip through. The math detector is intentionally conservative.
-    * When no Unicode TrueType font is installed we fall back to
-      Helvetica (Base-14, WinAnsi only). Non-Latin scripts may then
-      render as boxes.
-    * Line-wrapping inside the original bbox is recomputed by pymupdf,
-      so per-line breaks do not match the original layout.
-    """
-    import fitz  # pymupdf, already in the container
-
-    src = fitz.open(stream=pdf_bytes, filetype="pdf")
-
-    # ---- 1 & 2: gather every candidate text block plus its math / image
-    #             flags. We DO NOT drop anything yet — we first want a
-    #             document-wide view so we can disable a heuristic that
-    #             mis-classifies almost everything (safety net against
-    #             a false-positive rate near 100%, which used to happen
-    #             when a body font was mistaken for a math font and
-    #             produced an unchanged output document).
-    candidates: List[dict] = []
-    # Each entry: {page, bbox, reflowed, size, is_math, in_image}
-    images_per_page: dict[int, List[Tuple[float, float, float, float]]] = {}
-
-    for page_index, page in enumerate(src):
-        d = page.get_text("dict")
-        image_bboxes = _extract_image_bboxes(d)
-        images_per_page[page_index] = image_bboxes
-
-        for block in d.get("blocks", []):
-            if block.get("type", 0) != 0:  # 0 = text; 1 = image
-                continue
-
-            line_texts = [
-                "".join(sp.get("text", "") for sp in line.get("spans", []))
-                for line in block.get("lines", [])
-            ]
-            reflowed = _reflow_lines(line_texts)
-            if not reflowed.strip():
-                continue
-
-            bbox = tuple(block.get("bbox", (0, 0, 0, 0)))
-            candidates.append({
-                "page": page_index,
-                "bbox": bbox,
-                "text": reflowed,
-                "size": _block_median_fontsize(block),
-                "is_math": _is_math_block(block),
-                "in_image": _text_block_overlaps_image(bbox, image_bboxes),
-            })
-
-    if not candidates:
-        src.close()
-        return pdf_bytes
-
-    # Safety nets: if a heuristic flags an overwhelming majority of blocks,
-    # something is wrong with the heuristic on this particular document —
-    # disable it rather than return an unchanged file.
-    math_ratio = sum(1 for c in candidates if c["is_math"]) / len(candidates)
-    if math_ratio > 0.80:
-        for c in candidates:
-            c["is_math"] = False
-    image_ratio = sum(1 for c in candidates if c["in_image"]) / len(candidates)
-    if image_ratio > 0.80:
-        for c in candidates:
-            c["in_image"] = False
-
-    # Apply filters.
-    kept = [c for c in candidates if not c["is_math"] and not c["in_image"]]
-
-    # Final safety net: if all candidates were filtered out, translate
-    # everything anyway. Better a slightly imperfect translation than an
-    # untranslated file.
-    if not kept:
-        kept = candidates
-
-    all_blocks: List[Tuple[int, tuple, str, float]] = [
-        (c["page"], c["bbox"], c["text"], c["size"]) for c in kept
-    ]
-
-    if not all_blocks:
-        src.close()
-        return pdf_bytes
-
-    # ---- 3: semantic grouping across blocks & pages ---------------------
-    groups = _semantic_paragraphs(all_blocks)
-    total = len(groups)
-
-    # ---- 4: translate all semantic paragraphs in one batched pass -------
-    _report(progress_cb, 0, total, "translating pdf")
-    joined_list = [" ".join(all_blocks[i][2] for i in group)
-                   for group in groups]
-    translated_list = shielded_translate_many(
-        joined_list, translate_fn, glossary=glossary
+    from .pdf_checks import (
+        PDFIntegrityError, inspect_pdf, require_native_coverage,
     )
-    _report(progress_cb, total, total, "translating pdf")
 
-    translated_per_block: dict[int, str] = {}
-    for group, translated_joined in zip(groups, translated_list):
-        # Distribute the translated string across the group's blocks by
-        # length ratio so text stays near its original position when a
-        # paragraph spans multiple blocks.
-        if len(group) == 1:
-            translated_per_block[group[0]] = translated_joined
-            continue
+    require_native_coverage(inspect_pdf(pdf_bytes))
+    figure_pages = set()
+    equation_pages = set()
+    shrunk_pages = set()
+    with fitz.open(stream=pdf_bytes, filetype="pdf") as src:
+        all_blocks = []
+        protected_boxes = {}
+        for page_index, page in enumerate(src):
+            data = page.get_text("dict")
+            image_boxes = _extract_image_bboxes(data)
+            protected_boxes[page_index] = []
+            for block in data.get("blocks", []):
+                if block.get("type", 0) != 0:
+                    continue
+                text = _reflow_lines([
+                    "".join(span.get("text", "")
+                            for span in line.get("spans", []))
+                    for line in block.get("lines", [])
+                ])
+                if not text.strip():
+                    continue
+                bbox = tuple(block.get("bbox", (0, 0, 0, 0)))
+                if _is_math_block(block):
+                    protected_boxes[page_index].append(fitz.Rect(bbox))
+                    continue
+                if _text_block_overlaps_image(bbox, image_boxes):
+                    # Labels drawn over a figure: redacting them would cut
+                    # into the image, so they keep their source text.
+                    figure_pages.add(page_index + 1)
+                    continue
+                all_blocks.append((
+                    page_index, bbox, text, _block_median_fontsize(block),
+                ))
 
-        total_len = sum(len(all_blocks[i][2]) for i in group)
-        pieces = _split_by_ratio(
-            translated_joined,
-            [len(all_blocks[i][2]) / max(1, total_len) for i in group],
+        groups = _semantic_paragraphs(all_blocks)
+        sources = [" ".join(all_blocks[i][2] for i in group)
+                   for group in groups]
+        _report(progress_cb, 0, len(groups), "translating pdf")
+        translated = shielded_translate_many(
+            sources, translate_fn, glossary=glossary,
+            glossary_case_sensitive=glossary_case_sensitive,
         )
-        for i, piece in zip(group, pieces):
-            translated_per_block[i] = piece
-
-    # ---- 5: redact originals, insert translations -----------------------
-    per_page: dict[int, List[int]] = {}
-    for i, (pg, _bbox, _t, _s) in enumerate(all_blocks):
-        per_page.setdefault(pg, []).append(i)
-
-    # apply_redactions constants (fall back to numeric defaults if the
-    # installed pymupdf is old and doesn't expose them).
-    IMG_NONE = getattr(fitz, "PDF_REDACT_IMAGE_NONE", 0)
-    LINE_ART_NONE = getattr(fitz, "PDF_REDACT_LINE_ART_NONE", 0)
-
-    font_path = _unicode_font_path()
-
-    for page_index, page in enumerate(src):
-        idxs = per_page.get(page_index, [])
-        if not idxs:
-            continue
-
-        for i in idxs:
-            bbox = fitz.Rect(all_blocks[i][1])
-            page.add_redact_annot(bbox, fill=(1, 1, 1))
-
-        # Explicitly keep images AND vector line art (equation frames,
-        # chart axes, table rules) untouched — the crucial fix for
-        # research PDFs where redaction was clobbering figures.
-        try:
-            page.apply_redactions(images=IMG_NONE, graphics=LINE_ART_NONE)
-        except TypeError:
-            # Older pymupdf without the ``graphics`` kwarg.
-            page.apply_redactions(images=IMG_NONE)
-
-        # Insert translated text in each bbox with auto-shrink.
-        for i in idxs:
-            bbox = fitz.Rect(all_blocks[i][1])
-            text = translated_per_block.get(i, "")
+        if len(translated) != len(groups):
+            raise PDFIntegrityError("The translator omitted text blocks.")
+        translated_blocks = {}
+        for group, text in zip(groups, translated):
             if not text.strip():
-                continue
-            _insert_autoshrink(page, bbox, text, all_blocks[i][3], font_path)
+                raise PDFIntegrityError(
+                    "The translator returned empty text for source prose.",
+                    [all_blocks[i][0] + 1 for i in group],
+                )
+            total = sum(len(all_blocks[i][2]) for i in group)
+            pieces = _split_by_ratio(
+                text, [len(all_blocks[i][2]) / max(1, total) for i in group],
+            )
+            if "".join(pieces) != text:
+                raise PDFIntegrityError("Text distribution lost characters.")
+            if any(not piece.strip() for piece in pieces):
+                # Too few word boundaries to spread across the boxes: put
+                # the whole paragraph in its largest box, which shrinks it.
+                largest = max(group, key=lambda i: fitz.Rect(
+                    all_blocks[i][1]).get_area())
+                pieces = [text if i == largest else "" for i in group]
+            for index, piece in zip(group, pieces):
+                translated_blocks[index] = piece
 
-    out_buf = io.BytesIO()
-    src.save(out_buf, garbage=3, deflate=True)
-    src.close()
-    return out_buf.getvalue()
+        font_path = _unicode_font_path()
+        for page_index, page in enumerate(src):
+            indexes = [i for i, block in enumerate(all_blocks)
+                       if block[0] == page_index]
+            placed = []
+            for index in indexes:
+                rect = fitz.Rect(all_blocks[index][1]) & page.rect
+                if rect.is_empty:
+                    continue
+                if any(rect.intersects(box)
+                       for box in protected_boxes[page_index]):
+                    # Redacting here would erase part of an equation.
+                    equation_pages.add(page_index + 1)
+                    continue
+                page.add_redact_annot(rect, fill=(1, 1, 1))
+                placed.append((index, rect))
+            if not placed:
+                continue
+            page.apply_redactions(images=0, graphics=0)
+            for index, rect in placed:
+                if not translated_blocks[index].strip():
+                    continue
+                if not _insert_autoshrink(
+                    page, rect, translated_blocks[index],
+                    all_blocks[index][3], font_path,
+                ):
+                    shrunk_pages.add(page_index + 1)
+        _report(progress_cb, len(groups), len(groups), "validated pdf layout")
+        if warnings is not None:
+            for pages, message in (
+                (figure_pages, "Text drawn over figures was left in the "
+                               "source language"),
+                (equation_pages, "Text touching equations was left in the "
+                                 "source language"),
+                (shrunk_pages, "Some translated text was set in a very "
+                               "small font to fit its original box"),
+            ):
+                if pages:
+                    warnings.append(
+                        f"{message} (pages "
+                        + ", ".join(map(str, sorted(pages))) + ")."
+                    )
+        return src.tobytes(garbage=3, deflate=True)
 
 
 # ===========================================================================
@@ -839,10 +835,10 @@ def detect_pdf_is_scanned(
     pdf_bytes: bytes,
     threshold: int = SCANNED_PDF_TEXT_THRESHOLD,
 ) -> bool:
-    """True when the PDF has essentially no extractable text layer.
+    """Legacy whole-document text heuristic; not a completeness check.
 
-    Cheap PyMuPDF-only check: sums stripped text length across pages and
-    stops as soon as the threshold is crossed.
+    Kept for external callers. Translation routing uses ``inspect_pdf`` per
+    page instead, so mixed documents and short covers are handled correctly.
     """
     import fitz
 
@@ -859,28 +855,10 @@ def detect_pdf_is_scanned(
 
 
 def pdf_needs_ocr(pdf_bytes: bytes) -> bool:
-    """True if translating this PDF to Markdown would invoke the OCR (VL) lane.
+    """Use the same per-page plan as the actual Markdown extraction path."""
+    from .pdf_checks import inspect_pdf
 
-    Mirrors :func:`core.auto_ocr.process_document` per-page routing under the
-    ``auto`` lane: a page is sent to PaddleOCR-VL only when it lacks a real
-    text layer *or* contains math. A plain born-digital PDF (text layer, no
-    equations) returns ``False`` and never touches the OCR worker.
-
-    Used to decide whether a PDF can be handled on a GPU where OCR and the
-    translation model can't be resident at once (e.g. a 24 GB RTX 4090).
-    """
-    import fitz
-
-    from core.auto_ocr import _page_has_math, _page_has_text_layer
-
-    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-    try:
-        for page in doc:
-            if not _page_has_text_layer(page) or _page_has_math(page):
-                return True
-        return False
-    finally:
-        doc.close()
+    return any(plan.route == "ocr" for plan in inspect_pdf(pdf_bytes))
 
 
 def _ocr_progress_bridge(progress_cb: ProgressCb, stage_hint: str):
@@ -908,54 +886,23 @@ def pdf_to_markdown_bundle(
     progress_cb: ProgressCb = None,
     free_translation_vram_first: bool = False,
 ) -> Tuple[str, Dict[str, bytes]]:
-    """Extract ``pdf_bytes`` into (markdown_text, {asset_name: png_bytes}).
+    """Extract a coverage-checked document and its assets.
 
-    ``pdf_type``:
-      * ``"auto"``      — ``auto_ocr.process_document(native_fast_lane=True)``,
-                          picks the fast native lane per page and only routes
-                          scanned / math-heavy pages through PaddleOCR-VL.
-      * ``"force_ocr"`` — ``native_fast_lane=False``: every page through
-                          PaddleOCR-VL. Slower but robust to unreliable
-                          text layers.
-
-    ``free_translation_vram_first``: when True, evict any resident HuggingFace
-    translation model from the GPU *before* spawning the PaddleOCR-VL worker.
-    The OCR worker and a large (3B) translation backend do not fit together on
-    smaller cards; freeing first makes them run sequentially and avoids the
-    watchdog stall. Callers that translate afterwards should set this — the
-    model is reloaded transparently on the next translate call.
+    Blank and short native pages do not require OCR. Only the OCR subset
+    evicts translation weights; ordinary PDF batches keep their model warm.
     """
-    # Deferred imports: pulling auto_ocr eagerly would drag the vision-model
-    # subprocess wiring into every translate_engine import.
-    from core import auto_ocr, doc_ir
+    from core import doc_ir
+    from .pdf_extract import extract_document
 
-    if free_translation_vram_first:
-        # Give the OCR worker a clean GPU. Deferred import avoids a cycle at
-        # module load (engine imports are otherwise lazy inside this package).
-        from .engine import free_translation_vram
-
-        free_translation_vram()
-
-    ocr_prog = _ocr_progress_bridge(progress_cb, "OCR")
-
-    with tempfile.TemporaryDirectory(prefix="tl_translate_ocr_") as tmp:
-        input_path = Path(tmp) / source_name
-        input_path.write_bytes(pdf_bytes)
-        workspace = Path(tmp) / "ws"
-        workspace.mkdir()
-
-        document = auto_ocr.process_document(
-            input_path,
-            workspace,
-            native_fast_lane=(pdf_type != "force_ocr"),
-            progress=ocr_prog,
-            source_name=source_name,
-        )
-        md_text = doc_ir.to_markdown(
-            document, asset_dir="assets", embed_assets=True,
-        )
-        assets = doc_ir.collect_assets(document)
-    return md_text, dict(assets)
+    document = extract_document(
+        pdf_bytes, pdf_type=pdf_type, source_name=source_name,
+        progress=_ocr_progress_bridge(progress_cb, "OCR"),
+        free_translation_vram_first=free_translation_vram_first,
+    )
+    return (
+        doc_ir.to_markdown(document, asset_dir="assets", embed_assets=True),
+        dict(doc_ir.collect_assets(document)),
+    )
 
 
 def translate_pdf_to_markdown(
@@ -966,6 +913,7 @@ def translate_pdf_to_markdown(
     glossary: Glossary = None,
     pdf_type: str = "auto",
     source_name: str = "input.pdf",
+    glossary_case_sensitive: bool = False,
 ) -> Tuple[str, Dict[str, bytes]]:
     """OCR the PDF into markdown, translate that markdown.
 
@@ -978,21 +926,20 @@ def translate_pdf_to_markdown(
     sequentially rather than competing for VRAM. The translation model is
     reloaded automatically for the :func:`translate_markdown` step below.
     """
-    _report(progress_cb, 0, 1, "reading pdf")
-    md_source, assets = pdf_to_markdown_bundle(
-        pdf_bytes,
-        pdf_type=pdf_type,
-        source_name=source_name,
-        progress_cb=progress_cb,
-        free_translation_vram_first=True,
-    )
-    md_translated = translate_markdown(
-        md_source,
-        translate_fn,
-        progress_cb=progress_cb,
-        glossary=glossary,
-    )
-    return md_translated, assets
+    from .engine import translation_session
+
+    with translation_session():
+        _report(progress_cb, 0, 1, "reading pdf")
+        md_source, assets = pdf_to_markdown_bundle(
+            pdf_bytes, pdf_type=pdf_type, source_name=source_name,
+            progress_cb=progress_cb, free_translation_vram_first=True,
+        )
+        md_translated = translate_markdown(
+            md_source, translate_fn, progress_cb=progress_cb,
+            glossary=glossary,
+            glossary_case_sensitive=glossary_case_sensitive,
+        )
+        return md_translated, assets
 
 
 def pack_markdown_bundle(
@@ -1020,24 +967,24 @@ def _split_by_ratio(text: str, ratios: List[float]) -> List[str]:
     Split ``text`` into ``len(ratios)`` pieces whose lengths approximate the
     given ratios, snapping to nearest word boundaries.
     """
-    n = len(ratios)
-    if n <= 1:
+    if len(ratios) <= 1:
         return [text]
     total = sum(ratios) or 1.0
-    targets = [max(1, int(round(len(text) * r / total))) for r in ratios]
-    diff = len(text) - sum(targets)
-    targets[-1] += diff
-
-    pieces: List[str] = []
+    boundaries = [match.end() for match in re.finditer(r"\s+", text)]
+    pieces = []
     cursor = 0
-    for tlen in targets[:-1]:
-        end = cursor + tlen
-        snap = text.find(" ", end)
-        if snap == -1 or snap > cursor + tlen + 40:
-            snap = end
-        pieces.append(text[cursor:snap].strip())
-        cursor = snap + 1 if snap < len(text) else len(text)
-    pieces.append(text[cursor:].strip())
+    cumulative = 0.0
+    for ratio in ratios[:-1]:
+        cumulative += ratio
+        target = round(len(text) * cumulative / total)
+        available = [end for end in boundaries if cursor < end < len(text)]
+        # Without word boundaries, keep the remaining text intact. The PDF
+        # validator blocks any resulting empty boxes rather than cutting words.
+        end = min(available, key=lambda item: abs(item - target)) \
+            if available else len(text)
+        pieces.append(text[cursor:end])
+        cursor = end
+    pieces.append(text[cursor:])
     return pieces
 
 
@@ -1047,47 +994,62 @@ def _insert_autoshrink(
     text: str,
     preferred_size: float,
     font_path: Optional[str] = None,
-) -> None:
+) -> bool:
+    """Insert the entire translation; never clip or shorten it.
+
+    Shrinks the font down to 4.5 pt. If the text still does not fit, it is
+    laid out as HTML scaled to the box. Returns ``False`` in that case so
+    the caller can tell the user that text became very small.
     """
-    Insert ``text`` into ``bbox`` on ``page`` with
-    :meth:`fitz.Page.insert_textbox`, shrinking the font iteratively
-    until it fits.
+    import html as html_lib
 
-    If ``font_path`` points to a Unicode TTF that pymupdf can read, we
-    use it (covers Greek/math/CJK/Arabic). Otherwise we fall back to
-    the Base-14 Helvetica bundled with pymupdf.
-    """
-    fontsize = max(6.0, min(preferred_size, 14.0))
+    import fitz
 
-    if font_path:
-        kw = dict(fontname="tl_uni", fontfile=font_path)
-    else:
-        kw = dict(fontname="helv")
+    from .pdf_checks import PDFIntegrityError
 
-    for _ in range(8):
-        rc = page.insert_textbox(
-            bbox,
-            text,
-            fontsize=fontsize,
-            color=(0, 0, 0),
-            align=0,
-            expandtabs=4,
-            **kw,
+    page_number = page.number + 1
+    font = fitz.Font(fontfile=font_path) if font_path else fitz.Font("helv")
+    if any(not char.isspace() and not font.has_glyph(ord(char), fallback=False)
+           for char in text):
+        raise PDFIntegrityError(
+            "The PDF font does not contain all translated characters. "
+            "Use Markdown or install a suitable font.", [page_number],
         )
-        if rc >= 0:
-            return
-        fontsize *= 0.85
-        if fontsize < 4.5:
+    options = (dict(fontname="tl_uni", fontfile=font_path)
+               if font_path else dict(fontname="helv"))
+    fontsize = max(6.0, min(preferred_size, 14.0))
+    for _ in range(9):
+        shape = page.new_shape()
+        remaining = shape.insert_textbox(
+            bbox, text, fontsize=fontsize, color=(0, 0, 0),
+            align=0, expandtabs=4, **options,
+        )
+        if remaining >= 0:
+            shape.commit()
+            return True
+        if fontsize <= 4.5:
             break
-    # Final attempt: truncate with ellipsis rather than skip entirely.
-    page.insert_textbox(
-        bbox,
-        text[: max(1, int(len(text) * 0.9))].rstrip() + "…",
-        fontsize=max(4.5, fontsize),
-        color=(0, 0, 0),
-        align=0,
-        expandtabs=4,
-        **kw,
+        fontsize = max(4.5, fontsize * 0.85)
+
+    css = f"* {{font-size: {fontsize}pt; margin: 0; padding: 0;}}"
+    archive = None
+    if font_path:
+        archive = fitz.Archive(os.path.dirname(font_path))
+        css = (
+            "@font-face {font-family: tl_uni; src: url("
+            + os.path.basename(font_path) + ");} "
+            + css[:-1] + " font-family: tl_uni;}"
+        )
+    body = html_lib.escape(text).replace("\n", "<br>")
+    spare, _scale = page.insert_htmlbox(
+        bbox, body, css=css, archive=archive, scale_low=0,
+    )
+    if spare >= 0:
+        return False
+    raise PDFIntegrityError(
+        "Translated text does not fit its original PDF box, even at the "
+        "minimum font size. No text was shortened or replaced by ellipses; "
+        "use the Markdown output instead.", [page_number],
     )
 
 
@@ -1101,6 +1063,8 @@ def translate_xlsx(
     translate_fn: TranslateFn,
     progress_cb: ProgressCb = None,
     glossary: Glossary = None,
+    *,
+    glossary_case_sensitive: bool = False,
 ) -> bytes:
     """
     Translate a .xlsx file cell-by-cell, returning a new .xlsx file.
@@ -1156,7 +1120,9 @@ def translate_xlsx(
     ]
     _report(progress_cb, 0, total, "translating xlsx")
     translated_list = shielded_translate_many(
-        texts, translate_fn, glossary=glossary)
+        texts, translate_fn, glossary=glossary,
+        glossary_case_sensitive=glossary_case_sensitive,
+    )
     _report(progress_cb, total, total, "translating xlsx")
 
     for (cell, kind), translated in zip(translatable, translated_list):
@@ -1238,6 +1204,8 @@ def translate_pptx(
     translate_fn: TranslateFn,
     progress_cb: ProgressCb = None,
     glossary: Glossary = None,
+    *,
+    glossary_case_sensitive: bool = False,
 ) -> bytes:
     """
     Translate a .pptx file, returning a new .pptx file.
@@ -1268,7 +1236,9 @@ def translate_pptx(
     texts = [_pptx_paragraph_text(para) for para in paragraphs]
     _report(progress_cb, 0, total, "translating pptx")
     translated_list = shielded_translate_many(
-        texts, translate_fn, glossary=glossary)
+        texts, translate_fn, glossary=glossary,
+        glossary_case_sensitive=glossary_case_sensitive,
+    )
     _report(progress_cb, total, total, "translating pptx")
 
     for para, text, translated in zip(paragraphs, texts, translated_list):

@@ -9,6 +9,13 @@ from __future__ import annotations
 from collections.abc import Callable
 import logging
 
+from .gpu_memory import (
+    clear_cuda_cache,
+    discard_exception_tensors,
+    is_cuda_oom,
+    serialized,
+)
+
 from .chunking import (
     InputTooLongError,
     MAX_SPLIT_RETRIES,
@@ -58,6 +65,7 @@ def _notify(status_cb, message: str) -> None:
         status_cb(message)
 
 
+@serialized
 def generate_translations(
     model,
     tokenizer,
@@ -76,7 +84,9 @@ def generate_translations(
 
     Token counts include special tokens and the MADLAD target prefix. GPU
     work remains batched; only unfinished outputs are retried on smaller
-    source spans, with unchanged per-call token and memory budgets.
+    source spans, with unchanged per-call token and memory budgets. CUDA OOM
+    halves the microbatch independently of split-retry depth, stopping at
+    one; failed tensors/tracebacks are released before clearing the cache.
     """
     if batch_size <= 0 or max_new_tokens <= 0:
         raise ValueError(
@@ -109,7 +119,10 @@ def generate_translations(
     if forced_bos_token_id is not None:
         kwargs["forced_bos_token_id"] = forced_bos_token_id
 
-    def generate_batch(chunks: list[str], depth: int) -> list[str]:
+    microbatch_size = batch_size
+
+    def infer(chunks: list[str]):
+        # Return CPU data only so output retries never retain GPU tensors.
         prepared = [source_prefix + chunk for chunk in chunks]
         encoded = tokenizer(
             prepared,
@@ -132,6 +145,53 @@ def generate_translations(
                 "The model returned an incomplete batch of translations."
             )
         decoded = tokenizer.batch_decode(generated, skip_special_tokens=True)
+        if len(decoded) != len(chunks):
+            raise OutputTruncatedError(
+                "The tokenizer returned an incomplete batch of translations."
+            )
+        return rows, decoded
+
+    def attempt(chunks: list[str]):
+        try:
+            return infer(chunks)
+        except RuntimeError as error:
+            if not is_cuda_oom(error, device, torch):
+                raise
+            # Failed frames can own tensors even after infer has unwound.
+            discard_exception_tensors(error)
+        # Leave the exception scope before collection/empty_cache in caller.
+        return None
+
+    def generate_pending(chunks: list[str], depth: int) -> list[str]:
+        nonlocal microbatch_size
+        outputs = []
+        offset = 0
+        while offset < len(chunks):
+            batch = chunks[offset:offset + microbatch_size]
+            outcome = attempt(batch)
+            if outcome is None:
+                clear_cuda_cache(device)
+                if len(batch) == 1:
+                    message = (
+                        "CUDA out of memory at translation microbatch 1. "
+                        "Free GPU memory or choose a smaller/CPU backend. "
+                        "No partial translation was returned."
+                    )
+                    _notify(status_cb, message)
+                    raise RuntimeError(message) from None
+                microbatch_size = max(1, len(batch) // 2)
+                _notify(
+                    status_cb,
+                    "CUDA out of memory; retrying the same source with "
+                    f"microbatch {microbatch_size}. Token budgets unchanged.",
+                )
+                continue
+            rows, decoded = outcome
+            outputs.extend(finish_batch(batch, rows, decoded, depth))
+            offset += len(batch)
+        return outputs
+
+    def finish_batch(chunks, rows, decoded, depth: int) -> list[str]:
         retry_sources = []
         retry_slots = []
         results = list(decoded)
@@ -165,11 +225,7 @@ def generate_translations(
                 f"(attempt {depth + 1}/{MAX_SPLIT_RETRIES}); "
                 "partial outputs are discarded.",
             )
-            recovered = []
-            for start in range(0, len(retry_sources), batch_size):
-                recovered.extend(generate_batch(
-                    retry_sources[start:start + batch_size], depth + 1,
-                ))
+            recovered = generate_pending(retry_sources, depth + 1)
             for index, smaller, start in retry_slots:
                 results[index] = join_translations(
                     smaller, recovered[start:start + len(smaller)],
@@ -177,11 +233,13 @@ def generate_translations(
         return results
 
     translated = []
-    for start in range(0, len(flat), batch_size):
-        batch = flat[start:start + batch_size]
-        translated.extend(generate_batch(batch, 0))
+    start = 0
+    while start < len(flat):
+        batch = flat[start:start + microbatch_size]
+        translated.extend(generate_pending(batch, 0))
+        start += len(batch)
         if progress_cb is not None:
-            progress_cb(start + len(batch), len(flat))
+            progress_cb(start, len(flat))
 
     results = []
     offset = 0

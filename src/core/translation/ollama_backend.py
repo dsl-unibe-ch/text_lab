@@ -18,6 +18,7 @@ from collections.abc import Callable, Mapping
 import logging
 from typing import Any
 
+from .gpu_memory import serialized
 from .chunking import (
     MAX_SPLIT_RETRIES,
     InputTooLongError,
@@ -224,6 +225,103 @@ def _translate_chunk(
     return join_translations([text], [content])
 
 
+_ACTIVE_OLLAMA = None
+_OWNED_OLLAMA = None
+
+
+def _canonical_model(name: str) -> str:
+    return name if ":" in name.rsplit("/", 1)[-1] else name + ":latest"
+
+
+def _running_models(client):
+    """Unknown residency must never be treated as ownership permission."""
+    try:
+        response = client.ps()
+        models = _field(response, "models")
+        if not isinstance(models, (list, tuple)):
+            return None
+        names = set()
+        for model in models:
+            name = _field(model, "model") or _field(model, "name")
+            if not isinstance(name, str) or not name:
+                return None
+            names.add(_canonical_model(name))
+        return names
+    except Exception:
+        # Missing legacy API / disconnected service: cannot prove ownership.
+        return None
+
+
+@serialized
+def release_ollama_model() -> None:
+    """Unload only the model this translator observed absent before loading.
+
+    Never enumerate-and-unload other jobs, kill a server, or unload a model
+    already resident before translation. Ollama exposes no ownership leases:
+    another process sharing the *same* model cannot be isolated by this
+    process-local guard. Use a dedicated service for cross-process isolation.
+    """
+    global _ACTIVE_OLLAMA, _OWNED_OLLAMA
+
+    if _OWNED_OLLAMA is not None:
+        client, name = _OWNED_OLLAMA
+        running = _running_models(client)
+        if running is None:
+            raise RuntimeError(
+                "Cannot verify the translation-owned Ollama model's "
+                "residency; GPU handoff stopped rather than unloading "
+                "an unverified model."
+            )
+        if _canonical_model(name) in running:
+            unload = getattr(client, "generate", None)
+            if unload is None:
+                raise RuntimeError(
+                    "This Ollama client cannot release the translation "
+                    "model. GPU handoff stopped."
+                )
+            unload(model=name, keep_alive=0)
+            remaining = _running_models(client)
+            if (remaining is None
+                    or _canonical_model(name) in remaining):
+                raise RuntimeError(
+                    "Ollama has not released the translation model; "
+                    "GPU handoff stopped."
+                )
+    _OWNED_OLLAMA = None
+    _ACTIVE_OLLAMA = None
+
+
+@serialized
+def prepare_ollama_model(model_name: str) -> None:
+    """Evict HF before Ollama use and conservatively track model ownership."""
+    global _ACTIVE_OLLAMA, _OWNED_OLLAMA
+
+    import ollama
+    from . import engine
+
+    current = (ollama, _canonical_model(model_name))
+    if _ACTIVE_OLLAMA != current:
+        release_ollama_model()
+    if engine._ACTIVE_HF_SIGNATURE is not None:
+        engine._free_hf_cache()
+    running = _running_models(ollama)
+    if running is not None and current[1] not in running:
+        _OWNED_OLLAMA = (ollama, model_name)
+    _ACTIVE_OLLAMA = current
+
+
+@serialized
+def ollama_model_is_loaded(model_name: str) -> bool:
+    """Check actual residency, including server eviction/keep-alive expiry."""
+    if _ACTIVE_OLLAMA is None:
+        return False
+    client, active = _ACTIVE_OLLAMA
+    canonical = _canonical_model(model_name)
+    running = _running_models(client)
+    return active == canonical and running is not None and canonical in running
+
+
+@serialized
 def translate_ollama(
     text: str,
     src_lang_name: str,
@@ -252,6 +350,7 @@ def translate_ollama(
         chunks = [split_text(line, _estimate_tokens, budget) for line in lines]
         import ollama
 
+        prepare_ollama_model(model_name)
         total = sum(len(parts) for parts in chunks)
         completed = 0
         translated = []

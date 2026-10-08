@@ -21,7 +21,9 @@ Backend-specific adapters convert them internally.
 
 NOTE: The first call for a given (backend, model) pair downloads the model
 into ``HF_HOME`` (``/opt/huggingface``), which is bind-mounted from research
-storage. Subsequent calls are cache hits.
+storage. Only the active HF model remains cached. All model lifecycle and
+inference work shares the reentrant ``translation_session()`` guard; OCR
+callers hold that guard across eviction, OCR, and subsequent translation.
 """
 
 from __future__ import annotations
@@ -34,12 +36,25 @@ from .chunking import (
     split_into_sentences,
     translate_lines,
 )
-from .gpu_profile import resolve_batch_size
+from .gpu_memory import (
+    clear_cuda_cache,
+    discard_exception_tensors,
+    is_cuda_device,
+    is_cuda_oom,
+    serialized,
+    translation_session,
+)
+from .gpu_profile import cap_batch_size, resolve_batch_size
 from .hf_backend import (
     DEFAULT_NUM_BEAMS,
     generate_translations,
 )
-from .ollama_backend import translate_ollama
+from .ollama_backend import (
+    ollama_model_is_loaded,
+    prepare_ollama_model,
+    release_ollama_model,
+    translate_ollama,
+)
 
 # ---------------------------------------------------------------------------
 # Backend registry
@@ -90,12 +105,93 @@ def flores_to_iso2(code: str) -> Optional[str]:
     return _FLORES_TO_ISO2.get(code)
 
 
+_ACTIVE_HF_SIGNATURE = None
+_ACTIVE_HF_DEVICE = None
+
+
 def _resolve_device(device: Optional[str]) -> str:
     import torch
 
-    return device or ("cuda" if torch.cuda.is_available() else "cpu")
+    if device is not None and not is_cuda_device(device):
+        return device
+    if not torch.cuda.is_available():
+        return "cpu"
+    if device is None or device == "cuda":
+        return f"cuda:{torch.cuda.current_device()}"
+    return device
 
 
+def _free_hf_cache(device=None) -> None:
+    """Evict only translation loaders; caller holds translation_session."""
+    global _ACTIVE_HF_SIGNATURE, _ACTIVE_HF_DEVICE
+
+    old_device = _ACTIVE_HF_DEVICE
+    _ACTIVE_HF_SIGNATURE = None
+    _ACTIVE_HF_DEVICE = None
+    for loader in (_load_nllb, _load_marian, _load_madlad):
+        clear = getattr(loader, "cache_clear", None)
+        if clear is not None:
+            clear()
+    clear_cuda_cache(old_device or device)
+
+
+def _load_hf(backend, src_lang, tgt_lang, device):
+    """Keep one active HF model, evicting before a backend/pair/device swap."""
+    global _ACTIVE_HF_SIGNATURE, _ACTIVE_HF_DEVICE
+
+    signature = backend_load_signature(backend, src_lang, tgt_lang)
+    dtype = "float16" if is_cuda_device(device) else "float32"
+    if backend in NLLB_MODEL_IDS:
+        loader = _load_nllb
+        args = (NLLB_MODEL_IDS[backend], device, dtype)
+    elif backend in MADLAD_MODEL_IDS:
+        loader = _load_madlad
+        args = (MADLAD_MODEL_IDS[backend], device, dtype)
+    elif backend == "opus-mt":
+        src_iso = flores_to_iso2(src_lang)
+        tgt_iso = flores_to_iso2(tgt_lang)
+        if not src_iso or not tgt_iso:
+            raise ValueError(
+                f"OPUS-MT has no ISO-2 mapping for {src_lang} -> {tgt_lang}. "
+                "Try the NLLB backend."
+            )
+        loader = _load_marian
+        args = (opus_mt_model_for(src_iso, tgt_iso), device)
+    else:
+        raise ValueError(f"Not an HF seq2seq backend: {backend}")
+
+    release_ollama_model()
+    if (_ACTIVE_HF_SIGNATURE != signature or _ACTIVE_HF_DEVICE != device):
+        _free_hf_cache()
+    loaded = None
+    try:
+        loaded = loader(*args)
+    except OSError as error:
+        if backend != "opus-mt":
+            raise
+        raise RuntimeError(
+            f"No OPUS-MT model available for {src_lang} -> {tgt_lang}. "
+            "Try the NLLB backend instead."
+        ) from error
+    except RuntimeError as error:
+        import torch
+
+        if not is_cuda_oom(error, device, torch):
+            raise
+        discard_exception_tensors(error)
+    if loaded is None:
+        _free_hf_cache(device)
+        raise RuntimeError(
+            "CUDA out of memory while loading the translation model. "
+            "Reducing batches cannot fit model weights; free GPU memory "
+            "or choose a smaller/CPU backend."
+        ) from None
+    _ACTIVE_HF_SIGNATURE = signature
+    _ACTIVE_HF_DEVICE = device
+    return loaded
+
+
+@serialized
 def _translate_chunks_hf(
     chunks: List[str],
     src_lang: str,
@@ -117,16 +213,19 @@ def _translate_chunks_hf(
     if not chunks:
         return []
 
+    if batch_size is not None and batch_size <= 0:
+        raise ValueError("Batch size must be positive.")
+    device = _resolve_device(device)
+    tokenizer, model = _load_hf(backend, src_lang, tgt_lang, device)
+    # Keep the legacy one-argument resolver seam for integrations/fakes.
     if batch_size is None:
         batch_size = resolve_batch_size(backend)
-
-    device = _resolve_device(device)
+    batch_size = cap_batch_size(
+        backend, batch_size, device, num_beams=num_beams,
+    )
     source_prefix = ""
 
     if backend in NLLB_MODEL_IDS:
-        dtype_name = "float16" if device == "cuda" else "float32"
-        tokenizer, model = _load_nllb(
-            NLLB_MODEL_IDS[backend], device, dtype_name)
         tokenizer.src_lang = src_lang
         forced_bos_token_id = tokenizer.convert_tokens_to_ids(tgt_lang)
         if (forced_bos_token_id is None
@@ -134,9 +233,6 @@ def _translate_chunks_hf(
             raise ValueError(
                 f"Target language {tgt_lang} is not supported by NLLB.")
     elif backend in MADLAD_MODEL_IDS:
-        dtype_name = "float16" if device == "cuda" else "float32"
-        tokenizer, model = _load_madlad(
-            MADLAD_MODEL_IDS[backend], device, dtype_name)
         tgt_iso = flores_to_iso2(tgt_lang)
         if not tgt_iso:
             raise ValueError(
@@ -147,22 +243,6 @@ def _translate_chunks_hf(
         forced_bos_token_id = None
         source_prefix = f"<2{tgt_iso}> "
     elif backend == "opus-mt":
-        src_iso = flores_to_iso2(src_lang)
-        tgt_iso = flores_to_iso2(tgt_lang)
-        if not src_iso or not tgt_iso:
-            raise ValueError(
-                f"OPUS-MT backend does not have an ISO-2 mapping for "
-                f"{src_lang} -> {tgt_lang}. Try the NLLB backend."
-            )
-        model_id = opus_mt_model_for(src_iso, tgt_iso)
-        try:
-            tokenizer, model = _load_marian(model_id, device)
-        except Exception as exc:
-            raise RuntimeError(
-                f"No OPUS-MT model available for {src_iso}->{tgt_iso} "
-                f"({model_id}). "
-                "Try the NLLB backend instead."
-            ) from exc
         forced_bos_token_id = None
     else:
         raise ValueError(f"Not an HF seq2seq backend: {backend}")
@@ -210,7 +290,7 @@ def _translate_hf_texts(
 # ---------------------------------------------------------------------------
 
 
-@functools.lru_cache(maxsize=2)
+@functools.lru_cache(maxsize=1)
 def _load_nllb(model_id: str, device: str, dtype_name: str):
     """Lazy-load and cache a NLLB tokenizer/model pair."""
     import torch
@@ -255,7 +335,7 @@ def translate_nllb(
 # ---------------------------------------------------------------------------
 
 
-@functools.lru_cache(maxsize=8)
+@functools.lru_cache(maxsize=1)
 def _load_marian(model_id: str, device: str):
     from transformers import MarianMTModel, MarianTokenizer
 
@@ -290,7 +370,7 @@ def translate_opus_mt(
 # ---------------------------------------------------------------------------
 
 
-@functools.lru_cache(maxsize=2)
+@functools.lru_cache(maxsize=1)
 def _load_madlad(model_id: str, device: str, dtype_name: str):
     """Lazy-load and cache a MADLAD-400 tokenizer/model pair."""
     import torch
@@ -373,6 +453,7 @@ def translate(
     raise ValueError(f"Unknown translation backend: {backend}")
 
 
+@serialized
 def translate_many(
     texts: List[str],
     src_lang: str,
@@ -396,9 +477,9 @@ def translate_many(
     the fast path used by the format-preserving document pipelines, where a
     document may contain hundreds of short paragraphs.
 
-    ``batch_size`` defaults to the current GPU profile (bigger cards -> bigger
-    batches -> faster). Ollama has no batched API, so it falls back to a
-    per-text loop.
+    ``batch_size`` defaults to the allocated GPU profile and is capped by
+    current free memory after model loading, including explicit overrides.
+    Ollama has no batched API, so it falls back to a per-text loop.
     """
     if not texts:
         return []
@@ -570,37 +651,43 @@ def backend_load_signature(
     return (backend,)
 
 
+@serialized
 def free_translation_vram() -> None:
+    """Evict HF and any translation-owned Ollama model under the shared lock.
+
+    For sequential OCR, hold ``with translation_session():`` across this
+    call, OCR, and subsequent translation. Nested calls are safe. HF reloads
+    on the next translation; UI residency is invalidated immediately.
+    Unrelated or unverified Ollama models are never unloaded. Failure to
+    release an owned Ollama model propagates rather than claiming it is free.
     """
-    Evict every cached HuggingFace translation model and release its VRAM.
+    _free_hf_cache()
+    release_ollama_model()
 
-    Text Lab shares one GPU between translation and the PaddleOCR-VL document
-    parser. The VL worker needs ~8-9 GB; a resident 3B translation backend
-    (``madlad-3b`` / ``nllb-large``) plus its generation activations can leave
-    too little headroom, which makes the OCR subprocess stall until its
-    watchdog kills it. Calling this *before* spawning the OCR worker lets the
-    two run sequentially — each fits comfortably even on a 24 GB card — and
-    the translation model is transparently reloaded (``lru_cache``) on the
-    next :func:`translate` call.
+
+@serialized
+def backend_is_loaded(
+    backend: str,
+    src_lang: str = "",
+    tgt_lang: str = "",
+    ollama_model: Optional[str] = None,
+) -> bool:
+    """Validate residency, rather than trusting a stale UI load signature.
+
+    HF state is process-local and includes the selected CUDA logical device.
+    Ollama residency requires a successful current ``ps`` check; legacy
+    clients without that API cannot prove residency and return False.
     """
-    for loader in (_load_nllb, _load_marian, _load_madlad):
-        try:
-            loader.cache_clear()
-        except Exception:
-            pass
-
-    import gc
-
-    gc.collect()
-    try:
-        import torch
-
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-    except Exception:
-        pass
+    if backend == "ollama":
+        return bool(ollama_model) and ollama_model_is_loaded(ollama_model)
+    signature = backend_load_signature(backend, src_lang, tgt_lang)
+    return (
+        _ACTIVE_HF_SIGNATURE == signature
+        and _ACTIVE_HF_DEVICE == _resolve_device(None)
+    )
 
 
+@serialized
 def preload_backend(
     backend: str,
     src_lang: str = "",
@@ -621,36 +708,9 @@ def preload_backend(
     Idempotent — calling twice with the same arguments is essentially a
     no-op because the underlying loaders are ``lru_cache``-d.
     """
-    import torch
-
-    if backend in NLLB_MODEL_IDS:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        dtype_name = "float16" if device == "cuda" else "float32"
-        _load_nllb(NLLB_MODEL_IDS[backend], device, dtype_name)
-        return
-
-    if backend in MADLAD_MODEL_IDS:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        dtype_name = "float16" if device == "cuda" else "float32"
-        _load_madlad(MADLAD_MODEL_IDS[backend], device, dtype_name)
-        return
-
-    if backend == "opus-mt":
-        src_iso = flores_to_iso2(src_lang)
-        tgt_iso = flores_to_iso2(tgt_lang)
-        if not src_iso or not tgt_iso:
-            raise ValueError(
-                f"OPUS-MT has no direct ISO-2 mapping for {src_lang} → "
-                f"{tgt_lang}. Choose the NLLB backend for this pair."
-            )
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        try:
-            _load_marian(opus_mt_model_for(src_iso, tgt_iso), device)
-        except Exception as exc:
-            raise RuntimeError(
-                f"No OPUS-MT model available for {src_iso}→{tgt_iso}. "
-                "Try the NLLB backend instead."
-            ) from exc
+    if (backend in NLLB_MODEL_IDS or backend in MADLAD_MODEL_IDS
+            or backend == "opus-mt"):
+        _load_hf(backend, src_lang, tgt_lang, _resolve_device(None))
         return
 
     if backend == "ollama":
@@ -658,8 +718,7 @@ def preload_backend(
             raise ValueError("The Ollama backend requires an ollama_model.")
         import ollama
 
-        # A one-token request is enough for Ollama to page the model into
-        # VRAM. It stays resident for a while afterwards.
+        prepare_ollama_model(ollama_model)
         ollama.chat(
             model=ollama_model,
             messages=[{"role": "user", "content": "hi"}],

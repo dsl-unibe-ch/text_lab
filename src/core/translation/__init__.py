@@ -9,8 +9,12 @@ Layout
 * :mod:`.chunking`     -- lossless boundaries, budgets, and limit errors.
 * :mod:`.hf_backend`   -- tokenizer-aware batching and bounded recovery.
 * :mod:`.ollama_backend` -- conservative context budgets and stop checks.
-* :mod:`.format`       -- format-preserving document translation for
-                          Markdown, DOCX, PDF, XLSX, PPTX.
+* :mod:`.gpu_memory`   -- serialized lifecycle and CUDA cleanup.
+* :mod:`.gpu_profile`  -- allocated-device and live free-memory budgets.
+* :mod:`.format`       -- document translation and checked reconstruction.
+* :mod:`.pdf_checks`   -- per-page routing and extraction coverage checks.
+* :mod:`.pdf_extract`  -- native/blank extraction and the isolated OCR subset.
+* :mod:`.pdf_workflow` -- independent PDF/Markdown outputs and failure reports.
 * :mod:`.shield`       -- pre/post-translation shielding for URLs,
                           math, code, HTML, placeholders, plus glossary
                           / term-lock support.
@@ -36,6 +40,7 @@ from .engine import (
     MADLAD_MODEL_IDS,
     NLLB_MODEL_IDS,
     TRANSLATION_BACKENDS,
+    backend_is_loaded,
     backend_load_signature,
     chunk_text_for_translation,
     flores_to_iso2,
@@ -74,14 +79,19 @@ from .gpu_profile import (
     detect_gpu_profile,
     ocr_with_translation_allowed,
     resolve_batch_size,
+    sequential_ocr_allowed,
 )
+from .gpu_memory import translation_session
 from .quality import (
     SCORE_UNAVAILABLE,
     estimate_quality,
     is_available,
     quality_badge,
 )
+from .pdf_checks import PDFIntegrityError
+from .pdf_workflow import PDFTranslationResult, translate_pdf_outputs
 from .shield import (
+    ProtectedContentError,
     shield,
     shielded_translate,
     shielded_translate_many,
@@ -92,12 +102,17 @@ __all__ = [
     "InputTooLongError",
     "OutputTruncatedError",
     "TranslationLimitError",
+    "ProtectedContentError",
+    "PDFIntegrityError",
+    "PDFTranslationResult",
+    "translate_pdf_outputs",
     # Engine
     "FORMALITY_CAPABLE_BACKENDS",
     "FORMALITY_CHOICES",
     "MADLAD_MODEL_IDS",
     "NLLB_MODEL_IDS",
     "TRANSLATION_BACKENDS",
+    "backend_is_loaded",
     "backend_load_signature",
     "chunk_text_for_translation",
     "flores_to_iso2",
@@ -133,6 +148,8 @@ __all__ = [
     "detect_gpu_profile",
     "ocr_with_translation_allowed",
     "resolve_batch_size",
+    "sequential_ocr_allowed",
+    "translation_session",
     # Quality estimation
     "SCORE_UNAVAILABLE",
     "estimate_quality",
