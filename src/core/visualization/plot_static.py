@@ -15,9 +15,10 @@ from wordcloud import STOPWORDS, WordCloud
 from core.visualization.viz_config import CUSTOM_CODE_TIMEOUT
 from core.visualization.viz_utils import (
     _strip_show_calls,
+    describe_code_error,
     get_plot_path,
     load_data_safely,
-    time_limit,
+    run_generated_code,
 )
 
 
@@ -195,8 +196,11 @@ def generate_custom_static_plot_impl(
     The LLM may either assign its figure to `fig`, or just call seaborn/matplotlib
     directly; we save the current active figure in either case.
     """
+    columns: list[str] = []
+    clean_code = ""
     try:
         df = load_data_safely(data_file_path)
+        columns = [str(c) for c in df.columns]
 
         # Pass as a single dict (used as both globals and locals) so that nested
         # scopes like list comprehensions can also resolve `df`, `sns`, etc.
@@ -225,8 +229,7 @@ def generate_custom_static_plot_impl(
         # Close any stale figures from previous runs in this process.
         plt.close("all")
 
-        with time_limit(CUSTOM_CODE_TIMEOUT):
-            exec(clean_code, local_scope)
+        run_generated_code(clean_code, local_scope, CUSTOM_CODE_TIMEOUT)
 
         # Prefer an explicit `fig` if the LLM created one; otherwise use the
         # currently active matplotlib figure.
@@ -253,7 +256,8 @@ def generate_custom_static_plot_impl(
         return "Error: Your code must not call exit() or sys.exit(). Remove that call."
     except Exception as e:
         plt.close("all")
-        return f"Error executing custom static plot code: {str(e)}"
+        detail = describe_code_error(e, clean_code, columns)
+        return f"Error executing custom static plot code: {detail}"
     
 
 def plot_static_lineplot_impl(

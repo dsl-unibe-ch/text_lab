@@ -25,39 +25,15 @@ LAST_LOAD_TRUNCATED: dict[str, bool] = {}
 # over 30 columns). Most filesystems cap a file name at 255 bytes.
 MAX_PLOT_NAME_CHARS: int = 100
 
-# Long free-text cells must not be copied into model prompts: they waste tokens
-# and, when a model echoes them into tool-call arguments, can break tool-call
-# parsing (e.g. Qwen's XML tool-call format, which Ollama parses strictly).
-PREVIEW_CELL_MAX_CHARS: int = 60
-
 
 def shorten_text(value: object, limit: int) -> str:
     """Return ``value`` as a single-line string of at most ``limit`` characters.
 
-    Whitespace (including newlines) is collapsed so multi-line text cells do not
-    break tabular previews; truncated values end with ``"..."``.
+    Whitespace (including newlines) is collapsed so long free text never ends
+    up verbatim in a model prompt; truncated values end with ``"..."``.
     """
     flat = " ".join(str(value).split())
     return flat if len(flat) <= limit else flat[: max(limit - 3, 0)] + "..."
-
-
-def format_data_preview(df: pd.DataFrame, max_cell_chars: int = PREVIEW_CELL_MAX_CHARS) -> str:
-    """Render a small DataFrame preview for a model prompt with long text cells shortened.
-
-    Args:
-        df: The preview rows (typically the first few rows of the dataset).
-        max_cell_chars: Maximum characters kept per text cell.
-
-    Returns:
-        The ``DataFrame.to_string()`` table of the shortened preview.
-    """
-    preview = df.copy()
-    for column in preview.columns:
-        if not pd.api.types.is_numeric_dtype(preview[column]):
-            preview[column] = preview[column].map(
-                lambda v: shorten_text(v, max_cell_chars) if isinstance(v, str) else v
-            )
-    return preview.to_string()
 
 
 def _read_csv_with_fallback(file_path: str, sep: str = ",", nrows: int | None = None) -> pd.DataFrame:
@@ -234,6 +210,76 @@ def time_limit(seconds: float) -> Iterator[None]:
     finally:
         signal.setitimer(signal.ITIMER_REAL, 0)
         signal.signal(signal.SIGALRM, previous_handler)
+
+
+# File name given to model-written code when compiling it, so tracebacks can
+# be matched back to the generated code's own lines.
+GENERATED_CODE_FILENAME: str = "<generated code>"
+# Upper bound for the column list appended to code errors sent to the model.
+ERROR_COLUMNS_MAX_CHARS: int = 600
+
+
+def run_generated_code(code: str, scope: dict, timeout: float) -> None:
+    """Compile and execute model-written code in ``scope`` under a time limit.
+
+    Compiling under ``GENERATED_CODE_FILENAME`` lets ``describe_code_error``
+    report the exact failing line of the generated code.
+
+    Raises:
+        SyntaxError: If the code does not compile.
+        TimeoutError: If it runs longer than ``timeout`` seconds.
+        Exception: Whatever the generated code itself raises.
+    """
+    compiled = compile(code, GENERATED_CODE_FILENAME, "exec")
+    with time_limit(timeout):
+        exec(compiled, scope)
+
+
+def _generated_code_line(exc: BaseException) -> int | None:
+    """Return the line of the generated code where ``exc`` was raised, if any.
+
+    For errors raised inside library calls the innermost generated-code frame
+    is used, i.e. the line of the model's code that made the failing call.
+    """
+    if isinstance(exc, SyntaxError) and exc.filename == GENERATED_CODE_FILENAME:
+        return exc.lineno
+    line_no = None
+    tb = exc.__traceback__
+    while tb is not None:
+        if tb.tb_frame.f_code.co_filename == GENERATED_CODE_FILENAME:
+            line_no = tb.tb_lineno
+        tb = tb.tb_next
+    return line_no
+
+
+def describe_code_error(exc: BaseException, code: str, columns: list[str]) -> str:
+    """Explain a failure of model-written code so the model can fix it in one retry.
+
+    The bare exception text is often too terse to act on (a pandas
+    ``KeyError`` is just the quoted key). This adds the exception type, the
+    failing line of the generated code, and the dataset's column names.
+
+    Args:
+        exc: The exception raised while compiling or running the code.
+        code: The code that was executed.
+        columns: The dataset's column names (empty if the data did not load).
+
+    Returns:
+        A multi-line description, e.g.::
+
+            KeyError: 'Radius_mean'
+            At line 3: fig = px.scatter(df, x='Radius_mean', y='area_mean')
+            Available columns: radius_mean, texture_mean, ...
+    """
+    lines = [f"{type(exc).__name__}: {exc}"]
+    line_no = _generated_code_line(exc)
+    code_lines = code.splitlines()
+    if line_no and 1 <= line_no <= len(code_lines):
+        lines.append(f"At line {line_no}: {code_lines[line_no - 1].strip()}")
+    if columns:
+        listed = shorten_text(", ".join(columns), ERROR_COLUMNS_MAX_CHARS)
+        lines.append(f"Available columns: {listed}")
+    return "\n".join(lines)
 
 
 def get_plot_path(data_file_path: str, plot_name: str, ext: str = ".json") -> str:

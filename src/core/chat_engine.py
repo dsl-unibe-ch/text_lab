@@ -586,6 +586,11 @@ def get_synthesis_generator(
 
 # --- Tool Routing (Data Analysis Supervisor) ---
 
+# The router makes a yes/no decision, which should be predictable: the same
+# question must not route to analysis one time and to plain chat the next.
+# Temperature does not affect speed and does not make Ollama reload the model.
+ROUTER_TEMPERATURE = 0.1
+
 ROUTER_SYSTEM_PROMPT = (
     "You are a routing supervisor for a chat assistant. The user is chatting and has "
     "uploaded a tabular dataset (a schema is provided below). Decide whether answering "
@@ -667,6 +672,7 @@ def decide_tool_use(
             model=model_name,
             messages=router_messages,
             tools=[ANALYZE_DATA_TOOL],
+            options={"temperature": ROUTER_TEMPERATURE},
         )
     except Exception:
         # Router failed (e.g. model lacks tool support) — fall back to plain chat.

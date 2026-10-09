@@ -86,6 +86,12 @@ class FakeSession:
 
 
 @pytest.fixture(autouse=True)
+def fake_schema(monkeypatch):
+    """Serve the dataset summary without reading a data file."""
+    monkeypatch.setattr(viz_agent, "get_all_columns_summary_impl", lambda path: SCHEMA)
+
+
+@pytest.fixture(autouse=True)
 def fake_server(monkeypatch):
     """Replace the MCP server start-up; records how often a server was started."""
     starts = []
@@ -340,7 +346,6 @@ def test_plot_only_run_uses_template_summary(monkeypatch):
         _plan(interactive="Histogram of age", stats="None"),
     ])
     monkeypatch.setattr(viz_agent, "chat_no_think", chat)
-    monkeypatch.setattr(viz_agent, "get_all_columns_summary_impl", lambda path: SCHEMA)
     monkeypatch.setattr(viz_agent, "_run_worker_agent", _fake_worker({
         "interactive": {"plots": ["Interactive Histogram: Age"], "completed": True},
     }))
@@ -359,7 +364,6 @@ def test_stats_run_writes_summary_without_tools(monkeypatch):
         _reply("Age and income correlate (r = 0.9)."),
     ])
     monkeypatch.setattr(viz_agent, "chat_no_think", chat)
-    monkeypatch.setattr(viz_agent, "get_all_columns_summary_impl", lambda path: SCHEMA)
     stats_item = {"title": "Correlation Analysis", "result": "| r | 0.9 |", "code": ""}
     monkeypatch.setattr(viz_agent, "_run_worker_agent", _fake_worker(
         {"stats": {"stats": ["| r | 0.9 |"], "completed": True}},
@@ -388,7 +392,7 @@ def test_one_plan_call_can_fill_every_specialist(monkeypatch):
     monkeypatch.setattr(viz_agent, "chat_no_think", chat)
 
     tasks, _ = asyncio.run(viz_agent._plan_tasks(
-        [{"role": "user", "content": "Plots and stats"}], "fake", lambda *_: None
+        [{"role": "user", "content": "Plots and stats"}], SCHEMA, "fake", lambda *_: None
     ))
 
     assert tasks == [
@@ -418,7 +422,7 @@ def test_invalid_plan_json_falls_back_to_the_reply_text(monkeypatch):
     logs = []
 
     tasks, reply = asyncio.run(viz_agent._plan_tasks(
-        [{"role": "user", "content": "Plot age"}], "fake",
+        [{"role": "user", "content": "Plot age"}], SCHEMA, "fake",
         lambda level, msg: logs.append((level, msg)),
     ))
 
@@ -438,7 +442,7 @@ def test_plan_json_is_found_despite_surrounding_noise(monkeypatch, wrap):
     monkeypatch.setattr(viz_agent, "chat_no_think", chat)
 
     tasks, _ = asyncio.run(viz_agent._plan_tasks(
-        [{"role": "user", "content": "Plot age"}], "fake", lambda *_: None
+        [{"role": "user", "content": "Plot age"}], SCHEMA, "fake", lambda *_: None
     ))
 
     assert tasks == [("interactive", "Histogram of age")]
@@ -452,7 +456,6 @@ def test_leaked_control_tokens_are_removed_from_model_text():
 def test_all_workers_share_one_mcp_server(monkeypatch, fake_server):
     chat = ScriptedChat([_plan(interactive="Histogram", static="Histogram for print")])
     monkeypatch.setattr(viz_agent, "chat_no_think", chat)
-    monkeypatch.setattr(viz_agent, "get_all_columns_summary_impl", lambda path: SCHEMA)
     sessions = []
 
     async def fake_worker(session, agent_role, task_instruction, **_):
@@ -480,7 +483,6 @@ def test_server_start_failure_gives_failed_reports_not_a_crash(monkeypatch):
 
     chat = ScriptedChat([_plan(interactive="Histogram")])
     monkeypatch.setattr(viz_agent, "chat_no_think", chat)
-    monkeypatch.setattr(viz_agent, "get_all_columns_summary_impl", lambda path: SCHEMA)
     monkeypatch.setattr(viz_agent, "_mcp_session", broken_session)
 
     result = asyncio.run(viz_agent.run_analysis(
@@ -520,3 +522,15 @@ def test_distinct_plots_are_kept_and_exact_repeats_merged():
 
     assert [p["code"] for p in plots] == ["code A", "code B"]
     assert plots[0]["path"] == "/p/hist_age_3.json"  # latest file of the repeat
+
+
+def test_supervisor_plans_from_the_dataset_summary(monkeypatch):
+    chat = ScriptedChat([_plan(interactive="Histogram of age")])
+    monkeypatch.setattr(viz_agent, "chat_no_think", chat)
+
+    asyncio.run(viz_agent._plan_tasks(
+        [{"role": "user", "content": "User Request: Plot age"}], SCHEMA, "fake", lambda *_: None
+    ))
+
+    system_prompt = chat.calls[0]["messages"][0]["content"]
+    assert system_prompt.endswith(f"Dataset summary:\n{SCHEMA}\n")

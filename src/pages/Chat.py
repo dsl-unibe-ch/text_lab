@@ -52,8 +52,8 @@ from core.model_config import get_available_models, is_high_memory_gpu
 
 # --- Data-analysis tool integration (reuses the Visualisation MAS, unchanged) ---
 from core.visualization.viz_agent import run_analysis
-from core.visualization.viz_config import MAX_ROWS, get_tool_label
-from core.visualization.viz_utils import format_data_preview, get_fast_data_preview, save_data_file
+from core.visualization.viz_config import get_tool_label
+from core.visualization.viz_utils import save_data_file
 from core.visualization.plot_data import get_all_columns_summary_impl
 
 _SRC_DIR = pathlib.Path(__file__).resolve().parent.parent
@@ -173,7 +173,6 @@ def _render_analysis_payload(payload: dict, run_id: str) -> None:
 def _start_chat_analysis_thread(
     instruction: str,
     data_file_path: str,
-    file_name: str,
     model_name: str,
 ) -> None:
     """Run the visualisation MAS in a daemon thread so the chat UI stays responsive."""
@@ -184,18 +183,8 @@ def _start_chat_analysis_thread(
 
     def _worker() -> None:
         try:
-            head_df = get_fast_data_preview(data_file_path, file_name, nrows=5)
-            head_str = format_data_preview(head_df) if head_df is not None else "(preview unavailable)"
-            messages = [
-                {
-                    "role": "user",
-                    "content": (
-                        f"User Request: {instruction}\n\n"
-                        f"Data Head:\n{head_str}\n\n"
-                        f"Note: datasets larger than {MAX_ROWS:,} rows will be truncated."
-                    ),
-                }
-            ]
+            # The agent adds the compact dataset summary to the supervisor prompt.
+            messages = [{"role": "user", "content": f"User Request: {instruction}"}]
 
             def _log_cb(log_type: str, msg: str) -> None:
                 live_logs.append((log_type, msg))
@@ -453,9 +442,7 @@ def main():
             with st.chat_message("user"):
                 st.markdown(user_text)
             st.session_state["messages"].append({"role": "user", "content": user_text})
-            _start_chat_analysis_thread(
-                instruction or user_text, data_file_path, data_file_name, model_name
-            )
+            _start_chat_analysis_thread(instruction or user_text, data_file_path, model_name)
             st.rerun()
             return
         # Otherwise fall through to the normal chat path below.

@@ -640,16 +640,22 @@ async def _interpret_stats(
 # =========================================================================
 
 async def _plan_tasks(
-    messages: list[dict[str, Any]], model_name: str, log: LogFn
+    messages: list[dict[str, Any]], schema: str, model_name: str, log: LogFn
 ) -> tuple[list[tuple[str, str]], str]:
     """Make the single supervisor planning call and read its JSON plan.
+
+    The supervisor gets the compact dataset summary (column names grouped by
+    type, sample categories) rather than raw rows: it needs names and types to
+    plan, and raw values on wide datasets only cost tokens and tempt small
+    models into copying every column into their instructions.
 
     Returns:
         ``(tasks, direct_reply)`` where ``tasks`` is a de-duplicated list of
         ``(agent_role, task_instruction)`` pairs in role order. ``direct_reply``
         holds the supervisor's answer when no specialist is needed.
     """
-    supervisor_messages = [{"role": "system", "content": SUPERVISOR_PROMPT}] + messages
+    system_prompt = f"{SUPERVISOR_PROMPT}\nDataset summary:\n{schema}\n"
+    supervisor_messages = [{"role": "system", "content": system_prompt}] + messages
     response = await _chat(model_name, supervisor_messages, json_schema=PLAN_SCHEMA)
     content = _model_text(response["message"])
 
@@ -867,8 +873,13 @@ async def run_analysis(
 
     summary = ""
     try:
+        # Computed once, before planning: the supervisor plans from it and the
+        # concurrent workers reuse it instead of each re-reading the data.
+        schema = await asyncio.to_thread(get_all_columns_summary_impl, data_file_path)
+        truncated = was_last_load_truncated(data_file_path)
+
         try:
-            tasks, direct_reply = await _plan_tasks(messages, model_name, _log)
+            tasks, direct_reply = await _plan_tasks(messages, schema, model_name, _log)
         except Exception as exc:
             reason = _describe_model_error(exc)
             _log("error", f"Supervisor stopped: {reason}")
@@ -880,10 +891,6 @@ async def run_analysis(
             _log("warning", "Analysis cancelled by user.")
         else:
             _log("info", f"Supervisor planned {len(tasks)} task(s).")
-            # Computed once here so concurrent workers do not each re-read the data.
-            schema = await asyncio.to_thread(get_all_columns_summary_impl, data_file_path)
-            truncated = was_last_load_truncated(data_file_path)
-
             reports = await _run_workers_on_shared_server(
                 tasks, mcp_server_script, data_file_path, schema, model_name,
                 plot_results, stats_results, _log, cancel_event,

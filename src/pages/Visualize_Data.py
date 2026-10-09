@@ -31,7 +31,7 @@ from core.artifacts import ensure_artifacts_dir
 from core.chat_engine import check_ollama_server, get_gpu_name
 from core.visualization.viz_agent import run_analysis
 from core.visualization.viz_config import DEFAULT_PROMPT, MAX_ROWS, get_tool_label
-from core.visualization.viz_utils import format_data_preview, get_fast_data_preview, save_data_file
+from core.visualization.viz_utils import get_fast_data_preview, save_data_file
 from core.model_config import get_available_models, is_high_memory_gpu
 
 # --- Page Configuration ---
@@ -424,28 +424,15 @@ def _start_analysis_thread(
 
                 final_user_prompt = user_prompt.strip() or DEFAULT_PROMPT
 
+                content = f"User Request: {final_user_prompt}"
                 valid_selected = [c for c in selected_columns if c in df.columns]
                 if valid_selected:
-                    head_df = df[valid_selected]
-                    column_instruction = (
-                        f"Column Selection: Focus ONLY on these columns chosen by the user: "
-                        f"{', '.join(valid_selected)}\n\n"
+                    content += (
+                        "\n\nColumn Selection: Focus ONLY on these columns chosen by the "
+                        f"user: {', '.join(valid_selected)}"
                     )
-                else:
-                    head_df = df
-                    column_instruction = ""
-
-                messages = [
-                    {
-                        "role": "user",
-                        "content": (
-                            f"User Request: {final_user_prompt}\n\n"
-                            f"{column_instruction}"
-                            f"Data Head:\n{format_data_preview(head_df)}\n\n"
-                            f"Note: datasets larger than {MAX_ROWS:,} rows will be truncated."
-                        ),
-                    }
-                ]
+                # The agent adds the compact dataset summary to the supervisor prompt.
+                messages = [{"role": "user", "content": content}]
 
                 live_logs.append(("info", "Starting Supervisor Agent..."))
 

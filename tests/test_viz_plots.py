@@ -99,15 +99,6 @@ def test_schema_reports_long_text_columns_without_raw_text(text_data_file):
     assert "at length" not in schema
 
 
-def test_data_preview_shortens_text_cells_to_one_line(text_data_file):
-    df = pd.read_csv(text_data_file)
-    preview = viz_utils.format_data_preview(df, max_cell_chars=30)
-
-    assert "at length" not in preview
-    assert len(preview.splitlines()) == len(df) + 1  # header + one line per row
-    assert "neg" in preview and "5" in preview
-
-
 def test_custom_code_cannot_modify_the_cached_dataset(data_file):
     code = (
         "df.drop(columns=['radius_mean'], inplace=True)\n"
@@ -160,3 +151,20 @@ def test_exit_in_custom_code_returns_an_error_instead_of_stopping(data_file, cod
 
     for result in (output, static_output):
         assert result.startswith("Error") and "exit()" in result
+
+
+def test_custom_code_errors_name_the_line_and_the_columns(data_file):
+    code = "x = 1\nfig = px.histogram(df, x=df['Radius_mean'])"
+    output = generate_custom_plotly_impl(data_file, code, "typo")
+
+    assert "KeyError: 'Radius_mean'" in output
+    assert "At line 2: fig = px.histogram(df, x=df['Radius_mean'])" in output
+    assert "Available columns: diagnosis, radius_mean" in output
+
+
+def test_custom_code_syntax_errors_name_the_line(data_file):
+    output = plot_static.generate_custom_static_plot_impl(
+        data_file, "x = 1\nif x\n    y = 2", "syntax"
+    )
+
+    assert "SyntaxError" in output and "At line 2: if x" in output

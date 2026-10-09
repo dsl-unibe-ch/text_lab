@@ -134,9 +134,10 @@ CRITICAL ROUTING RULES:
 - Word clouds, heatmaps, and pair plots are visualizations — always route them to 'static' (if static is requested) or 'interactive'.
 
 PLANNING RULES:
-1. Analyze the user's request and the provided Data Head.
+1. Analyze the user's request and the dataset summary given below.
 2. Respond with ONE JSON object with exactly these string fields: "interactive", "static", "stats" and "reply". You will not get another chance to delegate.
-3. For EACH of the three specialists decide whether the request needs it. Write a short, self-contained instruction naming the exact columns to use for every specialist that is needed, and leave the field empty ("") for the others.
+3. For EACH of the three specialists decide whether the request needs it. Write a short, self-contained instruction for every specialist that is needed, and leave the field empty ("") for the others.
+   Name only the columns the task actually needs. Never list every column of the dataset, and skip identifier columns (e.g. 'id') and empty columns.
 4. Requests often need several specialists at once. Examples:
    - "plots and statistical analysis" -> fill "interactive" AND "stats".
    - "an interactive plot and a static version for publication" -> fill "interactive" AND "static" with the same plots.

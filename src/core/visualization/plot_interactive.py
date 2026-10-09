@@ -13,8 +13,9 @@ from core.visualization.viz_utils import (
     _strip_show_calls,
     generate_code_snippet,
     get_plot_path,
+    describe_code_error,
     load_data_safely,
-    time_limit,
+    run_generated_code,
 )
 
 
@@ -394,8 +395,11 @@ def generate_custom_plotly_impl(
     """
     Executes custom Python code to generate complex interactive Plotly charts.
     """
+    columns: list[str] = []
+    clean_code = ""
     try:
         df = load_data_safely(data_file_path)
+        columns = [str(c) for c in df.columns]
 
         # Local scope for `exec`.
         # Pass as a single dict (used as both globals and locals) so that nested
@@ -419,9 +423,7 @@ def generate_custom_plotly_impl(
         clean_code = python_code.replace("```python", "").replace("```", "").strip()
         clean_code = _strip_show_calls(clean_code)
 
-        # Execute the custom code
-        with time_limit(CUSTOM_CODE_TIMEOUT):
-            exec(clean_code, local_scope)
+        run_generated_code(clean_code, local_scope, CUSTOM_CODE_TIMEOUT)
 
         # The system prompt enforces that the LLM must assign the output to 'fig'
         if "fig" not in local_scope:
@@ -445,4 +447,5 @@ def generate_custom_plotly_impl(
         # server that every worker of the analysis shares.
         return "Error: Your code must not call exit() or sys.exit(). Remove that call."
     except Exception as e:
-        return f"Error executing custom plotly code: {str(e)}"
+        detail = describe_code_error(e, clean_code, columns)
+        return f"Error executing custom plotly code: {detail}"
