@@ -41,10 +41,12 @@ from core.visualization.plot_static import (
 )
 
 from core.visualization.stats_analysis import (
+    rank_target_correlations_impl,
+    run_association_test_impl,
     run_correlation_impl,
     run_group_comparison_impl,
     run_linear_regression_impl,
-    rank_target_correlations_impl,
+    run_logistic_regression_impl,
 )
 
 # Configure strict logging to prevent interference with stdout/stderr JSON-RPC
@@ -292,14 +294,29 @@ def run_correlation(
 
 @mcp.tool()
 def run_group_comparison(
-    data_file_path: str, target_col: str, group_col: str
+    data_file_path: str, target_col: str, group_col: str, method: str = "parametric"
 ) -> str:
     """
-    Performs T-tests (2 groups) or ANOVA (>2 groups) to see if a numeric variable 
-    (target_col) differs significantly across categories (group_col).
-    Use this before generating boxplots.
+    Tests whether a NUMERIC column (target_col) differs between the groups of a
+    categorical column (group_col). Always reports assumption checks and an effect size.
+    method:
+      'parametric' (default): t-test for 2 groups, one-way ANOVA + Tukey post-hoc for 3+.
+      'nonparametric': Mann-Whitney U for 2 groups, Kruskal-Wallis + pairwise tests for 3+.
+        Use it for ordinal data (Likert scales, ratings, ranks), small groups, or when a
+        parametric run reported doubtful normality.
+    For two categorical columns use run_association_test instead.
     """
-    return run_group_comparison_impl(data_file_path, target_col, group_col)
+    return run_group_comparison_impl(data_file_path, target_col, group_col, method)
+
+
+@mcp.tool()
+def run_association_test(data_file_path: str, x_column: str, y_column: str) -> str:
+    """
+    Tests whether two CATEGORICAL columns are associated (e.g. sex and smoker, faculty and
+    answer). Returns the crosstab with row percentages, a chi-square test (Fisher's exact
+    test for small 2x2 tables) and Cramer's V as the strength of the association.
+    """
+    return run_association_test_impl(data_file_path, x_column, y_column)
 
 
 @mcp.tool()
@@ -313,6 +330,20 @@ def run_linear_regression(
     CRITICAL: predictor_cols MUST be a valid JSON array of strings, e.g., ["col1", "col2"].
     """
     return run_linear_regression_impl(data_file_path, target_col, predictor_cols)
+
+@mcp.tool()
+def run_logistic_regression(
+    data_file_path: str, target_col: str, predictor_cols: list[str]
+) -> str:
+    """
+    Runs a logistic regression for a BINARY outcome (two values such as yes/no, 0/1, M/B).
+    target_col is the binary outcome; predictor_cols are the predictors (numeric or
+    categorical). Returns odds ratios with 95% confidence intervals.
+    For a numeric outcome use run_linear_regression instead.
+    CRITICAL: predictor_cols MUST be a valid JSON array of strings, e.g., ["col1", "col2"].
+    """
+    return run_logistic_regression_impl(data_file_path, target_col, predictor_cols)
+
 
 @mcp.tool()
 def rank_target_correlations(

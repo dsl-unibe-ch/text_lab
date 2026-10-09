@@ -111,7 +111,9 @@ AGENT_TOOLS = {
     "stats": [
         "run_correlation",
         "run_group_comparison",
+        "run_association_test",
         "run_linear_regression",
+        "run_logistic_regression",
         "rank_target_correlations",
     ]
 }
@@ -128,7 +130,7 @@ You do NOT generate plots or run statistical tests yourself.
 You have access to the following specialist agents:
 1. 'interactive': Creates web-ready Plotly charts. (Default for most visualisations)
 2. 'static': Creates Matplotlib/Seaborn/WordCloud charts. (Only use if user explicitly requests static/publication figures or a word cloud)
-3. 'stats': Runs pure statistical tests — Correlations, T-tests, ANOVA, Regression. Returns numbers and tables ONLY. It cannot produce any visual output.
+3. 'stats': Runs pure statistical tests — correlations, group comparisons (t-test, ANOVA, Mann-Whitney, Kruskal-Wallis), associations between two categorical columns (chi-square, Fisher), linear and logistic regression. Returns numbers and tables ONLY. It cannot produce any visual output.
 
 CRITICAL ROUTING RULES:
 - Any task that must produce a visual output (chart, plot, image, word cloud, heatmap) MUST go to 'interactive' or 'static' — even if computing those visuals requires first running statistics internally.
@@ -208,14 +210,18 @@ The dataset schema is provided above. The data is already loaded — you do NOT 
 
 CRITICAL RULES — follow these exactly:
 1. You MUST call the appropriate stats tool immediately. NEVER answer with numbers, p-values, or statistics from your own knowledge — always call the tool and return its output.
-2. For T-tests or ANOVA, use `run_group_comparison`.
-3. For Linear Regression, use `run_linear_regression`. The `predictor_cols` argument MUST be a JSON array, e.g. ["col1", "col2"].
-4. For ranking correlations with a target column, use `rank_target_correlations`.
-5. For a single pairwise correlation between two columns, use `run_correlation`.
-6. Make ALL the tool calls the task needs in a single response.
-7. After the tools return, you will be asked for a short plain-English interpretation of the key numbers (p-value, R², t-stat, etc.).
-8. Do not generate plots. Focus purely on numbers and statistical significance.
-9. If a tool returns an error, correct the column names or parameters and try again.
+2. Choose the tool by the types of the columns involved:
+   - numeric vs numeric: `run_correlation` (one pair) or `rank_target_correlations` (one target against all numeric columns).
+   - numeric vs groups of a categorical column: `run_group_comparison` (t-test / ANOVA).
+     Use method='nonparametric' for ordinal data (Likert scales, ratings, ranks), for small groups, or when a parametric run reports doubtful normality.
+   - categorical vs categorical: `run_association_test` (chi-square / Fisher).
+   - numeric outcome explained by predictors: `run_linear_regression`.
+   - binary outcome (two values such as yes/no) explained by predictors: `run_logistic_regression`.
+3. For both regression tools, the `predictor_cols` argument MUST be a JSON array, e.g. ["col1", "col2"].
+4. Make ALL the tool calls the task needs in a single response.
+5. After the tools return, you will be asked for a short plain-English interpretation of the key numbers (p-values, effect sizes, odds ratios, R²).
+6. Do not generate plots. Focus purely on numbers and statistical significance.
+7. If a tool returns an error, correct the column names or parameters, or switch to the tool the error suggests, and try again.
 """
 
 # =========================================================================
@@ -241,7 +247,9 @@ _TOOL_LABELS: dict[str, str] = {
     "generate_custom_static_plot": "Custom Static Chart",
     "plot_static_wordcloud": "Word Cloud",
     "run_correlation": "Correlation Analysis",
-    "run_group_comparison": "Group Comparison (T-test / ANOVA)",
+    "run_group_comparison": "Group Comparison",
+    "run_association_test": "Association Test (Chi-square / Fisher)",
+    "run_logistic_regression": "Logistic Regression",
     "run_linear_regression": "Linear Regression (OLS)",
     "rank_target_correlations": "Feature Correlation Ranking",
 }

@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 import plotly.io as pio
 import pytest
+from scipy import stats as stats_module
 
 from core.visualization import (
     plot_interactive,
@@ -260,7 +261,7 @@ def test_t_test_r_code_matches_pingouins_choice_of_test(r_data_file, r_enabled):
     equal = stats_analysis.run_group_comparison_impl(r_data_file, "radius_mean", "diagnosis")
     assert "```r\n" in equal
     assert "var.equal = TRUE" in equal  # 3 vs 3 rows: pingouin uses Student's t-test
-    assert 'clean_df[["diagnosis"]] == "B"' in equal  # same group order as Python
+    assert 'groups <- c("B", "M")' in equal  # same group order as Python
 
 
 def test_unequal_groups_use_welch_in_r(tmp_path, r_enabled):
@@ -295,3 +296,134 @@ def test_r_generation_errors_never_break_a_tool(r_enabled):
         raise ValueError("boom")
 
     assert r_code.build(broken) == "# The R code could not be generated: boom"
+
+
+# =========================================================================
+# EXTENDED STATISTICS
+# =========================================================================
+
+@pytest.fixture
+def survey_file(tmp_path):
+    """60 deterministic survey-like rows with numeric, group and binary columns."""
+    rng = np.random.RandomState(0)
+    faculty = np.repeat(["Arts", "Law", "Science"], 20)
+    score = np.concatenate([rng.normal(m, 1.0, 20) for m in (3.0, 3.5, 4.5)])
+    sex = np.tile(["F", "M"], 30)
+    smoker = np.where(rng.rand(60) < 0.3, "yes", "no")
+    age = rng.randint(18, 40, 60)
+    dropout = np.where(score + rng.normal(0, 1, 60) < 3.5, "yes", "no")
+    path = tmp_path / "survey.csv"
+    pd.DataFrame({
+        "faculty": faculty, "score": score, "sex": sex, "smoker": smoker,
+        "age": age, "dropout": dropout,
+    }).to_csv(path, index=False)
+    return str(path)
+
+
+def test_parametric_two_groups_reports_assumptions_and_effect_size(survey_file):
+    output = stats_analysis.run_group_comparison_impl(survey_file, "score", "sex")
+
+    assert "Independent t-test (Student's)" in output  # 30 vs 30 rows
+    assert "cohen-d" in output
+    assert "Assumption checks" in output and "Levene's test" in output
+
+
+def test_nonparametric_two_groups_matches_scipy(survey_file, r_enabled):
+    output = stats_analysis.run_group_comparison_impl(
+        survey_file, "score", "sex", method="nonparametric"
+    )
+    df = pd.read_csv(survey_file)
+    u, p = stats_module.mannwhitneyu(
+        df.loc[df.sex == "F", "score"], df.loc[df.sex == "M", "score"],
+        use_continuity=True, alternative="two-sided", method="asymptotic",
+    )
+
+    assert "Mann-Whitney U test" in output
+    assert f"{u:.1f}" in output or f"{u:g}" in output
+    assert "wilcox.test(samples[[1]], samples[[2]], exact = FALSE, correct = TRUE)" in output
+
+
+def test_three_groups_get_post_hoc_tests(survey_file):
+    anova = stats_analysis.run_group_comparison_impl(survey_file, "score", "faculty")
+    kruskal = stats_analysis.run_group_comparison_impl(
+        survey_file, "score", "faculty", method="nonparametric"
+    )
+
+    assert "One-way ANOVA" in anova and "Tukey HSD post-hoc" in anova
+    assert "Kruskal-Wallis test" in kruskal and "Holm-corrected" in kruskal
+    assert "p-holm" in kruskal
+
+
+def test_group_comparison_rejects_bad_input(survey_file):
+    assert "method must be" in stats_analysis.run_group_comparison_impl(
+        survey_file, "score", "sex", method="bayesian")
+    assert "run_association_test" in stats_analysis.run_group_comparison_impl(
+        survey_file, "smoker", "sex")
+
+
+def test_association_test_uses_chi_square_and_reports_cramers_v(survey_file, r_enabled):
+    output = stats_analysis.run_association_test_impl(survey_file, "faculty", "smoker")
+    df = pd.read_csv(survey_file)
+    table = pd.crosstab(df.faculty, df.smoker)
+    chi2_raw = stats_module.chi2_contingency(table, correction=False)[0]
+    cramers_v = (chi2_raw / (table.values.sum() * (min(table.shape) - 1))) ** 0.5
+
+    assert "Chi-square test" in output and "Row percentages" in output
+    assert f"{cramers_v:.4f}"[:5] in output
+    assert "result <- chisq.test(tab)" in output
+
+
+def test_small_two_by_two_table_uses_fisher(tmp_path, r_enabled):
+    path = tmp_path / "small.csv"
+    pd.DataFrame({
+        "treated": ["yes"] * 6 + ["no"] * 6,
+        "cured": ["yes"] * 5 + ["no"] + ["yes"] + ["no"] * 5,
+    }).to_csv(path, index=False)
+    output = stats_analysis.run_association_test_impl(str(path), "treated", "cured")
+
+    assert "Fisher's exact test" in output
+    assert "fisher.test(tab)" in output
+
+
+def test_association_test_rejects_numeric_columns(survey_file):
+    output = stats_analysis.run_association_test_impl(survey_file, "score", "age")
+    assert output.startswith("Error") and "run_correlation" in output
+
+
+def test_logistic_regression_reports_odds_ratios(survey_file, r_enabled):
+    output = stats_analysis.run_logistic_regression_impl(
+        survey_file, "dropout", ["score", "faculty"]
+    )
+
+    assert not output.startswith("Error"), output
+    assert "odds ratio" in output and "McFadden" in output
+    assert "'dropout' coded yes = 1, no = 0" in output
+    assert "reference" in output  # faculty is categorical
+    assert "family = binomial" in output and "confint.default(model)" in output
+
+
+def test_logistic_regression_handles_perfect_separation(tmp_path):
+    path = tmp_path / "separated.csv"
+    pd.DataFrame({
+        "x": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+        "y": [0, 0, 0, 0, 1, 1, 1, 1],
+    }).to_csv(path, index=False)
+    output = stats_analysis.run_logistic_regression_impl(str(path), "y", ["x"])
+
+    assert "separation" in output.lower()
+
+
+def test_logistic_regression_needs_a_binary_outcome(survey_file):
+    output = stats_analysis.run_logistic_regression_impl(survey_file, "faculty", ["score"])
+    assert output.startswith("Error") and "binary outcome" in output
+
+
+@pytest.mark.parametrize("values, expected", [
+    (["no", "yes", "no"], ("yes", "no")),
+    (["B", "M"], ("M", "B")),
+    ([1, 2, 2], (2, 1)),
+    (["apple", "Banana"], ("Banana", "apple")),
+    (["a", "b", "c"], None),
+])
+def test_binary_encoding_is_deterministic(values, expected):
+    assert stats_analysis._binary_encoding(values) == expected

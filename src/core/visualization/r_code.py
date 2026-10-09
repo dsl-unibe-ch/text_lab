@@ -470,31 +470,105 @@ def correlation_test(data_file_path: str, x_column: str, y_column: str,
 
 
 def group_comparison(data_file_path: str, target_col: str, group_col: str,
-                     groups: list[Any], equal_sizes: bool | None) -> str:
-    """Two-sample t-test (2 groups) or one-way ANOVA (3+ groups).
+                     groups: list[Any], equal_sizes: bool | None,
+                     method: str = "parametric", posthoc: bool = False) -> str:
+    """Group comparison mirroring ``run_group_comparison``.
 
     Args:
         groups: The group values in the order the Python tool compared them.
         equal_sizes: For two groups, whether both have the same size. pingouin
             then uses Student's t-test, otherwise Welch's; R's ``t.test``
             defaults to Welch, so ``var.equal`` is set to match.
+        method: 'parametric' (t-test / ANOVA + Tukey) or 'nonparametric'
+            (Mann-Whitney / Kruskal-Wallis + pairwise Mann-Whitney, Holm).
+        posthoc: Whether the Python tool ran post-hoc comparisons.
     """
-    body = f"clean_df <- na.omit(df[, {r_vector([target_col, group_col])}])\n"
-    if len(groups) == 2:
-        target, group = r_str(target_col), r_str(group_col)
+    target, group = r_str(target_col), r_str(group_col)
+    formula = f"{r_col(target_col)} ~ factor({r_col(group_col)})"
+    body = (
+        f"clean_df <- na.omit(df[, {r_vector([target_col, group_col])}])\n"
+        f"groups <- c({', '.join(r_value(g) for g in groups)})\n"
+        f"samples <- lapply(groups, function(g) clean_df[[{target}]][clean_df[[{group}]] == g])\n\n"
+    )
+    if method == "parametric" and len(groups) == 2:
         body += (
-            f"g1 <- clean_df[[{target}]][clean_df[[{group}]] == {r_value(groups[0])}]\n"
-            f"g2 <- clean_df[[{target}]][clean_df[[{group}]] == {r_value(groups[1])}]\n"
             "# The Python version (pingouin) uses Student's t-test when both groups\n"
             "# have the same size and Welch's t-test otherwise.\n"
-            f"result <- t.test(g1, g2, var.equal = {'TRUE' if equal_sizes else 'FALSE'})\n"
-            "print(result)"
+            f"result <- t.test(samples[[1]], samples[[2]], var.equal = "
+            f"{'TRUE' if equal_sizes else 'FALSE'})\n"
+            "print(result)\n"
+        )
+    elif method == "parametric":
+        body += (
+            f"model <- aov({formula}, data = clean_df)\n"
+            "print(summary(model))\n"
+            'ss <- summary(model)[[1]][["Sum Sq"]]\n'
+            'cat("Partial eta squared:", ss[1] / sum(ss), "\\n")\n'
+        )
+        if posthoc:
+            body += "print(TukeyHSD(model))\n"
+    elif len(groups) == 2:
+        body += (
+            "# exact = FALSE gives the same large-sample p-value (with continuity\n"
+            "# correction) as the Python version.\n"
+            "result <- wilcox.test(samples[[1]], samples[[2]], exact = FALSE, correct = TRUE)\n"
+            "print(result)\n"
+            "n1 <- length(samples[[1]])\n"
+            "n2 <- length(samples[[2]])\n"
+            'cat("Rank-biserial r:", 2 * unname(result$statistic) / (n1 * n2) - 1, "\\n")\n'
         )
     else:
         body += (
-            f"model <- aov({r_col(target_col)} ~ factor({r_col(group_col)}), data = clean_df)\n"
-            "print(summary(model))"
+            f"result <- kruskal.test({formula}, data = clean_df)\n"
+            "print(result)\n"
+            "k <- length(groups)\n"
+            'cat("eta2[H]:", (unname(result$statistic) - k + 1) / (nrow(clean_df) - k), "\\n")\n'
         )
+        if posthoc:
+            body += (
+                f"print(pairwise.wilcox.test(clean_df[[{target}]], clean_df[[{group}]],\n"
+                '                           p.adjust.method = "holm", exact = FALSE))\n'
+            )
+    body += (
+        "\n# Assumption checks: Shapiro-Wilk per group (3 to 5000 values) and\n"
+        "# Levene's test on deviations from the group medians, as in Python.\n"
+        "for (i in seq_along(samples)) {\n"
+        "  if (length(samples[[i]]) >= 3 && length(samples[[i]]) <= 5000) {\n"
+        '    cat("Group", format(groups[i]), "\\n")\n'
+        "    print(shapiro.test(samples[[i]]))\n"
+        "  }\n"
+        "}\n"
+        f"deviation <- abs(clean_df[[{target}]] - ave(clean_df[[{target}]], "
+        f"clean_df[[{group}]], FUN = median))\n"
+        f"print(summary(aov(deviation ~ factor(clean_df[[{group}]]))))"
+    )
+    return _header(data_file_path, []) + body
+
+
+def association_test(data_file_path: str, x_column: str, y_column: str,
+                     use_fisher: bool) -> str:
+    """Crosstab with chi-square (or Fisher's exact) test and Cramer's V."""
+    if use_fisher:
+        test = (
+            "# R reports the conditional maximum-likelihood odds ratio, which differs\n"
+            "# slightly from the sample odds ratio in Python; the p-value is the same.\n"
+            "result <- fisher.test(tab)\n"
+        )
+    else:
+        test = (
+            "# For 2x2 tables both R and Python apply Yates' continuity correction.\n"
+            "result <- chisq.test(tab)\n"
+        )
+    body = (
+        f"clean_df <- na.omit(df[, {r_vector([x_column, y_column])}])\n"
+        f"tab <- table(clean_df[[{r_str(x_column)}]], clean_df[[{r_str(y_column)}]])\n"
+        "print(tab)\n"
+        "print(round(100 * prop.table(tab, 1), 1))  # row percentages\n"
+        + test
+        + "print(result)\n"
+        "chi2_raw <- unname(chisq.test(tab, correct = FALSE)$statistic)\n"
+        'cat("Cramer\'s V:", sqrt(chi2_raw / (sum(tab) * (min(dim(tab)) - 1))), "\\n")'
+    )
     return _header(data_file_path, []) + body
 
 
@@ -505,6 +579,36 @@ def regression(data_file_path: str, target_col: str, predictor_cols: list[str]) 
         f"clean_df <- na.omit(df[, {r_vector([target_col] + predictor_cols)}])\n"
         f"model <- lm({formula}, data = clean_df)\n"
         "print(summary(model))"
+    )
+    return _header(data_file_path, []) + body
+
+
+def logistic_regression(data_file_path: str, target_col: str, predictor_cols: list[str],
+                        encoding: tuple[Any, Any] | None) -> str:
+    """Logistic regression with odds ratios, mirroring ``run_logistic_regression``.
+
+    Args:
+        encoding: ``(positive, negative)`` values when the Python tool coded a
+            two-value outcome as 1/0, otherwise None (outcome already 0/1).
+    """
+    target = r_str(target_col)
+    formula = f"{r_col(target_col)} ~ " + " + ".join(r_col(c) for c in predictor_cols)
+    body = f"clean_df <- na.omit(df[, {r_vector([target_col] + predictor_cols)}])\n"
+    if encoding:
+        positive, _ = encoding
+        body += (
+            "# Code the outcome as 1/0, as the Python version did\n"
+            f"clean_df[[{target}]] <- ifelse(clean_df[[{target}]] == {r_value(positive)}, 1, 0)\n"
+        )
+    body += (
+        "# Text predictors become factors; the alphabetically first category is\n"
+        "# the reference, as in the Python version.\n"
+        f"model <- glm({formula}, family = binomial, data = clean_df)\n"
+        "print(summary(model))\n"
+        "# Odds ratios with Wald 95% confidence intervals (confint.default), which\n"
+        "# is what the Python version reports; confint() would differ slightly.\n"
+        "print(exp(cbind(OR = coef(model), confint.default(model))))\n"
+        'cat("McFadden pseudo R-squared:", 1 - model$deviance / model$null.deviance, "\\n")'
     )
     return _header(data_file_path, []) + body
 

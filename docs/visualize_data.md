@@ -51,8 +51,11 @@ Describe what you want as specifically as you can: name the columns, the type of
 | See a distribution | "Histogram of age for each sex" |
 | Explore a relationship | "Scatter plot of income against age, coloured by region, and test the correlation" |
 | Compare groups | "Is radius_mean different between diagnosis M and B? Show a box plot and run a t-test." |
+| Compare ratings or Likert answers | "Do the faculties differ in satisfaction? Use a non-parametric test." |
+| Relate two categories | "Is smoking associated with diagnosis?" |
 | Find important variables | "Which columns are most strongly correlated with diagnosis?" |
 | Model an outcome | "Linear regression of price on size and number of rooms" |
+| Model a yes/no outcome | "Which factors predict dropout? Use logistic regression with age, faculty and grade." |
 | Analyse text | "Word cloud of the comments column" |
 | Get publication figures | "Static, publication-ready box plot of score by group" |
 
@@ -67,7 +70,7 @@ A **supervisor** agent reads your request and a summary of your columns (names, 
 |---|---|---|
 | **Interactive** | Interactive charts (Plotly) | By default for every plot |
 | **Static** | High-resolution images (Matplotlib/Seaborn) and word clouds | You ask for static or publication figures, a pair plot or a word cloud |
-| **Statistics** | Tables with test results | You ask for tests, correlations or regression |
+| **Statistics** | Tables with test results | You ask for tests, correlations, associations or regression |
 
 The specialists work at the same time. When they are done, the supervisor writes the summary.
 
@@ -100,12 +103,31 @@ A correlation heatmap can be limited to some columns, for example "a heatmap of 
 
 ### Statistical tests
 
-| Test | What it tells you | Details |
+Which test fits depends on the kind of columns you want to relate:
+
+| Your question involves... | Test | What you get |
 |---|---|---|
-| **Correlation** | Strength and direction of the relationship between two numeric columns, with p-value and confidence interval | Pearson (default), Spearman or Kendall |
-| **Group comparison** | Whether a numeric column differs between groups | Two groups: t-test (Student's t-test when both groups have the same size, otherwise Welch's t-test). Three or more groups: one-way ANOVA |
-| **Linear regression** | How well one or more numeric predictors explain an outcome | Ordinary least squares with intercept |
-| **Correlation ranking** | Which numeric columns are most strongly correlated with a target column | A target with two text values (such as *M/B* or *yes/no*) is coded as 1/0 automatically, with the positive value (such as *M* or *yes*) as 1 |
+| Two **numeric** columns | **Correlation** | Strength and direction of the relationship, p-value and confidence interval. Pearson (default), Spearman or Kendall |
+| A **numeric** column and **groups** | **Group comparison** | Whether the values differ between the groups, with an effect size and assumption checks (see below) |
+| Two **categorical** columns | **Association test** | The crosstab with row percentages, a chi-square test, and Cramér's V for the strength of the association. For a 2×2 table with small counts, Fisher's exact test is used instead |
+| A **numeric outcome** and predictors | **Linear regression** | Ordinary least squares with intercept: coefficients, p-values and R² |
+| A **yes/no outcome** and predictors | **Logistic regression** | Odds ratios with 95% confidence intervals, p-values and McFadden's pseudo R² |
+| One target and **all** numeric columns | **Correlation ranking** | Which columns are most strongly correlated with the target |
+
+**Group comparisons** come in two versions:
+
+| | Parametric (default) | Non-parametric |
+|---|---|---|
+| **Two groups** | t-test: Student's t-test when both groups have the same size, otherwise Welch's t-test. Effect size: Cohen's d | Mann-Whitney U test. Effect size: rank-biserial correlation |
+| **Three or more groups** | One-way ANOVA with Tukey post-hoc tests. Effect size: partial eta squared | Kruskal-Wallis test with pairwise Mann-Whitney tests (Holm-corrected). Effect size: eta squared (H) |
+| **Use for** | Roughly normally distributed measurements | Ratings, Likert scales and ranks, small groups, or skewed data |
+
+Ask for a non-parametric test explicitly ("use a non-parametric test"), or let the AI choose: every group comparison reports **assumption checks**, a Shapiro-Wilk normality test per group and Levene's test for equal variances, and a note when they look violated. Post-hoc tests are shown for up to 10 groups.
+
+**Yes/no outcomes and categories:**
+
+* An outcome with two values, such as *yes/no*, *M/B* or *1/2*, is coded as 1 and 0 automatically. The result says which value counts as 1: a typical positive label such as *yes* or *M*, otherwise the larger number or the alphabetically later value.
+* Text predictors in a logistic regression are compared with their alphabetically first category (the *reference*).
 
 Rows with missing values in the columns of a test are left out of that test.
 
@@ -116,7 +138,7 @@ Rows with missing values in the columns of a test are left out of that test.
 * **Generated Visualisations**: each chart with its code under *View Source Code*. Interactive charts can be zoomed and panned, show values when you hover over them, and can be saved as an image with the camera icon in their toolbar.
 
 !!! warning "Check the results"
-    The AI can choose an unsuitable plot or test, or misread a result. Read the result tables yourself and use the code to verify important findings. Statistical assumptions, such as normally distributed data for a t-test, are not checked automatically.
+    The AI can choose an unsuitable plot or test, or misread a result. Read the result tables yourself and use the code to verify important findings. Group comparisons report assumption checks, but they do not choose the test for you, and the other tests do not check their assumptions (for example linearity in a regression).
 
 ## Reproducible code in Python and R
 
@@ -127,7 +149,7 @@ Every plot and test comes with code that reproduces it on your own computer. Rep
 Tick **Also generate equivalent R code** before you click *Generate Visualisations* to get R code next to the Python code. The code areas then show a **Python** and an **R** tab.
 
 * Plots use **ggplot2**, statistical tests use base R. The first lines of each snippet list the packages it needs, with the command to install them. R 4.1 or newer is required.
-* **Statistical results are the same** in R and Python. The R code repeats the choices the Python code made, for example Student's or Welch's t-test.
+* **Statistical results are the same** in R and Python. The R code repeats the choices the Python code made, for example Student's or Welch's t-test, or how a yes/no outcome was coded. The only exception is the odds ratio of Fisher's exact test, which R estimates slightly differently (the p-value is the same).
 * **Plots show the same data but look different**, because default bin widths, colours and styles differ between the libraries. Sampled pair plots and word clouds can differ in detail.
 * For interactive plots, the R code contains a commented line (`plotly::ggplotly(p)`) that turns the plot into an interactive one.
 * **Custom charts have no R version**, because they are made from code the AI wrote freely in Python. They show *R code is not available for plots made from custom Python code*.
@@ -173,7 +195,13 @@ Click a problem to see what to do.
     Select only the relevant columns under *Select columns to include in the analysis*, and use the exact column names in your request.
 
 ??? question "A test on a text column fails"
-    Free-text columns (long texts such as comments) cannot be used for statistics. Use them for word clouds, or choose a numeric or category column.
+    Free-text columns (long texts such as comments) cannot be used for statistics; use them for word clouds. For two category columns (such as *sex* and *smoker*), ask for an association test instead of a correlation or t-test.
+
+??? question "The logistic regression reports 'separation' or extremely large odds ratios"
+    One predictor (almost) perfectly predicts the outcome, so its effect cannot be estimated. Remove that predictor, or merge rare categories of it.
+
+??? question "'Some expected counts are below 5'"
+    Some combinations of categories are too rare for a reliable chi-square test. Merge rare categories (for example combine small faculties into *Other*) and run the test again.
 
 ??? question "The pair plot says '(sampled 5,000 rows)'"
     Pair plots of very large datasets are drawn from a random sample of 5,000 rows to keep them readable and fast. The statistics are always computed on all rows.

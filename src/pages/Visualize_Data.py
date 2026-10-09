@@ -645,7 +645,7 @@ def main() -> None:
 
         * **Interactive Agent (Default):** Generates web-ready, interactive Plotly charts (Scatter, Bar, Line, Box, Scatter Matrix, Correlation Heatmap, etc.). Best for exploring data on this page.
         * **Static Agent:** Generates publication-ready Matplotlib/Seaborn charts, Pair Plots, and Word Clouds. Triggered when you explicitly ask for "static", "publication figures", "pair plot", or "word cloud".
-        * **Statistical Agent:** Runs rigorous mathematical tests including Correlations, T-tests, ANOVA, and OLS Linear Regression. Each result includes reproducible Python code.
+        * **Statistical Agent:** Runs statistical tests: correlations, group comparisons (t-test, ANOVA, Mann-Whitney, Kruskal-Wallis), associations between categorical columns (chi-square, Fisher), and linear and logistic regression. Each result includes reproducible Python code.
         * **R Code (optional):** Tick "Also generate equivalent R code" to get R code (ggplot2 plots, base R statistics) next to the Python code of every result. Plots made from custom Python code have no R version.
 
         **Prompting Tip:** Be specific about what you want!
