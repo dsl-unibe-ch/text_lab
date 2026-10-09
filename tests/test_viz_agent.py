@@ -1,12 +1,13 @@
 """Supervisor/worker control flow of the viz agent, with Ollama and MCP faked.
 
 No model, GPU or MCP subprocess is used: ``chat_no_think`` is replaced by a
-scripted fake and the MCP session by an in-memory stub.
+scripted fake and the MCP session by an in-memory stub (``fake_server``).
 """
 
 import conftest_path  # noqa: F401
 
 import asyncio
+import contextlib
 import json
 from types import SimpleNamespace
 
@@ -82,6 +83,20 @@ class FakeSession:
         )
 
 
+@pytest.fixture(autouse=True)
+def fake_server(monkeypatch):
+    """Replace the MCP server start-up; records how often a server was started."""
+    starts = []
+
+    @contextlib.asynccontextmanager
+    async def fake_session(mcp_server_script):
+        starts.append(mcp_server_script)
+        yield FakeSession({})
+
+    monkeypatch.setattr(viz_agent, "_mcp_session", fake_session)
+    return starts
+
+
 @pytest.fixture
 def logs():
     return []
@@ -89,7 +104,7 @@ def logs():
 
 def _run_loop(role, session, logs, instruction="Plot the age column"):
     plots, stats = [], []
-    report = asyncio.run(viz_agent._run_worker_loop(
+    report = asyncio.run(viz_agent._run_worker_agent(
         session=session,
         agent_role=role,
         task_instruction=instruction,
@@ -429,3 +444,46 @@ def test_plan_json_is_found_despite_surrounding_noise(monkeypatch, wrap):
 def test_leaked_control_tokens_are_removed_from_model_text():
     message = {"role": "assistant", "content": "Summary text.<|im_end|>\n<|endoftext|>"}
     assert viz_agent._model_text(message) == "Summary text."
+
+
+def test_all_workers_share_one_mcp_server(monkeypatch, fake_server):
+    chat = ScriptedChat([_plan(interactive="Histogram", static="Histogram for print")])
+    monkeypatch.setattr(viz_agent, "chat_no_think", chat)
+    monkeypatch.setattr(viz_agent, "get_all_columns_summary_impl", lambda path: SCHEMA)
+    sessions = []
+
+    async def fake_worker(session, agent_role, task_instruction, **_):
+        sessions.append(session)
+        report = viz_agent._new_report(agent_role, task_instruction)
+        report.update({"plots": [f"{agent_role} plot"], "completed": True})
+        return report
+
+    monkeypatch.setattr(viz_agent, "_run_worker_agent", fake_worker)
+
+    result = asyncio.run(viz_agent.run_analysis(
+        [{"role": "user", "content": "Plot"}], DATA_PATH, "fake", "server.py"
+    ))
+
+    assert fake_server == ["server.py"]
+    assert len(sessions) == 2 and sessions[0] is sessions[1]
+    assert "- interactive plot" in result["summary"]
+
+
+def test_server_start_failure_gives_failed_reports_not_a_crash(monkeypatch):
+    @contextlib.asynccontextmanager
+    async def broken_session(mcp_server_script):
+        raise FileNotFoundError("mcp_server.py not found")
+        yield  # pragma: no cover
+
+    chat = ScriptedChat([_plan(interactive="Histogram")])
+    monkeypatch.setattr(viz_agent, "chat_no_think", chat)
+    monkeypatch.setattr(viz_agent, "get_all_columns_summary_impl", lambda path: SCHEMA)
+    monkeypatch.setattr(viz_agent, "_mcp_session", broken_session)
+
+    result = asyncio.run(viz_agent.run_analysis(
+        [{"role": "user", "content": "Plot"}], DATA_PATH, "fake", "server.py"
+    ))
+
+    assert "The analysis tools could not be started." in result["summary"]
+    assert any(level == "error" and "mcp_server.py not found" in msg
+               for level, msg in result["logs"])

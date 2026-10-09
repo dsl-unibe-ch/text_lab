@@ -12,7 +12,7 @@ import pytest
 
 from core.visualization import viz_utils
 from core.visualization.plot_data import get_all_columns_summary_impl
-from core.visualization.plot_interactive import plot_barchart_impl
+from core.visualization.plot_interactive import generate_custom_plotly_impl, plot_barchart_impl
 
 
 def _trace_values(values):
@@ -106,3 +106,14 @@ def test_data_preview_shortens_text_cells_to_one_line(text_data_file):
     assert "at length" not in preview
     assert len(preview.splitlines()) == len(df) + 1  # header + one line per row
     assert "neg" in preview and "5" in preview
+
+
+def test_custom_code_cannot_modify_the_cached_dataset(data_file):
+    code = (
+        "df.drop(columns=['radius_mean'], inplace=True)\n"
+        "fig = px.histogram(df, x='diagnosis')"
+    )
+    output = generate_custom_plotly_impl(data_file, code, "mutating")
+
+    assert not output.startswith("Error"), output
+    assert "radius_mean" in viz_utils.load_data_safely(data_file).columns

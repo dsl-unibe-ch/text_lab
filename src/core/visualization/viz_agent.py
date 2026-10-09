@@ -5,8 +5,8 @@ Implements a plan-execute-summarise Supervisor-Worker pattern that keeps the
 number of sequential LLM calls low for small models:
 
 1. Plan: the supervisor model returns one JSON plan (structured output).
-2. Execute: delegated workers run concurrently, each with its own MCP session
-   and a narrow tool set. A worker only loops to retry failed tool calls:
+2. Execute: delegated workers run concurrently with narrow tool sets, sharing
+   one MCP server process for the whole analysis. A worker only loops to retry failed tool calls:
    plot workers stop as soon as their plots succeed, and stats workers get one
    tool-free turn to interpret their results.
 3. Summarise: one tool-free supervisor call writes the final report. When no
@@ -14,13 +14,15 @@ number of sequential LLM calls low for small models:
 """
 
 import asyncio
+import contextlib
 import copy
 import difflib
 import json
 import re
+import sys
 import threading
 import traceback
-from typing import Any, Callable, TypedDict
+from typing import Any, AsyncIterator, Callable, TypedDict
 
 from mcp import ClientSession, StdioServerParameters, types
 from mcp.client.stdio import stdio_client
@@ -374,55 +376,32 @@ def _record_plot(
 # WORKERS
 # =========================================================================
 
-async def _run_worker_agent(
-    agent_role: str,
-    task_instruction: str,
-    data_file_path: str,
-    schema: str,
-    model_name: str,
-    mcp_server_script: str,
-    global_plots: list[PlotArtifact],
-    global_stats: list[StatsArtifact],
-    log: LogFn,
-    cancel_event: threading.Event | None = None,
-) -> WorkerReport:
-    """Run one specialist worker inside its own MCP stdio session.
+@contextlib.asynccontextmanager
+async def _mcp_session(mcp_server_script: str) -> AsyncIterator[ClientSession]:
+    """Start one MCP server subprocess and yield an initialised client session.
 
-    Raises:
-        RuntimeError: If the MCP server subprocess cannot be started or dies.
+    The server is shared by all workers of an analysis. Starting it means
+    importing the plotting/statistics stack and later parsing the dataset, so
+    doing this once instead of once per worker saves several seconds per run
+    and lets the server's dataset cache serve every worker. Concurrent workers
+    multiplex their requests over the one session; the server runs the tool
+    calls one at a time, which costs little because they are short compared
+    to model calls.
+
+    ``sys.executable`` guarantees the server runs in the same Python
+    environment as the app, whatever ``python3`` resolves to on ``PATH``.
     """
     server_params = StdioServerParameters(
-        command="python3",
+        command=sys.executable,
         args=[mcp_server_script],
     )
-
-    try:
-        async with stdio_client(server_params) as (read, write):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
-                return await _run_worker_loop(
-                    session=session,
-                    agent_role=agent_role,
-                    task_instruction=task_instruction,
-                    data_file_path=data_file_path,
-                    schema=schema,
-                    model_name=model_name,
-                    global_plots=global_plots,
-                    global_stats=global_stats,
-                    log=log,
-                    cancel_event=cancel_event,
-                )
-    except BaseException as exc:
-        if isinstance(exc, asyncio.CancelledError):
-            raise
-        detail = _unwrap_exception_group(exc)
-        log("error", f"Worker '{agent_role}' MCP session failed:\n{detail}")
-        raise RuntimeError(
-            f"Worker '{agent_role}' MCP session failed: {detail}"
-        ) from exc
+    async with stdio_client(server_params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            yield session
 
 
-async def _run_worker_loop(
+async def _run_worker_agent(
     session: ClientSession,
     agent_role: str,
     task_instruction: str,
@@ -654,16 +633,16 @@ async def _plan_tasks(
 
 async def _run_workers(
     tasks: list[tuple[str, str]],
+    session: ClientSession,
     data_file_path: str,
     schema: str,
     model_name: str,
-    mcp_server_script: str,
     global_plots: list[PlotArtifact],
     global_stats: list[StatsArtifact],
     log: LogFn,
     cancel_event: threading.Event | None,
 ) -> list[WorkerReport]:
-    """Run all delegated workers concurrently and collect their reports.
+    """Run all delegated workers concurrently on one MCP session.
 
     A worker that raises is converted into a failed report so one broken
     worker never discards the results of the others.
@@ -671,12 +650,12 @@ async def _run_workers(
     outputs = await asyncio.gather(
         *(
             _run_worker_agent(
+                session=session,
                 agent_role=role,
                 task_instruction=instruction,
                 data_file_path=data_file_path,
                 schema=schema,
                 model_name=model_name,
-                mcp_server_script=mcp_server_script,
                 global_plots=global_plots,
                 global_stats=global_stats,
                 log=log,
@@ -697,6 +676,45 @@ async def _run_workers(
             reports.append(report)
         else:
             reports.append(output)
+    return reports
+
+
+async def _run_workers_on_shared_server(
+    tasks: list[tuple[str, str]],
+    mcp_server_script: str,
+    data_file_path: str,
+    schema: str,
+    model_name: str,
+    global_plots: list[PlotArtifact],
+    global_stats: list[StatsArtifact],
+    log: LogFn,
+    cancel_event: threading.Event | None,
+) -> list[WorkerReport]:
+    """Start the MCP server once, run every worker on it, then shut it down.
+
+    If the server cannot start, or dies so that closing the session fails,
+    the error is logged. Reports that were already completed are kept;
+    otherwise each task gets a failed report, so the run still ends with a
+    readable summary instead of a crash.
+    """
+    reports: list[WorkerReport] | None = None
+    try:
+        async with _mcp_session(mcp_server_script) as session:
+            reports = await _run_workers(
+                tasks, session, data_file_path, schema, model_name,
+                global_plots, global_stats, log, cancel_event,
+            )
+    except BaseException as exc:
+        if isinstance(exc, (asyncio.CancelledError, KeyboardInterrupt, SystemExit)):
+            raise
+        log("error", f"MCP server session failed:\n{_unwrap_exception_group(exc)}")
+
+    if reports is None:
+        reports = []
+        for role, instruction in tasks:
+            report = _new_report(role, instruction)
+            report["errors"].append("The analysis tools could not be started.")
+            reports.append(report)
     return reports
 
 
@@ -791,7 +809,7 @@ async def run_analysis(
         messages: The user turn(s) describing the request and a data preview.
         data_file_path: Path to the uploaded dataset.
         model_name: The Ollama model used by the supervisor and all workers.
-        mcp_server_script: Path to the MCP server script launched per worker.
+        mcp_server_script: Path to the MCP server script, started once per run.
         log_callback: Optional callback receiving ``(level, message)`` logs.
         cancel_event: Optional event; when set, workers stop between rounds.
 
@@ -826,8 +844,8 @@ async def run_analysis(
             schema = await asyncio.to_thread(get_all_columns_summary_impl, data_file_path)
             truncated = was_last_load_truncated(data_file_path)
 
-            reports = await _run_workers(
-                tasks, data_file_path, schema, model_name, mcp_server_script,
+            reports = await _run_workers_on_shared_server(
+                tasks, mcp_server_script, data_file_path, schema, model_name,
                 plot_results, stats_results, _log, cancel_event,
             )
             summary = await _summarise(messages, reports, model_name, truncated, _log)

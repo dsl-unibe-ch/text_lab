@@ -405,7 +405,10 @@ def generate_custom_plotly_impl(
             "px": px,
             "go": go,
             "np": np,
-            "df": df,
+            # A copy, because load_data_safely returns a cached DataFrame shared
+            # with every later tool call in this server process. Generated code
+            # such as df.dropna(inplace=True) must not change the data for them.
+            "df": df.copy(),
             # data_file_path is intentionally NOT exposed: the model should use df
             # directly and must not call pd.read_csv() or reference file paths.
         }
