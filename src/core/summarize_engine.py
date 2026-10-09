@@ -11,7 +11,7 @@ All functions in this module are pure logic with no Streamlit dependency.
 import csv
 import io
 import re
-from typing import Callable, Dict, Generator, List, Optional
+from typing import Any, Callable, Dict, Generator, List, Optional
 
 import ollama
 
@@ -19,7 +19,12 @@ from .chat_engine import (
     MAX_CONTEXT_TOKENS,
     chunk_text,
     estimate_tokens,
+    message_text,
 )
+
+# Low temperature keeps summaries close to the transcript instead of
+# paraphrasing creatively or adding detail that was never said.
+SUMMARY_TEMPERATURE = 0.2
 
 
 # ---------------------------------------------------------------------------
@@ -280,6 +285,120 @@ def _build_synthesis_messages(
 
 
 # ---------------------------------------------------------------------------
+# Internal Ollama call helpers
+# ---------------------------------------------------------------------------
+
+def _chat(
+    model_name: str,
+    messages: List[Dict[str, str]],
+    stream: bool,
+    disable_thinking: bool = True,
+) -> Any:
+    """
+    Call ``ollama.chat`` with the summarization options.
+
+    Reasoning ("thinking") is disabled by default: a summary needs no
+    chain-of-thought, and thinking tokens only add latency and use up the
+    context window. Older ollama-python clients without the ``think``
+    keyword are called without it.
+
+    Args:
+        model_name: The Ollama model identifier.
+        messages: Role/content message dicts.
+        stream: Whether to return a token stream instead of one response.
+        disable_thinking: Send ``think=False``. Callers pass ``False`` to
+            retry when the server or model rejects the ``think`` argument.
+
+    Returns:
+        A chat response, or an iterator of response chunks when ``stream``
+        is true. For streams the HTTP request is only sent on iteration.
+    """
+    kwargs: Dict[str, Any] = {
+        "model": model_name,
+        "messages": messages,
+        "stream": stream,
+        "options": {"temperature": SUMMARY_TEMPERATURE},
+    }
+    if disable_thinking:
+        try:
+            return ollama.chat(think=False, **kwargs)
+        except TypeError:
+            pass  # Older ollama-python without the ``think`` keyword.
+    return ollama.chat(**kwargs)
+
+
+def _is_think_rejection(exc: ollama.ResponseError) -> bool:
+    """Return True if Ollama rejected the request because of ``think``."""
+    return "think" in str(exc).lower()
+
+
+def _response_text(response: Any) -> str:
+    """
+    Return the content of a chat response or stream chunk as a string.
+
+    Reasoning-only chunks carry ``None`` content, which is mapped to an
+    empty string so callers can concatenate safely.
+    """
+    if isinstance(response, dict):
+        message = response.get("message")
+    else:
+        message = getattr(response, "message", None)
+    return message_text(message)
+
+
+def _complete_text(model_name: str, messages: List[Dict[str, str]]) -> str:
+    """
+    Run one blocking chat call and return the reply text.
+
+    Args:
+        model_name: The Ollama model identifier.
+        messages: Role/content message dicts.
+
+    Returns:
+        The model's reply, or an empty string if it produced no content.
+    """
+    try:
+        response = _chat(model_name, messages, stream=False)
+    except ollama.ResponseError as exc:
+        if not _is_think_rejection(exc):
+            raise
+        response = _chat(
+            model_name, messages, stream=False, disable_thinking=False
+        )
+    return _response_text(response)
+
+
+def _stream_text(
+    model_name: str,
+    messages: List[Dict[str, str]],
+) -> Generator[str, None, None]:
+    """
+    Stream a chat reply as text tokens.
+
+    If the server rejects ``think=False`` before any token arrives, the
+    request is retried once without it.
+
+    Args:
+        model_name: The Ollama model identifier.
+        messages: Role/content message dicts.
+
+    Yields:
+        Incremental string tokens (never ``None``).
+    """
+    started = False
+    try:
+        for chunk in _chat(model_name, messages, stream=True):
+            started = True
+            yield _response_text(chunk)
+        return
+    except ollama.ResponseError as exc:
+        if started or not _is_think_rejection(exc):
+            raise
+    for chunk in _chat(model_name, messages, stream=True, disable_thinking=False):
+        yield _response_text(chunk)
+
+
+# ---------------------------------------------------------------------------
 # Public API: summarization
 # ---------------------------------------------------------------------------
 
@@ -310,12 +429,7 @@ def get_summary_stream(
         Incremental string tokens from the language model.
     """
     messages = _build_single_pass_messages(text, mode_key, speaker_context, output_language)
-    stream = ollama.chat(model=model_name, messages=messages, stream=True)
-    for chunk in stream:
-        if isinstance(chunk, dict):
-            yield chunk["message"]["content"]
-        else:
-            yield chunk.message.content
+    yield from _stream_text(model_name, messages)
 
 
 def get_partial_notes(
@@ -365,11 +479,7 @@ def get_partial_notes(
             speaker_context=speaker_context,
             output_language=output_language,
         )
-        response = ollama.chat(model=model_name, messages=messages, stream=False)
-        if isinstance(response, dict):
-            partial_notes.append(response["message"]["content"])
-        else:
-            partial_notes.append(response.message.content)
+        partial_notes.append(_complete_text(model_name, messages))
 
     return partial_notes
 
@@ -397,12 +507,7 @@ def get_synthesis_stream(
         Incremental string tokens from the language model.
     """
     messages = _build_synthesis_messages(partial_notes, mode_key, output_language)
-    stream = ollama.chat(model=model_name, messages=messages, stream=True)
-    for chunk in stream:
-        if isinstance(chunk, dict):
-            yield chunk["message"]["content"]
-        else:
-            yield chunk.message.content
+    yield from _stream_text(model_name, messages)
 
 
 # ---------------------------------------------------------------------------

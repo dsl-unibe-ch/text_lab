@@ -136,10 +136,14 @@ def _render_summary_results(
     mode_key: str,
     duration_str: str,
     word_count: int,
+    key_prefix: str,
 ) -> None:
     """
     Render the summary and transcript results in a structured layout with
     download options.
+
+    Download buttons use ``on_click="ignore"`` so that saving a file does not
+    rerun the page.
 
     Args:
         summary: The generated summary text (Markdown).
@@ -148,6 +152,7 @@ def _render_summary_results(
         mode_key: Summary mode key used.
         duration_str: Human-readable audio duration string.
         word_count: Number of words in the transcript.
+        key_prefix: Unique prefix for Streamlit widget keys.
     """
     mode_label = SUMMARY_MODES[mode_key]["label"]
 
@@ -195,6 +200,8 @@ def _render_summary_results(
             file_name=f"{base_name}_summary_{timestamp}.md",
             mime="text/markdown",
             use_container_width=True,
+            on_click="ignore",
+            key=f"{key_prefix}_summary_dl",
         )
     with col_d2:
         st.download_button(
@@ -203,6 +210,8 @@ def _render_summary_results(
             file_name=f"{base_name}_transcript_{timestamp}.txt",
             mime="text/plain",
             use_container_width=True,
+            on_click="ignore",
+            key=f"{key_prefix}_transcript_dl",
         )
     with col_d3:
         st.download_button(
@@ -211,6 +220,8 @@ def _render_summary_results(
             file_name=f"{base_name}_full_{timestamp}.md",
             mime="text/markdown",
             use_container_width=True,
+            on_click="ignore",
+            key=f"{key_prefix}_full_dl",
         )
 
 
@@ -734,6 +745,7 @@ def _render_audio_tab(gpu_name: str) -> None:
     if st.session_state.get("audio_sum_last_sig") != current_sig:
         # Config changed - clear previous transcription so it reruns
         st.session_state.pop("audio_sum_transcript", None)
+        st.session_state.pop("audio_sum_summary_error", None)
 
     # --- Run button ---
     run_col, _ = st.columns([1, 3])
@@ -841,7 +853,10 @@ def _render_audio_tab(gpu_name: str) -> None:
         # --- Run summarization if triggered by button click or no summary yet ---
         # If settings (model/mode/language) change after a summary exists, show the
         # existing result with a notice and let the user decide to re-summarize manually.
+        # After a failure, summarization only runs again when the user asks for it,
+        # so ordinary widget interactions do not restart a long LLM job.
         existing_summary = st.session_state.get("audio_sum_summary")
+        summary_error = st.session_state.get("audio_sum_summary_error")
         existing_mode = st.session_state.get("audio_sum_mode_used")
         existing_model = st.session_state.get("audio_sum_model_used")
         existing_lang = st.session_state.get("audio_sum_lang_used")
@@ -855,7 +870,7 @@ def _render_audio_tab(gpu_name: str) -> None:
             )
         )
 
-        if existing_summary is None or run_clicked:
+        if run_clicked or (existing_summary is None and summary_error is None):
             st.divider()
             st.write("**Generating summary...**")
             try:
@@ -866,6 +881,17 @@ def _render_audio_tab(gpu_name: str) -> None:
                     speaker_context=speaker_context,
                     output_language=output_language,
                 )
+            except Exception as exc:
+                # Drop any summary of a previous recording and keep the error so
+                # the transcript stays available below.
+                st.session_state.pop("audio_sum_summary", None)
+                summary_error = {
+                    "message": str(exc),
+                    "traceback": traceback.format_exc(),
+                }
+                st.session_state["audio_sum_summary_error"] = summary_error
+                existing_summary = None
+            else:
                 st.session_state["audio_sum_summary"] = summary
                 st.session_state["audio_sum_mode_used"] = mode_key
                 st.session_state["audio_sum_model_used"] = model_name
@@ -874,10 +900,36 @@ def _render_audio_tab(gpu_name: str) -> None:
                 st.session_state["audio_sum_word_count"] = word_count
                 st.session_state["audio_sum_duration_str"] = duration_str
                 st.session_state["audio_sum_source_label"] = audio_name
+                st.session_state.pop("audio_sum_summary_error", None)
                 st.rerun()
-            except Exception as exc:
-                st.error(f"Summarization failed: {exc}")
-                st.code(traceback.format_exc())
+
+        if existing_summary is None and summary_error is not None:
+            st.divider()
+            st.error(f"Summarization failed: {summary_error['message']}")
+            with st.expander("Error details"):
+                st.code(summary_error["traceback"])
+
+            retry_col, _ = st.columns([1, 3])
+            with retry_col:
+                if st.button(
+                    "Retry summarization",
+                    key="audio_sum_retry",
+                    use_container_width=True,
+                    help="Summarize the existing transcript again without re-transcribing.",
+                ):
+                    st.session_state.pop("audio_sum_summary_error", None)
+                    st.rerun()
+
+            st.write("**Transcript**")
+            st.text_area(
+                "Transcript",
+                value=display_transcript,
+                height=420,
+                disabled=True,
+                label_visibility="collapsed",
+                key="audio_sum_failed_transcript",
+            )
+            _render_raw_transcript_downloads(csv_text, audio_name)
 
         elif existing_summary:
             st.divider()
@@ -895,8 +947,7 @@ def _render_audio_tab(gpu_name: str) -> None:
             if settings_changed:
                 st.info(
                     "Settings have changed. Click **Re-summarize** above to regenerate "
-                    "with the new model, type, or language.",
-                    icon="ℹ️",
+                    "with the new model, type, or language."
                 )
 
             _render_summary_results(
@@ -908,31 +959,42 @@ def _render_audio_tab(gpu_name: str) -> None:
                 mode_key=st.session_state.get("audio_sum_mode_used", mode_key),
                 duration_str=st.session_state.get("audio_sum_duration_str", duration_str),
                 word_count=st.session_state.get("audio_sum_word_count", word_count),
+                key_prefix="audio_sum",
             )
+            _render_raw_transcript_downloads(csv_text, audio_name)
 
-            # Offer transcript download as CSV as well
-            with st.expander("Download raw transcription files"):
-                base_name = os.path.splitext(audio_name)[0]
-                col_tc1, col_tc2 = st.columns(2)
-                with col_tc1:
-                    st.download_button(
-                        label="Transcript CSV (WhisperX)",
-                        data=csv_text,
-                        file_name=f"{base_name}_transcription.csv",
-                        mime="text/plain",
-                        use_container_width=True,
-                        key="audio_sum_csv_dl",
-                    )
-                with col_tc2:
-                    plain_txt = transcription_text_from_csv(csv_text)
-                    st.download_button(
-                        label="Plain transcript (.txt)",
-                        data=plain_txt,
-                        file_name=f"{base_name}_transcript.txt",
-                        mime="text/plain",
-                        use_container_width=True,
-                        key="audio_sum_txt_dl",
-                    )
+
+def _render_raw_transcript_downloads(csv_text: str, audio_name: str) -> None:
+    """
+    Render download buttons for the raw WhisperX transcription output.
+
+    Args:
+        csv_text: The WhisperX TSV transcription.
+        audio_name: Original audio filename, used to name the downloads.
+    """
+    with st.expander("Download raw transcription files"):
+        base_name = os.path.splitext(audio_name)[0]
+        col_tc1, col_tc2 = st.columns(2)
+        with col_tc1:
+            st.download_button(
+                label="Transcript CSV (WhisperX)",
+                data=csv_text,
+                file_name=f"{base_name}_transcription.csv",
+                mime="text/plain",
+                use_container_width=True,
+                on_click="ignore",
+                key="audio_sum_csv_dl",
+            )
+        with col_tc2:
+            st.download_button(
+                label="Plain transcript (.txt)",
+                data=transcription_text_from_csv(csv_text),
+                file_name=f"{base_name}_transcript.txt",
+                mime="text/plain",
+                use_container_width=True,
+                on_click="ignore",
+                key="audio_sum_txt_dl",
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -1053,8 +1115,6 @@ def _render_transcript_tab(gpu_name: str) -> None:
         unique_spks = extract_unique_speakers(transcript_text)
         speaker_context = build_speaker_context(unique_spks) if unique_spks else None
 
-        word_count = len(transcript_text.split())
-
         st.divider()
         st.write("**Generating summary...**")
         try:
@@ -1070,14 +1130,41 @@ def _render_transcript_tab(gpu_name: str) -> None:
             st.code(traceback.format_exc())
             st.stop()
 
+        # Keep the result across reruns so it survives later widget
+        # interactions; the rerun replaces the streamed text with the results.
+        st.session_state["ts_result"] = {
+            "summary": summary,
+            "transcript_text": transcript_text,
+            "source_label": source_label,
+            "mode_key": mode_key,
+            "model_name": model_name,
+            "output_language": output_language,
+            "word_count": len(transcript_text.split()),
+        }
+        st.rerun()
+
+    result = st.session_state.get("ts_result")
+    if result is not None:
         st.divider()
+        input_changed = (
+            result["transcript_text"] != transcript_text
+            or result["mode_key"] != mode_key
+            or result["model_name"] != model_name
+            or result["output_language"] != output_language
+        )
+        if input_changed:
+            st.info(
+                "The transcript or settings have changed since this summary was "
+                "generated. Click **Generate Summary** to regenerate it."
+            )
         _render_summary_results(
-            summary=summary,
-            transcript_text=transcript_text,
-            source_label=source_label,
-            mode_key=mode_key,
+            summary=result["summary"],
+            transcript_text=result["transcript_text"],
+            source_label=result["source_label"],
+            mode_key=result["mode_key"],
             duration_str="",
-            word_count=word_count,
+            word_count=result["word_count"],
+            key_prefix="ts",
         )
 
 
