@@ -487,3 +487,23 @@ def test_server_start_failure_gives_failed_reports_not_a_crash(monkeypatch):
     assert "The analysis tools could not be started." in result["summary"]
     assert any(level == "error" and "mcp_server.py not found" in msg
                for level, msg in result["logs"])
+
+
+def test_activity_log_shows_tools_per_round(monkeypatch, logs):
+    bad = ("plot_interactive_boxplot", {"column": "nope", "title": "Box"})
+    good_hist = ("plot_interactive_histogram", {"column": "age", "title": "Age"})
+    good_box = ("plot_interactive_boxplot", {"column": "age", "title": "Box"})
+    chat = ScriptedChat([_reply(calls=[good_hist, bad]), _reply(calls=[good_box])])
+    monkeypatch.setattr(viz_agent, "chat_no_think", chat)
+    session = FakeSession({
+        "plot_interactive_histogram": ["/tmp/run/plots/h.json|||code"],
+        "plot_interactive_boxplot": [
+            "Error: Column 'nope' not found.", "/tmp/run/plots/b.json|||c",
+        ],
+    })
+
+    _run_loop("interactive", session, logs)
+
+    assert ("info", "Worker 'interactive' is running 2 tools: "
+            "Interactive Histogram, Interactive Box Plot.") in logs
+    assert ("info", "Worker 'interactive' is retrying 1 tool: Interactive Box Plot.") in logs

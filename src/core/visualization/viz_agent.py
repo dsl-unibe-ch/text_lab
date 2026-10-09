@@ -442,7 +442,7 @@ async def _run_worker_agent(
 
     log("info", f"Supervisor delegated task to '{agent_role}' agent.")
 
-    for _ in range(WORKER_MAX_ITERATIONS):
+    for round_index in range(WORKER_MAX_ITERATIONS):
         if cancel_event and cancel_event.is_set():
             log("warning", f"Worker '{agent_role}' cancelled by user.")
             report["errors"].append("Cancelled by user.")
@@ -463,6 +463,8 @@ async def _run_worker_agent(
             report["completed"] = True
             log("info", f"Worker '{agent_role}' finished task successfully.")
             return report
+
+        log("info", _describe_round(agent_role, tool_calls, allowed_tools, round_index))
 
         round_errors: list[str] = []
         round_stats: list[str] = []
@@ -563,6 +565,7 @@ async def _run_worker_agent(
             return report
 
         if agent_role == "stats" and round_stats:
+            log("info", f"Worker '{agent_role}' is interpreting the results.")
             report["text"] = await _interpret_stats(model_name, messages, agent_role, log)
             report["completed"] = True
             log("info", f"Worker '{agent_role}' finished task successfully.")
@@ -576,6 +579,30 @@ async def _run_worker_agent(
     else:
         log("error", f"Worker '{agent_role}' reached the iteration limit without any results.")
     return report
+
+
+def _describe_round(
+    agent_role: str,
+    tool_calls: list[dict[str, Any]],
+    allowed_tools: list[str],
+    round_index: int,
+) -> str:
+    """Summarise a worker's planned tool calls for the activity log.
+
+    Shows how many tools the agent runs and which ones, so users can see why
+    some agents take longer than others. Rounds after the first are retries
+    of tool calls that failed.
+    """
+    labels: list[str] = []
+    for tool_call in tool_calls:
+        requested_name, _ = _parse_tool_call(tool_call)
+        tool_name = _resolve_tool_name(requested_name, allowed_tools) or requested_name
+        labels.append(get_tool_label(tool_name))
+
+    count = len(labels)
+    noun = "tool" if count == 1 else "tools"
+    action = "is running" if round_index == 0 else "is retrying"
+    return f"Worker '{agent_role}' {action} {count} {noun}: {', '.join(labels)}."
 
 
 async def _interpret_stats(
