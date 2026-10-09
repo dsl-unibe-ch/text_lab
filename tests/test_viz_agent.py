@@ -16,6 +16,9 @@ from mcp import types
 
 from core.visualization import viz_agent
 
+# Kept before the autouse fixture replaces it, for the server start-up test.
+REAL_MCP_SESSION = viz_agent._mcp_session
+
 DATA_PATH = "/tmp/run/uploaded_data.csv"
 SCHEMA = "Dataset: 3 rows x 2 columns\nNumeric columns (2): age, income"
 
@@ -93,12 +96,12 @@ def fake_schema(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def fake_server(monkeypatch):
-    """Replace the MCP server start-up; records how often a server was started."""
+    """Replace the MCP server start-up; records each start and its R-code flag."""
     starts = []
 
     @contextlib.asynccontextmanager
-    async def fake_session(mcp_server_script):
-        starts.append(mcp_server_script)
+    async def fake_session(mcp_server_script, include_r_code=False):
+        starts.append((mcp_server_script, include_r_code))
         yield FakeSession({})
 
     monkeypatch.setattr(viz_agent, "_mcp_session", fake_session)
@@ -152,7 +155,7 @@ def test_plot_worker_stops_after_first_successful_round(monkeypatch, logs):
     assert report["completed"] is True
     assert report["plots"] == ["Interactive Histogram: Age"]
     assert plots == [{
-        "path": "/tmp/run/plots/h.json", "code": "code",
+        "path": "/tmp/run/plots/h.json", "code": "code", "r_code": "",
         "tool_name": "plot_interactive_histogram",
     }]
     assert session.calls[0][1]["data_file_path"] == DATA_PATH
@@ -210,7 +213,10 @@ def test_stats_worker_gets_one_tool_free_interpretation_turn(monkeypatch, logs):
     assert chat.calls[1]["tools"] is None
     assert report["completed"] is True
     assert report["text"] == "Age and income are strongly correlated."
-    assert stats == [{"title": "Correlation Analysis", "result": "| r | 0.9 |", "code": "print(1)"}]
+    assert stats == [{
+        "title": "Correlation Analysis", "result": "| r | 0.9 |",
+        "code": "print(1)", "r_code": "",
+    }]
 
 
 PARSE_ERROR = RuntimeError(
@@ -470,14 +476,14 @@ def test_all_workers_share_one_mcp_server(monkeypatch, fake_server):
         [{"role": "user", "content": "Plot"}], DATA_PATH, "fake", "server.py"
     ))
 
-    assert fake_server == ["server.py"]
+    assert fake_server == [("server.py", False)]
     assert len(sessions) == 2 and sessions[0] is sessions[1]
     assert "- interactive plot" in result["summary"]
 
 
 def test_server_start_failure_gives_failed_reports_not_a_crash(monkeypatch):
     @contextlib.asynccontextmanager
-    async def broken_session(mcp_server_script):
+    async def broken_session(mcp_server_script, include_r_code=False):
         raise FileNotFoundError("mcp_server.py not found")
         yield  # pragma: no cover
 
@@ -534,3 +540,135 @@ def test_supervisor_plans_from_the_dataset_summary(monkeypatch):
 
     system_prompt = chat.calls[0]["messages"][0]["content"]
     assert system_prompt.endswith(f"Dataset summary:\n{SCHEMA}\n")
+
+
+def test_column_parameters_list_the_dataset_columns():
+    schema = {
+        "type": "object",
+        "properties": {
+            "x_column": {"type": "string"},
+            "color_column": {"anyOf": [{"type": "string"}, {"type": "null"}], "default": None},
+            "hue_column": {"type": "string", "default": ""},
+            "predictor_cols": {"type": "array", "items": {"type": "string"}},
+            "title": {"type": "string"},
+        },
+        "required": ["x_column", "predictor_cols", "title"],
+    }
+    viz_agent._add_column_enums(schema, ["age", "income"])
+    props = schema["properties"]
+
+    assert props["x_column"]["enum"] == ["age", "income"]
+    assert props["color_column"]["anyOf"][0]["enum"] == ["age", "income", ""]
+    assert "enum" not in props["color_column"]["anyOf"][1]
+    assert props["hue_column"]["enum"] == ["age", "income", ""]
+    assert props["predictor_cols"]["items"]["enum"] == ["age", "income"]
+    assert "enum" not in props["title"]
+
+
+def test_worker_tools_carry_column_enums_and_fix_near_misses(monkeypatch, logs):
+    monkeypatch.setattr(viz_agent, "_dataset_columns", lambda path: ["age", "income"])
+    chat = ScriptedChat([
+        _reply(calls=[("plot_interactive_histogram", {"column": " Age", "title": "Age"})]),
+    ])
+    monkeypatch.setattr(viz_agent, "chat_no_think", chat)
+    session = FakeSession({"plot_interactive_histogram": ["/tmp/run/plots/h.json|||code"]})
+
+    _run_loop("interactive", session, logs)
+
+    params = chat.calls[0]["tools"][0]["function"]["parameters"]["properties"]
+    assert params["column"]["enum"] == ["age", "income"]
+    assert "enum" not in params["title"]
+    assert session.calls[0][1]["column"] == "age"
+    assert ("info", "Worker 'interactive' used column ' Age'; using 'age'.") in logs
+
+
+def test_wide_datasets_get_no_column_enums(monkeypatch, logs):
+    wide = [f"col{i}" for i in range(viz_agent.MAX_ENUM_COLUMNS + 1)]
+    monkeypatch.setattr(viz_agent, "_dataset_columns", lambda path: wide)
+    chat = ScriptedChat([_reply("Nothing to do.")])
+    monkeypatch.setattr(viz_agent, "chat_no_think", chat)
+
+    _run_loop("interactive", FakeSession({}), logs)
+
+    params = chat.calls[0]["tools"][0]["function"]["parameters"]["properties"]
+    assert "enum" not in params["column"]
+
+
+def test_ambiguous_or_unknown_columns_are_left_for_the_tool_to_report():
+    args = {"x_column": "AGE", "y_column": "salary", "title": "Age"}
+    fixes = viz_agent._fix_column_args(args, ["Age", "age", "income"])
+
+    assert fixes == []
+    assert args == {"x_column": "AGE", "y_column": "salary", "title": "Age"}
+
+
+def test_plot_r_code_is_kept_but_never_shown_to_the_model(monkeypatch, logs):
+    chat = ScriptedChat([
+        _reply(calls=[("plot_interactive_histogram", {"column": "age", "title": "Age"})]),
+    ])
+    monkeypatch.setattr(viz_agent, "chat_no_think", chat)
+    session = FakeSession({
+        "plot_interactive_histogram": ["/tmp/run/plots/h.json|||py code|||library(ggplot2)"],
+    })
+
+    _, plots, _ = _run_loop("interactive", session, logs)
+
+    assert plots[0]["code"] == "py code"
+    assert plots[0]["r_code"] == "library(ggplot2)"
+
+
+def test_stats_r_block_is_stored_and_removed_from_the_model_view(monkeypatch, logs):
+    output = "| r | 0.9 |\n\n```python\nprint(1)\n```\n\n```r\nprint(cor.test(a, b))\n```"
+    chat = ScriptedChat([
+        _reply(calls=[("run_correlation", {"x_column": "age", "y_column": "income"})]),
+        _reply("Interpretation."),
+    ])
+    monkeypatch.setattr(viz_agent, "chat_no_think", chat)
+    session = FakeSession({"run_correlation": [output]})
+
+    _, _, stats = _run_loop("stats", session, logs)
+
+    assert stats[0]["code"] == "print(1)"
+    assert stats[0]["r_code"] == "print(cor.test(a, b))"
+    tool_messages = [m for m in chat.calls[1]["messages"] if m.get("role") == "tool"]
+    assert "```r" not in tool_messages[0]["content"]
+    assert "```python" in tool_messages[0]["content"]
+
+
+@pytest.mark.parametrize("include_r_code", [True, False])
+def test_r_code_flag_reaches_the_mcp_server_environment(monkeypatch, include_r_code):
+    captured = {}
+
+    @contextlib.asynccontextmanager
+    async def capturing_stdio_client(server_params):
+        captured["params"] = server_params
+        raise RuntimeError("stop before starting a process")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(viz_agent, "stdio_client", capturing_stdio_client)
+
+    async def start():
+        async with REAL_MCP_SESSION("server.py", include_r_code):
+            pass  # pragma: no cover
+
+    with pytest.raises(RuntimeError):
+        asyncio.run(start())
+
+    env = captured["params"].env
+    assert (env.get(viz_agent.r_code.R_CODE_ENV) == "1") is include_r_code
+    assert "PATH" in env  # the default environment is kept
+
+
+def test_run_analysis_passes_the_r_code_option_to_the_server(monkeypatch, fake_server):
+    chat = ScriptedChat([_plan(interactive="Histogram")])
+    monkeypatch.setattr(viz_agent, "chat_no_think", chat)
+    monkeypatch.setattr(viz_agent, "_run_worker_agent", _fake_worker({
+        "interactive": {"plots": ["Interactive Histogram"], "completed": True},
+    }))
+
+    asyncio.run(viz_agent.run_analysis(
+        [{"role": "user", "content": "Plot"}], DATA_PATH, "fake", "server.py",
+        include_r_code=True,
+    ))
+
+    assert fake_server == [("server.py", True)]

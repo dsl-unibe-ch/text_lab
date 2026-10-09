@@ -324,6 +324,20 @@ def get_plot_path(data_file_path: str, plot_name: str, ext: str = ".json") -> st
     return plot_path
 
 
+def split_comma_list(value: str | None) -> list[str]:
+    """Split a comma-separated tool argument into its non-empty, stripped parts."""
+    return [part.strip() for part in (value or "").split(",") if part.strip()]
+
+
+def format_plot_output(plot_path: str, code: str, r_snippet: str = "") -> str:
+    """Build a plot tool's result: ``"path|||python code"``, plus ``"|||R code"``.
+
+    The R part is only present when the run asked for R code (see r_code.py).
+    """
+    output = f"{plot_path}|||{code}"
+    return f"{output}|||{r_snippet}" if r_snippet else output
+
+
 def _strip_show_calls(code: str) -> str:
     """
     Remove standalone display/save calls from model-generated code before exec.

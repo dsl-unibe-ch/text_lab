@@ -8,14 +8,17 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 
+from core.visualization import r_code
 from core.visualization.viz_config import CUSTOM_CODE_TIMEOUT
 from core.visualization.viz_utils import (
     _strip_show_calls,
+    describe_code_error,
+    format_plot_output,
     generate_code_snippet,
     get_plot_path,
-    describe_code_error,
     load_data_safely,
     run_generated_code,
+    split_comma_list,
 )
 
 
@@ -51,7 +54,11 @@ def plot_histogram_impl(
         )
         code = generate_code_snippet(code_logic, data_file_path)
 
-        return f"{plot_path}|||{code}"
+        r_snippet = r_code.build(
+            r_code.histogram, data_file_path, column, title, color_column,
+            pd.api.types.is_numeric_dtype(df[column]), interactive=True,
+        )
+        return format_plot_output(plot_path, code, r_snippet)
     except Exception as e:
         return f"Error plotting interactive histogram: {str(e)}"
 
@@ -95,7 +102,12 @@ def plot_scatterplot_impl(
         )
         code = generate_code_snippet(code_logic, data_file_path)
 
-        return f"{plot_path}|||{code}"
+        r_snippet = r_code.build(
+            r_code.scatter, data_file_path, x_column, y_column, title, color_column,
+            bool(color_column) and pd.api.types.is_numeric_dtype(df[color_column]),
+            interactive=True,
+        )
+        return format_plot_output(plot_path, code, r_snippet)
     except Exception as e:
         return f"Error plotting interactive scatterplot: {str(e)}"
 
@@ -139,7 +151,11 @@ def plot_boxplot_impl(
         )
         code = generate_code_snippet(code_logic, data_file_path)
 
-        return f"{plot_path}|||{code}"
+        r_snippet = r_code.build(
+            r_code.boxplot, data_file_path, x_column, y_column, title, color_column,
+            interactive=True,
+        )
+        return format_plot_output(plot_path, code, r_snippet)
     except Exception as e:
         return f"Error plotting interactive boxplot: {str(e)}"
 
@@ -183,7 +199,11 @@ def plot_lineplot_impl(
         )
         code = generate_code_snippet(code_logic, data_file_path)
 
-        return f"{plot_path}|||{code}"
+        r_snippet = r_code.build(
+            r_code.lineplot, data_file_path, x_column, y_column, title, color_column,
+            interactive=True,
+        )
+        return format_plot_output(plot_path, code, r_snippet)
     except Exception as e:
         return f"Error plotting interactive lineplot: {str(e)}"
 
@@ -259,7 +279,11 @@ def plot_barchart_impl(
             f"    barmode='{barmode}', title='{title}', template='plotly_white')"
         )
         code = generate_code_snippet(code_logic, data_file_path)
-        return f"{plot_path}|||{code}"
+        r_snippet = r_code.build(
+            r_code.barchart_interactive, data_file_path, x_column, y_column, title,
+            color_column, aggregation, count_rows=y_column in group_cols,
+        )
+        return format_plot_output(plot_path, code, r_snippet)
     except Exception as e:
         return f"Error plotting interactive bar chart: {str(e)}"
 
@@ -310,7 +334,11 @@ def plot_scatter_matrix_impl(
             "fig.update_traces(diagonal_visible=False, showupperhalf=False)"
         )
         code = generate_code_snippet(code_logic, data_file_path)
-        return f"{plot_path}|||{code}"
+        r_snippet = r_code.build(
+            r_code.pair_plot, data_file_path, col_list, title, color_column,
+            interactive=True,
+        )
+        return format_plot_output(plot_path, code, r_snippet)
     except Exception as e:
         return f"Error plotting scatter matrix: {str(e)}"
 
@@ -384,7 +412,11 @@ def plot_correlation_heatmap_impl(
             "fig.update_layout(template='plotly_white')"
         )
         code = generate_code_snippet(code_logic, data_file_path)
-        return f"{plot_path}|||{code}"
+        r_snippet = r_code.build(
+            r_code.correlation_heatmap, data_file_path, title, method,
+            split_comma_list(column_filter), interactive=True,
+        )
+        return format_plot_output(plot_path, code, r_snippet)
     except Exception as e:
         return f"Error plotting correlation heatmap: {str(e)}"
 

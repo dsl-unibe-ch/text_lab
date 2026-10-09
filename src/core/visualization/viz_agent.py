@@ -26,9 +26,10 @@ from datetime import timedelta
 from typing import Any, AsyncIterator, Callable, TypedDict
 
 from mcp import ClientSession, StdioServerParameters, types
-from mcp.client.stdio import stdio_client
+from mcp.client.stdio import get_default_environment, stdio_client
 
 from core.chat_engine import chat_no_think, message_text
+from core.visualization import r_code
 from core.visualization.plot_data import get_all_columns_summary_impl
 from core.visualization.viz_config import (
     AGENT_OPTIONS,
@@ -46,7 +47,7 @@ from core.visualization.viz_config import (
     VizAnalysisResult,
     get_tool_label,
 )
-from core.visualization.viz_utils import was_last_load_truncated
+from core.visualization.viz_utils import load_data_safely, was_last_load_truncated
 
 WORKER_PROMPTS = {
     "interactive": INTERACTIVE_PROMPT,
@@ -68,6 +69,17 @@ LOG_SNIPPET_CHARS = 300
 # Caps on tool output sent back to the model. Full results still reach the UI.
 MAX_TOOL_OUTPUT_CHARS = 4000
 MAX_TOOL_ERROR_CHARS = 1000
+
+# Tool parameters whose value is one column name, or a list of column names.
+# Their schemas list the dataset's real columns as allowed values (``enum``),
+# so models pick existing names instead of guessing (e.g. 'Radius_mean').
+COLUMN_PARAMS = frozenset({
+    "column", "x_column", "y_column", "color_column", "hue_column",
+    "text_column", "target_col", "group_col",
+})
+COLUMN_LIST_PARAMS = frozenset({"predictor_cols"})
+# Above this many columns the enums are left out to keep tool schemas short.
+MAX_ENUM_COLUMNS = 150
 
 # Minimum difflib similarity for mapping a misspelled tool name onto an allowed
 # tool, e.g. 'run_rank_target_correlations' -> 'rank_target_correlations'.
@@ -240,12 +252,104 @@ def _strip_injected_args(schema: dict[str, Any] | None) -> dict[str, Any]:
     return clean
 
 
-def _extract_stats_code(tool_output: str) -> tuple[str, str]:
+def _set_string_enum(prop: dict[str, Any], allowed: list[str]) -> None:
+    """Attach ``allowed`` as the enum of a string property.
+
+    Handles both plain ``{"type": "string"}`` properties and optional ones,
+    which FastMCP writes as ``{"anyOf": [{"type": "string"}, {"type": "null"}]}``.
     """
-    Splits a stats tool output into (result_text, code_snippet).
-    Stats tools embed a ```python ... ``` block at the end of their output.
-    Returns the markdown table/summary and the code block separately.
+    for branch in prop.get("anyOf") or [prop]:
+        if branch.get("type") == "string":
+            branch["enum"] = allowed
+
+
+def _add_column_enums(schema: dict[str, Any], columns: list[str]) -> None:
+    """List the dataset's columns as allowed values of every column parameter.
+
+    Optional parameters also allow ``""``, which the tools treat as "not set".
+    Modifies ``schema`` in place; callers pass a copy.
     """
+    required = set(schema.get("required", []))
+    for name, prop in schema.get("properties", {}).items():
+        if name in COLUMN_PARAMS:
+            allowed = list(columns) if name in required else list(columns) + [""]
+            _set_string_enum(prop, allowed)
+        elif name in COLUMN_LIST_PARAMS and isinstance(prop.get("items"), dict):
+            _set_string_enum(prop["items"], list(columns))
+
+
+def _match_column(value: str, columns: list[str]) -> str | None:
+    """Return the column ``value`` refers to, tolerating case and whitespace slips.
+
+    Only an exact match or a single unambiguous case-insensitive match is
+    accepted; anything else returns None and the tool reports the error.
+    """
+    if value in columns:
+        return value
+    key = " ".join(value.split()).casefold()
+    matches = [c for c in columns if " ".join(c.split()).casefold() == key]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _fix_column_args(
+    tool_args: dict[str, Any], columns: list[str]
+) -> list[tuple[str, str]]:
+    """Correct near-miss column names in ``tool_args`` in place.
+
+    Returns:
+        The ``(requested, corrected)`` pairs that were changed, for logging.
+    """
+    fixes: list[tuple[str, str]] = []
+
+    def fix(value: Any) -> Any:
+        if not isinstance(value, str) or not value or value in columns:
+            return value
+        match = _match_column(value, columns)
+        if match is None:
+            return value
+        fixes.append((value, match))
+        return match
+
+    for name in COLUMN_PARAMS & tool_args.keys():
+        tool_args[name] = fix(tool_args[name])
+    for name in COLUMN_LIST_PARAMS & tool_args.keys():
+        if isinstance(tool_args[name], list):
+            tool_args[name] = [fix(v) for v in tool_args[name]]
+    return fixes
+
+
+def _dataset_columns(data_file_path: str) -> list[str]:
+    """Return the dataset's column names, or an empty list if it cannot be read."""
+    try:
+        return [str(c) for c in load_data_safely(data_file_path).columns]
+    except Exception:
+        return []
+
+
+_R_BLOCK_RE = re.compile(r"\n*```r\n(.*?)```", re.DOTALL)
+
+
+def _split_r_block(tool_output: str) -> tuple[str, str]:
+    """Split off the optional trailing ```r block of a stats tool output.
+
+    Returns:
+        ``(output_without_r, r_code)``; ``r_code`` is empty when there is none.
+        The model only ever receives the output without the R block.
+    """
+    match = _R_BLOCK_RE.search(tool_output)
+    if not match:
+        return tool_output, ""
+    without_r = tool_output[:match.start()] + tool_output[match.end():]
+    return without_r.rstrip(), match.group(1).strip()
+
+
+def _extract_stats_code(tool_output: str) -> tuple[str, str, str]:
+    """
+    Splits a stats tool output into (result_text, python_code, r_code).
+    Stats tools embed a ```python ... ``` block, and when R code was requested
+    a ```r ... ``` block, after the result. Missing parts are returned as "".
+    """
+    tool_output, r_snippet = _split_r_block(tool_output)
     match = re.search(r"```python\n(.*?)```", tool_output, re.DOTALL)
     if match:
         code = match.group(1).strip()
@@ -253,7 +357,7 @@ def _extract_stats_code(tool_output: str) -> tuple[str, str]:
     else:
         code = ""
         result_text = tool_output.strip()
-    return result_text, code
+    return result_text, code, r_snippet
 
 
 def _describe_model_error(exc: Exception) -> str:
@@ -305,26 +409,34 @@ async def _chat(
 # =========================================================================
 
 async def _get_mcp_tools(
-    session: ClientSession, allowed_names: list[str] | None = None
+    session: ClientSession,
+    allowed_names: list[str] | None = None,
+    columns: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """List the MCP server's tools in Ollama format, filtered to ``allowed_names``.
 
     Agent-injected arguments (see ``INJECTED_ARGS``) are removed from each
-    schema because the agent always supplies them itself.
+    schema because the agent always supplies them itself. When ``columns`` is
+    given (and not longer than ``MAX_ENUM_COLUMNS``), every column parameter
+    lists them as its allowed values.
     """
+    use_enums = bool(columns) and len(columns) <= MAX_ENUM_COLUMNS
     tool_list_response = await session.list_tools()
     ollama_tools: list[dict[str, Any]] = []
 
     for tool in tool_list_response.tools:
         if allowed_names is not None and tool.name not in allowed_names:
             continue
+        parameters = _strip_injected_args(tool.inputSchema)
+        if use_enums:
+            _add_column_enums(parameters, columns)
         ollama_tools.append(
             {
                 "type": "function",
                 "function": {
                     "name": tool.name,
                     "description": tool.description,
-                    "parameters": _strip_injected_args(tool.inputSchema),
+                    "parameters": parameters,
                 },
             }
         )
@@ -362,7 +474,7 @@ async def _call_tool(
 def _record_plot(
     global_plots: list[PlotArtifact], tool_name: str, output: str
 ) -> bool:
-    """Store a plot artifact from a ``"path|||code"`` tool output.
+    """Store a plot artifact from a ``"path|||code"`` or ``"path|||code|||r"`` output.
 
     Returns False if the output is malformed. Plot files never overwrite each
     other, so distinct plots are all kept. Only an exact repeat (same tool and
@@ -371,10 +483,11 @@ def _record_plot(
     """
     if "|||" not in output:
         return False
-    path_part, code_part = output.split("|||", 1)
+    path_part, code_part, *r_part = output.split("|||", 2)
     artifact: PlotArtifact = {
         "path": path_part.strip(),
         "code": code_part.strip(),
+        "r_code": r_part[0].strip() if r_part else "",
         "tool_name": tool_name,
     }
     for index, existing in enumerate(global_plots):
@@ -390,7 +503,9 @@ def _record_plot(
 # =========================================================================
 
 @contextlib.asynccontextmanager
-async def _mcp_session(mcp_server_script: str) -> AsyncIterator[ClientSession]:
+async def _mcp_session(
+    mcp_server_script: str, include_r_code: bool = False
+) -> AsyncIterator[ClientSession]:
     """Start one MCP server subprocess and yield an initialised client session.
 
     The server is shared by all workers of an analysis. Starting it means
@@ -403,10 +518,17 @@ async def _mcp_session(mcp_server_script: str) -> AsyncIterator[ClientSession]:
 
     ``sys.executable`` guarantees the server runs in the same Python
     environment as the app, whatever ``python3`` resolves to on ``PATH``.
+
+    With ``include_r_code`` the server's tools also return R equivalents of
+    their Python snippets (see ``r_code.py``).
     """
+    env = get_default_environment()
+    if include_r_code:
+        env[r_code.R_CODE_ENV] = "1"
     server_params = StdioServerParameters(
         command=sys.executable,
         args=[mcp_server_script],
+        env=env,
     )
     async with stdio_client(server_params) as (read, write):
         async with ClientSession(read, write) as session:
@@ -440,7 +562,9 @@ async def _run_worker_agent(
     """
     report = _new_report(agent_role, task_instruction)
     allowed_tools = AGENT_TOOLS.get(agent_role, [])
-    tools = await _get_mcp_tools(session, allowed_names=allowed_tools)
+    # Cached in-process by load_data_safely, so this does not re-read the file.
+    columns = await asyncio.to_thread(_dataset_columns, data_file_path)
+    tools = await _get_mcp_tools(session, allowed_names=allowed_tools, columns=columns)
 
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": WORKER_PROMPTS[agent_role]},
@@ -506,6 +630,11 @@ async def _run_worker_agent(
                     f"Worker '{agent_role}' called '{requested_name}'; using '{tool_name}'.",
                 )
 
+            for requested, corrected in _fix_column_args(tool_args, columns):
+                log(
+                    "info",
+                    f"Worker '{agent_role}' used column '{requested}'; using '{corrected}'.",
+                )
             for name in INJECTED_ARGS:
                 tool_args.pop(name, None)
             tool_args["data_file_path"] = data_file_path
@@ -546,16 +675,20 @@ async def _run_worker_agent(
                 ))
             else:
                 if tool_name in STATS_TOOLS:
-                    result_text, code_snippet = _extract_stats_code(output)
+                    result_text, code_snippet, r_snippet = _extract_stats_code(output)
                     # A retry round may repeat a test that already succeeded.
                     if all(s["result"] != result_text for s in global_stats):
                         global_stats.append({
                             "title": get_tool_label(tool_name),
                             "result": result_text,
                             "code": code_snippet,
+                            "r_code": r_snippet,
                         })
                     round_stats.append(result_text)
-                messages.append(_tool_message(tool_name, _clip(output, MAX_TOOL_OUTPUT_CHARS)))
+                model_output, _ = _split_r_block(output)
+                messages.append(_tool_message(
+                    tool_name, _clip(model_output, MAX_TOOL_OUTPUT_CHARS)
+                ))
 
         report["plots"].extend(round_plots)
         report["stats"].extend(r for r in round_stats if r not in report["stats"])
@@ -735,6 +868,7 @@ async def _run_workers_on_shared_server(
     global_stats: list[StatsArtifact],
     log: LogFn,
     cancel_event: threading.Event | None,
+    include_r_code: bool = False,
 ) -> list[WorkerReport]:
     """Start the MCP server once, run every worker on it, then shut it down.
 
@@ -745,7 +879,7 @@ async def _run_workers_on_shared_server(
     """
     reports: list[WorkerReport] | None = None
     try:
-        async with _mcp_session(mcp_server_script) as session:
+        async with _mcp_session(mcp_server_script, include_r_code) as session:
             reports = await _run_workers(
                 tasks, session, data_file_path, schema, model_name,
                 global_plots, global_stats, log, cancel_event,
@@ -848,6 +982,7 @@ async def run_analysis(
     mcp_server_script: str,
     log_callback: LogFn | None = None,
     cancel_event: threading.Event | None = None,
+    include_r_code: bool = False,
 ) -> VizAnalysisResult:
     """Run a full plan-execute-summarise analysis of the user's request.
 
@@ -858,6 +993,8 @@ async def run_analysis(
         mcp_server_script: Path to the MCP server script, started once per run.
         log_callback: Optional callback receiving ``(level, message)`` logs.
         cancel_event: Optional event; when set, workers stop between rounds.
+        include_r_code: Also produce R equivalents of the Python snippets
+            (Visualize Data option; the models never see the R code).
 
     Returns:
         The summary, plot and stats artifacts, and the run logs.
@@ -893,7 +1030,7 @@ async def run_analysis(
             _log("info", f"Supervisor planned {len(tasks)} task(s).")
             reports = await _run_workers_on_shared_server(
                 tasks, mcp_server_script, data_file_path, schema, model_name,
-                plot_results, stats_results, _log, cancel_event,
+                plot_results, stats_results, _log, cancel_event, include_r_code,
             )
             summary = await _summarise(messages, reports, model_name, truncated, _log)
             _log("info", "Supervisor synthesized the final summary.")

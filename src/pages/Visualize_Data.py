@@ -115,6 +115,30 @@ def _build_column_profile(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+R_NOT_AVAILABLE = "R code is not available for plots made from custom Python code."
+
+
+def _render_code(python_code: str, r_snippet: str, show_r: bool) -> None:
+    """Show the reproducible code: Python only, or Python and R tabs.
+
+    Args:
+        python_code: The Python snippet.
+        r_snippet: The R equivalent (empty for custom-code plots).
+        show_r: Whether the user asked for R code for this run.
+    """
+    if not show_r:
+        st.code(python_code, language="python")
+        return
+    tab_python, tab_r = st.tabs(["Python", "R"])
+    with tab_python:
+        st.code(python_code, language="python")
+    with tab_r:
+        if r_snippet:
+            st.code(r_snippet, language="r")
+        else:
+            st.caption(R_NOT_AVAILABLE)
+
+
 def _build_html_report(
     summary: str,
     final_artifacts: list[dict],
@@ -179,6 +203,18 @@ def _build_html_report(
 
     summary_html = f'<div class="summary-box">{_md(summary)}</div>' if summary else ""
 
+    show_r = bool(submission_info.get("include_r_code"))
+
+    def _r_block(r_snippet: str) -> str:
+        if not show_r:
+            return ""
+        if not r_snippet:
+            return f"<p><em>{html_lib.escape(R_NOT_AVAILABLE)}</em></p>"
+        return (
+            f"<details><summary>View R code</summary>"
+            f"<pre><code>{html_lib.escape(r_snippet)}</code></pre></details>"
+        )
+
     stats_parts = []
     for item in stats_results:
         title = html_lib.escape(item.get("title", ""))
@@ -187,7 +223,7 @@ def _build_html_report(
             f"<details><summary>View reproducible code</summary>"
             f"<pre><code>{html_lib.escape(code)}</code></pre></details>"
             if code else ""
-        )
+        ) + _r_block(item.get("r_code", ""))
         stats_parts.append(
             f'<div class="stat-card"><h3>{title}</h3>'
             f'{_md(item.get("result", ""))}{code_block}</div>'
@@ -207,7 +243,7 @@ def _build_html_report(
             f"<details><summary>View source code</summary>"
             f"<pre><code>{html_lib.escape(code)}</code></pre></details>"
             if code else ""
-        )
+        ) + _r_block(artifact.get("r_code", ""))
         if filename.endswith(".json") and fig is not None:
             # Embed the full Plotly JS bundle with the first chart so the report
             # is completely self-contained and never requests external resources.
@@ -285,6 +321,7 @@ def render_results(
     run_id: str,
     submission_info: dict,
 ) -> None:
+    show_r = bool(submission_info.get("include_r_code"))
     st.success("Analysis Complete.")
     st.subheader("Analysis Summary")
     st.markdown(summary)
@@ -295,7 +332,7 @@ def render_results(
             with st.expander(item["title"], expanded=True):
                 st.markdown(item["result"])
                 if item["code"]:
-                    st.code(item["code"], language="python")
+                    _render_code(item["code"], item.get("r_code", ""), show_r)
         st.divider()
 
     if final_artifacts:
@@ -317,7 +354,7 @@ def render_results(
                     st.image(file_bytes, caption=filename)
                     
                 with st.expander(f"View Source Code: {tool_label or filename}"):
-                    st.code(code, language="python")
+                    _render_code(code, artifact.get("r_code", ""), show_r)
                 
                 st.divider()
 
@@ -338,6 +375,8 @@ def render_results(
                     
                 code_filename = filename.replace(".json", ".py").replace(".png", ".py")
                 zf.writestr(code_filename, code)
+                if show_r and artifact.get("r_code"):
+                    zf.writestr(code_filename[:-3] + ".R", artifact["r_code"])
 
             report_html = _build_html_report(
                 summary, final_artifacts, stats_results, submission_info, run_id
@@ -369,10 +408,14 @@ def _start_analysis_thread(
     user_prompt: str,
     selected_model: str,
     selected_columns: list[str],
+    include_r_code: bool = False,
 ) -> None:
     """
     Capture all inputs, initialise shared session_state structures, then start the
     analysis in a daemon thread so the Streamlit UI remains responsive.
+
+    With ``include_r_code`` every result also carries an R equivalent of its
+    Python code.
     """
     cancel_event: threading.Event = threading.Event()
     live_logs: list[tuple[str, str]] = []
@@ -389,6 +432,7 @@ def _start_analysis_thread(
         "selected_columns": selected_columns,
         "user_prompt": user_prompt.strip(),
         "model": selected_model,
+        "include_r_code": include_r_code,
     }
 
     def _worker() -> None:
@@ -449,6 +493,7 @@ def _start_analysis_thread(
                                 MCP_SERVER_SCRIPT,
                                 log_callback=_log_cb,
                                 cancel_event=cancel_event,
+                                include_r_code=include_r_code,
                             ),
                             timeout=ANALYSIS_TIMEOUT_SECONDS,
                         )
@@ -468,6 +513,7 @@ def _start_analysis_thread(
                             "filename": filename,
                             "bytes": img_bytes,
                             "code": item["code"],
+                            "r_code": item.get("r_code", ""),
                             "fig": None,
                             "tool_name": item.get("tool_name", ""),
                         }
@@ -600,6 +646,7 @@ def main() -> None:
         * **Interactive Agent (Default):** Generates web-ready, interactive Plotly charts (Scatter, Bar, Line, Box, Scatter Matrix, Correlation Heatmap, etc.). Best for exploring data on this page.
         * **Static Agent:** Generates publication-ready Matplotlib/Seaborn charts, Pair Plots, and Word Clouds. Triggered when you explicitly ask for "static", "publication figures", "pair plot", or "word cloud".
         * **Statistical Agent:** Runs rigorous mathematical tests including Correlations, T-tests, ANOVA, and OLS Linear Regression. Each result includes reproducible Python code.
+        * **R Code (optional):** Tick "Also generate equivalent R code" to get R code (ggplot2 plots, base R statistics) next to the Python code of every result. Plots made from custom Python code have no R version.
 
         **Prompting Tip:** Be specific about what you want!
         *(e.g., "Run a t-test on column X grouped by Y, then plot an interactive bar chart of the means.")*
@@ -715,6 +762,17 @@ def main() -> None:
         disabled=is_running,
     )
 
+    include_r_code = st.checkbox(
+        "Also generate equivalent R code",
+        key="viz_include_r",
+        disabled=is_running,
+        help=(
+            "Adds R code (ggplot2 plots, base R statistics) next to the Python code "
+            "of each result, so the analysis can be reproduced and checked in R. "
+            "Plots made from custom Python code have no R version."
+        ),
+    )
+
     if is_running:
         st.button("Generating...", type="primary", disabled=True)
     else:
@@ -727,6 +785,7 @@ def main() -> None:
                 user_prompt=user_prompt,
                 selected_model=selected_model,
                 selected_columns=selected_columns,
+                include_r_code=include_r_code,
             )
             st.rerun()
 

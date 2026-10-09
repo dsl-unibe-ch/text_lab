@@ -7,6 +7,7 @@ import pandas as pd
 import pingouin as pg
 import statsmodels.api as sm
 
+from core.visualization import r_code
 from core.visualization.viz_utils import load_data_safely
 
 # Values that represent the "positive" class in binary categorical columns.
@@ -29,6 +30,11 @@ def _stats_code_header(data_file_path: str) -> str:
     else:
         loader = "df = pd.read_csv('your_data.csv')"
     return f"import pandas as pd\n\n# Load Data\n{loader}\n\n"
+
+
+def _with_r_block(output: str, r_snippet: str) -> str:
+    """Append the R equivalent as a fenced ```r block when one was generated."""
+    return f"{output}\n\n```r\n{r_snippet}\n```" if r_snippet else output
 
 
 def run_correlation_impl(
@@ -65,10 +71,14 @@ def run_correlation_impl(
             + f"result = pg.corr(clean_df['{x_column}'], clean_df['{y_column}'], method='{method}')\n"
             + "print(result)"
         )
-        return (
+        r_snippet = r_code.build(
+            r_code.correlation_test, data_file_path, x_column, y_column, method
+        )
+        return _with_r_block(
             f"Correlation Analysis ({method}) between '{x_column}' and '{y_column}':\n\n"
             f"{res.to_markdown()}\n\n"
-            f"```python\n{code}\n```"
+            f"```python\n{code}\n```",
+            r_snippet,
         )
     except Exception as e:
         return f"Error computing correlation: {str(e)}"
@@ -102,6 +112,9 @@ def run_group_comparison_impl(
             group1 = clean_df[clean_df[group_col] == groups[0]][target_col]
             group2 = clean_df[clean_df[group_col] == groups[1]][target_col]
             res = pg.ttest(group1, group2)
+            # pingouin's default picks Student's t-test for equal group sizes and
+            # Welch's otherwise; the R snippet needs to know which one was used.
+            equal_sizes = len(group1) == len(group2)
             result_text = (
                 f"Independent T-test for '{target_col}' grouped by '{group_col}' "
                 f"(Groups: {groups[0]} vs {groups[1]}):\n\n{res.to_markdown()}"
@@ -113,6 +126,7 @@ def run_group_comparison_impl(
                 "result = pg.ttest(g1, g2)\nprint(result)"
             )
         elif len(groups) > 2:
+            equal_sizes = None
             res = pg.anova(dv=target_col, between=group_col, data=clean_df, detailed=True)
             result_text = (
                 f"One-way ANOVA for '{target_col}' grouped by '{group_col}' "
@@ -131,7 +145,11 @@ def run_group_comparison_impl(
             + "import pingouin as pg\n\n"
             + code_logic
         )
-        return f"{result_text}\n\n```python\n{code}\n```"
+        r_snippet = r_code.build(
+            r_code.group_comparison, data_file_path, target_col, group_col,
+            list(groups), equal_sizes,
+        )
+        return _with_r_block(f"{result_text}\n\n```python\n{code}\n```", r_snippet)
 
     except Exception as e:
         return f"Error computing group comparison: {str(e)}"
@@ -184,10 +202,14 @@ def run_linear_regression_impl(
             + "model = sm.OLS(y, X).fit()\n"
             + "print(model.summary())"
         )
-        return (
+        r_snippet = r_code.build(
+            r_code.regression, data_file_path, target_col, predictor_cols
+        )
+        return _with_r_block(
             f"OLS Linear Regression Results (Target: {target_col}):\n\n"
             f"{model.summary().as_text()}\n\n"
-            f"```python\n{code}\n```"
+            f"```python\n{code}\n```",
+            r_snippet,
         )
     except Exception as e:
         return f"Error computing linear regression: {str(e)}"
@@ -216,6 +238,7 @@ def rank_target_correlations_impl(
 
         working_df = df.copy()
         binary_encode_snippet = ""
+        encoding = None
 
         if not pd.api.types.is_numeric_dtype(working_df[target_col]):
             raw_unique = working_df[target_col].dropna().unique()
@@ -233,6 +256,7 @@ def rank_target_correlations_impl(
             )
             neg_idx = 1 - pos_idx
             val_map = {sorted_vals[pos_idx]: 1, sorted_vals[neg_idx]: 0}
+            encoding = (sorted_vals[pos_idx], sorted_vals[neg_idx])
             working_df[target_col] = working_df[target_col].map(val_map)
             # Build the encoding step to include in the reproducible snippet.
             binary_encode_snippet = (
@@ -263,10 +287,14 @@ def rank_target_correlations_impl(
             + f"corr = corr.drop('{target_col}').abs().sort_values(ascending=False)\n"
             + "print(corr)"
         )
-        return (
+        r_snippet = r_code.build(
+            r_code.rank_correlations, data_file_path, target_col, method, encoding
+        )
+        return _with_r_block(
             f"Correlation Ranking with respect to target column '{target_col}' ({method}):\n\n"
             f"{ranking_df.to_markdown(index=False)}\n\n"
-            f"```python\n{code}\n```"
+            f"```python\n{code}\n```",
+            r_snippet,
         )
     except Exception as e:
         return f"Error ranking correlations: {str(e)}"

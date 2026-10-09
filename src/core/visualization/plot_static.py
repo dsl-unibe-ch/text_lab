@@ -12,13 +12,16 @@ import pandas.api.types as ptypes
 import seaborn as sns
 from wordcloud import STOPWORDS, WordCloud
 
+from core.visualization import r_code
 from core.visualization.viz_config import CUSTOM_CODE_TIMEOUT
 from core.visualization.viz_utils import (
     _strip_show_calls,
     describe_code_error,
+    format_plot_output,
     get_plot_path,
     load_data_safely,
     run_generated_code,
+    split_comma_list,
 )
 
 
@@ -95,7 +98,11 @@ def plot_static_histogram_impl(
             "plt.ylabel('Frequency')",
             data_file_path=data_file_path,
         )
-        return f"{plot_path}|||{code}"
+        r_snippet = r_code.build(
+            r_code.histogram, data_file_path, column, title, None,
+            pd.api.types.is_numeric_dtype(df[column]), interactive=False, x_label=x_label,
+        )
+        return format_plot_output(plot_path, code, r_snippet)
     except Exception as e:
         return f"Error plotting static histogram: {str(e)}"
 
@@ -140,7 +147,12 @@ def plot_static_scatterplot_impl(
             f"plt.ylabel('{y_label}')",
             data_file_path=data_file_path,
         )
-        return f"{plot_path}|||{code}"
+        r_snippet = r_code.build(
+            r_code.scatter, data_file_path, x_column, y_column, title, hue_column,
+            bool(hue_column) and pd.api.types.is_numeric_dtype(df[hue_column]),
+            interactive=False, x_label=x_label, y_label=y_label,
+        )
+        return format_plot_output(plot_path, code, r_snippet)
     except Exception as e:
         return f"Error plotting static scatterplot: {str(e)}"
 
@@ -183,7 +195,11 @@ def plot_static_boxplot_impl(
             "plt.xticks(rotation=45)",
             data_file_path=data_file_path,
         )
-        return f"{plot_path}|||{code}"
+        r_snippet = r_code.build(
+            r_code.boxplot, data_file_path, x_column, y_column, title, None,
+            interactive=False, x_label=x_label, y_label=y_label,
+        )
+        return format_plot_output(plot_path, code, r_snippet)
     except Exception as e:
         return f"Error plotting static boxplot: {str(e)}"
 
@@ -303,7 +319,11 @@ def plot_static_lineplot_impl(
             "plt.xticks(rotation=45)",
             data_file_path=data_file_path,
         )
-        return f"{plot_path}|||{code}"
+        r_snippet = r_code.build(
+            r_code.lineplot, data_file_path, x_column, y_column, title, hue_column,
+            interactive=False, x_label=x_label, y_label=y_label,
+        )
+        return format_plot_output(plot_path, code, r_snippet)
     except Exception as e:
         return f"Error plotting static lineplot: {str(e)}"
 
@@ -367,7 +387,11 @@ def plot_static_barchart_impl(
             "plt.xticks(rotation=45, ha='right')",
             data_file_path=data_file_path,
         )
-        return f"{plot_path}|||{code}"
+        r_snippet = r_code.build(
+            r_code.barchart_static, data_file_path, x_column, y_column, title,
+            x_label, y_label, hue_column, aggregation,
+        )
+        return format_plot_output(plot_path, code, r_snippet)
     except Exception as e:
         return f"Error plotting static bar chart: {str(e)}"
 
@@ -436,7 +460,11 @@ def plot_static_wordcloud_impl(
             "plt.axis('off')",
             data_file_path=data_file_path,
         )
-        return f"{plot_path}|||{code}"
+        r_snippet = r_code.build(
+            r_code.wordcloud, data_file_path, text_column, title,
+            split_comma_list(extra_stopwords),
+        )
+        return format_plot_output(plot_path, code, r_snippet)
     except Exception as e:
         return f"Error plotting word cloud: {str(e)}"
 
@@ -512,7 +540,11 @@ def plot_static_pairplot_impl(
             f"g.fig.suptitle('{display_title}', y=1.02, fontsize=14)\n"
         )
         code = _generate_static_code_snippet(code_body, grid_figure=True, data_file_path=data_file_path)
-        return f"{plot_path}|||{code}"
+        r_snippet = r_code.build(
+            r_code.pair_plot, data_file_path, col_list, title, hue_column,
+            interactive=False, sample_rows=_PAIRPLOT_MAX_ROWS if sampled else None,
+        )
+        return format_plot_output(plot_path, code, r_snippet)
     except Exception as e:
         return f"Error generating pair plot: {str(e)}"
 
@@ -600,6 +632,10 @@ def plot_static_correlation_heatmap_impl(
             grid_figure=True,
             data_file_path=data_file_path,
         )
-        return f"{plot_path}|||{code}"
+        r_snippet = r_code.build(
+            r_code.correlation_heatmap, data_file_path, title, method,
+            split_comma_list(column_filter), interactive=False,
+        )
+        return format_plot_output(plot_path, code, r_snippet)
     except Exception as e:
         return f"Error plotting static correlation heatmap: {str(e)}"

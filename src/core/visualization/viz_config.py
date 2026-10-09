@@ -11,6 +11,7 @@ class PlotArtifact(TypedDict):
     """Represents a single generated plot artifact returned by the MCP server."""
     path: str
     code: str
+    r_code: str     # R equivalent of ``code``; empty unless R code was requested
     tool_name: str
 
 
@@ -19,6 +20,7 @@ class StatsArtifact(TypedDict):
     title: str      # short human-readable label, e.g. "T-test: radius_mean by diagnosis"
     result: str     # the markdown table / summary text returned by the stats tool
     code: str       # the reproducible Python code snippet embedded in the result
+    r_code: str     # R equivalent of ``code``; empty unless R code was requested
 
 
 class VizAnalysisResult(TypedDict):

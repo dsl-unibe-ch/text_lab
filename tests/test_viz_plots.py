@@ -1,4 +1,4 @@
-"""Plot tool edge cases seen in agent runs, on a tiny in-memory dataset."""
+"""Plot and stats tool behaviour (incl. optional R code), on tiny datasets."""
 
 import conftest_path  # noqa: F401
 
@@ -10,7 +10,13 @@ import pandas as pd
 import plotly.io as pio
 import pytest
 
-from core.visualization import plot_interactive, plot_static, viz_utils
+from core.visualization import (
+    plot_interactive,
+    plot_static,
+    r_code,
+    stats_analysis,
+    viz_utils,
+)
 from core.visualization.plot_data import get_all_columns_summary_impl
 from core.visualization.plot_interactive import generate_custom_plotly_impl, plot_barchart_impl
 
@@ -168,3 +174,124 @@ def test_custom_code_syntax_errors_name_the_line(data_file):
     )
 
     assert "SyntaxError" in output and "At line 2: if x" in output
+
+
+# =========================================================================
+# R CODE
+# =========================================================================
+
+@pytest.fixture
+def r_data_file(tmp_path):
+    path = tmp_path / "uploaded_data.csv"
+    pd.DataFrame({
+        "diagnosis": ["M", "B", "B", "M", "B", "M"],
+        "radius_mean": [17.0, 12.0, 13.0, 20.0, 11.5, 18.2],
+        "concave points_mean": [0.14, 0.05, 0.04, 0.18, 0.03, 0.12],
+        "notes": ["large irregular mass", "small smooth", "small round",
+                  "large irregular", "small smooth round", "irregular mass"],
+    }).to_csv(path, index=False)
+    return str(path)
+
+
+@pytest.fixture
+def r_enabled(monkeypatch):
+    monkeypatch.setenv(r_code.R_CODE_ENV, "1")
+
+
+def _plot_calls(path):
+    """Every standard plot tool with valid arguments for ``r_data_file``."""
+    return {
+        "interactive histogram": lambda: plot_interactive.plot_histogram_impl(
+            path, "radius_mean", "Radius", "diagnosis"),
+        "interactive scatter": lambda: plot_interactive.plot_scatterplot_impl(
+            path, "radius_mean", "concave points_mean", "Scatter", "diagnosis"),
+        "interactive box": lambda: plot_interactive.plot_boxplot_impl(
+            path, "diagnosis", "radius_mean", "Box"),
+        "interactive line": lambda: plot_interactive.plot_lineplot_impl(
+            path, "radius_mean", "concave points_mean", "Line"),
+        "interactive bar": lambda: plot_interactive.plot_barchart_impl(
+            path, "diagnosis", "radius_mean", "Bar"),
+        "interactive matrix": lambda: plot_interactive.plot_scatter_matrix_impl(
+            path, "radius_mean,concave points_mean", "Matrix", "diagnosis"),
+        "interactive heatmap": lambda: plot_interactive.plot_correlation_heatmap_impl(
+            path, "Heatmap", "pearson", "_mean"),
+        "static histogram": lambda: plot_static.plot_static_histogram_impl(
+            path, "radius_mean", "Radius", "Radius"),
+        "static scatter": lambda: plot_static.plot_static_scatterplot_impl(
+            path, "radius_mean", "concave points_mean", "Scatter", "R", "C", "diagnosis"),
+        "static box": lambda: plot_static.plot_static_boxplot_impl(
+            path, "diagnosis", "radius_mean", "Box", "D", "R"),
+        "static line": lambda: plot_static.plot_static_lineplot_impl(
+            path, "radius_mean", "concave points_mean", "Line", "R", "C"),
+        "static bar": lambda: plot_static.plot_static_barchart_impl(
+            path, "diagnosis", "radius_mean", "Bar", "D", "R"),
+        "static wordcloud": lambda: plot_static.plot_static_wordcloud_impl(
+            path, "notes", "Words"),
+        "static pairplot": lambda: plot_static.plot_static_pairplot_impl(
+            path, "radius_mean,concave points_mean", "Pairs", "diagnosis"),
+        "static heatmap": lambda: plot_static.plot_static_correlation_heatmap_impl(
+            path, "Heatmap", "spearman"),
+    }
+
+
+def test_every_standard_plot_tool_returns_r_code_when_enabled(r_data_file, r_enabled):
+    for name, call in _plot_calls(r_data_file).items():
+        output = call()
+        assert not output.startswith("Error"), (name, output)
+        parts = output.split("|||")
+        assert len(parts) == 3, name
+        r_snippet = parts[2]
+        assert 'check.names = FALSE' in r_snippet, name
+        assert "library(" in r_snippet and "# The R code could not" not in r_snippet, name
+
+
+def test_plot_tools_return_no_r_code_by_default(r_data_file):
+    output = plot_interactive.plot_histogram_impl(r_data_file, "radius_mean", "Radius")
+    assert len(output.split("|||")) == 2
+
+
+def test_custom_code_plots_have_no_r_code(r_data_file, r_enabled):
+    output = generate_custom_plotly_impl(
+        r_data_file, "fig = px.histogram(df, x='radius_mean')", "custom")
+    assert len(output.split("|||")) == 2
+
+
+def test_t_test_r_code_matches_pingouins_choice_of_test(r_data_file, r_enabled):
+    equal = stats_analysis.run_group_comparison_impl(r_data_file, "radius_mean", "diagnosis")
+    assert "```r\n" in equal
+    assert "var.equal = TRUE" in equal  # 3 vs 3 rows: pingouin uses Student's t-test
+    assert 'clean_df[["diagnosis"]] == "B"' in equal  # same group order as Python
+
+
+def test_unequal_groups_use_welch_in_r(tmp_path, r_enabled):
+    path = tmp_path / "uploaded_data.csv"
+    pd.DataFrame({"g": ["a", "a", "a", "b", "b"], "y": [1.0, 2.0, 3.0, 4.0, 6.0]}).to_csv(
+        path, index=False)
+    output = stats_analysis.run_group_comparison_impl(str(path), "y", "g")
+    assert "var.equal = FALSE" in output
+
+
+def test_rank_correlations_r_code_repeats_the_binary_encoding(r_data_file, r_enabled):
+    output = stats_analysis.rank_target_correlations_impl(r_data_file, "diagnosis")
+    assert '== "M", 1' in output and '== "B", 0' in output
+
+
+def test_stats_have_no_r_block_by_default(r_data_file):
+    output = stats_analysis.run_correlation_impl(r_data_file, "radius_mean", "concave points_mean")
+    assert "```r" not in output and "```python" in output
+
+
+def test_r_literals_quote_names_and_values_safely():
+    assert r_code.r_col("concave points_mean") == "`concave points_mean`"
+    assert r_code.r_col("a`b") == "`a\\`b`"
+    assert r_code.r_str('say "hi"\n') == '"say \\"hi\\"\\n"'
+    assert r_code.r_value(np.bool_(True)) == "TRUE"
+    assert r_code.r_value(np.int64(3)) == "3"
+    assert r_code.r_value("M") == '"M"'
+
+
+def test_r_generation_errors_never_break_a_tool(r_enabled):
+    def broken(*args):
+        raise ValueError("boom")
+
+    assert r_code.build(broken) == "# The R code could not be generated: boom"
