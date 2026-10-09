@@ -44,7 +44,8 @@ nav:
     - Meeting Notes Generator: meeting_notes.md
     - Knowledge Graph: knowledge_graph.md
     - Topic Modeling: topic_modeling.md
-    - Chat & Viz: other_tools.md
+    - Chat: chat.md
+    - Visualize Data: visualize_data.md
 
 # Extensions to make Markdown look better
 markdown_extensions:
