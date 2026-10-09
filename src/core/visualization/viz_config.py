@@ -60,6 +60,14 @@ AGENT_NUM_CTX: int | None = _env_int("TEXTLAB_AGENT_NUM_CTX")
 # include loading a large model from shared storage on the first call.
 AGENT_REQUEST_TIMEOUT: float = float(_env_int("TEXTLAB_AGENT_TIMEOUT") or 300)
 
+# Limits for tool execution. Model-written plotting code is stopped inside the
+# MCP server after CUSTOM_CODE_TIMEOUT seconds, so an endless loop cannot block
+# the server all workers share. TOOL_CALL_TIMEOUT is the client-side safety net
+# for any tool call and must stay above CUSTOM_CODE_TIMEOUT to leave time for
+# saving the figure.
+CUSTOM_CODE_TIMEOUT: float = 60
+TOOL_CALL_TIMEOUT: float = 180
+
 AGENT_OPTIONS: dict[str, float | int] = {"temperature": AGENT_TEMPERATURE}
 if AGENT_NUM_CTX:
     AGENT_OPTIONS["num_ctx"] = AGENT_NUM_CTX

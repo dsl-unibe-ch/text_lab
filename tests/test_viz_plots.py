@@ -10,7 +10,7 @@ import pandas as pd
 import plotly.io as pio
 import pytest
 
-from core.visualization import viz_utils
+from core.visualization import plot_interactive, plot_static, viz_utils
 from core.visualization.plot_data import get_all_columns_summary_impl
 from core.visualization.plot_interactive import generate_custom_plotly_impl, plot_barchart_impl
 
@@ -117,3 +117,46 @@ def test_custom_code_cannot_modify_the_cached_dataset(data_file):
 
     assert not output.startswith("Error"), output
     assert "radius_mean" in viz_utils.load_data_safely(data_file).columns
+
+
+def test_existing_plot_files_are_never_overwritten(data_file):
+    first = viz_utils.get_plot_path(data_file, "hist_radius_mean", ext=".json")
+    open(first, "w").close()
+    second = viz_utils.get_plot_path(data_file, "hist_radius_mean", ext=".json")
+    open(second, "w").close()
+    third = viz_utils.get_plot_path(data_file, "hist_radius_mean", ext=".json")
+
+    assert os.path.basename(second) == "hist_radius_mean_2.json"
+    assert os.path.basename(third) == "hist_radius_mean_3.json"
+
+
+def test_time_limit_interrupts_a_runaway_loop():
+    with pytest.raises(TimeoutError):
+        with viz_utils.time_limit(0.2):
+            while True:
+                pass
+
+
+def test_endless_custom_plotly_code_is_stopped(data_file, monkeypatch):
+    monkeypatch.setattr(plot_interactive, "CUSTOM_CODE_TIMEOUT", 0.3)
+    output = generate_custom_plotly_impl(data_file, "while True:\n    pass", "loop")
+
+    assert output.startswith("Error") and "did not finish" in output
+
+
+def test_endless_custom_static_code_is_stopped(data_file, monkeypatch):
+    monkeypatch.setattr(plot_static, "CUSTOM_CODE_TIMEOUT", 0.3)
+    output = plot_static.generate_custom_static_plot_impl(
+        data_file, "while True:\n    pass", "loop"
+    )
+
+    assert output.startswith("Error") and "did not finish" in output
+
+
+@pytest.mark.parametrize("code", ["import sys\nsys.exit(1)", "exit()"])
+def test_exit_in_custom_code_returns_an_error_instead_of_stopping(data_file, code):
+    output = generate_custom_plotly_impl(data_file, code, "exit")
+    static_output = plot_static.generate_custom_static_plot_impl(data_file, code, "exit")
+
+    for result in (output, static_output):
+        assert result.startswith("Error") and "exit()" in result

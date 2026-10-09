@@ -8,11 +8,13 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 
+from core.visualization.viz_config import CUSTOM_CODE_TIMEOUT
 from core.visualization.viz_utils import (
     _strip_show_calls,
     generate_code_snippet,
     get_plot_path,
     load_data_safely,
+    time_limit,
 )
 
 
@@ -418,7 +420,8 @@ def generate_custom_plotly_impl(
         clean_code = _strip_show_calls(clean_code)
 
         # Execute the custom code
-        exec(clean_code, local_scope)
+        with time_limit(CUSTOM_CODE_TIMEOUT):
+            exec(clean_code, local_scope)
 
         # The system prompt enforces that the LLM must assign the output to 'fig'
         if "fig" not in local_scope:
@@ -437,5 +440,9 @@ def generate_custom_plotly_impl(
 
         return f"{plot_path}|||{full_user_code}"
 
+    except SystemExit:
+        # exit()/sys.exit() in generated code would otherwise shut down the MCP
+        # server that every worker of the analysis shares.
+        return "Error: Your code must not call exit() or sys.exit(). Remove that call."
     except Exception as e:
         return f"Error executing custom plotly code: {str(e)}"

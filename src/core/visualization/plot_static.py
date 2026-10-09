@@ -12,7 +12,13 @@ import pandas.api.types as ptypes
 import seaborn as sns
 from wordcloud import STOPWORDS, WordCloud
 
-from core.visualization.viz_utils import _strip_show_calls, get_plot_path, load_data_safely
+from core.visualization.viz_config import CUSTOM_CODE_TIMEOUT
+from core.visualization.viz_utils import (
+    _strip_show_calls,
+    get_plot_path,
+    load_data_safely,
+    time_limit,
+)
 
 
 def _generate_static_code_snippet(
@@ -219,7 +225,8 @@ def generate_custom_static_plot_impl(
         # Close any stale figures from previous runs in this process.
         plt.close("all")
 
-        exec(clean_code, local_scope)
+        with time_limit(CUSTOM_CODE_TIMEOUT):
+            exec(clean_code, local_scope)
 
         # Prefer an explicit `fig` if the LLM created one; otherwise use the
         # currently active matplotlib figure.
@@ -239,6 +246,11 @@ def generate_custom_static_plot_impl(
 
         return f"{plot_path}|||{full_user_code}"
 
+    except SystemExit:
+        # exit()/sys.exit() in generated code would otherwise shut down the MCP
+        # server that every worker of the analysis shares.
+        plt.close("all")
+        return "Error: Your code must not call exit() or sys.exit(). Remove that call."
     except Exception as e:
         plt.close("all")
         return f"Error executing custom static plot code: {str(e)}"

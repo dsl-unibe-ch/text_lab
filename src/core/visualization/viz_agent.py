@@ -22,6 +22,7 @@ import re
 import sys
 import threading
 import traceback
+from datetime import timedelta
 from typing import Any, AsyncIterator, Callable, TypedDict
 
 from mcp import ClientSession, StdioServerParameters, types
@@ -39,6 +40,7 @@ from core.visualization.viz_config import (
     STATS_PROMPT,
     SUMMARY_PROMPT,
     SUPERVISOR_PROMPT,
+    TOOL_CALL_TIMEOUT,
     PlotArtifact,
     StatsArtifact,
     VizAnalysisResult,
@@ -338,8 +340,18 @@ async def _call_tool(
     A call fails when MCP flags it as an error (e.g. invalid arguments) or when
     the tool's own output starts with ``"Error"``, the convention all tool
     implementations follow.
+
+    Raises:
+        mcp.shared.exceptions.McpError: If the server does not answer within
+            ``TOOL_CALL_TIMEOUT`` seconds. Model-written code has its own,
+            shorter limit inside the server; this is the safety net for any
+            tool that hangs.
     """
-    result = await session.call_tool(tool_name, arguments=tool_args)
+    result = await session.call_tool(
+        tool_name,
+        arguments=tool_args,
+        read_timeout_seconds=timedelta(seconds=TOOL_CALL_TIMEOUT),
+    )
     output = "\n".join(
         part.text for part in result.content if isinstance(part, types.TextContent)
     )
@@ -352,9 +364,10 @@ def _record_plot(
 ) -> bool:
     """Store a plot artifact from a ``"path|||code"`` tool output.
 
-    Returns False if the output is malformed. A plot whose path is already
-    recorded (the model re-ran the same plot) replaces the earlier entry, since
-    the file on disk was overwritten anyway.
+    Returns False if the output is malformed. Plot files never overwrite each
+    other, so distinct plots are all kept. Only an exact repeat (same tool and
+    same generated code, e.g. the model re-ran a plot that already succeeded)
+    replaces the earlier entry instead of showing the same plot twice.
     """
     if "|||" not in output:
         return False
@@ -365,7 +378,7 @@ def _record_plot(
         "tool_name": tool_name,
     }
     for index, existing in enumerate(global_plots):
-        if existing["path"] == artifact["path"]:
+        if (existing["tool_name"], existing["code"]) == (tool_name, artifact["code"]):
             global_plots[index] = artifact
             return True
     global_plots.append(artifact)

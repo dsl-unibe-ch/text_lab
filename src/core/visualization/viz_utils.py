@@ -3,11 +3,15 @@ Utility functions for the AI Visualization Engine.
 Handles file I/O, memory-safe data loading, and path generation.
 """
 
+import contextlib
 import hashlib
 import os
 import re
+import signal
 import sys
+import threading
 from functools import lru_cache
+from typing import Iterator
 
 import pandas as pd
 
@@ -199,12 +203,48 @@ def was_last_load_truncated(file_path: str) -> bool:
     return LAST_LOAD_TRUNCATED.get(file_path, False)
 
 
+@contextlib.contextmanager
+def time_limit(seconds: float) -> Iterator[None]:
+    """Raise ``TimeoutError`` inside the block if it runs longer than ``seconds``.
+
+    Used around model-written code: an endless loop would otherwise block the
+    MCP server, which all workers of an analysis share. Implemented with
+    ``SIGALRM``, so it is only active in the main thread on POSIX systems
+    (where the MCP server runs its tools); elsewhere the block runs unlimited.
+
+    Note that a long-running C call (e.g. a single huge NumPy operation) is
+    only interrupted once control returns to Python.
+    """
+    usable = (
+        seconds > 0
+        and hasattr(signal, "SIGALRM")
+        and threading.current_thread() is threading.main_thread()
+    )
+    if not usable:
+        yield
+        return
+
+    def _on_timeout(signum, frame):
+        raise TimeoutError(f"Code did not finish within {seconds:.0f} seconds.")
+
+    previous_handler = signal.signal(signal.SIGALRM, _on_timeout)
+    signal.setitimer(signal.ITIMER_REAL, seconds)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous_handler)
+
+
 def get_plot_path(data_file_path: str, plot_name: str, ext: str = ".json") -> str:
     """
     Generate a safe, unique file path for saving a generated plot.
 
     The name is sanitised to word characters and hyphens; names longer than
-    ``MAX_PLOT_NAME_CHARS`` are shortened and suffixed with a hash.
+    ``MAX_PLOT_NAME_CHARS`` are shortened and suffixed with a hash. If a file
+    with that name already exists (e.g. two histograms of the same column, or
+    a plot from an earlier chat turn), a numeric suffix is added so earlier
+    plots are never overwritten.
 
     Args:
         data_file_path: The path to the source data file (used to locate the run directory).
@@ -228,7 +268,14 @@ def get_plot_path(data_file_path: str, plot_name: str, ext: str = ".json") -> st
         digest = hashlib.sha1(safe_plot_name.encode("utf-8")).hexdigest()[:10]
         safe_plot_name = f"{safe_plot_name[:MAX_PLOT_NAME_CHARS]}_{digest}"
 
-    return os.path.join(plot_dir, f"{safe_plot_name}{ext}")
+    base = os.path.join(plot_dir, safe_plot_name)
+    plot_path = f"{base}{ext}"
+    counter = 2
+    # The MCP server runs tools one at a time, so check-then-write is safe here.
+    while os.path.exists(plot_path):
+        plot_path = f"{base}_{counter}{ext}"
+        counter += 1
+    return plot_path
 
 
 def _strip_show_calls(code: str) -> str:

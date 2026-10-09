@@ -59,6 +59,7 @@ class FakeSession:
     def __init__(self, outputs):
         self.outputs = {name: list(values) for name, values in outputs.items()}
         self.calls = []
+        self.timeouts = []
 
     async def list_tools(self):
         schema = {
@@ -75,8 +76,9 @@ class FakeSession:
             SimpleNamespace(name=n, description=n, inputSchema=schema) for n in names
         ])
 
-    async def call_tool(self, name, arguments):
+    async def call_tool(self, name, arguments, read_timeout_seconds=None):
         self.calls.append((name, dict(arguments)))
+        self.timeouts.append(read_timeout_seconds)
         text = self.outputs[name].pop(0)
         return SimpleNamespace(
             content=[types.TextContent(type="text", text=text)], isError=False
@@ -148,6 +150,7 @@ def test_plot_worker_stops_after_first_successful_round(monkeypatch, logs):
         "tool_name": "plot_interactive_histogram",
     }]
     assert session.calls[0][1]["data_file_path"] == DATA_PATH
+    assert session.timeouts[0].total_seconds() == viz_agent.TOOL_CALL_TIMEOUT
     for tool in chat.calls[0]["tools"]:
         assert "data_file_path" not in tool["function"]["parameters"]["properties"]
     assert chat.calls[0]["options"]["temperature"] == viz_agent.AGENT_OPTIONS["temperature"]
@@ -507,3 +510,13 @@ def test_activity_log_shows_tools_per_round(monkeypatch, logs):
     assert ("info", "Worker 'interactive' is running 2 tools: "
             "Interactive Histogram, Interactive Box Plot.") in logs
     assert ("info", "Worker 'interactive' is retrying 1 tool: Interactive Box Plot.") in logs
+
+
+def test_distinct_plots_are_kept_and_exact_repeats_merged():
+    plots = []
+    viz_agent._record_plot(plots, "plot_interactive_histogram", "/p/hist_age.json|||code A")
+    viz_agent._record_plot(plots, "plot_interactive_histogram", "/p/hist_age_2.json|||code B")
+    viz_agent._record_plot(plots, "plot_interactive_histogram", "/p/hist_age_3.json|||code A")
+
+    assert [p["code"] for p in plots] == ["code A", "code B"]
+    assert plots[0]["path"] == "/p/hist_age_3.json"  # latest file of the repeat
