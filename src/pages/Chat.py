@@ -53,7 +53,7 @@ from core.model_config import get_available_models, is_high_memory_gpu
 # --- Data-analysis tool integration (reuses the Visualisation MAS, unchanged) ---
 from core.visualization.viz_agent import run_analysis
 from core.visualization.viz_config import MAX_ROWS, get_tool_label
-from core.visualization.viz_utils import save_data_file, get_fast_data_preview
+from core.visualization.viz_utils import format_data_preview, get_fast_data_preview, save_data_file
 from core.visualization.plot_data import get_all_columns_summary_impl
 
 _SRC_DIR = pathlib.Path(__file__).resolve().parent.parent
@@ -185,7 +185,7 @@ def _start_chat_analysis_thread(
     def _worker() -> None:
         try:
             head_df = get_fast_data_preview(data_file_path, file_name, nrows=5)
-            head_str = head_df.to_string() if head_df is not None else "(preview unavailable)"
+            head_str = format_data_preview(head_df) if head_df is not None else "(preview unavailable)"
             messages = [
                 {
                     "role": "user",

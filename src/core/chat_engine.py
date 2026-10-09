@@ -1,3 +1,4 @@
+import functools
 import os
 import subprocess
 import socket
@@ -109,11 +110,23 @@ def _normalize_response(response: Any) -> Dict[str, Any]:
     }
 
 
+@functools.lru_cache(maxsize=4)
+def _timeout_client(timeout: float) -> ollama.Client:
+    """Return a shared Ollama client whose HTTP requests fail after ``timeout`` seconds.
+
+    The host is read from ``OLLAMA_HOST`` exactly as for the module-level
+    ``ollama.chat`` helpers.
+    """
+    return ollama.Client(timeout=timeout)
+
+
 def chat_no_think(
     model: str,
     messages: List[Dict[str, Any]],
     tools: List[Dict[str, Any]] | None = None,
     options: Dict[str, Any] | None = None,
+    timeout: float | None = None,
+    json_schema: Dict[str, Any] | None = None,
 ) -> Any:
     """Non-streaming ``ollama.chat`` with reasoning disabled.
 
@@ -133,23 +146,40 @@ def chat_no_think(
         options: Optional Ollama runtime options (e.g. ``temperature``,
             ``num_ctx``). Note that a ``num_ctx`` differing from the one the
             model is loaded with makes Ollama reload the model.
+        timeout: Optional HTTP timeout in seconds. Without it a request that
+            Ollama never answers blocks the caller forever.
+        json_schema: Optional JSON schema passed as Ollama's ``format``. Ollama
+            then constrains decoding so the reply content is valid JSON for
+            this schema, which avoids model-specific tool-call parsing.
 
     Returns:
         The normalised response dict with a plain-dict ``message``.
+
+    Raises:
+        ollama.ResponseError: If Ollama rejects the request, e.g. HTTP 500 when
+            it cannot parse the model's tool call.
+        httpx.TimeoutException: If ``timeout`` elapses first.
     """
+    chat = _timeout_client(timeout).chat if timeout else ollama.chat
     kwargs: Dict[str, Any] = {"model": model, "messages": messages}
     if tools is not None:
         kwargs["tools"] = tools
     if options:
         kwargs["options"] = options
+    if json_schema is not None:
+        kwargs["format"] = json_schema
     try:
-        return _normalize_response(ollama.chat(think=False, **kwargs))
+        return _normalize_response(chat(think=False, **kwargs))
     except TypeError:
         # Older ollama-python without the ``think`` keyword.
-        return _normalize_response(ollama.chat(**kwargs))
-    except Exception:
-        # Model/server rejected ``think`` (e.g. a non-reasoning model) — retry plain.
-        return _normalize_response(ollama.chat(**kwargs))
+        return _normalize_response(chat(**kwargs))
+    except ollama.ResponseError as exc:
+        # Model/server rejected ``think`` (e.g. "does not support thinking") —
+        # retry plain. Other errors, such as an unparseable tool call, would
+        # only fail again with the identical request, so they are re-raised.
+        if "think" not in str(exc).lower():
+            raise
+        return _normalize_response(chat(**kwargs))
 
 
 def is_port_open(host: str, port: int) -> bool:

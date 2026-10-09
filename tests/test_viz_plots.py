@@ -2,14 +2,29 @@
 
 import conftest_path  # noqa: F401
 
+import base64
 import os
 
+import numpy as np
 import pandas as pd
 import plotly.io as pio
 import pytest
 
 from core.visualization import viz_utils
+from core.visualization.plot_data import get_all_columns_summary_impl
 from core.visualization.plot_interactive import plot_barchart_impl
+
+
+def _trace_values(values):
+    """Return trace data as a list, decoding Plotly 6's typed-array encoding.
+
+    Plotly >= 6 serialises numeric arrays as ``{"dtype": ..., "bdata": ...}``
+    and ``pio.read_json`` returns that dict unchanged.
+    """
+    if hasattr(values, "keys") and "bdata" in values:
+        raw = base64.b64decode(values["bdata"])
+        return np.frombuffer(raw, dtype=values["dtype"]).tolist()
+    return list(values)
 
 
 @pytest.fixture
@@ -43,7 +58,7 @@ def test_barchart_counts_rows_when_y_is_the_grouping_column(data_file):
     assert not output.startswith("Error"), output
     path, code = output.split("|||", 1)
     fig = pio.read_json(path)
-    assert sorted(fig.data[0].y) == [2, 2]
+    assert sorted(_trace_values(fig.data[0].y)) == [2, 2]
     assert ".size().reset_index(name='count')" in code
 
 
@@ -61,3 +76,33 @@ def test_barchart_regular_aggregation_still_works(data_file):
 
     assert not output.startswith("Error"), output
     assert "['radius_mean'].mean()" in output.split("|||", 1)[1]
+
+
+@pytest.fixture
+def text_data_file(tmp_path):
+    path = tmp_path / "uploaded_data.csv"
+    long_text = "This review talks about the product <b>at length</b> & more. " * 20
+    pd.DataFrame({
+        "rating": [1, 5, 4],
+        "sentiment": ["neg", "pos", "pos"],
+        "review": [long_text, long_text + " again", "Short\nmulti-line " + long_text],
+    }).to_csv(path, index=False)
+    return str(path)
+
+
+def test_schema_reports_long_text_columns_without_raw_text(text_data_file):
+    schema = get_all_columns_summary_impl(text_data_file)
+
+    assert "Text columns (1, free text" in schema
+    assert "review (avg" in schema
+    assert "Categorical columns (1): sentiment [neg, pos]" in schema
+    assert "at length" not in schema
+
+
+def test_data_preview_shortens_text_cells_to_one_line(text_data_file):
+    df = pd.read_csv(text_data_file)
+    preview = viz_utils.format_data_preview(df, max_cell_chars=30)
+
+    assert "at length" not in preview
+    assert len(preview.splitlines()) == len(df) + 1  # header + one line per row
+    assert "neg" in preview and "5" in preview

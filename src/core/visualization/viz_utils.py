@@ -21,6 +21,40 @@ LAST_LOAD_TRUNCATED: dict[str, bool] = {}
 # over 30 columns). Most filesystems cap a file name at 255 bytes.
 MAX_PLOT_NAME_CHARS: int = 100
 
+# Long free-text cells must not be copied into model prompts: they waste tokens
+# and, when a model echoes them into tool-call arguments, can break tool-call
+# parsing (e.g. Qwen's XML tool-call format, which Ollama parses strictly).
+PREVIEW_CELL_MAX_CHARS: int = 60
+
+
+def shorten_text(value: object, limit: int) -> str:
+    """Return ``value`` as a single-line string of at most ``limit`` characters.
+
+    Whitespace (including newlines) is collapsed so multi-line text cells do not
+    break tabular previews; truncated values end with ``"..."``.
+    """
+    flat = " ".join(str(value).split())
+    return flat if len(flat) <= limit else flat[: max(limit - 3, 0)] + "..."
+
+
+def format_data_preview(df: pd.DataFrame, max_cell_chars: int = PREVIEW_CELL_MAX_CHARS) -> str:
+    """Render a small DataFrame preview for a model prompt with long text cells shortened.
+
+    Args:
+        df: The preview rows (typically the first few rows of the dataset).
+        max_cell_chars: Maximum characters kept per text cell.
+
+    Returns:
+        The ``DataFrame.to_string()`` table of the shortened preview.
+    """
+    preview = df.copy()
+    for column in preview.columns:
+        if not pd.api.types.is_numeric_dtype(preview[column]):
+            preview[column] = preview[column].map(
+                lambda v: shorten_text(v, max_cell_chars) if isinstance(v, str) else v
+            )
+    return preview.to_string()
+
 
 def _read_csv_with_fallback(file_path: str, sep: str = ",", nrows: int | None = None) -> pd.DataFrame:
     """Try UTF-8 first (most common), fall back to latin1 to avoid silent mangling."""

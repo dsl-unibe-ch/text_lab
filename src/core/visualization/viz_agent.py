@@ -4,7 +4,7 @@ Agentic Multi-Agent System (MAS) for the AI Visualization Engine.
 Implements a plan-execute-summarise Supervisor-Worker pattern that keeps the
 number of sequential LLM calls low for small models:
 
-1. Plan: the supervisor model makes a single ``plan_tasks`` call.
+1. Plan: the supervisor model returns one JSON plan (structured output).
 2. Execute: delegated workers run concurrently, each with its own MCP session
    and a narrow tool set. A worker only loops to retry failed tool calls:
    plot workers stop as soon as their plots succeed, and stats workers get one
@@ -29,6 +29,7 @@ from core.chat_engine import chat_no_think, message_text
 from core.visualization.plot_data import get_all_columns_summary_impl
 from core.visualization.viz_config import (
     AGENT_OPTIONS,
+    AGENT_REQUEST_TIMEOUT,
     AGENT_TOOLS,
     INTERACTIVE_PROMPT,
     MAX_ROWS,
@@ -60,6 +61,10 @@ INJECTED_ARGS = ("data_file_path",)
 WORKER_MAX_ITERATIONS = 6
 LOG_SNIPPET_CHARS = 300
 
+# Caps on tool output sent back to the model. Full results still reach the UI.
+MAX_TOOL_OUTPUT_CHARS = 4000
+MAX_TOOL_ERROR_CHARS = 1000
+
 # Minimum difflib similarity for mapping a misspelled tool name onto an allowed
 # tool, e.g. 'run_rank_target_correlations' -> 'rank_target_correlations'.
 TOOL_NAME_CUTOFF = 0.7
@@ -69,37 +74,20 @@ INTERPRET_INSTRUCTION = (
     "above. Do not call any tools."
 )
 
-# One field per specialist: small models often emit only a single tool call per
-# response, so separate per-agent delegation calls silently dropped specialists.
-# Requiring every field makes the model decide on each specialist explicitly.
-PLAN_TASKS_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "plan_tasks",
-        "description": (
-            "Assign the work to the specialist agents in one call. Write an "
-            "instruction for every specialist the request needs and leave the "
-            "others as an empty string."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "interactive": {
-                    "type": "string",
-                    "description": "Instruction for the interactive Plotly agent, or empty.",
-                },
-                "static": {
-                    "type": "string",
-                    "description": "Instruction for the static Matplotlib/Seaborn agent, or empty.",
-                },
-                "stats": {
-                    "type": "string",
-                    "description": "Instruction for the statistical tests agent, or empty.",
-                },
-            },
-            "required": ["interactive", "static", "stats"],
-        },
+# The supervisor returns its plan as JSON via Ollama structured output instead
+# of a tool call. Decoding is constrained to this schema, so no model-specific
+# tool-call parsing is involved: Qwen's XML tool calls failed to parse on long
+# multi-field plans (HTTP 500), which also left Ollama stuck afterwards.
+# One field per specialist makes the model decide on each of them explicitly.
+PLAN_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "interactive": {"type": "string"},
+        "static": {"type": "string"},
+        "stats": {"type": "string"},
+        "reply": {"type": "string"},
     },
+    "required": ["interactive", "static", "stats", "reply"],
 }
 
 # Placeholder values small models write into fields that should stay empty.
@@ -145,6 +133,47 @@ def _snippet(text: str, limit: int = LOG_SNIPPET_CHARS) -> str:
     """Collapse whitespace and truncate text for single-line log messages."""
     flat = " ".join(text.split())
     return flat if len(flat) <= limit else flat[: limit - 3] + "..."
+
+
+def _clip(text: str, limit: int) -> str:
+    """Truncate multi-line text to ``limit`` characters, keeping line breaks."""
+    text = text.strip()
+    return text if len(text) <= limit else text[:limit].rstrip() + "\n...[truncated]"
+
+
+# Chat-template control tokens (e.g. "<|eot|>", "<|im_end|>") that some models
+# leak into their reply text when the server's template does not match them.
+_LEAKED_TOKEN_RE = re.compile(r"\s*<\|[A-Za-z0-9_]{1,40}\|>\s*$")
+
+
+def _model_text(message: dict[str, Any]) -> str:
+    """Return a reply's text with leaked trailing control tokens removed."""
+    text = message_text(message)
+    while True:
+        cleaned = _LEAKED_TOKEN_RE.sub("", text)
+        if cleaned == text:
+            return text.strip()
+        text = cleaned
+
+
+def _extract_json_object(text: str) -> dict[str, Any] | None:
+    """Parse the first JSON object in ``text``, ignoring anything around it.
+
+    Even with structured output some models wrap the JSON in a Markdown code
+    fence, add a sentence, or leak an end-of-turn token after it, which makes
+    a strict ``json.loads`` fail on an otherwise valid plan.
+
+    Returns:
+        The parsed object, or None if no JSON object can be decoded.
+    """
+    start = text.find("{")
+    if start == -1:
+        return None
+    try:
+        parsed, _ = json.JSONDecoder().raw_decode(text, start)
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
 
 
 def _new_report(role: str, instruction: str) -> WorkerReport:
@@ -223,10 +252,32 @@ def _extract_stats_code(tool_output: str) -> tuple[str, str]:
     return result_text, code
 
 
+def _describe_model_error(exc: Exception) -> str:
+    """Turn an Ollama call failure into a short, user-facing explanation.
+
+    Ollama answers HTTP 500 when it cannot parse the model's tool call (seen
+    with Qwen models, whose XML tool-call format breaks easily). Retrying is
+    not useful: the next request to Ollama was observed to hang afterwards.
+    """
+    detail = _snippet(str(exc))
+    if "tool call" in detail.lower() or "xml syntax" in detail.lower():
+        return (
+            f"The model produced a tool call Ollama could not parse ({detail}). "
+            "This is a known issue with some models; please try another model."
+        )
+    if "timed out" in detail.lower() or "timeout" in type(exc).__name__.lower():
+        return (
+            f"The model did not answer within {AGENT_REQUEST_TIMEOUT:.0f} seconds. "
+            "Please try again or choose another model."
+        )
+    return f"Model call failed: {detail}"
+
+
 async def _chat(
     model_name: str,
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None = None,
+    json_schema: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run a blocking Ollama chat call in a worker thread.
 
@@ -240,6 +291,8 @@ async def _chat(
         messages=messages,
         tools=tools,
         options=AGENT_OPTIONS,
+        timeout=AGENT_REQUEST_TIMEOUT,
+        json_schema=json_schema,
     )
 
 
@@ -419,14 +472,15 @@ async def _run_worker_loop(
         try:
             response = await _chat(model_name, messages, tools)
         except Exception as exc:
-            log("error", f"Worker '{agent_role}' failed to communicate with Ollama: {exc}")
-            report["errors"].append(f"Model call failed: {exc}")
+            reason = _describe_model_error(exc)
+            log("error", f"Worker '{agent_role}' stopped: {reason}")
+            report["errors"].append(reason)
             return report
         messages.append(response["message"])
 
         tool_calls = response["message"].get("tool_calls")
         if not tool_calls:
-            report["text"] = message_text(response["message"])
+            report["text"] = _model_text(response["message"])
             report["completed"] = True
             log("info", f"Worker '{agent_role}' finished task successfully.")
             return report
@@ -481,7 +535,7 @@ async def _run_worker_loop(
                 round_errors.append(f"{get_tool_label(tool_name)}: {output.strip()}")
                 messages.append(_tool_message(
                     tool_name,
-                    f"Execution Error: {output.strip()}\n"
+                    f"Execution Error: {_clip(output, MAX_TOOL_ERROR_CHARS)}\n"
                     "Please correct your code or parameters and try again.",
                 ))
                 continue
@@ -507,7 +561,7 @@ async def _run_worker_loop(
                             "code": code_snippet,
                         })
                     round_stats.append(result_text)
-                messages.append(_tool_message(tool_name, output))
+                messages.append(_tool_message(tool_name, _clip(output, MAX_TOOL_OUTPUT_CHARS)))
 
         report["plots"].extend(round_plots)
         report["stats"].extend(r for r in round_stats if r not in report["stats"])
@@ -559,7 +613,7 @@ async def _interpret_stats(
     except Exception as exc:
         log("warning", f"Worker '{agent_role}' could not interpret its results: {exc}")
         return ""
-    return message_text(response["message"])
+    return _model_text(response["message"])
 
 
 # =========================================================================
@@ -569,38 +623,33 @@ async def _interpret_stats(
 async def _plan_tasks(
     messages: list[dict[str, Any]], model_name: str, log: LogFn
 ) -> tuple[list[tuple[str, str]], str]:
-    """Make the single supervisor planning call.
-
-    Every tool call's arguments are read regardless of the tool name the model
-    used, so a misspelled ``plan_tasks`` still yields its tasks.
+    """Make the single supervisor planning call and read its JSON plan.
 
     Returns:
         ``(tasks, direct_reply)`` where ``tasks`` is a de-duplicated list of
         ``(agent_role, task_instruction)`` pairs in role order. ``direct_reply``
-        holds the supervisor's text when it answered without delegating.
+        holds the supervisor's answer when no specialist is needed.
     """
     supervisor_messages = [{"role": "system", "content": SUPERVISOR_PROMPT}] + messages
-    response = await _chat(model_name, supervisor_messages, [PLAN_TASKS_TOOL])
-    message = response["message"]
+    response = await _chat(model_name, supervisor_messages, json_schema=PLAN_SCHEMA)
+    content = _model_text(response["message"])
 
-    tool_calls = message.get("tool_calls")
-    if not tool_calls:
-        return [], message_text(message)
+    plan = _extract_json_object(content)
+    if plan is None:
+        log("warning", "Supervisor did not return a valid plan; showing its reply instead.")
+        return [], content
 
     tasks: list[tuple[str, str]] = []
-    for tool_call in tool_calls:
-        _, args = _parse_tool_call(tool_call)
-        for key in args:
-            if key not in WORKER_PROMPTS:
-                log("warning", f"Supervisor assigned work to unknown agent '{key}'; skipping it.")
-        for role in WORKER_PROMPTS:
-            instruction = str(args.get(role) or "").strip()
-            if instruction.lower().rstrip(".") in EMPTY_INSTRUCTIONS:
-                continue
-            if (role, instruction) not in tasks:
-                tasks.append((role, instruction))
+    for role in WORKER_PROMPTS:
+        instruction = str(plan.get(role) or "").strip()
+        if instruction.lower().rstrip(".") in EMPTY_INSTRUCTIONS:
+            continue
+        if (role, instruction) not in tasks:
+            tasks.append((role, instruction))
 
-    return tasks, message_text(message)
+    if not tasks:
+        log("info", "Supervisor answered without delegating any tasks.")
+    return tasks, str(plan.get("reply") or "").strip()
 
 
 async def _run_workers(
@@ -721,7 +770,7 @@ async def _summarise(
     ]
     try:
         response = await _chat(model_name, summary_messages)
-        summary = message_text(response["message"])
+        summary = _model_text(response["message"])
     except Exception as exc:
         log("warning", f"Supervisor could not write the summary: {exc}")
         summary = ""
@@ -760,10 +809,14 @@ async def run_analysis(
 
     summary = ""
     try:
-        tasks, direct_reply = await _plan_tasks(messages, model_name, _log)
+        try:
+            tasks, direct_reply = await _plan_tasks(messages, model_name, _log)
+        except Exception as exc:
+            reason = _describe_model_error(exc)
+            _log("error", f"Supervisor stopped: {reason}")
+            tasks, direct_reply = [], f"The analysis could not be started. {reason}"
 
         if not tasks:
-            _log("info", "Supervisor answered without delegating any tasks.")
             summary = direct_reply
         elif cancel_event and cancel_event.is_set():
             _log("warning", "Analysis cancelled by user.")

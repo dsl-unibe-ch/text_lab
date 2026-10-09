@@ -55,6 +55,11 @@ AGENT_TEMPERATURE: float = 0.1
 # Ollama server log reports "truncating input prompt" during an analysis.
 AGENT_NUM_CTX: int | None = _env_int("TEXTLAB_AGENT_NUM_CTX")
 
+# HTTP timeout (seconds) for each agent model call, so a request Ollama never
+# answers fails the step instead of freezing the analysis. Generous enough to
+# include loading a large model from shared storage on the first call.
+AGENT_REQUEST_TIMEOUT: float = float(_env_int("TEXTLAB_AGENT_TIMEOUT") or 300)
+
 AGENT_OPTIONS: dict[str, float | int] = {"temperature": AGENT_TEMPERATURE}
 if AGENT_NUM_CTX:
     AGENT_OPTIONS["num_ctx"] = AGENT_NUM_CTX
@@ -122,13 +127,13 @@ CRITICAL ROUTING RULES:
 
 PLANNING RULES:
 1. Analyze the user's request and the provided Data Head.
-2. Call `plan_tasks` exactly once. It has one field per specialist: 'interactive', 'static' and 'stats'. You will not get another chance to delegate.
-3. For EACH of the three specialists decide whether the request needs it. Write a clear, self-contained instruction naming the exact columns to use for every specialist that is needed, and leave the field empty ("") for the others.
+2. Respond with ONE JSON object with exactly these string fields: "interactive", "static", "stats" and "reply". You will not get another chance to delegate.
+3. For EACH of the three specialists decide whether the request needs it. Write a short, self-contained instruction naming the exact columns to use for every specialist that is needed, and leave the field empty ("") for the others.
 4. Requests often need several specialists at once. Examples:
-   - "plots and statistical analysis" -> fill 'interactive' AND 'stats'.
-   - "an interactive plot and a static version for publication" -> fill 'interactive' AND 'static' with the same plots.
-   - "a correlation heatmap and the strongest correlations" -> fill 'interactive' AND 'stats'.
-5. Only answer without calling `plan_tasks` when the request needs no plots and no statistics (e.g. a question about which columns exist). In that case answer directly in Markdown.
+   - "plots and statistical analysis" -> fill "interactive" AND "stats".
+   - "an interactive plot and a static version for publication" -> fill "interactive" AND "static" with the same plots.
+   - "a correlation heatmap and the strongest correlations" -> fill "interactive" AND "stats".
+5. "reply" is only used when the request needs no plots and no statistics (e.g. a question about which columns exist): then leave the three specialist fields empty and answer the user in "reply" (Markdown). Otherwise leave "reply" empty.
 6. NEVER include file paths, directory names, or storage locations in any text.
 """
 

@@ -31,7 +31,7 @@ from core.artifacts import ensure_artifacts_dir
 from core.chat_engine import check_ollama_server, get_gpu_name
 from core.visualization.viz_agent import run_analysis
 from core.visualization.viz_config import DEFAULT_PROMPT, MAX_ROWS, get_tool_label
-from core.visualization.viz_utils import get_fast_data_preview, save_data_file
+from core.visualization.viz_utils import format_data_preview, get_fast_data_preview, save_data_file
 from core.model_config import get_available_models, is_high_memory_gpu
 
 # --- Page Configuration ---
@@ -441,7 +441,7 @@ def _start_analysis_thread(
                         "content": (
                             f"User Request: {final_user_prompt}\n\n"
                             f"{column_instruction}"
-                            f"Data Head:\n{head_df.to_string()}\n\n"
+                            f"Data Head:\n{format_data_preview(head_df)}\n\n"
                             f"Note: datasets larger than {MAX_ROWS:,} rows will be truncated."
                         ),
                     }

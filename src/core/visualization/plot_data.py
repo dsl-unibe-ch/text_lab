@@ -6,7 +6,23 @@ Provides tools for the LLM to inspect dataset columns before plotting.
 import pandas as pd
 
 from core.visualization.viz_config import MAX_ROWS
-from core.visualization.viz_utils import load_data_safely, was_last_load_truncated
+from core.visualization.viz_utils import load_data_safely, shorten_text, was_last_load_truncated
+
+# A non-numeric column whose values average more than this many characters is
+# reported as free text (no sample values) rather than as categorical.
+TEXT_COLUMN_MIN_AVG_CHARS: int = 50
+# Maximum characters shown per sample value in schema summaries.
+SAMPLE_VALUE_MAX_CHARS: int = 40
+# Rows inspected when measuring average text length (keeps wide files fast).
+TEXT_LENGTH_SAMPLE_ROWS: int = 1000
+
+
+def _average_text_length(series: pd.Series) -> float:
+    """Return the mean string length of the first non-null values of ``series``."""
+    sample = series.dropna().head(TEXT_LENGTH_SAMPLE_ROWS)
+    if sample.empty:
+        return 0.0
+    return float(sample.astype(str).str.len().mean())
 
 
 def get_column_summary_impl(data_file_path: str, column: str) -> str:
@@ -54,11 +70,10 @@ def get_column_summary_impl(data_file_path: str, column: str) -> str:
             unique_vals = col_data.unique()
             total_unique = len(unique_vals)
             
+            shown = [shorten_text(v, SAMPLE_VALUE_MAX_CHARS) for v in unique_vals[:10]]
+            val_str = ", ".join(shown)
             if total_unique > 10:
-                top_vals = ", ".join(map(str, unique_vals[:10]))
-                val_str = f"{top_vals}... (+ {total_unique - 10} more)"
-            else:
-                val_str = ", ".join(map(str, unique_vals))
+                val_str += f"... (+ {total_unique - 10} more)"
                 
             return (
                 f"Categorical Column '{column}': {total_unique} unique values. "
@@ -71,8 +86,11 @@ def get_column_summary_impl(data_file_path: str, column: str) -> str:
 
 def get_all_columns_summary_impl(data_file_path: str) -> str:
     """
-    Returns a compact schema of every column: name and type only.
-    Intentionally terse to minimise token load on the model.
+    Returns a compact schema of every column grouped by type.
+
+    Intentionally terse to minimise token load on the model. Categorical
+    columns show a few shortened sample values; long free-text columns only
+    show their average length, so no raw text reaches the model's prompt.
     Use get_column_summary for detailed stats on a specific column.
     """
     try:
@@ -84,7 +102,10 @@ def get_all_columns_summary_impl(data_file_path: str) -> str:
 
         numeric_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
         datetime_cols = [c for c in df.columns if pd.api.types.is_datetime64_any_dtype(df[c])]
-        categorical_cols = [c for c in df.columns if c not in numeric_cols and c not in datetime_cols]
+        other_cols = [c for c in df.columns if c not in numeric_cols and c not in datetime_cols]
+        text_lengths = {c: _average_text_length(df[c]) for c in other_cols}
+        text_cols = [c for c in other_cols if text_lengths[c] > TEXT_COLUMN_MIN_AVG_CHARS]
+        categorical_cols = [c for c in other_cols if c not in text_cols]
 
         lines = [
             f"Dataset: {len(df):,} rows × {len(df.columns)} columns{truncation_note}",
@@ -94,9 +115,18 @@ def get_all_columns_summary_impl(data_file_path: str) -> str:
             cat_details = []
             for c in categorical_cols:
                 unique_vals = df[c].dropna().unique()
-                sample = ", ".join(str(v) for v in sorted(unique_vals, key=str)[:5])
+                sample = ", ".join(
+                    shorten_text(v, SAMPLE_VALUE_MAX_CHARS)
+                    for v in sorted(unique_vals, key=str)[:5]
+                )
                 cat_details.append(f"{c} [{sample}]")
             lines.append(f"Categorical columns ({len(categorical_cols)}): {'; '.join(cat_details)}")
+        if text_cols:
+            text_details = "; ".join(f"{c} (avg {text_lengths[c]:.0f} chars)" for c in text_cols)
+            lines.append(
+                f"Text columns ({len(text_cols)}, free text: use for word clouds, "
+                f"not for statistics): {text_details}"
+            )
         if datetime_cols:
             lines.append(f"Datetime columns ({len(datetime_cols)}): {', '.join(datetime_cols)}")
 
