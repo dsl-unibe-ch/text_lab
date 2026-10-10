@@ -56,23 +56,16 @@ extend-exclude = [
     "src/textlab/ui/streamlit/auth.py",
     "src/textlab/ui/streamlit/pages/Chat.py",
     "src/textlab/ui/streamlit/pages/Knowledge_Graph.py",
-    "src/textlab/ui/streamlit/pages/OCR.py",
     "src/textlab/ui/streamlit/pages/Topic_Modeling.py",
     "src/textlab/ui/streamlit/pages/Visualize_Data.py",
+    "src/textlab/ui/streamlit/ocr/legacy.py",
     # Chat
     "src/textlab/features/chat/chat_engine.py",
     # Knowledge graph
     "src/textlab/features/knowledge_graph/kg_engine.py",
-    # OCR
-    "src/textlab/features/ocr/auto_ocr.py",
-    "src/textlab/features/ocr/doc_ir.py",
-    "src/textlab/features/ocr/markup_detect.py",
+    # OCR: manual engine selection, until phase 6b
     "src/textlab/features/ocr/ocr_engine.py",
     "src/textlab/features/ocr/paddle_ocr_worker.py",
-    "src/textlab/features/ocr/paddle_vl_worker.py",
-    "src/textlab/features/ocr/searchable_pdf.py",
-    "src/textlab/features/ocr/vision_enrich.py",
-    "src/textlab/features/ocr/tests",
     # Survey
     "src/textlab/features/survey/cli.py",
     "src/textlab/features/survey/form_extract.py",
@@ -124,6 +117,8 @@ convention = "google"
 # Streamlit derives page titles from file names such as
 # Meeting_Notes_Generator.py, which cannot be PEP 8 module names.
 "src/textlab/ui/streamlit/pages/*.py" = ["N999"]
+# Image height and width are H and W, beside the lowercase h and w of boxes.
+"src/textlab/features/ocr/markup_detect.py" = ["N803", "N806"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["textlab"]

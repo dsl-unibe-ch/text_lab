@@ -1,4 +1,8 @@
-"""PaddleOCR-VL subprocess worker (runs in the isolated ``paddle_backend`` env).
+"""PaddleOCR-VL worker process, run in the ``paddle_vl_backend`` environment.
+
+Started as ``python -m textlab.features.ocr.paddle_vl_worker`` by
+:mod:`textlab.features.ocr.vl_session`; it imports nothing from ``textlab``,
+because that environment does not have the app's dependencies.
 
 Mirrors ``paddle_ocr_worker.py``: the parent process invokes this script with a
 list of single-page image paths, the script runs the ``PaddleOCRVL`` doc-parser
@@ -27,7 +31,6 @@ import traceback
 from pathlib import Path
 
 import numpy as np
-
 
 # ---- offline hygiene: identical policy to paddle_ocr_worker.py --------------
 os.environ.setdefault("OMP_NUM_THREADS", "1")
@@ -61,7 +64,8 @@ DEFAULT_ASSET_LABELS = {
 
 
 def make_json_serializable(value):
-    if value is None or isinstance(value, (str, int, float, bool)):
+    """Convert NumPy values and containers to plain JSON types."""
+    if value is None or isinstance(value, str | int | float | bool):
         return value
     if isinstance(value, np.ndarray):
         return value.tolist()
@@ -69,7 +73,7 @@ def make_json_serializable(value):
         return value.item()
     if isinstance(value, dict):
         return {k: make_json_serializable(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple, set)):
+    if isinstance(value, list | tuple | set):
         return [make_json_serializable(v) for v in value]
     if hasattr(value, "tolist"):
         try:
@@ -112,7 +116,7 @@ def _bbox4(bbox):
         return None
     flat = []
     for v in bbox:
-        if isinstance(v, (list, tuple)):
+        if isinstance(v, list | tuple):
             flat.extend(v)
         else:
             flat.append(v)
@@ -138,8 +142,12 @@ def _normalize_blocks(res):
         out.append(
             {
                 "block_label": block.get("block_label") or block.get("label"),
-                "block_content": block.get("block_content", block.get("content", "")),
-                "block_bbox": _bbox4(block.get("block_bbox") or block.get("bbox")),
+                "block_content": block.get(
+                    "block_content", block.get("content", "")
+                ),
+                "block_bbox": _bbox4(
+                    block.get("block_bbox") or block.get("bbox")
+                ),
                 "block_order": block.get("block_order"),
                 "block_score": block.get("block_score") or block.get("score"),
             }
@@ -205,11 +213,16 @@ def _build_pipeline():
     return PaddleOCRVL()
 
 
-def process_image(pipeline, image_path, asset_labels, margin_frac, page_number):
+def process_image(
+    pipeline, image_path, asset_labels, margin_frac, page_number
+):
+    """Recognize one page image; return its layout blocks and crops."""
     import cv2
 
     src = cv2.imread(str(image_path))
-    height, width = (src.shape[0], src.shape[1]) if src is not None else (None, None)
+    height, width = (
+        (src.shape[0], src.shape[1]) if src is not None else (None, None)
+    )
 
     result = None
     for res in pipeline.predict(str(image_path)):
@@ -254,7 +267,11 @@ def _run_request(pipeline, images, asset_labels, crop_margin) -> dict:
     total = len(images)
     pages = []
     for idx, image in enumerate(images, start=1):
-        pages.append(process_image(pipeline, Path(image), asset_labels, crop_margin, idx))
+        pages.append(
+            process_image(
+                pipeline, Path(image), asset_labels, crop_margin, idx
+            )
+        )
         print(f"{PROGRESS_MARKER}{idx}/{total}", flush=True)
     return {"pages": pages}
 
@@ -262,10 +279,10 @@ def _run_request(pipeline, images, asset_labels, crop_margin) -> dict:
 def serve(default_margin: float):
     """Answer one JSON request per stdin line until stdin closes.
 
-    A request is ``{"images": [...], "extra_labels": "...", "crop_margin": f}``.
-    Every request is answered with exactly one result line, an error included,
-    so one bad document cannot leave the parent waiting or desynchronise the
-    stream.
+    A request is ``{"images": [...], "extra_labels": "...", "crop_margin":
+    f}``. Every request is answered with exactly one result line, an error
+    included, so one bad document cannot leave the parent waiting or
+    desynchronise the stream.
     """
     pipeline = _build_pipeline()
     print(f"{READY_MARKER}1", flush=True)
@@ -287,20 +304,31 @@ def serve(default_margin: float):
         except Exception as exc:  # one document's failure, not the session's
             traceback.print_exc()
             payload = {"pages": [], "error": f"{type(exc).__name__}: {exc}"}
-        print(RESULT_MARKER + json.dumps(payload, ensure_ascii=False), flush=True)
+        print(
+            RESULT_MARKER + json.dumps(payload, ensure_ascii=False), flush=True
+        )
 
 
 def main():
-    parser = argparse.ArgumentParser(description="PaddleOCR-VL doc-parser worker")
+    """Recognize the images on the command line, or serve requests."""
+    parser = argparse.ArgumentParser(
+        description="PaddleOCR-VL doc-parser worker"
+    )
     parser.add_argument("images", nargs="*", help="single-page image paths")
     parser.add_argument(
         "--extra-labels",
         default="",
         help="comma-separated extra layout labels to crop as assets",
     )
-    parser.add_argument("--crop-margin", type=float, default=0.06, help="crop margin as fraction of box")
     parser.add_argument(
-        "--serve", action="store_true",
+        "--crop-margin",
+        type=float,
+        default=0.06,
+        help="crop margin as fraction of box",
+    )
+    parser.add_argument(
+        "--serve",
+        action="store_true",
         help="stay alive and answer one JSON request per stdin line",
     )
     args = parser.parse_args()
@@ -315,7 +343,10 @@ def main():
     print(f"{PROGRESS_MARKER}0/{total}", flush=True)
     pipeline = _build_pipeline()
     payload = _run_request(
-        pipeline, args.images, _asset_labels(args.extra_labels), args.crop_margin
+        pipeline,
+        args.images,
+        _asset_labels(args.extra_labels),
+        args.crop_margin,
     )
     print(RESULT_MARKER + json.dumps(payload, ensure_ascii=False))
 

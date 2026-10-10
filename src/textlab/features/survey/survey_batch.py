@@ -772,7 +772,7 @@ def _blank_layout(template, blanks, vl_session=None):
 
     import cv2
 
-    from textlab.features.ocr import auto_ocr
+    from textlab.features.ocr.vl_session import run_vl_worker
 
     with tempfile.TemporaryDirectory() as tmp:
         images = []
@@ -780,7 +780,7 @@ def _blank_layout(template, blanks, vl_session=None):
             path = pathlib.Path(tmp) / f"blank_page{page.page_index + 1}.png"
             cv2.imwrite(str(path), blank.image)
             images.append(path)
-        return auto_ocr.run_vl_worker(images, session=vl_session)
+        return run_vl_worker(images, session=vl_session)
 
 
 def template_overlays(

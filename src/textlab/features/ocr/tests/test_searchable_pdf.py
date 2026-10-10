@@ -5,19 +5,23 @@ Tesseract binary; only ``test_live_tesseract_words`` needs the real engine and
 skips itself when it is unavailable.
 """
 
-
 import io
 import pathlib
 
 import numpy as np
 
-from textlab.features.ocr import doc_ir, searchable_pdf as sp
+from textlab.features.ocr import doc_ir
+from textlab.features.ocr import searchable_pdf as sp
 
 
 def words(*specs):
     """``("Die", 10, 20, 50, 44)`` -> the provider's word-box dict."""
     return [
-        {"text": t, "bbox": [float(a), float(b), float(c), float(d)], "conf": 96.0}
+        {
+            "text": t,
+            "bbox": [float(a), float(b), float(c), float(d)],
+            "conf": 96.0,
+        }
         for t, a, b, c, d in specs
     ]
 
@@ -44,7 +48,9 @@ def test_vl_text_wins_when_transcriptions_disagree():
 
 def test_tokens_without_ink_fall_back_to_a_real_box():
     tess = words(("Die", 10, 20, 50, 44))
-    placed = sp.align_tokens(["Die", "Befragung"], tess, fallback_bbox=[0, 0, 500, 60])
+    placed = sp.align_tokens(
+        ["Die", "Befragung"], tess, fallback_bbox=[0, 0, 500, 60]
+    )
     assert "Befragung" in " ".join(p["text"] for p in placed)
     for entry in placed:
         assert entry["bbox"][2] > entry["bbox"][0]
@@ -52,15 +58,17 @@ def test_tokens_without_ink_fall_back_to_a_real_box():
 
 
 def test_extra_ink_is_not_invented_into_the_layer():
-    # Tesseract sees a word the VL lane did not transcribe: VL is authoritative,
-    # so that token must not appear in the searchable text.
+    # Tesseract sees a word the VL lane did not transcribe: VL is
+    # authoritative, so that token must not appear in the searchable text.
     tess = words(("Die", 10, 20, 50, 44), ("Randnotiz", 60, 20, 190, 44))
     placed = sp.align_tokens(["Die"], tess)
     assert "Randnotiz" not in " ".join(p["text"] for p in placed)
 
 
 def test_no_words_falls_back_to_region_box():
-    placed = sp.align_tokens(["Ganzer", "Satz"], [], fallback_bbox=[5, 5, 300, 40])
+    placed = sp.align_tokens(
+        ["Ganzer", "Satz"], [], fallback_bbox=[5, 5, 300, 40]
+    )
     assert len(placed) == 1
     assert placed[0]["text"] == "Ganzer Satz"
     assert placed[0]["bbox"] == [5.0, 5.0, 300.0, 40.0]
@@ -69,8 +77,8 @@ def test_no_words_falls_back_to_region_box():
 
 
 def test_form_glyphs_are_not_indexed():
-    # Box/circle glyphs are not words, and are unencodable in the base-14 fonts,
-    # which drops the whole entry.
+    # Box/circle glyphs are not words, and are unencodable in the base-14
+    # fonts, which drops the whole entry.
     assert sp.tokenize("□ Ja ○ Nein") == ["Ja", "Nein"]
     assert sp.tokenize("☒Zutreffend") == ["Zutreffend"]
     assert sp.tokenize("□ ○ ☐") == []
@@ -88,11 +96,15 @@ def test_non_latin1_text_is_folded_not_dropped():
 def test_pdf_writer_survives_unencodable_entries():
     import fitz
 
-    ok, enc = __import__("cv2").imencode("(.png)"[1:5], np.full((300, 500, 3), 255, np.uint8))
-    layers = {1: [
-        {"text": "□", "bbox": [10, 10, 40, 40], "exact": True},
-        {"text": "Frühjahr", "bbox": [50, 10, 200, 40], "exact": True},
-    ]}
+    ok, enc = __import__("cv2").imencode(
+        "(.png)"[1:5], np.full((300, 500, 3), 255, np.uint8)
+    )
+    layers = {
+        1: [
+            {"text": "□", "bbox": [10, 10, 40, 40], "exact": True},
+            {"text": "Frühjahr", "bbox": [50, 10, 200, 40], "exact": True},
+        ]
+    }
     blob = sp.build_searchable_pdf(layers, rasters={1: enc.tobytes()})
     doc = fitz.open("pdf", blob)
     # The unencodable entry is skipped; its neighbour is unaffected.
@@ -102,18 +114,30 @@ def test_pdf_writer_survives_unencodable_entries():
 
 def test_table_cells_are_indexed_but_not_the_html():
     region = doc_ir.Region(
-        "r1", doc_ir.TABLE, [0, 0, 100, 100], 0,
-        {"html": "<table><tr><th>Jahr</th><th>Total</th></tr>"
-                 "<tr><td>2024</td><td>17</td></tr></table>"},
+        "r1",
+        doc_ir.TABLE,
+        [0, 0, 100, 100],
+        0,
+        {
+            "html": "<table><tr><th>Jahr</th><th>Total</th></tr>"
+            "<tr><td>2024</td><td>17</td></tr></table>"
+        },
     )
     text = sp.region_layer_text(region)
-    assert "Jahr" in text and "Total" in text and "2024" in text and "17" in text
+    assert (
+        "Jahr" in text and "Total" in text and "2024" in text and "17" in text
+    )
     # The markup itself must never reach the searchable layer.
     assert "<" not in text and "table" not in text.lower()
     # Unparseable table -> nothing indexed, rather than raw HTML.
-    assert sp.region_layer_text(
-        doc_ir.Region("r2", doc_ir.TABLE, [0, 0, 1, 1], 0, {"html": "not html"})
-    ) == ""
+    assert (
+        sp.region_layer_text(
+            doc_ir.Region(
+                "r2", doc_ir.TABLE, [0, 0, 1, 1], 0, {"html": "not html"}
+            )
+        )
+        == ""
+    )
 
 
 def test_unprinted_table_headers_are_not_indexed():
@@ -121,36 +145,69 @@ def test_unprinted_table_headers_are_not_indexed():
     on the page, and alignment being positional they displace every later cell.
     """
     plain = doc_ir.Region(
-        "r", doc_ir.TABLE, [0, 0, 1, 1], 0,
-        {"html": "<table><tr><td>2024</td><td>17</td></tr>"
-                 "<tr><td>2025</td><td>23</td></tr></table>"},
+        "r",
+        doc_ir.TABLE,
+        [0, 0, 1, 1],
+        0,
+        {
+            "html": "<table><tr><td>2024</td><td>17</td></tr>"
+            "<tr><td>2025</td><td>23</td></tr></table>"
+        },
     )
     tokens = sp.tokenize(sp.region_layer_text(plain))
     assert tokens == ["2024", "17", "2025", "23"], tokens
 
     # A real header row is still indexed, because it really is printed.
     titled = doc_ir.Region(
-        "r2", doc_ir.TABLE, [0, 0, 1, 1], 0,
-        {"html": "<table><tr><th>Jahr</th><th>Total</th></tr>"
-                 "<tr><td>2024</td><td>17</td></tr></table>"},
+        "r2",
+        doc_ir.TABLE,
+        [0, 0, 1, 1],
+        0,
+        {
+            "html": "<table><tr><th>Jahr</th><th>Total</th></tr>"
+            "<tr><td>2024</td><td>17</td></tr></table>"
+        },
     )
-    assert sp.tokenize(sp.region_layer_text(titled)) == ["Jahr", "Total", "2024", "17"]
+    assert sp.tokenize(sp.region_layer_text(titled)) == [
+        "Jahr",
+        "Total",
+        "2024",
+        "17",
+    ]
 
 
 def test_page_layer_calls_the_engine_once_for_the_whole_page():
-    page = doc_ir.Page(page_number=1, regions=[
-        doc_ir.Region("r1", doc_ir.TEXT, [100, 200, 400, 240], 0, {"text": "Hallo Welt"}),
-        # Formulas stay out: exported LaTeX is not what is printed.
-        doc_ir.Region("r3", doc_ir.FORMULA, [100, 400, 400, 440], 2, {"latex": "E = mc^2"}),
-    ])
+    page = doc_ir.Page(
+        page_number=1,
+        regions=[
+            doc_ir.Region(
+                "r1",
+                doc_ir.TEXT,
+                [100, 200, 400, 240],
+                0,
+                {"text": "Hallo Welt"},
+            ),
+            # Formulas stay out: exported LaTeX is not what is printed.
+            doc_ir.Region(
+                "r3",
+                doc_ir.FORMULA,
+                [100, 400, 400, 440],
+                2,
+                {"latex": "E = mc^2"},
+            ),
+        ],
+    )
     seen = []
 
     def provider(image, lang):
         seen.append(image.shape)
-        return words(("Hallo", 100, 200, 160, 230), ("Welt", 170, 200, 230, 230))
+        return words(
+            ("Hallo", 100, 200, 160, 230), ("Welt", 170, 200, 230, 230)
+        )
 
-    entries = sp.page_text_layer(page, np.full((600, 500, 3), 255, np.uint8),
-                                 word_provider=provider)
+    entries = sp.page_text_layer(
+        page, np.full((600, 500, 3), 255, np.uint8), word_provider=provider
+    )
     # One call, given the whole page — not one call per region.
     assert len(seen) == 1 and seen[0] == (600, 500, 3)
     assert [e["text"] for e in entries] == ["Hallo", "Welt"]
@@ -160,22 +217,40 @@ def test_page_layer_calls_the_engine_once_for_the_whole_page():
 
 
 def test_words_are_bucketed_into_the_region_that_holds_them():
-    page = doc_ir.Page(page_number=1, regions=[
-        doc_ir.Region("left", doc_ir.TEXT, [0, 0, 200, 100], 0, {"text": "links oben"}),
-        doc_ir.Region("right", doc_ir.TEXT, [300, 0, 500, 100], 1, {"text": "rechts oben"}),
-    ])
+    page = doc_ir.Page(
+        page_number=1,
+        regions=[
+            doc_ir.Region(
+                "left",
+                doc_ir.TEXT,
+                [0, 0, 200, 100],
+                0,
+                {"text": "links oben"},
+            ),
+            doc_ir.Region(
+                "right",
+                doc_ir.TEXT,
+                [300, 0, 500, 100],
+                1,
+                {"text": "rechts oben"},
+            ),
+        ],
+    )
 
     def provider(image, lang):
         return words(
-            ("links", 10, 10, 80, 40), ("oben", 90, 10, 160, 40),
-            ("rechts", 310, 10, 390, 40), ("oben", 400, 10, 470, 40),
-            ("ausserhalb", 600, 600, 700, 640),   # in no region at all
+            ("links", 10, 10, 80, 40),
+            ("oben", 90, 10, 160, 40),
+            ("rechts", 310, 10, 390, 40),
+            ("oben", 400, 10, 470, 40),
+            ("ausserhalb", 600, 600, 700, 640),  # in no region at all
         )
 
-    entries = sp.page_text_layer(page, np.full((800, 800, 3), 255, np.uint8),
-                                 word_provider=provider)
-    # Each column keeps its own words; the stray one is not indexed, because the
-    # VL lane never transcribed that area.
+    entries = sp.page_text_layer(
+        page, np.full((800, 800, 3), 255, np.uint8), word_provider=provider
+    )
+    # Each column keeps its own words; the stray one is not indexed, because
+    # the VL lane never transcribed that area.
     assert [e["text"] for e in entries] == ["links", "oben", "rechts", "oben"]
     assert all(e["exact"] for e in entries)
     assert entries[2]["bbox"][0] == 310.0
@@ -183,48 +258,67 @@ def test_words_are_bucketed_into_the_region_that_holds_them():
 
 
 def test_a_word_is_never_indexed_by_two_overlapping_regions():
-    page = doc_ir.Page(page_number=1, regions=[
-        doc_ir.Region("outer", doc_ir.TEXT, [0, 0, 400, 200], 0, {"text": "Wort"}),
-        doc_ir.Region("inner", doc_ir.TEXT, [50, 50, 300, 150], 1, {"text": "Wort"}),
-    ])
+    page = doc_ir.Page(
+        page_number=1,
+        regions=[
+            doc_ir.Region(
+                "outer", doc_ir.TEXT, [0, 0, 400, 200], 0, {"text": "Wort"}
+            ),
+            doc_ir.Region(
+                "inner", doc_ir.TEXT, [50, 50, 300, 150], 1, {"text": "Wort"}
+            ),
+        ],
+    )
 
     def provider(image, lang):
         return words(("Wort", 100, 80, 180, 110))
 
-    entries = sp.page_text_layer(page, np.full((400, 500, 3), 255, np.uint8),
-                                 word_provider=provider)
-    # First region in reading order claims it; the second falls back to its box.
+    entries = sp.page_text_layer(
+        page, np.full((400, 500, 3), 255, np.uint8), word_provider=provider
+    )
+    # First region in reading order claims it; the second falls back to its
+    # box.
     exact = [e for e in entries if e["exact"]]
     assert len(exact) == 1, [(e["text"], e["exact"]) for e in entries]
 
 
 def test_provider_failure_degrades_to_region_box():
-    page = doc_ir.Page(page_number=1, regions=[
-        doc_ir.Region("r1", doc_ir.TEXT, [10, 10, 300, 50], 0, {"text": "Hallo Welt"}),
-    ])
+    page = doc_ir.Page(
+        page_number=1,
+        regions=[
+            doc_ir.Region(
+                "r1", doc_ir.TEXT, [10, 10, 300, 50], 0, {"text": "Hallo Welt"}
+            ),
+        ],
+    )
 
     def boom(crop, lang):
         raise RuntimeError("tesseract exploded")
 
-    entries = sp.page_text_layer(page, np.full((600, 500, 3), 255, np.uint8),
-                                 word_provider=boom)
+    entries = sp.page_text_layer(
+        page, np.full((600, 500, 3), 255, np.uint8), word_provider=boom
+    )
     assert len(entries) == 1 and entries[0]["text"] == "Hallo Welt"
     assert entries[0]["bbox"] == [10.0, 10.0, 300.0, 50.0]
 
 
 GERMAN = (
-    "Die Befragung wurde im Frühjahr durchgeführt und die Antworten wurden anonym "
-    "erfasst. Bitte kreuzen Sie an, wie zufrieden Sie mit den Angeboten sind. Wenn "
+    "Die Befragung wurde im Frühjahr durchgeführt und die Antworten wurden "
+    "anonym "
+    "erfasst. Bitte kreuzen Sie an, wie zufrieden Sie mit den Angeboten "
+    "sind. Wenn "
     "Sie nicht sicher sind, lassen Sie die Frage bitte offen."
 )
 ENGLISH = (
     "The survey was carried out in the spring and all responses were recorded "
-    "anonymously. Please indicate how satisfied you are with the services provided. "
+    "anonymously. Please indicate how satisfied you are with the services "
+    "provided. "
     "If you are not sure, please leave the question blank."
 )
 FRENCH = (
     "L'enquête a été réalisée au printemps et toutes les réponses ont été "
-    "enregistrées de manière anonyme. Veuillez indiquer dans quelle mesure vous "
+    "enregistrées de manière anonyme. Veuillez indiquer dans quelle mesure "
+    "vous "
     "êtes satisfait des services. Si vous n'êtes pas sûr, laissez la question."
 )
 
@@ -249,11 +343,18 @@ def test_language_detection_is_deterministic():
 
 
 def test_page_language_reads_only_text_regions():
-    page = doc_ir.Page(page_number=1, regions=[
-        doc_ir.Region("r1", doc_ir.TEXT, [0, 0, 10, 10], 0, {"text": GERMAN}),
-        # A table full of English must not sway the page's language.
-        doc_ir.Region("r2", doc_ir.TABLE, [0, 20, 10, 30], 1, {"html": ENGLISH}),
-    ])
+    page = doc_ir.Page(
+        page_number=1,
+        regions=[
+            doc_ir.Region(
+                "r1", doc_ir.TEXT, [0, 0, 10, 10], 0, {"text": GERMAN}
+            ),
+            # A table full of English must not sway the page's language.
+            doc_ir.Region(
+                "r2", doc_ir.TABLE, [0, 20, 10, 30], 1, {"html": ENGLISH}
+            ),
+        ],
+    )
     assert sp.page_language(page) == "deu"
     assert sp.page_language(doc_ir.Page(page_number=1, regions=[])) == "eng"
 
@@ -263,10 +364,12 @@ def test_pdf_is_searchable_and_text_is_invisible():
 
     raster = np.full((400, 600, 3), 255, np.uint8)
     ok, enc = __import__("cv2").imencode(".png", raster)
-    layers = {1: [
-        {"text": "Befragung", "bbox": [60, 100, 190, 130], "exact": True},
-        {"text": "Frühjahr", "bbox": [200, 100, 320, 130], "exact": True},
-    ]}
+    layers = {
+        1: [
+            {"text": "Befragung", "bbox": [60, 100, 190, 130], "exact": True},
+            {"text": "Frühjahr", "bbox": [200, 100, 320, 130], "exact": True},
+        ]
+    }
     blob = sp.build_searchable_pdf(layers, rasters={1: enc.tobytes()})
     assert blob and blob[:5] == b"%PDF-"
 
@@ -286,24 +389,32 @@ def test_png_dpi_tag_does_not_rescale_the_layer():
     """An embedded dpi tag must not rescale the layer: PyMuPDF would size the
     page from it and push every word progressively off the bottom-right.
     """
-    import io
 
     import fitz
     from PIL import Image
 
-    W, H = 1216, 1696
-    marker = {"text": "Marker", "bbox": [1000.0, 1500.0, 1150.0, 1530.0], "exact": True}
+    width, height = 1216, 1696
+    marker = {
+        "text": "Marker",
+        "bbox": [1000.0, 1500.0, 1150.0, 1530.0],
+        "exact": True,
+    }
     for dpi_tag in (None, (96, 96), (144, 144)):
         buf = io.BytesIO()
-        Image.new("RGB", (W, H), "white").save(
+        Image.new("RGB", (width, height), "white").save(
             buf, format="PNG", **({"dpi": dpi_tag} if dpi_tag else {})
         )
         blob = sp.build_searchable_pdf(
-            {1: [dict(marker)]}, rasters={1: buf.getvalue()}, page_sizes={1: (W, H)}
+            {1: [dict(marker)]},
+            rasters={1: buf.getvalue()},
+            page_sizes={1: (width, height)},
         )
         doc = fitz.open("pdf", blob)
         page = doc.load_page(0)
-        assert (page.rect.width, page.rect.height) == (W, H), (dpi_tag, page.rect)
+        assert (page.rect.width, page.rect.height) == (width, height), (
+            dpi_tag,
+            page.rect,
+        )
         hit = page.search_for("Marker")
         assert hit, dpi_tag
         assert page.rect.contains(hit[0]), (dpi_tag, hit[0])
@@ -315,14 +426,31 @@ def test_png_dpi_tag_does_not_rescale_the_layer():
 
 
 def test_line_metrics_are_shared_across_a_line():
-    """One size and baseline per line: "we" has no ascender or descender, so its
-    own ink box would give it a smaller font and a jittering highlight.
+    """One size and baseline per line.
+
+    "we" has no ascender or descender, so its own ink box would give it a
+    smaller font and a jittering highlight.
     """
     line = (0, 0, 1)
     tess = [
-        {"text": "preliminary", "bbox": [10.0, 100.0, 120.0, 130.0], "conf": 96.0, "line": line},
-        {"text": "we", "bbox": [130.0, 110.0, 160.0, 122.0], "conf": 96.0, "line": line},
-        {"text": "Frühjahr", "bbox": [170.0, 100.0, 260.0, 130.0], "conf": 96.0, "line": line},
+        {
+            "text": "preliminary",
+            "bbox": [10.0, 100.0, 120.0, 130.0],
+            "conf": 96.0,
+            "line": line,
+        },
+        {
+            "text": "we",
+            "bbox": [130.0, 110.0, 160.0, 122.0],
+            "conf": 96.0,
+            "line": line,
+        },
+        {
+            "text": "Frühjahr",
+            "bbox": [170.0, 100.0, 260.0, 130.0],
+            "conf": 96.0,
+            "line": line,
+        },
     ]
     placed = sp.align_tokens(["preliminary", "we", "Frühjahr"], tess)
     sp._apply_line_metrics(placed, tess)
@@ -332,13 +460,25 @@ def test_line_metrics_are_shared_across_a_line():
     assert len(sizes) == 1, f"font size varies within a line: {sizes}"
     assert len(baselines) == 1, f"baseline varies within a line: {baselines}"
     # Derived from the line's full ink extent (100..130), not the short word.
-    assert abs(placed[0]["fontsize"] - 30.0 / (sp._ASCENT + sp._DESCENT)) < 0.01
+    assert (
+        abs(placed[0]["fontsize"] - 30.0 / (sp._ASCENT + sp._DESCENT)) < 0.01
+    )
 
 
 def test_separate_lines_keep_separate_baselines():
     tess = [
-        {"text": "first", "bbox": [10.0, 100.0, 80.0, 130.0], "conf": 96.0, "line": (0, 0, 1)},
-        {"text": "second", "bbox": [10.0, 140.0, 90.0, 170.0], "conf": 96.0, "line": (0, 0, 2)},
+        {
+            "text": "first",
+            "bbox": [10.0, 100.0, 80.0, 130.0],
+            "conf": 96.0,
+            "line": (0, 0, 1),
+        },
+        {
+            "text": "second",
+            "bbox": [10.0, 140.0, 90.0, 170.0],
+            "conf": 96.0,
+            "line": (0, 0, 2),
+        },
     ]
     placed = sp.align_tokens(["first", "second"], tess)
     sp._apply_line_metrics(placed, tess)
@@ -364,22 +504,28 @@ def test_live_ruled_table_rows_stay_separate():
 
     img = Image.new("RGB", (620, 280), "white")
     draw = ImageDraw.Draw(img)
-    rows = [("MHA 1L", "0.32", "0.53"), ("MuRS 1L", "0.33", "0.54"),
-            ("MHA 2L", "0.31", "0.52"), ("MuRS 2L", "0.30", "0.51")]
+    rows = [
+        ("MHA 1L", "0.32", "0.53"),
+        ("MuRS 1L", "0.33", "0.54"),
+        ("MHA 2L", "0.31", "0.52"),
+        ("MuRS 2L", "0.30", "0.51"),
+    ]
     draw.rectangle([10, 10, 610, 270], outline="black", width=2)
     for index, (label, a, b) in enumerate(rows):
         y = 30 + index * 60
-        draw.line([10, y - 8, 610, y - 8], fill="black", width=2)   # row rule
+        draw.line([10, y - 8, 610, y - 8], fill="black", width=2)  # row rule
         for x, text in ((25, label), (300, a), (450, b)):
             draw.text((x, y), text, fill="black", font=font)
-    for x in (280, 430):                                            # column rules
+    for x in (280, 430):  # column rules
         draw.line([x, 10, x, 270], fill="black", width=2)
 
     found = sp.tesseract_words(np.array(img)[:, :, ::-1], lang="eng")
     assert found, "no words read from the ruled table"
     # Rules must never enter the layer as anchors.
     for word in found:
-        assert sp._normalise(word["text"]), f"rule glyph kept as a word: {word['text']!r}"
+        assert sp._normalise(word["text"]), (
+            f"rule glyph kept as a word: {word['text']!r}"
+        )
     # Rows must not all land on one line.
     lines = {word["line"] for word in found}
     assert len(lines) >= 3, f"table rows collapsed into {len(lines)} line(s)"
@@ -398,7 +544,9 @@ def test_live_tesseract_words():
     import cv2
 
     img = np.full((120, 700, 3), 255, np.uint8)
-    cv2.putText(img, "Hallo Welt", (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 0), 4)
+    cv2.putText(
+        img, "Hallo Welt", (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 0), 4
+    )
     found = sp.tesseract_words(img, lang="deu")
     assert found, "tesseract returned no words"
     for word in found:
@@ -435,23 +583,33 @@ def test_a_rotated_scan_gets_a_carrier_with_no_rotation():
     with tempfile.TemporaryDirectory() as tmp:
         source = pathlib.Path(tmp) / "rotated.pdf"
         doc = fitz.open()
-        page = doc.new_page(width=841, height=1190)   # portrait box...
-        page.set_rotation(270)                        # ...shown landscape
+        page = doc.new_page(width=841, height=1190)  # portrait box...
+        page.set_rotation(270)  # ...shown landscape
         doc.save(str(source))
         doc.close()
 
-        entries = [{"text": "Bevoelkerungsbefragung", "bbox": [400, 180, 1500, 260],
-                    "fontsize": 60, "baseline": 245}]
+        entries = [
+            {
+                "text": "Bevoelkerungsbefragung",
+                "bbox": [400, 180, 1500, 260],
+                "fontsize": 60,
+                "baseline": 245,
+            }
+        ]
         blob = sp.build_searchable_pdf(
-            {1: entries}, source_pdf=str(source),
-            page_sizes={1: (4960, 3507)}, raster_dpi=150,
+            {1: entries},
+            source_pdf=str(source),
+            page_sizes={1: (4960, 3507)},
+            raster_dpi=150,
         )
         assert blob
 
         out = fitz.open(stream=blob)
         result = out.load_page(0)
         assert result.rotation == 0, "the carrier still carries /Rotate"
-        assert result.rect.width > result.rect.height, "the page is not landscape"
+        assert result.rect.width > result.rect.height, (
+            "the page is not landscape"
+        )
         words = result.get_text("words")
         assert words, "no text layer was written"
         # the word must read across the page, not down it

@@ -14,7 +14,8 @@ from __future__ import annotations
 import difflib
 import io
 import re
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from collections.abc import Callable, Sequence
+from typing import Any
 
 try:  # pragma: no cover - exercised only by container availability
     from textlab.features.ocr import doc_ir
@@ -37,7 +38,8 @@ DEFAULT_TESSERACT_LANG = "eng"
 MIN_WORD_CONFIDENCE = 30.0
 
 #: Region types whose text belongs in the layer. Formulas are out: the exported
-#: LaTeX is not what is printed. Table cells are in, via :func:`region_layer_text`.
+#: LaTeX is not what is printed. Table cells are in, via
+#: :func:`region_layer_text`.
 LAYER_TYPES = {
     doc_ir.TEXT,
     doc_ir.TITLE,
@@ -50,8 +52,8 @@ LAYER_TYPES = {
 }
 
 
-def region_layer_text(region: "doc_ir.Region") -> str:
-    """Printed text of *region*: table HTML flattened to cells, else plain text."""
+def region_layer_text(region: doc_ir.Region) -> str:
+    """Return *region*'s printed text; tables flattened to their cells."""
     if region.type != doc_ir.TABLE:
         return region.text
     try:
@@ -66,15 +68,20 @@ def region_layer_text(region: "doc_ir.Region") -> str:
     return " ".join(cell for cell in cells if cell and cell.lower() != "nan")
 
 
-def _printed_header(frame) -> List[str]:
-    """Column names, but only real ones: a table without ``<th>`` gets pandas'
-    positional names, which appear nowhere on the page and, since alignment is
-    positional, would push every following cell onto the wrong box.
+def _printed_header(frame) -> list[str]:
+    """Return a table's column names, but only real ones.
+
+    A table without ``<th>`` gets pandas' positional names, which appear
+    nowhere on the page and, since alignment is positional, would push every
+    following cell onto the wrong box.
     """
     columns = list(frame.columns)
     if not columns:
         return []
-    if all(isinstance(column, (int, bool)) or str(column).isdigit() for column in columns):
+    if all(
+        isinstance(column, int | bool) or str(column).isdigit()
+        for column in columns
+    ):
         return []
     return [
         str(column)
@@ -89,7 +96,7 @@ def _printed_header(frame) -> List[str]:
 
 
 def _normalise(token: str) -> str:
-    """Fold a token to a comparable key (case, punctuation and accents aside)."""
+    """Fold a token to a key that ignores case, punctuation and accents."""
     return re.sub(r"[^\w]", "", token, flags=re.UNICODE).lower()
 
 
@@ -98,8 +105,8 @@ def _normalise(token: str) -> str:
 _GLYPH_CHARS = "□■○●◯☐☑☒✓✔✗✘"
 
 
-def tokenize(text: str) -> List[str]:
-    """Whitespace-split VL text, dropping mark glyphs and word-character-free tokens."""
+def tokenize(text: str) -> list[str]:
+    """Split VL text into words, dropping mark glyphs and non-words."""
     tokens = []
     for raw in re.split(r"\s+", text or ""):
         cleaned = raw.strip(_GLYPH_CHARS).strip()
@@ -110,14 +117,15 @@ def tokenize(text: str) -> List[str]:
 
 def align_tokens(
     vl_tokens: Sequence[str],
-    tess_words: Sequence[Dict[str, Any]],
-    fallback_bbox: Optional[Sequence[float]] = None,
-) -> List[Dict[str, Any]]:
-    """Map VL tokens onto Tesseract word boxes (dicts of ``text`` and ``bbox``).
+    tess_words: Sequence[dict[str, Any]],
+    fallback_bbox: Sequence[float] | None = None,
+) -> list[dict[str, Any]]:
+    """Map VL tokens onto Tesseract word boxes (``text`` and ``bbox`` dicts).
 
-    Matched on normalised keys, so ordinary OCR differences cost precision, not
-    correctness: equal runs get their own box, replacements share the boxes they
-    displaced, and unanchored tokens fall back to a neighbour or the region.
+    Matched on normalised keys, so ordinary OCR differences cost precision,
+    not correctness: equal runs get their own box, replacements share the
+    boxes they displaced, and unanchored tokens fall back to a neighbour or
+    the region.
     Returns ``[{"text", "bbox", "exact"}]``; ``exact`` marks a one-to-one box.
     """
     vl_tokens = list(vl_tokens)
@@ -128,13 +136,17 @@ def align_tokens(
         if fallback_bbox is None:
             return []
         return [
-            {"text": " ".join(vl_tokens), "bbox": list(fallback_bbox), "exact": False}
+            {
+                "text": " ".join(vl_tokens),
+                "bbox": list(fallback_bbox),
+                "exact": False,
+            }
         ]
 
     vl_keys = [_normalise(t) for t in vl_tokens]
     tess_keys = [_normalise(w.get("text", "")) for w in tess_words]
 
-    placed: List[Dict[str, Any]] = []
+    placed: list[dict[str, Any]] = []
     matcher = difflib.SequenceMatcher(a=vl_keys, b=tess_keys, autojunk=False)
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag == "equal":
@@ -151,9 +163,17 @@ def align_tokens(
         elif tag in ("replace", "delete"):
             # The VL text wins; it spans whatever boxes it displaced.
             boxes = [w["bbox"] for w in tess_words[j1:j2]]
-            span = _union(boxes) if boxes else _neighbour_box(tess_words, j1, fallback_bbox)
+            span = (
+                _union(boxes)
+                if boxes
+                else _neighbour_box(tess_words, j1, fallback_bbox)
+            )
             if span is not None:
-                line = tess_words[j1].get("line") if j1 < len(tess_words) else None
+                line = (
+                    tess_words[j1].get("line")
+                    if j1 < len(tess_words)
+                    else None
+                )
                 placed.append(
                     {
                         "text": " ".join(vl_tokens[i1:i2]),
@@ -166,7 +186,7 @@ def align_tokens(
     return placed
 
 
-def _union(boxes: Sequence[Sequence[float]]) -> Optional[List[float]]:
+def _union(boxes: Sequence[Sequence[float]]) -> list[float] | None:
     boxes = [b for b in boxes if b]
     if not boxes:
         return None
@@ -179,10 +199,10 @@ def _union(boxes: Sequence[Sequence[float]]) -> Optional[List[float]]:
 
 
 def _neighbour_box(
-    tess_words: Sequence[Dict[str, Any]],
+    tess_words: Sequence[dict[str, Any]],
     index: int,
-    fallback_bbox: Optional[Sequence[float]],
-) -> Optional[List[float]]:
+    fallback_bbox: Sequence[float] | None,
+) -> list[float] | None:
     """Nearest real box to an unanchored token, else the region box."""
     for candidate in (index, index - 1, index + 1):
         if 0 <= candidate < len(tess_words):
@@ -196,12 +216,18 @@ def _neighbour_box(
 
 
 #: ISO-639-1 code per supported Tesseract pack, for the stopword lexicons.
-_ISO_FOR_TESSERACT = {"eng": "en", "deu": "de", "fra": "fr", "ita": "it", "spa": "es"}
+_ISO_FOR_TESSERACT = {
+    "eng": "en",
+    "deu": "de",
+    "fra": "fr",
+    "ita": "it",
+    "spa": "es",
+}
 
 #: A clear stopword-ratio win needs no second opinion.
 _STOPWORD_MARGIN = 0.04
 
-_STOPWORD_CACHE: Dict[str, frozenset] = {}
+_STOPWORD_CACHE: dict[str, frozenset] = {}
 
 
 def _stopwords(iso: str) -> frozenset:
@@ -215,7 +241,7 @@ def _stopwords(iso: str) -> frozenset:
     return _STOPWORD_CACHE[iso]
 
 
-def _stopword_scores(tokens: Sequence[str]) -> Dict[str, float]:
+def _stopword_scores(tokens: Sequence[str]) -> dict[str, float]:
     """Fraction of *tokens* that are stopwords in each supported language."""
     if not tokens:
         return {}
@@ -231,10 +257,14 @@ def detect_language(text: str, default: str = DEFAULT_TESSERACT_LANG) -> str:
     """Pick a Tesseract language code from the VL text.
 
     A five-way choice over the installed packs, so a stopword-frequency vote is
-    accurate and deterministic; ``langdetect`` only breaks a close call. Short or
-    unrecognisable text keeps *default*.
+    accurate and deterministic; ``langdetect`` only breaks a close call. Short
+    or unrecognisable text keeps *default*.
     """
-    tokens = [t for t in re.findall(r"[^\W\d_]+", (text or "").lower(), re.UNICODE) if t]
+    tokens = [
+        t
+        for t in re.findall(r"[^\W\d_]+", (text or "").lower(), re.UNICODE)
+        if t
+    ]
     if len(tokens) < 20:  # too little evidence to beat the default
         return default
 
@@ -267,7 +297,9 @@ def detect_language(text: str, default: str = DEFAULT_TESSERACT_LANG) -> str:
 PROSE_TYPES = LAYER_TYPES - {doc_ir.TABLE}
 
 
-def document_language(document: "doc_ir.Document", default: str = DEFAULT_TESSERACT_LANG) -> str:
+def document_language(
+    document: doc_ir.Document, default: str = DEFAULT_TESSERACT_LANG
+) -> str:
     """Detect once over the whole document's prose regions."""
     parts = [
         region.text
@@ -277,8 +309,10 @@ def document_language(document: "doc_ir.Document", default: str = DEFAULT_TESSER
     return detect_language(" ".join(parts), default=default)
 
 
-def page_language(page: "doc_ir.Page", default: str = DEFAULT_TESSERACT_LANG) -> str:
-    """Detect from one page's own text, so a sparse page cannot skew the rest."""
+def page_language(
+    page: doc_ir.Page, default: str = DEFAULT_TESSERACT_LANG
+) -> str:
+    """Detect from one page's own text, so sparse pages skew nothing."""
     parts = [
         region.text
         for region in page.ordered_regions()
@@ -293,6 +327,7 @@ def page_language(page: "doc_ir.Page", default: str = DEFAULT_TESSERACT_LANG) ->
 
 
 def tesseract_available() -> bool:
+    """Return True if Tesseract can be called."""
     try:
         import pytesseract
 
@@ -307,17 +342,24 @@ def engine_citation(lang: str = DEFAULT_TESSERACT_LANG) -> str:
     try:
         import pytesseract
 
-        return f"Tesseract {pytesseract.get_tesseract_version()} ({lang}), word geometry only"
+        version = pytesseract.get_tesseract_version()
+        return f"Tesseract {version} ({lang}), word geometry only"
     except Exception:
         return f"Tesseract ({lang}), word geometry only"
 
 
-def tesseract_words(image_bgr, lang: str = DEFAULT_TESSERACT_LANG) -> List[Dict[str, Any]]:
+def tesseract_words(
+    image_bgr, lang: str = DEFAULT_TESSERACT_LANG
+) -> list[dict[str, Any]]:
     """Per-word boxes for a crop, in the crop's own pixel coordinates."""
     import pytesseract
     from PIL import Image
 
-    rgb = image_bgr[:, :, ::-1] if getattr(image_bgr, "ndim", 0) == 3 else image_bgr
+    rgb = (
+        image_bgr[:, :, ::-1]
+        if getattr(image_bgr, "ndim", 0) == 3
+        else image_bgr
+    )
     # psm 4 (single column of variable-sized text): psm 6 reads a ruled table's
     # rules as text and collapses its rows.
     data = pytesseract.image_to_data(
@@ -326,7 +368,7 @@ def tesseract_words(image_bgr, lang: str = DEFAULT_TESSERACT_LANG) -> List[Dict[
         config="--psm 4",
         output_type=pytesseract.Output.DICT,
     )
-    words: List[Dict[str, Any]] = []
+    words: list[dict[str, Any]] = []
     for index, text in enumerate(data.get("text", [])):
         if not str(text).strip():
             continue
@@ -351,7 +393,8 @@ def tesseract_words(image_bgr, lang: str = DEFAULT_TESSERACT_LANG) -> List[Dict[
                 ],
                 "conf": conf,
                 # Tesseract's line grouping: size and baseline are per line,
-                # since "we" has a far shorter ink box than "Frühjahr" beside it.
+                # since "we" has a far shorter ink box than "Frühjahr" beside
+                # it.
                 "line": (
                     data.get("block_num", [0] * len(data["text"]))[index],
                     data.get("par_num", [0] * len(data["text"]))[index],
@@ -363,11 +406,11 @@ def tesseract_words(image_bgr, lang: str = DEFAULT_TESSERACT_LANG) -> List[Dict[
 
 
 def page_text_layer(
-    page: "doc_ir.Page",
+    page: doc_ir.Page,
     page_bgr,
     lang: str = DEFAULT_TESSERACT_LANG,
-    word_provider: Optional[Callable[[Any, str], List[Dict[str, Any]]]] = None,
-) -> List[Dict[str, Any]]:
+    word_provider: Callable[[Any, str], list[dict[str, Any]]] | None = None,
+) -> list[dict[str, Any]]:
     """Invisible-layer entries for one page, in raster pixel space.
 
     ``word_provider`` is injectable so alignment is testable without Tesseract.
@@ -387,19 +430,23 @@ def page_text_layer(
     targets = [
         region
         for region in page.ordered_regions()
-        if region.type in LAYER_TYPES and region.bbox and region_layer_text(region).strip()
+        if region.type in LAYER_TYPES
+        and region.bbox
+        and region_layer_text(region).strip()
     ]
     buckets = _bucket_words(targets, all_words, width, height)
 
-    entries: List[Dict[str, Any]] = []
-    for region, words in zip(targets, buckets):
+    entries: list[dict[str, Any]] = []
+    for region, words in zip(targets, buckets, strict=False):
         x1, y1, x2, y2 = (float(v) for v in region.bbox[:4])
         x1, y1 = max(0.0, x1), max(0.0, y1)
         x2, y2 = min(float(width), x2), min(float(height), y2)
         if x2 - x1 < 2 or y2 - y1 < 2:
             continue
         text = region_layer_text(region).strip()
-        placed = align_tokens(tokenize(text), words, fallback_bbox=[x1, y1, x2, y2])
+        placed = align_tokens(
+            tokenize(text), words, fallback_bbox=[x1, y1, x2, y2]
+        )
         # Scoped to the region: on a two-column page the engine's own "lines"
         # merge both columns, and no shared baseline suits that union.
         _apply_line_metrics(placed, words)
@@ -412,18 +459,18 @@ _BUCKET_MARGIN = 0.02
 
 
 def _bucket_words(
-    regions: Sequence["doc_ir.Region"],
-    words: Sequence[Dict[str, Any]],
+    regions: Sequence[doc_ir.Region],
+    words: Sequence[dict[str, Any]],
     width: int,
     height: int,
-) -> List[List[Dict[str, Any]]]:
+) -> list[list[dict[str, Any]]]:
     """Assign each word to the first region (reading order) holding its centre.
 
     First match wins, so overlapping boxes cannot index a word twice; words in
     no region are dropped, the VL lane having never transcribed there. Engine
     order is kept within a region, since alignment is positional.
     """
-    buckets: List[List[Dict[str, Any]]] = [[] for _ in regions]
+    buckets: list[list[dict[str, Any]]] = [[] for _ in regions]
     if not words:
         return buckets
 
@@ -450,18 +497,20 @@ def _bucket_words(
 _ASCENT, _DESCENT = 0.718, 0.207
 
 
-def _font_metrics() -> Tuple[float, float]:
+def _font_metrics() -> tuple[float, float]:
     """``(ascent, descent)`` used to map an ink box to a size and baseline."""
     return _ASCENT, _DESCENT
 
 
-def _apply_line_metrics(placed: List[Dict[str, Any]], words: Sequence[Dict[str, Any]]):
-    """Attach a per-line font size and baseline, so a highlight tracks the line.
+def _apply_line_metrics(
+    placed: list[dict[str, Any]], words: Sequence[dict[str, Any]]
+):
+    """Attach a per-line font size and baseline, so highlights follow lines.
 
     A line's ink box spans ascender to descender across all its words, giving
     one size and one baseline rather than a per-word jitter.
     """
-    line_boxes: Dict[Any, List[float]] = {}
+    line_boxes: dict[Any, list[float]] = {}
     for word in words:
         key = word.get("line")
         if key is None:
@@ -469,7 +518,8 @@ def _apply_line_metrics(placed: List[Dict[str, Any]], words: Sequence[Dict[str, 
         box = word["bbox"]
         current = line_boxes.get(key)
         line_boxes[key] = (
-            [box[1], box[3]] if current is None
+            [box[1], box[3]]
+            if current is None
             else [min(current[0], box[1]), max(current[1], box[3])]
         )
 
@@ -493,10 +543,19 @@ def _apply_line_metrics(placed: List[Dict[str, Any]], words: Sequence[Dict[str, 
 #: Typographic characters with a safe Latin-1 equivalent; anything else outside
 #: Latin-1 is dropped per character rather than losing the word.
 _LATIN1_SUBSTITUTIONS = {
-    "‘": "'", "’": "'", "‚": "'",
-    "“": '"', "”": '"', "„": '"',
-    "–": "-", "—": "-", "−": "-",
-    "…": "...", " ": " ", "‹": "<", "›": ">",
+    "‘": "'",
+    "’": "'",
+    "‚": "'",
+    "“": '"',
+    "”": '"',
+    "„": '"',
+    "–": "-",
+    "—": "-",
+    "−": "-",
+    "…": "...",
+    " ": " ",
+    "‹": "<",
+    "›": ">",
 }
 
 
@@ -507,12 +566,12 @@ def _encodable(text: str) -> str:
 
 
 def build_searchable_pdf(
-    layers: Dict[int, List[Dict[str, Any]]],
-    source_pdf: Optional[str] = None,
-    rasters: Optional[Dict[int, bytes]] = None,
+    layers: dict[int, list[dict[str, Any]]],
+    source_pdf: str | None = None,
+    rasters: dict[int, bytes] | None = None,
     raster_dpi: int = 200,
-    page_sizes: Optional[Dict[int, Tuple[int, int]]] = None,
-) -> Optional[bytes]:
+    page_sizes: dict[int, tuple[int, int]] | None = None,
+) -> bytes | None:
     """Write the invisible text layer onto the pages and return PDF bytes.
 
     ``layers`` maps 1-based page number to :func:`page_text_layer` entries in
@@ -520,8 +579,8 @@ def build_searchable_pdf(
     scan quality; otherwise pages are built from ``rasters``.
 
     ``page_sizes`` gives each raster's true pixel size, from which the
-    pixel->point scale is derived per page. That is the only reliable source: an
-    embedded dpi tag or a wrong assumed DPI shifts every word progressively
+    pixel->point scale is derived per page. That is the only reliable source:
+    an embedded dpi tag or a wrong assumed DPI shifts every word progressively
     further from the origin. ``raster_dpi`` is the fallback.
     """
     import fitz
@@ -542,7 +601,9 @@ def build_searchable_pdf(
                 # JPEG, not PNG: these pages are photographs of paper, and
                 # lossless re-encoding multiplies the file size several times.
                 try:
-                    rendered[page.number + 1] = pix.tobytes("jpeg", jpg_quality=88)
+                    rendered[page.number + 1] = pix.tobytes(
+                        "jpeg", jpg_quality=88
+                    )
                 except Exception:
                     rendered[page.number + 1] = pix.tobytes("png")
             doc.close()
@@ -553,7 +614,8 @@ def build_searchable_pdf(
         for page_number in sorted(rasters):
             data = rasters[page_number]
             pix = fitz.Pixmap(data)
-            # Sized from the raster's pixels, not its dpi tag, so pixels are points.
+            # Sized from the raster's pixels, not its dpi tag, so pixels are
+            # points.
             page = doc.new_page(width=pix.width, height=pix.height)
             page.insert_image(page.rect, stream=data)
     if doc is None:
@@ -573,7 +635,9 @@ def build_searchable_pdf(
                 scale_x = scale_y = 72.0 / raster_dpi if raster_dpi else 1.0
             for entry in entries:
                 x1, y1, x2, y2 = entry["bbox"]
-                rect = fitz.Rect(x1 * scale_x, y1 * scale_y, x2 * scale_x, y2 * scale_y)
+                rect = fitz.Rect(
+                    x1 * scale_x, y1 * scale_y, x2 * scale_x, y2 * scale_y
+                )
                 if rect.is_empty or rect.height <= 0 or rect.width <= 0:
                     continue
                 # Base-14 fonts are Latin-1; one stray character drops the
@@ -581,7 +645,8 @@ def build_searchable_pdf(
                 text = _encodable(entry["text"])
                 if not text:
                     continue
-                # Per-line size and baseline; the entry's own box is a fallback.
+                # Per-line size and baseline; the entry's own box is a
+                # fallback.
                 if entry.get("fontsize") and entry.get("baseline") is not None:
                     fontsize = max(1.0, entry["fontsize"] * scale_y)
                     baseline = entry["baseline"] * scale_y
@@ -591,7 +656,9 @@ def build_searchable_pdf(
                     baseline = rect.y1 - descent * fontsize
                 # Condensed to the measured width so the highlight matches the
                 # word; insert_textbox would drop a string that does not fit.
-                width = fitz.get_text_length(text, fontname="helv", fontsize=fontsize)
+                width = fitz.get_text_length(
+                    text, fontname="helv", fontsize=fontsize
+                )
                 if width > rect.width and width > 0:
                     fontsize = max(1.0, fontsize * rect.width / width)
                 # render_mode=3: selectable and searchable, never visible.

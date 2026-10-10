@@ -194,3 +194,54 @@ def test_running_model_names_are_unknown_when_untrustworthy(response):
         return response
 
     assert ollama.running_model_names(SimpleNamespace(ps=ps)) is None
+
+
+class FakeServer:
+    """Loaded models that leave memory a few polls after being unloaded."""
+
+    def __init__(self, loaded, polls_until_free=2):
+        self.loaded = list(loaded)
+        self.unloaded = []
+        self.polls_until_free = polls_until_free
+
+    def ps(self):
+        if self.unloaded:
+            self.polls_until_free -= 1
+            if self.polls_until_free < 0:
+                self.loaded = [
+                    m for m in self.loaded if m not in self.unloaded
+                ]
+        return {"models": [{"name": name} for name in self.loaded]}
+
+    def generate(self, model, prompt, keep_alive):
+        assert keep_alive == 0
+        self.unloaded.append(model)
+
+
+def test_release_models_waits_until_memory_is_free(monkeypatch):
+    server = FakeServer(["vision:20b", "qwen3:latest"])
+    monkeypatch.setattr(client, "ps", server.ps)
+    monkeypatch.setattr(client, "generate", server.generate)
+    monkeypatch.setattr(ollama.time, "sleep", lambda seconds: None)
+    released = ollama.release_models(keep={"qwen3:latest"})
+    assert released == ["vision:20b"]
+    assert server.unloaded == ["vision:20b"]
+    assert server.loaded == ["qwen3:latest"]
+
+
+def test_release_models_does_nothing_when_nothing_is_loaded(monkeypatch):
+    server = FakeServer([])
+    monkeypatch.setattr(client, "ps", server.ps)
+    monkeypatch.setattr(client, "generate", server.generate)
+    assert ollama.release_models() == []
+    assert server.unloaded == []
+
+
+def test_release_models_gives_up_after_the_timeout(monkeypatch):
+    server = FakeServer(["stuck:latest"], polls_until_free=10**9)
+    monkeypatch.setattr(client, "ps", server.ps)
+    monkeypatch.setattr(client, "generate", server.generate)
+    clock = iter(range(0, 1000, 1))
+    monkeypatch.setattr(ollama.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(ollama.time, "sleep", lambda seconds: None)
+    assert ollama.release_models(timeout=5) == ["stuck:latest"]

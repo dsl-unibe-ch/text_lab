@@ -35,7 +35,9 @@ ffmpeg, and `common/tests/test_ollama.py` fakes the Ollama client. A few
 tests run the real thing and carry the `container` marker, such as
 `features/transcription/tests/test_integration.py`; they skip themselves
 when the model stores are not mounted. Tests of worker processes start real
-subprocesses with a stub worker (`common/tests/stub_worker.py`).
+subprocesses with a stub worker (`common/tests/stub_worker.py`). The
+PaddleOCR-VL worker is tested the same way: `features/ocr/tests/` writes
+stub scripts that speak its protocol and passes them as `worker_path`.
 
 ## Running the tests
 

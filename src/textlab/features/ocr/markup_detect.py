@@ -29,17 +29,21 @@ from __future__ import annotations
 import base64
 import math
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 
 # ---- geometric decision thresholds ------------------------------------------
-CHECKED_FILL = 0.18      # >= this fraction of interior inked -> checked
-UNCHECKED_FILL = 0.045   # <= this fraction inked (and no stroke) -> unchecked
-STRIKE_CHECKED = 0.45    # stroke line >= this fraction of interior diagonal -> checked
+CHECKED_FILL = 0.18  # >= this fraction of interior inked -> checked
+UNCHECKED_FILL = 0.045  # <= this fraction inked (and no stroke) -> unchecked
+STRIKE_CHECKED = (
+    0.45  # stroke line >= this fraction of interior diagonal -> checked
+)
 STRIKE_AMBIGUOUS = 0.30  # stroke above this blocks a confident "unchecked"
 _INTERIOR_MARGIN = 0.24  # fraction of the crop trimmed on each side as border
-_SATURATION_MIN = 80     # HSV saturation above which a pixel counts as a colored mark
+_SATURATION_MIN = (
+    80  # HSV saturation above which a pixel counts as a colored mark
+)
 
 # ---- glyphs the VL recogniser might emit ------------------------------------
 _CHECKED_GLYPHS = set("☑☒✓✔✗✘√●■▣▪◼✕⨯×")
@@ -58,7 +62,7 @@ def _clamp(value: float, lo: float = 0.0, hi: float = 1.0) -> float:
 # ==========================================
 
 
-def detect_markup_from_vl(block_content: Optional[str]) -> Optional[Dict[str, Any]]:
+def detect_markup_from_vl(block_content: str | None) -> dict[str, Any] | None:
     """Infer a single-checkbox state from recognised text, or ``None``."""
     if not block_content:
         return None
@@ -81,20 +85,26 @@ def detect_markup_from_vl(block_content: Optional[str]) -> Optional[Dict[str, An
     return None
 
 
-def extract_mark_glyphs(content: Optional[str]) -> List[Dict[str, Any]]:
+def extract_mark_glyphs(content: str | None) -> list[dict[str, Any]]:
     """All mark glyphs in *content*, in order, with their transcribed state."""
-    items: List[Dict[str, Any]] = []
+    items: list[dict[str, Any]] = []
     if not content:
         return items
     for i, ch in enumerate(str(content)):
         if ch in _CHECKED_GLYPHS:
-            items.append({"index": i, "glyph": ch, "state": "checked", "method": "vl"})
+            items.append(
+                {"index": i, "glyph": ch, "state": "checked", "method": "vl"}
+            )
         elif ch in _UNCHECKED_GLYPHS:
-            items.append({"index": i, "glyph": ch, "state": "unchecked", "method": "vl"})
+            items.append(
+                {"index": i, "glyph": ch, "state": "unchecked", "method": "vl"}
+            )
     return items
 
 
-def apply_states_to_content(content: str, states: List[str]) -> Tuple[str, bool]:
+def apply_states_to_content(
+    content: str, states: list[str]
+) -> tuple[str, bool]:
     """Rewrite mark glyphs in *content* to match reconciled *states*.
 
     Only upgrades: a glyph transcribed as unchecked whose reconciled state is
@@ -107,7 +117,7 @@ def apply_states_to_content(content: str, states: List[str]) -> Tuple[str, bool]
         return content, False
     chars = list(content)
     changed = False
-    for item, state in zip(items, states):
+    for item, state in zip(items, states, strict=False):
         if state == "checked" and item["state"] == "unchecked":
             chars[item["index"]] = OVERRIDE_GLYPH
             changed = True
@@ -119,7 +129,7 @@ def apply_states_to_content(content: str, states: List[str]) -> Tuple[str, bool]
 # ==========================================
 
 
-def decode_crop_b64(b64: Optional[str]):
+def decode_crop_b64(b64: str | None):
     """Decode a base64 PNG crop into a BGR ``np.ndarray`` (or ``None``)."""
     if not b64:
         return None
@@ -191,9 +201,12 @@ def _line_strike_score(interior) -> float:
     diag = math.hypot(h, w)
     min_len = max(6, int(min(h, w) * 0.45))
     lines = cv2.HoughLinesP(
-        interior, 1, np.pi / 180,
+        interior,
+        1,
+        np.pi / 180,
         threshold=max(8, int(min_len * 0.7)),
-        minLineLength=min_len, maxLineGap=3,
+        minLineLength=min_len,
+        maxLineGap=3,
     )
     if lines is None:
         return 0.0
@@ -208,12 +221,17 @@ def _line_strike_score(interior) -> float:
     return best / max(1.0, diag)
 
 
-def detect_markup_geometric(crop_bgr) -> Dict[str, Any]:
+def detect_markup_geometric(crop_bgr) -> dict[str, Any]:
     """Classify a single checkbox/mark crop by interior ink and strokes."""
     interior, fill = _interior(crop_bgr)
     if fill is None:
-        return {"state": "uncertain", "method": "geometric", "score": 0.0,
-                "fill_ratio": None, "strike": None}
+        return {
+            "state": "uncertain",
+            "method": "geometric",
+            "score": 0.0,
+            "fill_ratio": None,
+            "strike": None,
+        }
 
     strike = _line_strike_score(interior)
 
@@ -228,12 +246,19 @@ def detect_markup_geometric(crop_bgr) -> Dict[str, Any]:
         state = "unchecked"
     else:
         span = CHECKED_FILL - UNCHECKED_FILL
-        nearest = min(CHECKED_FILL - fill, max(0.0, fill - UNCHECKED_FILL)) / span
+        nearest = (
+            min(CHECKED_FILL - fill, max(0.0, fill - UNCHECKED_FILL)) / span
+        )
         score = _clamp(0.5 - nearest, 0.0, 0.5)
         state = "uncertain"
 
-    return {"state": state, "method": "geometric", "score": round(score, 3),
-            "fill_ratio": round(fill, 4), "strike": round(strike, 3)}
+    return {
+        "state": state,
+        "method": "geometric",
+        "score": round(score, 3),
+        "fill_ratio": round(fill, 4),
+        "strike": round(strike, 3),
+    }
 
 
 # ==========================================
@@ -241,7 +266,9 @@ def detect_markup_geometric(crop_bgr) -> Dict[str, Any]:
 # ==========================================
 
 
-def find_marks(region_bgr, n_expected: Optional[int] = None) -> List[Dict[str, Any]]:
+def find_marks(
+    region_bgr, n_expected: int | None = None
+) -> list[dict[str, Any]]:
     """Locate candidate survey marks (circles/boxes) in a region crop.
 
     Returns marks in reading order, each ``{"bbox": [x1,y1,x2,y2], "state": ..,
@@ -259,7 +286,9 @@ def find_marks(region_bgr, n_expected: Optional[int] = None) -> List[Dict[str, A
         return []
 
     ink = _ink_mask(region_bgr)
-    contours, _ = cv2.findContours(ink, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours, _ = cv2.findContours(
+        ink, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+    )
 
     cands = []
     for cnt in contours:
@@ -290,7 +319,9 @@ def find_marks(region_bgr, n_expected: Optional[int] = None) -> List[Dict[str, A
     # pen cross from the gap it leaves in the pattern.
     if n_expected == 1:
         # A single mark ("☐ label ...") sits at the start of its region.
-        cands = [c for c in cands if (c["bbox"][0] + c["bbox"][2]) / 2.0 <= 0.28 * W]
+        cands = [
+            c for c in cands if (c["bbox"][0] + c["bbox"][2]) / 2.0 <= 0.28 * W
+        ]
         cands = sorted(cands, key=lambda c: c["bbox"][0])[:1]
     elif n_expected and n_expected >= 2:
         cands = _dominant_alignment_group(cands)
@@ -309,7 +340,7 @@ def find_marks(region_bgr, n_expected: Optional[int] = None) -> List[Dict[str, A
         return []
     med_h = float(np.median([c["h"] for c in cands]))
     cands.sort(key=lambda c: (c["bbox"][1], c["bbox"][0]))
-    rows: List[List[dict]] = []
+    rows: list[list[dict]] = []
     for c in cands:
         cy = (c["bbox"][1] + c["bbox"][3]) / 2.0
         if rows and abs(cy - rows[-1][0]) <= max(6.0, med_h * 0.7):
@@ -317,7 +348,11 @@ def find_marks(region_bgr, n_expected: Optional[int] = None) -> List[Dict[str, A
         else:
             rows.append((cy, [c]))
         rows[-1] = (
-            float(np.mean([(m["bbox"][1] + m["bbox"][3]) / 2.0 for m in rows[-1][1]])),
+            float(
+                np.mean(
+                    [(m["bbox"][1] + m["bbox"][3]) / 2.0 for m in rows[-1][1]]
+                )
+            ),
             rows[-1][1],
         )
     out = []
@@ -328,7 +363,7 @@ def find_marks(region_bgr, n_expected: Optional[int] = None) -> List[Dict[str, A
     return out
 
 
-def _make_candidate(region_bgr, x, y, w, h) -> Dict[str, Any]:
+def _make_candidate(region_bgr, x, y, w, h) -> dict[str, Any]:
     H, W = region_bgr.shape[:2]
     pad_x, pad_y = max(2, w // 8), max(2, h // 8)
     x1, y1 = max(0, x - pad_x), max(0, y - pad_y)
@@ -339,13 +374,13 @@ def _make_candidate(region_bgr, x, y, w, h) -> Dict[str, Any]:
     return verdict
 
 
-def _dominant_alignment_group(cands: List[dict]) -> List[dict]:
-    """Largest subset sharing an x-column or a y-row (regular survey layout)."""
+def _dominant_alignment_group(cands: list[dict]) -> list[dict]:
+    """Return the largest subset sharing an x-column or a y-row."""
     if len(cands) < 2:
         return cands
     heights = [c["h"] for c in cands]
     tol = max(6.0, float(np.median(heights)))
-    best: List[dict] = []
+    best: list[dict] = []
     for axis in (0, 1):  # 0: x-centers (column), 1: y-centers (row)
         centers = [
             ((c["bbox"][axis] + c["bbox"][axis + 2]) / 2.0, c) for c in cands
@@ -357,7 +392,7 @@ def _dominant_alignment_group(cands: List[dict]) -> List[dict]:
     return best
 
 
-def _fill_pattern_gap(group: List[dict], region_bgr) -> Optional[dict]:
+def _fill_pattern_gap(group: list[dict], region_bgr) -> dict | None:
     """Synthesize the one mark missing from a regular row/column pattern.
 
     A heavy pen cross destroys the printed outline, so the marked option is
@@ -374,7 +409,7 @@ def _fill_pattern_gap(group: List[dict], region_bgr) -> Optional[dict]:
     coords = sorted(xs if axis == 0 else ys)
     if len(coords) < 2:
         return None
-    diffs = [b - a for a, b in zip(coords, coords[1:])]
+    diffs = [b - a for a, b in zip(coords, coords[1:], strict=False)]
     med = float(np.median(diffs))
     if med <= 4:
         return None
@@ -445,7 +480,7 @@ def _is_isolated(ink, x, y, w, h, W) -> bool:
     return True
 
 
-def _most_uniform_subset(cands: List[dict], n: int) -> List[dict]:
+def _most_uniform_subset(cands: list[dict], n: int) -> list[dict]:
     """The n candidates with the smallest height spread (marks are uniform)."""
     by_h = sorted(cands, key=lambda c: c["h"])
     best, best_spread = by_h[:n], float("inf")
@@ -463,11 +498,11 @@ def _most_uniform_subset(cands: List[dict], n: int) -> List[dict]:
 
 
 def reconcile_marks(
-    glyph_items: List[Dict[str, Any]],
-    geo_marks: List[Dict[str, Any]],
+    glyph_items: list[dict[str, Any]],
+    geo_marks: list[dict[str, Any]],
     *,
     allow_override: bool = False,
-) -> Tuple[List[Dict[str, Any]], str]:
+) -> tuple[list[dict[str, Any]], str]:
     """Compare VL glyph states with geometric verdicts (position-aligned).
 
     Returns ``(items, status)`` where status is ``"matched"``,
@@ -490,7 +525,7 @@ def reconcile_marks(
     if len(items) >= 4 and all(m["state"] == "checked" for m in geo_marks):
         return items, "geometry_saturated"
     disagreements = 0
-    for item, mark in zip(items, geo_marks):
+    for item, mark in zip(items, geo_marks, strict=False):
         if mark.get("bbox"):
             item["geo_bbox"] = mark["bbox"]
         item["geometry"] = {
@@ -519,7 +554,8 @@ def reconcile_marks(
     return items, "geometry_disagreement" if disagreements else "matched"
 
 
-def summarize_items(items: List[Dict[str, Any]]) -> Dict[str, int]:
+def summarize_items(items: list[dict[str, Any]]) -> dict[str, int]:
+    """Count the marks by state, overrides and disagreements."""
     counts = {
         "n_checked": 0,
         "n_unchecked": 0,
@@ -547,7 +583,9 @@ def summarize_items(items: List[Dict[str, Any]]) -> Dict[str, int]:
 # ==========================================
 
 
-def classify_checkbox(block_content: Optional[str] = None, crop_bgr=None) -> Dict[str, Any]:
+def classify_checkbox(
+    block_content: str | None = None, crop_bgr=None
+) -> dict[str, Any]:
     """Record VL and geometric observations without geometric correction."""
     vl = detect_markup_from_vl(block_content)
     geo = detect_markup_geometric(crop_bgr) if crop_bgr is not None else None
@@ -570,11 +608,15 @@ def classify_checkbox(block_content: Optional[str] = None, crop_bgr=None) -> Dic
         "state": state,
         "method": method,
         "score": score,
-        "status": "geometry_disagreement" if disagreement else ("observed" if vl else "needs_review"),
+        "status": "geometry_disagreement"
+        if disagreement
+        else ("observed" if vl else "needs_review"),
         "observations": observations,
     }
 
 
-def classify_from_b64(block_content: Optional[str], crop_b64: Optional[str]) -> Dict[str, Any]:
-    """Convenience wrapper: decode a base64 crop, then :func:`classify_checkbox`."""
+def classify_from_b64(
+    block_content: str | None, crop_b64: str | None
+) -> dict[str, Any]:
+    """Decode a base64 crop, then run :func:`classify_checkbox` on it."""
     return classify_checkbox(block_content, decode_crop_b64(crop_b64))

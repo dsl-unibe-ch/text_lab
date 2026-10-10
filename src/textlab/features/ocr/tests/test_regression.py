@@ -1,6 +1,5 @@
 """Core IR / adapter / worker-protocol / native-lane regression checks."""
 
-
 import base64
 import io
 import json
@@ -10,10 +9,23 @@ import tempfile
 import time
 import zipfile
 
-import numpy as np
 import cv2
+import numpy as np
 
-from textlab.features.ocr import doc_ir, auto_ocr, markup_detect as md
+from textlab.features.ocr import doc_ir
+from textlab.features.ocr import markup_detect as md
+from textlab.features.ocr.marks import apply_markup
+from textlab.features.ocr.native import (
+    PUA_GLYPH_MIN,
+    is_figure_sized,
+    is_flat_fill,
+    native_page,
+    page_has_math,
+    page_has_text_layer,
+    text_layer_is_corrupt,
+)
+from textlab.features.ocr.pipeline import _finalize_vl_page
+from textlab.features.ocr.vl_session import run_vl_worker
 
 WORK = pathlib.Path(tempfile.mkdtemp(prefix="textlab_test_"))
 
@@ -29,14 +41,41 @@ def crop_b64(kind):
 
 
 PAGE_JSON = {
-    "page_number": 1, "width": 800, "height": 1000,
+    "page_number": 1,
+    "width": 800,
+    "height": 1000,
     "parsing_res_list": [
-        {"block_label": "title", "block_content": "Survey Form", "block_bbox": [10, 10, 400, 40], "block_order": 0},
-        {"block_label": "checkbox", "block_content": "", "block_bbox": [10, 90, 50, 130], "block_order": 1},
-        {"block_label": "table", "block_content": "<table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>", "block_bbox": [10, 200, 400, 300], "block_order": 2},
-        {"block_label": "formula", "block_content": "E = mc^2", "block_bbox": [10, 320, 200, 360], "block_order": 3},
+        {
+            "block_label": "title",
+            "block_content": "Survey Form",
+            "block_bbox": [10, 10, 400, 40],
+            "block_order": 0,
+        },
+        {
+            "block_label": "checkbox",
+            "block_content": "",
+            "block_bbox": [10, 90, 50, 130],
+            "block_order": 1,
+        },
+        {
+            "block_label": "table",
+            "block_content": (
+                "<table><tr><th>A</th><th>B</th></tr>"
+                "<tr><td>1</td><td>2</td></tr></table>"
+            ),
+            "block_bbox": [10, 200, 400, 300],
+            "block_order": 2,
+        },
+        {
+            "block_label": "formula",
+            "block_content": "E = mc^2",
+            "block_bbox": [10, 320, 200, 360],
+            "block_order": 3,
+        },
     ],
-    "layout_det_res": [{"label": "checkbox", "score": 0.85, "coordinate": [10, 90, 50, 130]}],
+    "layout_det_res": [
+        {"label": "checkbox", "score": 0.85, "coordinate": [10, 90, 50, 130]}
+    ],
     "assets": {"1": {"b64": crop_b64("checked"), "ext": "png"}},
     "markdown": "# Survey",
 }
@@ -44,20 +83,32 @@ PAGE_JSON = {
 
 def test_adapter_and_exports():
     page = doc_ir.from_paddle_vl(PAGE_JSON)
-    assert [r.type for r in page.regions] == ["title", "checkbox", "table", "formula"]
+    assert [r.type for r in page.regions] == [
+        "title",
+        "checkbox",
+        "table",
+        "formula",
+    ]
     doc = doc_ir.Document(pages=[page], source_name="s.pdf")
     tables = doc_ir.tables_to_dataframes(doc)
-    assert len(tables) == 1 and list(tables[0]["dataframe"].columns) == ["A", "B"]
+    assert len(tables) == 1 and list(tables[0]["dataframe"].columns) == [
+        "A",
+        "B",
+    ]
     mdtxt = doc_ir.to_markdown(doc)
     assert "## Survey Form" in mdtxt and "$$" in mdtxt
-    names = zipfile.ZipFile(io.BytesIO(doc_ir.build_full_bundle(doc))).namelist()
+    names = zipfile.ZipFile(
+        io.BytesIO(doc_ir.build_full_bundle(doc))
+    ).namelist()
     assert any(n.startswith("tables/") for n in names)
     assert any(n.startswith("assets/") for n in names)
     json.loads(doc_ir.to_json(doc))
 
 
 def test_text_export():
-    doc = doc_ir.Document(pages=[doc_ir.from_paddle_vl(PAGE_JSON)], source_name="s.pdf")
+    doc = doc_ir.Document(
+        pages=[doc_ir.from_paddle_vl(PAGE_JSON)], source_name="s.pdf"
+    )
     txt = doc_ir.to_text(doc)
     assert "Survey Form" in txt and "E = mc^2" in txt
     # Tables become readable columns, never raw markup.
@@ -66,29 +117,49 @@ def test_text_export():
     # A checkbox keeps its state; the crop is named rather than embedded.
     assert "[?]" in txt or "[x]" in txt or "[ ]" in txt
 
-    two = doc_ir.Document(pages=[
-        doc_ir.from_paddle_vl(PAGE_JSON), doc_ir.from_paddle_vl(PAGE_JSON)
-    ])
+    two = doc_ir.Document(
+        pages=[
+            doc_ir.from_paddle_vl(PAGE_JSON),
+            doc_ir.from_paddle_vl(PAGE_JSON),
+        ]
+    )
     two.pages[1].page_number = 2
     assert "--- page 2 ---" in doc_ir.to_text(two)
     assert doc_ir.to_text(doc_ir.Document(pages=[])).strip() == ""
 
 
 def test_docx_export():
-    doc = doc_ir.Document(pages=[doc_ir.from_paddle_vl(PAGE_JSON)], source_name="s.pdf")
+    doc = doc_ir.Document(
+        pages=[doc_ir.from_paddle_vl(PAGE_JSON)], source_name="s.pdf"
+    )
     blob = doc_ir.build_docx(doc, "s")
     if blob is None:  # python-docx absent: the caller hides the download
         return
     assert "word/document.xml" in zipfile.ZipFile(io.BytesIO(blob)).namelist()
 
     # Checked on a page with a figure: a checkbox stays a text marker.
-    with_figure = doc_ir.Document(pages=[doc_ir.Page(page_number=1, regions=[
-        doc_ir.Region("r1", doc_ir.FIGURE, [0, 0, 40, 40], 0, {"text": "Fig 1"},
-                      asset={"b64": crop_b64("checked"), "ext": "png"}),
-    ])])
+    with_figure = doc_ir.Document(
+        pages=[
+            doc_ir.Page(
+                page_number=1,
+                regions=[
+                    doc_ir.Region(
+                        "r1",
+                        doc_ir.FIGURE,
+                        [0, 0, 40, 40],
+                        0,
+                        {"text": "Fig 1"},
+                        asset={"b64": crop_b64("checked"), "ext": "png"},
+                    ),
+                ],
+            )
+        ]
+    )
     fig_blob = doc_ir.build_docx(with_figure, "f")
     fig_names = zipfile.ZipFile(io.BytesIO(fig_blob)).namelist()
-    assert any(n.startswith("word/media/") for n in fig_names), "figure crop not embedded"
+    assert any(n.startswith("word/media/") for n in fig_names), (
+        "figure crop not embedded"
+    )
 
     import docx as _docx
 
@@ -100,7 +171,9 @@ def test_docx_export():
         if run.text == "Fig 1"
     ]
     assert caption_runs, "figure caption missing"
-    assert all(run.italic for run in caption_runs), "figure caption is not italic"
+    assert all(run.italic for run in caption_runs), (
+        "figure caption is not italic"
+    )
 
     parsed = _docx.Document(io.BytesIO(blob))
     assert parsed.paragraphs[0].style.name.startswith("Heading")
@@ -119,21 +192,32 @@ def test_glyph_index_junk_never_reaches_an_export():
     control bytes. They are unrecoverable, and one of them used to abort the
     whole .docx export with an lxml ValueError."""
     dirty = "Rahmenbedingungen\x03 der\x02 Studie\x00"
-    page = doc_ir.from_paddle_vl({
-        "page_number": 1,
-        "markdown": dirty,
-        "parsing_res_list": [
-            {"block_label": "text", "block_content": dirty, "block_bbox": [0, 0, 10, 10]},
-            {"block_label": "table", "block_content": "<table><tr><td>a\x04</td></tr></table>",
-             "block_bbox": [0, 20, 10, 30]},
-        ],
-    })
+    page = doc_ir.from_paddle_vl(
+        {
+            "page_number": 1,
+            "markdown": dirty,
+            "parsing_res_list": [
+                {
+                    "block_label": "text",
+                    "block_content": dirty,
+                    "block_bbox": [0, 0, 10, 10],
+                },
+                {
+                    "block_label": "table",
+                    "block_content": "<table><tr><td>a\x04</td></tr></table>",
+                    "block_bbox": [0, 20, 10, 30],
+                },
+            ],
+        }
+    )
     assert page.regions[0].text == "Rahmenbedingungen der Studie"
     assert "\x03" not in page.markdown
     assert "\x04" not in page.regions[1].text
 
     # Tab/newline/CR are legal XML and must survive the scrub.
-    kept = doc_ir.Region("r", doc_ir.TEXT, [0, 0, 1, 1], 0, {"text": "a\tb\nc\r"})
+    kept = doc_ir.Region(
+        "r", doc_ir.TEXT, [0, 0, 1, 1], 0, {"text": "a\tb\nc\r"}
+    )
     assert kept.text == "a\tb\nc\r"
 
     doc = doc_ir.Document(pages=[page], source_name="broken_cmap.pdf")
@@ -142,13 +226,19 @@ def test_glyph_index_junk_never_reaches_an_export():
         return
     import docx as _docx
 
-    text = "\n".join(p.text for p in _docx.Document(io.BytesIO(blob)).paragraphs)
+    text = "\n".join(
+        p.text for p in _docx.Document(io.BytesIO(blob)).paragraphs
+    )
     assert "Rahmenbedingungen der Studie" in text
 
 
 def test_full_bundle_carries_every_format():
-    doc = doc_ir.Document(pages=[doc_ir.from_paddle_vl(PAGE_JSON)], source_name="s.pdf")
-    names = zipfile.ZipFile(io.BytesIO(doc_ir.build_full_bundle(doc, "s"))).namelist()
+    doc = doc_ir.Document(
+        pages=[doc_ir.from_paddle_vl(PAGE_JSON)], source_name="s.pdf"
+    )
+    names = zipfile.ZipFile(
+        io.BytesIO(doc_ir.build_full_bundle(doc, "s"))
+    ).namelist()
     for expected in ("s.md", "s.txt", "s.json"):
         assert expected in names, f"{expected} missing from bundle: {names}"
     if doc_ir.build_docx(doc, "s") is not None:
@@ -157,27 +247,40 @@ def test_full_bundle_carries_every_format():
 
 def test_batch_outputs_match_the_single_document_downloads():
     """A batch result must carry every format the single-file page offers."""
-    doc = doc_ir.Document(pages=[doc_ir.from_paddle_vl(PAGE_JSON)], source_name="s.pdf")
+    doc = doc_ir.Document(
+        pages=[doc_ir.from_paddle_vl(PAGE_JSON)], source_name="s.pdf"
+    )
     doc.searchable_pdf = b"%PDF-1.7 fake"
     out = WORK / "batch_out"
     written = doc_ir.write_document_outputs(doc, out, "document")
 
-    bundle = zipfile.ZipFile(io.BytesIO(doc_ir.build_full_bundle(doc, "document")))
+    bundle = zipfile.ZipFile(
+        io.BytesIO(doc_ir.build_full_bundle(doc, "document"))
+    )
+
     def kinds(names):
         return {
             pathlib.PurePath(n).suffix or pathlib.PurePath(n).name
-            for n in names if not n.endswith("/")
+            for n in names
+            if not n.endswith("/")
         }
+
     missing = kinds(bundle.namelist()) - kinds(written)
     assert not missing, f"batch is missing formats the bundle has: {missing}"
 
-    for expected in ("document.md", "document.txt", "document.json",
-                     "document_searchable.pdf", "models_used.txt"):
+    for expected in (
+        "document.md",
+        "document.txt",
+        "document.json",
+        "document_searchable.pdf",
+        "models_used.txt",
+    ):
         assert (out / expected).exists(), f"{expected} not written: {written}"
 
     # Batch writes one merged summary at its root instead of one per folder.
     per_file = doc_ir.write_document_outputs(
-        doc, WORK / "batch_no_prov", "document", provenance=False)
+        doc, WORK / "batch_no_prov", "document", provenance=False
+    )
     assert "models_used.txt" not in per_file, per_file
     assert not (WORK / "batch_no_prov" / "models_used.txt").exists()
     assert any(n.startswith("tables/") for n in written), written
@@ -198,19 +301,34 @@ def test_model_provenance_is_citable_and_derived():
     # No figure was described, so no description model may be claimed.
     assert "figure_descriptions" not in models
 
-    figure = doc_ir.Region("f1", doc_ir.FIGURE, [0, 0, 10, 10], 9, {"text": ""},
-                           asset={"b64": crop_b64("checked"), "ext": "png"})
+    figure = doc_ir.Region(
+        "f1",
+        doc_ir.FIGURE,
+        [0, 0, 10, 10],
+        9,
+        {"text": ""},
+        asset={"b64": crop_b64("checked"), "ext": "png"},
+    )
     figure.visual_description = doc_ir.VisualDescription(
-        description="a chart", source="ollama-local", model="qwen3-vl:30b-a3b-instruct")
+        description="a chart",
+        source="ollama-local",
+        model="qwen3-vl:30b-a3b-instruct",
+    )
     page.regions.append(figure)
     doc.extra_tools["text_layer"] = "Tesseract 4.1.1 (deu), word geometry only"
     models = doc_ir.model_provenance(doc)
-    assert models["figure_descriptions"] == ["qwen3-vl:30b-a3b-instruct (ollama-local)"]
+    assert models["figure_descriptions"] == [
+        "qwen3-vl:30b-a3b-instruct (ollama-local)"
+    ]
     assert "Tesseract 4.1.1" in models["text_layer"]
 
     # A born-digital page names no recognition model, because none ran.
-    native = doc_ir.Document(pages=[doc_ir.Page(page_number=1, source="native")])
-    assert "no recognition model" in " ".join(doc_ir.model_provenance(native)["text_recognition"])
+    native = doc_ir.Document(
+        pages=[doc_ir.Page(page_number=1, source="native")]
+    )
+    assert "no recognition model" in " ".join(
+        doc_ir.model_provenance(native)["text_recognition"]
+    )
 
     # It travels with the canonical JSON and as readable lines.
     assert "models" in json.loads(doc_ir.to_json(doc))
@@ -220,22 +338,33 @@ def test_model_provenance_is_citable_and_derived():
 
 def test_batch_provenance_is_the_union_over_the_files():
     """A batch is not uniform, so its one summary must cover every file."""
-    scanned = {"text_recognition": ["PaddleOCR-VL 1.6"],
-               "figure_descriptions": ["qwen3-vl:30b-a3b-instruct (ollama-local)"],
-               "text_layer": "Tesseract 4.1.1 (deu), word geometry only"}
-    born_digital = {"text_recognition": ["PyMuPDF text extraction (no recognition model)"]}
-    another_scan = {"text_recognition": ["PaddleOCR-VL 1.6"],
-                    "text_layer": "Tesseract 4.1.1 (eng), word geometry only"}
+    scanned = {
+        "text_recognition": ["PaddleOCR-VL 1.6"],
+        "figure_descriptions": ["qwen3-vl:30b-a3b-instruct (ollama-local)"],
+        "text_layer": "Tesseract 4.1.1 (deu), word geometry only",
+    }
+    born_digital = {
+        "text_recognition": ["PyMuPDF text extraction (no recognition model)"]
+    }
+    another_scan = {
+        "text_recognition": ["PaddleOCR-VL 1.6"],
+        "text_layer": "Tesseract 4.1.1 (eng), word geometry only",
+    }
 
     merged = doc_ir.merge_provenance([scanned, born_digital, another_scan])
     # Every lane that ran is named, once, in first-seen order.
     assert merged["text_recognition"] == [
-        "PaddleOCR-VL 1.6", "PyMuPDF text extraction (no recognition model)"]
-    assert merged["figure_descriptions"] == ["qwen3-vl:30b-a3b-instruct (ollama-local)"]
+        "PaddleOCR-VL 1.6",
+        "PyMuPDF text extraction (no recognition model)",
+    ]
+    assert merged["figure_descriptions"] == [
+        "qwen3-vl:30b-a3b-instruct (ollama-local)"
+    ]
     # A scalar from one file and a different one from another both survive.
     assert merged["text_layer"] == [
         "Tesseract 4.1.1 (deu), word geometry only",
-        "Tesseract 4.1.1 (eng), word geometry only"]
+        "Tesseract 4.1.1 (eng), word geometry only",
+    ]
 
     text = doc_ir.provenance_to_text(merged)
     assert "Text recognition: PaddleOCR-VL 1.6, PyMuPDF" in text
@@ -246,18 +375,21 @@ def test_batch_provenance_is_the_union_over_the_files():
 def test_finalize_vl_page():
     raster = WORK / "p1.png"
     cv2.imwrite(str(raster), np.full((1000, 800, 3), 255, np.uint8))
-    fp = auto_ocr._finalize_vl_page(PAGE_JSON, 1, raster)
+    fp = _finalize_vl_page(PAGE_JSON, 1, raster)
     assert fp.image_b64
     cb = [r for r in fp.regions if r.type == doc_ir.CHECKBOX][0]
-    # Ordinary OCR is immutable and does not run form interpretation implicitly.
+    # Ordinary OCR is immutable and does not run form interpretation
+    # implicitly.
     assert cb.markup is None
 
     # Geometry can still be requested as review evidence, but it is never
     # allowed to rewrite the OCR token.
-    auto_ocr._apply_markup(fp, cv2.imread(str(raster)))
+    apply_markup(fp, cv2.imread(str(raster)))
     assert cb.markup and cb.markup["state"] == "uncertain"
     geometry = next(
-        item for item in cb.markup["observations"] if item["source"] == "geometric"
+        item
+        for item in cb.markup["observations"]
+        if item["source"] == "geometric"
     )
     assert geometry["state"] in {"checked", "unchecked", "uncertain"}
 
@@ -266,14 +398,23 @@ def test_worker_protocol():
     stub = WORK / "stub.py"
     stub.write_text(
         "import json\nprint('TEXTLAB_PADDLEVL_RESULT_JSON=' + "
-        "json.dumps({'pages': [{'page_number':1,'parsing_res_list':[],'layout_det_res':[],'assets':{}}]}))\n"
+        "json.dumps({'pages': [{'page_number':1,'parsing_res_list':[],"
+        "'layout_det_res':[],'assets':{}}]}))\n"
     )
-    pages = auto_ocr.run_vl_worker([pathlib.Path("x.png")], backend_python=sys.executable, worker_path=stub)
+    pages = run_vl_worker(
+        [pathlib.Path("x.png")],
+        backend_python=sys.executable,
+        worker_path=stub,
+    )
     assert len(pages) == 1
     bad = WORK / "bad.py"
     bad.write_text("import sys; sys.exit(3)\n")
     try:
-        auto_ocr.run_vl_worker([pathlib.Path("x.png")], backend_python=sys.executable, worker_path=bad)
+        run_vl_worker(
+            [pathlib.Path("x.png")],
+            backend_python=sys.executable,
+            worker_path=bad,
+        )
         raise AssertionError("should raise")
     except RuntimeError:
         pass
@@ -282,9 +423,11 @@ def test_worker_protocol():
 def test_native_lane():
     # A real figure carries detail. A flat one would be filtered out as the
     # decorative fill it looks like -- covered in the test below.
-    _img = np.random.default_rng(0).integers(0, 255, (20, 20, 3), dtype=np.uint8)
+    _img = np.random.default_rng(0).integers(
+        0, 255, (20, 20, 3), dtype=np.uint8
+    )
     _ok, _enc = cv2.imencode(".png", _img)
-    PNG = _enc.tobytes()
+    png_bytes = _enc.tobytes()
 
     class FR:
         width = 595.0
@@ -292,30 +435,53 @@ def test_native_lane():
 
     class FPix:
         def tobytes(self, fmt="png"):
-            return PNG
+            return png_bytes
 
     class FPage:
         rect = FR()
 
         def get_text(self, mode):
             if mode == "text":
-                return "This is a born digital page with plenty of words in it."
+                return (
+                    "This is a born digital page with plenty of words in it."
+                )
             if mode == "words":
                 return [("w",)] * 11
             if mode == "dict":
-                return {"blocks": [
-                    {"type": 0, "bbox": [72, 72, 500, 96], "lines": [{"spans": [{"text": "Hello world", "font": "Arial"}]}]},
-                    {"type": 1, "bbox": [72, 120, 300, 300], "image": PNG, "ext": "png",
-                     "width": 20, "height": 20},
-                ]}
+                return {
+                    "blocks": [
+                        {
+                            "type": 0,
+                            "bbox": [72, 72, 500, 96],
+                            "lines": [
+                                {
+                                    "spans": [
+                                        {
+                                            "text": "Hello world",
+                                            "font": "Arial",
+                                        }
+                                    ]
+                                }
+                            ],
+                        },
+                        {
+                            "type": 1,
+                            "bbox": [72, 120, 300, 300],
+                            "image": png_bytes,
+                            "ext": "png",
+                            "width": 20,
+                            "height": 20,
+                        },
+                    ]
+                }
             return []
 
         def get_pixmap(self, dpi=150):
             return FPix()
 
-    assert auto_ocr._page_has_text_layer(FPage()) is True
-    assert auto_ocr._page_has_math(FPage()) is False
-    np_page = auto_ocr._native_page(FPage(), 3)
+    assert page_has_text_layer(FPage()) is True
+    assert page_has_math(FPage()) is False
+    np_page = native_page(FPage(), 3)
     assert [r.type for r in np_page.regions] == ["text", "figure"]
     assert np_page.regions[0].text == "Hello world"
     assert np_page.image_b64
@@ -338,42 +504,46 @@ def test_decorative_image_blocks_do_not_become_figures():
     flat = np.full((60, 60, 3), (200, 180, 160), np.uint8)
 
     big = {"bbox": (0, 0, 90, 90), "width": 60, "height": 60}
-    assert auto_ocr._is_figure_sized(big) is True
+    assert is_figure_sized(big) is True
     # Degenerate on the page: the 0.00 x 0.11 pt hairlines seen in the wild.
-    assert auto_ocr._is_figure_sized({**big, "bbox": (0, 0, 90, 0.11)}) is False
+    assert is_figure_sized({**big, "bbox": (0, 0, 90, 0.11)}) is False
     # Degenerate in its own raster: a 2x2 tile stretched across the page.
-    assert auto_ocr._is_figure_sized({**big, "width": 2, "height": 2}) is False
+    assert is_figure_sized({**big, "width": 2, "height": 2}) is False
 
-    assert auto_ocr._is_flat_fill(png(flat)) is True
-    assert auto_ocr._is_flat_fill(png(photo)) is False
+    assert is_flat_fill(png(flat)) is True
+    assert is_flat_fill(png(photo)) is False
 
     # A bilevel scan holds exactly two colours and is unmistakably content, so
     # flatness has to be measured as detail, never as a count of colours.
     scan = np.full((300, 300, 3), 255, np.uint8)
     scan[::7, :] = 0  # text-like rows of ink
     assert len(np.unique(scan.reshape(-1, 3), axis=0)) == 2
-    assert auto_ocr._is_flat_fill(png(scan)) is False
+    assert is_flat_fill(png(scan)) is False
 
     # A fill is flat whatever its hue: measured on luminance, not on spread
     # between the channels.
-    assert auto_ocr._is_flat_fill(png(np.full((60, 60, 3), (173, 216, 230), np.uint8))) is True
+    assert (
+        is_flat_fill(png(np.full((60, 60, 3), (173, 216, 230), np.uint8)))
+        is True
+    )
     # An image that cannot be decoded is never dropped: losing content in
     # silence is worse than carrying one dubious asset. Same for a block that
     # does not report its raster size -- judge it on the page box alone.
-    assert auto_ocr._is_flat_fill(b"not an image") is False
-    assert auto_ocr._is_flat_fill(None) is False
-    assert auto_ocr._is_figure_sized({"bbox": (0, 0, 90, 90)}) is True
+    assert is_flat_fill(b"not an image") is False
+    assert is_flat_fill(None) is False
+    assert is_figure_sized({"bbox": (0, 0, 90, 90)}) is True
 
     # A large flat fill survives every size test, so only the colour count
     # separates it from the photograph beside it.
-    assert auto_ocr._is_figure_sized(big) and auto_ocr._is_flat_fill(png(flat))
+    assert is_figure_sized(big) and is_flat_fill(png(flat))
 
 
 def test_a_mis_encoded_text_layer_is_sent_to_the_vl_lane():
     r"""A broken ToUnicode CMap makes the fast lane succeed with wrong text.
 
     Real case: a journal PDF extracted ``MMD½Hk; P; Q ¼`` for
-    ``MMD[Hk; P, Q] =``, and subtraction signs coming out as raw ``\x03`` bytes.
+    ``MMD[Hk; P, Q] =``, and subtraction signs came out as raw ``\x03``
+    bytes.
     Nothing downstream can undo that, so the page is re-read from the raster.
     """
 
@@ -385,21 +555,26 @@ def test_a_mis_encoded_text_layer_is_sent_to_the_vl_lane():
         return FPage()
 
     # Control bytes and U+FFFD are never legitimate: one is enough.
-    assert auto_ocr._text_layer_is_corrupt(page_with("kðxi; xjÞ \x03 kðyi; xjÞ")) is True
-    assert auto_ocr._text_layer_is_corrupt(page_with("a \ufffd b")) is True
+    assert text_layer_is_corrupt(page_with("kðxi; xjÞ \x03 kðyi; xjÞ")) is True
+    assert text_layer_is_corrupt(page_with("a \ufffd b")) is True
 
     # Private-use glyphs have a legitimate use (a logo in a journal header),
     # so a lone one must not condemn the page.
-    assert auto_ocr._text_layer_is_corrupt(page_with("\ue000 Journal of Things")) is False
-    assert auto_ocr._text_layer_is_corrupt(page_with("\ue000" * auto_ocr.PUA_GLYPH_MIN)) is True
+    assert (
+        text_layer_is_corrupt(page_with("\ue000 Journal of Things")) is False
+    )
+    assert text_layer_is_corrupt(page_with("\ue000" * PUA_GLYPH_MIN)) is True
 
     # Healthy text, including the tab/newline that XML allows, stays native.
-    assert auto_ocr._text_layer_is_corrupt(page_with("Rahmen\tbedingungen\nder Studie\r")) is False
-    assert auto_ocr._text_layer_is_corrupt(page_with("")) is False
+    assert (
+        text_layer_is_corrupt(page_with("Rahmen\tbedingungen\nder Studie\r"))
+        is False
+    )
+    assert text_layer_is_corrupt(page_with("")) is False
 
     # Mojibake proper is deliberately NOT caught: every character in it is a
     # real letter somewhere (ð and Þ are ordinary Icelandic).
-    assert auto_ocr._text_layer_is_corrupt(page_with("ðX; YÞ ¼ 1")) is False
+    assert text_layer_is_corrupt(page_with("ðX; YÞ ¼ 1")) is False
 
 
 def test_api_compat():
@@ -418,17 +593,22 @@ def test_worker_reports_pages_as_they_finish():
         "    time.sleep(0.2)\n"
         "    pages.append({'page_number': i, 'parsing_res_list': [],\n"
         "                  'layout_det_res': [], 'assets': {}})\n"
-        "    print('TEXTLAB_PADDLEVL_PROGRESS=%d/%d' % (i, total), flush=True)\n"
-        "print('TEXTLAB_PADDLEVL_RESULT_JSON=' + json.dumps({'pages': pages}))\n"
+        "    print('TEXTLAB_PADDLEVL_PROGRESS=%d/%d' % (i, total), "
+        "flush=True)\n"
+        "print('TEXTLAB_PADDLEVL_RESULT_JSON=' + "
+        "json.dumps({'pages': pages}))\n"
     )
     seen = []
-    pages = auto_ocr.run_vl_worker(
+    pages = run_vl_worker(
         [pathlib.Path(f"p{i}.png") for i in range(3)],
-        backend_python=sys.executable, worker_path=stub,
+        backend_python=sys.executable,
+        worker_path=stub,
         on_page=lambda done, total: seen.append((done, total, time.time())),
     )
     assert len(pages) == 3
-    assert [(d, t) for d, t, _ in seen] == [(0, 3), (1, 3), (2, 3), (3, 3)], seen
+    assert [(d, t) for d, t, _ in seen] == [(0, 3), (1, 3), (2, 3), (3, 3)], (
+        seen
+    )
     # Streamed, not replayed at the end: the callbacks are spread over the run.
     assert seen[-1][2] - seen[0][2] > 0.4, "progress arrived all at once"
 
@@ -439,9 +619,11 @@ def test_wedged_worker_is_killed_instead_of_hanging():
     stub.write_text("import time\ntime.sleep(600)\n")
     started = time.time()
     try:
-        auto_ocr.run_vl_worker(
-            [pathlib.Path("x.png")], backend_python=sys.executable,
-            worker_path=stub, stall_timeout=2.0,
+        run_vl_worker(
+            [pathlib.Path("x.png")],
+            backend_python=sys.executable,
+            worker_path=stub,
+            stall_timeout=2.0,
         )
         raise AssertionError("a wedged worker should raise")
     except RuntimeError as exc:
@@ -451,7 +633,7 @@ def test_wedged_worker_is_killed_instead_of_hanging():
 
 
 def test_a_slow_but_talking_worker_is_not_killed():
-    """The guard is a stall budget, not a total one: slow pages are legitimate."""
+    """The guard is a stall budget, not a total one: slow pages are fine."""
     stub = WORK / "stub_slow.py"
     stub.write_text(
         "import json, time\n"
@@ -459,62 +641,21 @@ def test_a_slow_but_talking_worker_is_not_killed():
         "    time.sleep(0.4)\n"
         "    print('TEXTLAB_PADDLEVL_PROGRESS=%d/3' % i, flush=True)\n"
         "print('TEXTLAB_PADDLEVL_RESULT_JSON=' + json.dumps({'pages': [\n"
-        "    {'page_number': 1, 'parsing_res_list': [], 'layout_det_res': [], 'assets': {}}]}))\n"
+        "    {'page_number': 1, 'parsing_res_list': [], "
+        "'layout_det_res': [], 'assets': {}}]}))\n"
     )
     # Total runtime (~1.2s) exceeds the stall budget; no single gap does.
-    pages = auto_ocr.run_vl_worker(
-        [pathlib.Path("x.png")], backend_python=sys.executable,
-        worker_path=stub, stall_timeout=0.9,
+    pages = run_vl_worker(
+        [pathlib.Path("x.png")],
+        backend_python=sys.executable,
+        worker_path=stub,
+        stall_timeout=0.9,
     )
     assert len(pages) == 1
 
 
-def test_free_gpu_waits_for_the_vram_to_be_released():
-    """free_gpu must not return while the model is still on the card."""
-    from textlab.features.ocr import vision_enrich
-
-    calls = {"unloaded": [], "polls": 0}
-    free_after = 3
-
-    def fake_request(base_url, path, payload=None, timeout=60.0):
-        if path == "/api/generate":
-            calls["unloaded"].append(payload["model"])
-            assert payload["keep_alive"] == 0
-            return {}
-        if path == "/api/ps":
-            calls["polls"] += 1
-            if calls["polls"] > free_after:
-                return {"models": []}
-            return {"models": [{"model": "vision:20b"}, {"model": "chat:8b"}]}
-        return {}
-
-    original = vision_enrich._ollama_request
-    vision_enrich._ollama_request = fake_request
-    try:
-        evicted = vision_enrich.free_gpu()
-        assert sorted(evicted) == ["chat:8b", "vision:20b"], evicted
-        assert sorted(calls["unloaded"]) == ["chat:8b", "vision:20b"]
-        # It kept polling until the card was actually clear.
-        assert calls["polls"] > free_after, calls
-
-        # Nothing resident: no unload requests, no waiting.
-        calls.update(unloaded=[], polls=0)
-        free_after = -1
-        assert vision_enrich.free_gpu() == []
-        assert calls["unloaded"] == []
-
-        # A model that never unloads must not block the app forever.
-        free_after = 10**9
-        calls.update(unloaded=[], polls=0)
-        started = time.time()
-        vision_enrich.free_gpu(timeout=0.5)
-        assert time.time() - started < 10
-    finally:
-        vision_enrich._ollama_request = original
-
-
 def test_document_run_leaves_the_vision_model_warm():
-    """close() leaves the model warm; the next stage needing the card frees it."""
+    """close() leaves the model warm; the next stage needing it frees it."""
     from textlab.features.ocr import vision_enrich
 
     class Client(vision_enrich.OllamaVisionClient):
@@ -524,7 +665,10 @@ def test_document_run_leaves_the_vision_model_warm():
             self.unload_requests = 0
 
         def _request(self, path, payload=None):
-            if path == "/api/generate" and (payload or {}).get("keep_alive") == 0:
+            if (
+                path == "/api/generate"
+                and (payload or {}).get("keep_alive") == 0
+            ):
                 self.unload_requests += 1
             return {}
 
@@ -532,6 +676,7 @@ def test_document_run_leaves_the_vision_model_warm():
     client.close()
     assert client.unload_requests == 0, "close() evicted a still-useful model"
     assert client._prepared is False
+
 
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):

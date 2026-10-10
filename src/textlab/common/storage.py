@@ -23,7 +23,10 @@ from __future__ import annotations
 
 import contextlib
 import functools
+import logging
 import os
+import shutil
+import stat
 import tempfile
 from collections.abc import Iterator
 from pathlib import Path
@@ -32,6 +35,8 @@ from textlab.common.config import get_settings
 
 #: Permissions of every directory the workspace creates: owner only.
 PRIVATE_MODE = 0o700
+
+LOGGER = logging.getLogger(__name__)
 
 
 class WorkspaceError(RuntimeError):
@@ -106,12 +111,40 @@ class Workspace:
 
         Yields:
             The directory. It and its contents are deleted when the
-            ``with`` block ends, also on errors.
+            ``with`` block ends, also on errors, and also when a tool left
+            read-only files or folders in it.
         """
-        with tempfile.TemporaryDirectory(
-            prefix=prefix, dir=self.dir(area)
-        ) as path:
-            yield Path(path)
+        path = self.make_temp_dir(area, prefix=prefix)
+        try:
+            yield path
+        finally:
+            remove_tree(path)
+
+
+def remove_tree(path: Path) -> None:
+    """Delete a directory tree, including read-only parts.
+
+    Some tools (model caches, PDF libraries) create read-only files or
+    folders; those are made writable and removed. Whatever still cannot be
+    removed is logged rather than raised, so cleaning up never hides the
+    result or the error of the work before it.
+
+    Args:
+        path: The directory to delete; nothing happens if it is missing.
+    """
+
+    def make_writable_and_retry(function, failed_path, _exc_info):
+        try:
+            os.chmod(failed_path, stat.S_IRWXU)
+            if function is not os.rmdir:
+                os.chmod(os.path.dirname(failed_path), stat.S_IRWXU)
+            function(failed_path)
+        except OSError:
+            LOGGER.warning("Could not remove %s", failed_path)
+
+    if path.exists():
+        # onerror, not onexc: the image runs Python 3.11.
+        shutil.rmtree(path, onerror=make_writable_and_retry)
 
 
 def default_root() -> Path:

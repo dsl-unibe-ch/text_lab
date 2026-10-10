@@ -80,6 +80,7 @@ def run_worker(
     on_progress: ProgressCallback = no_progress,
     cancel: threading.Event | None = None,
     poll_interval: float = 0.5,
+    python: str | None = None,
 ) -> Any:
     """Run ``python -m module`` on a request and return its result.
 
@@ -93,6 +94,9 @@ def run_worker(
             exception propagates.
         cancel: Stops the worker when set.
         poll_interval: Seconds between checks for progress and exit.
+        python: The interpreter to run the worker with, for workers that
+            need another environment of the image (see
+            :mod:`textlab.common.container`); defaults to this process's.
 
     Returns:
         The value the worker's handler returned.
@@ -105,8 +109,8 @@ def run_worker(
     with get_workspace().temp_dir(area, prefix="job-") as job_dir:
         _write_json(job_dir / REQUEST_FILE, request)
         process = subprocess.Popen(
-            [sys.executable, "-m", module, str(job_dir)],
-            env=_worker_environment(),
+            [python or sys.executable, "-m", module, str(job_dir)],
+            env=worker_environment(python),
         )
         try:
             last_update = None
@@ -156,14 +160,35 @@ def worker_main(handler: WorkerHandler) -> None:
     sys.exit(exit_code)
 
 
-def _worker_environment() -> dict[str, str]:
-    """Return the environment for a worker, with ``textlab`` importable."""
+def worker_environment(python: str | None = None) -> dict[str, str]:
+    """Return the environment for a worker process.
+
+    ``textlab`` is importable in it, so workers can be started with
+    ``python -m``. A worker that runs with another environment's
+    interpreter also gets that environment's programs and libraries first
+    on ``PATH`` and ``LD_LIBRARY_PATH``, as conda activation would set them.
+
+    Args:
+        python: The worker's interpreter, if it is not this process's.
+
+    Returns:
+        A copy of this process's environment with those changes.
+    """
     env = os.environ.copy()
     src_root = str(Path(textlab.__file__).resolve().parents[1])
-    existing = env.get("PYTHONPATH", "").split(os.pathsep)
-    paths = [src_root, *filter(None, existing)]
-    env["PYTHONPATH"] = os.pathsep.join(dict.fromkeys(paths))
+    _prepend(env, "PYTHONPATH", src_root)
+    if python is not None:
+        bin_dir = Path(python).resolve().parent
+        _prepend(env, "PATH", str(bin_dir))
+        _prepend(env, "LD_LIBRARY_PATH", str(bin_dir.parent / "lib"))
     return env
+
+
+def _prepend(env: dict[str, str], name: str, path: str) -> None:
+    """Put ``path`` first in a path-list variable, without duplicates."""
+    existing = env.get(name, "").split(os.pathsep)
+    paths = [path, *filter(None, existing)]
+    env[name] = os.pathsep.join(dict.fromkeys(paths))
 
 
 def _read_progress(job_dir: Path) -> Progress | None:

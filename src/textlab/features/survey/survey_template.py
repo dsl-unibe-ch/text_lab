@@ -21,7 +21,7 @@ import numpy as np
 
 from textlab.features.ocr import markup_detect
 
-DEFAULT_DPI = 300  # matches auto_ocr.SURVEY_DPI
+DEFAULT_DPI = 300  # matches ocr.pipeline.SURVEY_DPI
 BLANK_SAMPLE = 15  # copies stacked for the median; more adds cost, not accuracy
 MIN_BLANK_DOCUMENTS = 6  # below this the median stops reliably cancelling the ink
 MIN_REGISTRATION_QUALITY = 0.30

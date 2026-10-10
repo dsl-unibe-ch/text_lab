@@ -163,6 +163,27 @@ options and an `on_progress` callback, and the page imports nothing else
 from the feature. Use a worker when a feature's models are only needed for
 one run; keep it in-process when keeping a model loaded is the point.
 
+### Workers in another environment: OCR
+
+Some engines need dependencies that conflict with the app's, so the image
+has separate conda environments for them (`common/container.py` names
+them). Their workers still start with `python -m textlab.features...`, with
+that environment's interpreter: `common.jobs.worker_environment(python)`
+makes `textlab` importable and puts the environment's programs and
+libraries first. Such a worker must not import anything from `textlab`
+beyond the standard library and its own environment, since the app's
+packages are not installed there. The PaddleOCR-VL worker of the OCR
+feature is the example; it also stays running for a whole batch
+(`ocr.vl_session.VLWorkerSession`), because loading its weights takes
+longer than recognizing a short document.
+
+### A large page
+
+A page too large for one file keeps the Streamlit script in `pages/` and
+moves its parts to a package of the same name in `ui/streamlit/`: the OCR
+page has `ui/streamlit/ocr/` with the result tabs, the response review and
+its session state. These modules are UI code like the page itself.
+
 ## Migration status
 
 All code now lives in `src/textlab/`; the old `src/core/`, `src/pages/` and
@@ -175,8 +196,8 @@ feature follows the rules above.
 |---|---|---|---|
 | Transcription | `features/transcription/` | `Transcribe.py` | Refactored |
 | Meeting Notes | `features/meeting_notes/` | `Meeting_Notes_Generator.py` | Refactored |
-| OCR | `features/ocr/` | `OCR.py` | Moved |
-| Survey | `features/survey/` | part of `OCR.py` (hidden) | Moved |
+| OCR | `features/ocr/` | `OCR.py` | Automatic pipeline refactored; manual engines moved |
+| Survey | `features/survey/` | part of `OCR.py` (partly hidden) | Moved |
 | Translation | `features/translation/` | `Translate.py` | Refactored |
 | Topic Modeling | `features/topic_modeling/` | `Topic_Modeling.py` | Moved |
 | Visualization | `features/visualization/` | `Visualize_Data.py` | Moved |
@@ -190,16 +211,18 @@ and language configuration) is in `src/textlab/common/`.
 
 Known issues to resolve during the refactor:
 
-- `common/gpu_manager.py` imports `features/ocr/vision_enrich.py`, so shared
-  code depends on a feature.
-- The PaddleOCR workers and the MCP server are still started by file path,
-  and `gpu_manager` recognizes leftover workers by file or module name; they
-  move to `common.jobs` when OCR and Visualization are refactored.
+- The PaddleOCR 2 worker of manual engine selection and the MCP server are
+  still started by file path, and `gpu_manager` recognizes leftover workers
+  by file or module name; they move to `common.jobs` when manual OCR engines
+  (phase 6b) and Visualization are refactored.
+- Manual OCR engine selection runs its engines in the UI
+  (`ui/streamlit/ocr/legacy.py`, not linted) until phase 6b.
 - The home page still names the University of Bern and UBELIX in its text
   (allow-listed in `tests/test_data_footprint.py`).
 - Translation calls the OCR feature for scanned PDF pages
-  (`translation/documents/pdf_extract.py`); the connection is revisited
-  when OCR is refactored.
+  (`translation/documents/pdf_extract.py`, through `ocr.service`), and the
+  OCR batch reads questionnaires through `survey.survey_batch`; Survey gets
+  its own service in phase 6b.
 - About 190 emojis remain in the pages; they are removed as each feature is
   refactored, keeping functional symbols such as checkbox glyphs.
 

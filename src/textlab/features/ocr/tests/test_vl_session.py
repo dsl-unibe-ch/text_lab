@@ -5,15 +5,13 @@ is tested on any machine -- the real worker needs a GPU and 17 s of loading,
 which is the very cost these tests exist to keep paid only once.
 """
 
-
-import json
 import pathlib
 import sys
 import tempfile
 
 import pytest
 
-from textlab.features.ocr import auto_ocr
+from textlab.features.ocr import vl_session
 
 STUB = '''
 import argparse, json, os, sys
@@ -41,7 +39,8 @@ def answer(images, serving):
         sys.exit(9)
     if os.environ.get("STUB_ERROR_ON") in set(images):
         return {"pages": [], "error": "stub was asked to fail"}
-    return {"pages": [{"page_number": i, "image": p} for i, p in enumerate(images, 1)]}
+    pages = enumerate(images, 1)
+    return {"pages": [{"page_number": i, "image": p} for i, p in pages]}
 
 if args.serve:
     load()
@@ -80,7 +79,7 @@ def _loads(counter) -> int:
 def test_a_batch_loads_the_weights_once(stub):
     """One resident worker serves every document in the batch."""
     worker, counter = stub
-    with auto_ocr.VLWorkerSession(
+    with vl_session.VLWorkerSession(
         backend_python=sys.executable, worker_path=worker
     ) as session:
         first = session.run([pathlib.Path("a.png")])
@@ -94,36 +93,44 @@ def test_a_batch_loads_the_weights_once(stub):
 def test_page_progress_still_arrives_per_document(stub):
     worker, _ = stub
     seen = []
-    with auto_ocr.VLWorkerSession(
+    with vl_session.VLWorkerSession(
         backend_python=sys.executable, worker_path=worker
     ) as session:
-        session.run([pathlib.Path("a.png"), pathlib.Path("b.png")],
-                    on_page=lambda done, total: seen.append((done, total)))
+        session.run(
+            [pathlib.Path("a.png"), pathlib.Path("b.png")],
+            on_page=lambda done, total: seen.append((done, total)),
+        )
     assert (0, 2) in seen and (2, 2) in seen
 
 
-def test_a_dead_worker_falls_back_instead_of_failing_the_batch(stub, monkeypatch):
+def test_a_dead_worker_falls_back_instead_of_failing_the_batch(
+    stub, monkeypatch
+):
     """A crash costs the file its speed, not its result."""
     worker, counter = stub
     monkeypatch.setenv("STUB_DIE_ON", "boom.png")
-    session = auto_ocr.VLWorkerSession(
+    session = vl_session.VLWorkerSession(
         backend_python=sys.executable, worker_path=worker
     )
     try:
-        pages = auto_ocr.run_vl_worker(
-            [pathlib.Path("boom.png")], backend_python=sys.executable,
-            worker_path=worker, session=session,
+        pages = vl_session.run_vl_worker(
+            [pathlib.Path("boom.png")],
+            backend_python=sys.executable,
+            worker_path=worker,
+            session=session,
         )
     finally:
         session.close()
-    assert [p["image"] for p in pages] == ["boom.png"], "the fallback lost the document"
+    assert [p["image"] for p in pages] == ["boom.png"], (
+        "the fallback lost the document"
+    )
     assert _loads(counter) == 2, "the fallback worker never started"
 
 
 def test_the_session_recovers_for_the_next_document(stub, monkeypatch):
     worker, counter = stub
     monkeypatch.setenv("STUB_DIE_ON", "boom.png")
-    session = auto_ocr.VLWorkerSession(
+    session = vl_session.VLWorkerSession(
         backend_python=sys.executable, worker_path=worker
     )
     try:
@@ -136,10 +143,12 @@ def test_the_session_recovers_for_the_next_document(stub, monkeypatch):
     assert _loads(counter) == 2, "the worker was restarted exactly once"
 
 
-def test_a_reported_error_is_raised_not_returned_as_no_pages(stub, monkeypatch):
+def test_a_reported_error_is_raised_not_returned_as_no_pages(
+    stub, monkeypatch
+):
     worker, _ = stub
     monkeypatch.setenv("STUB_ERROR_ON", "bad.png")
-    session = auto_ocr.VLWorkerSession(
+    session = vl_session.VLWorkerSession(
         backend_python=sys.executable, worker_path=worker
     )
     try:
@@ -152,8 +161,10 @@ def test_a_reported_error_is_raised_not_returned_as_no_pages(stub, monkeypatch):
 def test_the_one_shot_worker_still_works_without_a_session(stub):
     """The single-document path has no batch to amortise a session over."""
     worker, counter = stub
-    pages = auto_ocr.run_vl_worker(
-        [pathlib.Path("a.png")], backend_python=sys.executable, worker_path=worker
+    pages = vl_session.run_vl_worker(
+        [pathlib.Path("a.png")],
+        backend_python=sys.executable,
+        worker_path=worker,
     )
     assert [p["image"] for p in pages] == ["a.png"]
     assert _loads(counter) == 1
@@ -161,7 +172,12 @@ def test_the_one_shot_worker_still_works_without_a_session(stub):
 
 def test_no_images_never_starts_a_worker(stub):
     worker, counter = stub
-    assert auto_ocr.run_vl_worker([], backend_python=sys.executable, worker_path=worker) == []
+    assert (
+        vl_session.run_vl_worker(
+            [], backend_python=sys.executable, worker_path=worker
+        )
+        == []
+    )
     assert _loads(counter) == 0
 
 
@@ -193,7 +209,7 @@ def test_close_reaps_a_worker_after_forced_termination():
             self.killed = True
 
     process = Process()
-    session = auto_ocr.VLWorkerSession()
+    session = vl_session.VLWorkerSession()
     session._proc = process
 
     session.close()

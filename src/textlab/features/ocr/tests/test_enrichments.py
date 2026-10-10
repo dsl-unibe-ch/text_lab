@@ -1,6 +1,5 @@
 """Deterministic tests for opt-in figure and form enrichment."""
 
-
 import base64
 import io
 import json
@@ -60,7 +59,12 @@ def test_figure_description_is_separate_from_ocr():
     )
     page = doc_ir.Page(page_number=1, regions=[region])
     client = FakeVisionClient(
-        [{"description": "A simple document figure.", "visible_text": "Figure 1"}]
+        [
+            {
+                "description": "A simple document figure.",
+                "visible_text": "Figure 1",
+            }
+        ]
     )
 
     vision_enrich.describe_page_figures(page, client)
@@ -155,7 +159,9 @@ def test_schema_free_is_default_and_assigns_ids_after_echo_validation():
     assert group.provenance["contract_version"] == "schema-free-v2"
     assert group.rows[0].options[1].id == "p1_s1_q1_r1_c2"
     assert group.rows[0].options[1].state == "selected"
-    assert {o.source for o in group.rows[0].options[1].observations} == {"fake-local"}
+    assert {o.source for o in group.rows[0].options[1].observations} == {
+        "fake-local"
+    }
     assert "questions" in client.calls[0][2]["properties"]
     assert "Paddle schema hints" not in client.calls[0][1]
     assert "choice_text" in json.dumps(client.calls[0][2])
@@ -181,7 +187,9 @@ def test_schema_free_echo_and_model_rule_disagreement_force_review():
     # derived rule; the Paddle-visible section has no multiple-answer cue.
     result["questions"][0]["question_text"] = "Select all options"
 
-    group = form_extract.extract_page_forms(page, image, FakeVisionClient([result]))[0]
+    group = form_extract.extract_page_forms(
+        page, image, FakeVisionClient([result])
+    )[0]
 
     assert group.selection_rule == "zero_or_one"
     assert group.status == group.rows[0].status == "needs_review"
@@ -243,11 +251,17 @@ def test_markup_count_mismatch_is_diagnostic_not_answer_review(monkeypatch):
 
     assert group.status == "accepted"
     assert group.review_reasons == []
-    assert group.provenance["answer_geometry_alignment"] == "no_aligned_geometry"
-    assert group.provenance["markup_diagnostics"][0]["status"] == "count_mismatch"
+    assert (
+        group.provenance["answer_geometry_alignment"] == "no_aligned_geometry"
+    )
+    assert (
+        group.provenance["markup_diagnostics"][0]["status"] == "count_mismatch"
+    )
 
 
-def test_ocr_geometry_disagreement_is_not_review_when_answer_matches_geometry(monkeypatch):
+def test_ocr_geometry_disagreement_is_not_review_when_answer_matches_geometry(
+    monkeypatch,
+):
     monkeypatch.setenv("TEXTLAB_APPROVED_SURVEY_MODELS", "fake-vl")
     image, _ = _png_bytes()
     page = _survey_page()
@@ -255,8 +269,18 @@ def test_ocr_geometry_disagreement_is_not_review_when_answer_matches_geometry(mo
         page,
         "geometry_disagreement",
         [
-            {"state": "checked", "score": 0.87, "fill_ratio": 0.32, "strike": 0.66},
-            {"state": "unchecked", "score": 0.70, "fill_ratio": 0.01, "strike": 0.0},
+            {
+                "state": "checked",
+                "score": 0.87,
+                "fill_ratio": 0.32,
+                "strike": 0.66,
+            },
+            {
+                "state": "unchecked",
+                "score": 0.70,
+                "fill_ratio": 0.01,
+                "strike": 0.0,
+            },
         ],
     )
 
@@ -296,8 +320,18 @@ def test_strong_answer_geometry_conflict_flags_the_specific_row(monkeypatch):
         page,
         "matched",
         [
-            {"state": "checked", "score": 0.87, "fill_ratio": 0.32, "strike": 0.66},
-            {"state": "unchecked", "score": 0.70, "fill_ratio": 0.01, "strike": 0.0},
+            {
+                "state": "checked",
+                "score": 0.87,
+                "fill_ratio": 0.32,
+                "strike": 0.66,
+            },
+            {
+                "state": "unchecked",
+                "score": 0.70,
+                "fill_ratio": 0.01,
+                "strike": 0.0,
+            },
         ],
     )
 
@@ -360,7 +394,10 @@ def test_schema_free_preserves_conditional_parent_and_row_extra_choice():
             "selection_rule": "zero_or_one",
             "parent_question_index": 1,
             "condition_text": "If Alpha",
-            "choices": [{"choice_text": "Reason A"}, {"choice_text": "Reason B"}],
+            "choices": [
+                {"choice_text": "Reason A"},
+                {"choice_text": "Reason B"},
+            ],
             "rows": [
                 {
                     "row_text": "",
@@ -379,19 +416,23 @@ def test_schema_free_preserves_conditional_parent_and_row_extra_choice():
         }
     )
 
-    groups = form_extract.extract_page_forms(page, image, FakeVisionClient([result]))
+    groups = form_extract.extract_page_forms(
+        page, image, FakeVisionClient([result])
+    )
 
     assert len(groups) == 2
     assert groups[1].parent_question_id == groups[0].id
     assert groups[1].condition_text == "If Alpha"
     extra = groups[1].rows[0].options[2]
-    assert extra.label == "Not applicable" and extra.associated_text == "handwritten note"
+    assert (
+        extra.label == "Not applicable"
+        and extra.associated_text == "handwritten note"
+    )
 
 
 def test_multiple_answer_cue_is_scoped_to_the_current_subquestion():
     paddle_section = (
-        "2) Did this happen? Ja Nein. If yes, why? "
-        "Mehrere Antworten möglich"
+        "2) Did this happen? Ja Nein. If yes, why? Mehrere Antworten möglich"
     )
 
     primary = form_extract._derived_selection_rule(
@@ -566,13 +607,19 @@ def test_choice_label_format_leakage_and_duplicates_are_rejected():
     assert "duplicate" in " ".join(group.warnings)
 
 
-def test_repaired_paddle_schema_strips_answer_leakage_and_skips_response_headers():
+def test_repaired_schema_strips_answer_leakage_and_skips_headers():
     title = doc_ir.Region(
-        id="q7", type=doc_ir.TEXT, bbox=[0, 0, 500, 50], reading_order=0,
+        id="q7",
+        type=doc_ir.TEXT,
+        bbox=[0, 0, 500, 50],
+        reading_order=0,
         content={"text": "7) Who benefits? ✗ Population has disadvantages"},
     )
     table = doc_ir.Region(
-        id="matrix", type=doc_ir.TABLE, bbox=[0, 60, 500, 240], reading_order=1,
+        id="matrix",
+        type=doc_ir.TABLE,
+        bbox=[0, 60, 500, 240],
+        reading_order=1,
         content={
             "html": (
                 "<table><tr><th></th><th>Good</th><th>Bad</th></tr>"
@@ -586,14 +633,20 @@ def test_repaired_paddle_schema_strips_answer_leakage_and_skips_response_headers
     schema = form_extract._schema_hint(section, "p1_q7")
 
     assert schema["question_text"] == "7) Who benefits?"
-    matrix_rows = [row for row in schema["rows"] if row["row_id"].startswith("matrix_")]
-    assert [[option["label"] for option in row["options"]] for row in matrix_rows] == [
+    matrix_rows = [
+        row for row in schema["rows"] if row["row_id"].startswith("matrix_")
+    ]
+    assert [
+        [option["label"] for option in row["options"]] for row in matrix_rows
+    ] == [
         ["Good", "Bad"],
         ["Good", "Bad"],
     ]
 
 
-def test_default_contract_routes_reliable_matrix_through_paddle_owned_ids(monkeypatch):
+def test_default_contract_routes_reliable_matrix_through_paddle_owned_ids(
+    monkeypatch,
+):
     monkeypatch.setenv("TEXTLAB_APPROVED_SURVEY_MODELS", "fake-vl")
     image, _ = _png_bytes()
     title = doc_ir.Region(
@@ -647,7 +700,10 @@ def test_default_contract_routes_reliable_matrix_through_paddle_owned_ids(monkey
     }
     assert group.question_type == "matrix"
     assert len(group.rows) == 2
-    assert [option.label for option in group.rows[0].options] == ["Good", "Bad"]
+    assert [option.label for option in group.rows[0].options] == [
+        "Good",
+        "Bad",
+    ]
     assert group.rows[0].options[1].state == "selected"
     assert group.provenance["contract_version"] == "hybrid-paddle-table-v1"
     assert group.provenance["structure_source"] == "paddleocr-vl-table"
@@ -769,9 +825,14 @@ def test_form_extraction_builds_question_ir_without_mutating_ocr():
     group = groups[0]
     assert group.id == "p1_q1" and group.question_type == "single"
     row = group.rows[0]
-    selected = next(option for option in row.options if option.id == selected_id)
+    selected = next(
+        option for option in row.options if option.id == selected_id
+    )
     assert selected.state == "selected" and selected.visual_mark == "x"
-    assert {o.source for o in selected.observations} == {"paddleocr-vl", "fake-local"}
+    assert {o.source for o in selected.observations} == {
+        "paddleocr-vl",
+        "fake-local",
+    }
     # Paddle transcribed an empty circle while the image reader saw an X: the
     # disagreement is explicit, and the raw OCR table stays unchanged.
     assert group.status == row.status == "needs_review"
@@ -782,7 +843,9 @@ def test_form_extraction_builds_question_ir_without_mutating_ocr():
     assert csv_bytes and b"Beta" in csv_bytes
     bundle = zipfile.ZipFile(io.BytesIO(doc_ir.build_full_bundle(document)))
     assert "responses/form_responses.csv" in bundle.namelist()
-    assert any(name.startswith("assets/form_p1_q1") for name in bundle.namelist())
+    assert any(
+        name.startswith("assets/form_p1_q1") for name in bundle.namelist()
+    )
 
 
 def test_missing_vlm_row_is_not_silently_accepted_as_blank():
@@ -833,28 +896,47 @@ def test_unnumbered_question_is_a_form_section():
 
 def test_question_grouping_uses_page_geometry_not_paddle_order():
     q10 = doc_ir.Region(
-        id="p1_r0", type=doc_ir.TEXT, bbox=[20, 20, 600, 70], reading_order=0,
+        id="p1_r0",
+        type=doc_ir.TEXT,
+        bbox=[20, 20, 600, 70],
+        reading_order=0,
         content={"text": "10) Matrix question"},
     )
     q11 = doc_ir.Region(
-        id="p1_r1", type=doc_ir.TEXT, bbox=[20, 300, 600, 350], reading_order=1,
+        id="p1_r1",
+        type=doc_ir.TEXT,
+        bbox=[20, 300, 600, 350],
+        reading_order=1,
         content={"text": "11) Gender"},
     )
     # Paddle may emit a large table after the next title in reading order even
     # though the table is visibly above that title.
     q10_table = doc_ir.Region(
-        id="p1_r2", type=doc_ir.TABLE, bbox=[20, 80, 600, 270], reading_order=2,
-        content={"html": "<table><tr><td>row</td><td>○</td><td>○</td></tr></table>"},
+        id="p1_r2",
+        type=doc_ir.TABLE,
+        bbox=[20, 80, 600, 270],
+        reading_order=2,
+        content={
+            "html": "<table><tr><td>row</td><td>○</td><td>○</td></tr></table>"
+        },
     )
     q11_answers = doc_ir.Region(
-        id="p1_r3", type=doc_ir.TEXT, bbox=[20, 360, 600, 400], reading_order=3,
+        id="p1_r3",
+        type=doc_ir.TEXT,
+        bbox=[20, 360, 600, 400],
+        reading_order=3,
         content={"text": "○ female ○ male"},
     )
-    page = doc_ir.Page(page_number=1, regions=[q10, q11, q10_table, q11_answers])
+    page = doc_ir.Page(
+        page_number=1, regions=[q10, q11, q10_table, q11_answers]
+    )
 
     sections = form_extract._question_sections(page)
 
-    by_number = {section["number"]: {r.id for r in section["regions"]} for section in sections}
+    by_number = {
+        section["number"]: {r.id for r in section["regions"]}
+        for section in sections
+    }
     assert "p1_r2" in by_number["10"] and "p1_r2" not in by_number["11"]
     assert "p1_r3" in by_number["11"]
 
@@ -880,34 +962,54 @@ def test_question_grouping_uses_page_geometry_not_paddle_order():
 def test_numbered_prize_list_is_not_a_question_and_title_ends_section():
     regions = [
         doc_ir.Region(
-            id="q15", type=doc_ir.TITLE, bbox=[20, 20, 700, 60], reading_order=0,
+            id="q15",
+            type=doc_ir.TITLE,
+            bbox=[20, 20, 700, 60],
+            reading_order=0,
             content={"text": "15) Participate in the draw?"},
         ),
         doc_ir.Region(
-            id="prize1", type=doc_ir.TEXT, bbox=[40, 80, 600, 110], reading_order=1,
+            id="prize1",
+            type=doc_ir.TEXT,
+            bbox=[40, 80, 600, 110],
+            reading_order=1,
             content={"text": "1. Voucher worth 100"},
         ),
         doc_ir.Region(
-            id="prize2", type=doc_ir.TEXT, bbox=[40, 115, 600, 145], reading_order=2,
+            id="prize2",
+            type=doc_ir.TEXT,
+            bbox=[40, 115, 600, 145],
+            reading_order=2,
             content={"text": "2. Voucher worth 50"},
         ),
         doc_ir.Region(
-            id="answers", type=doc_ir.TEXT, bbox=[40, 170, 400, 210], reading_order=3,
+            id="answers",
+            type=doc_ir.TEXT,
+            bbox=[40, 170, 400, 210],
+            reading_order=3,
             content={"text": "○ Yes ○ No"},
         ),
         doc_ir.Region(
-            id="privacy", type=doc_ir.TITLE, bbox=[20, 250, 700, 290], reading_order=4,
+            id="privacy",
+            type=doc_ir.TITLE,
+            bbox=[20, 250, 700, 290],
+            reading_order=4,
             content={"text": "Data processing"},
         ),
         doc_ir.Region(
-            id="privacy_text", type=doc_ir.TEXT, bbox=[20, 300, 700, 390], reading_order=5,
+            id="privacy_text",
+            type=doc_ir.TEXT,
+            bbox=[20, 300, 700, 390],
+            reading_order=5,
             content={"text": "Personal data is deleted after the draw."},
         ),
     ]
     page = doc_ir.Page(page_number=1, width=800, height=450, regions=regions)
 
     sections = form_extract._question_sections(page)
-    numbered = {section["number"]: section for section in sections if section["number"]}
+    numbered = {
+        section["number"]: section for section in sections if section["number"]
+    }
 
     assert set(numbered) == {"15"}
     q15_ids = {region.id for region in numbered["15"]["regions"]}
@@ -1058,7 +1160,9 @@ def test_extraction_sends_one_complete_question_image():
 
     assert len(groups) == len(client.calls) == 1
     encoded_image, prompt, _ = client.calls[0]
-    decoded = cv2.imdecode(np.frombuffer(encoded_image, np.uint8), cv2.IMREAD_COLOR)
+    decoded = cv2.imdecode(
+        np.frombuffer(encoded_image, np.uint8), cv2.IMREAD_COLOR
+    )
     section = form_extract._question_sections(page)[0]
     expected_bbox = form_extract._section_bbox(
         section["regions"],
@@ -1077,27 +1181,45 @@ def test_extraction_sends_one_complete_question_image():
 def test_two_page_spread_does_not_mix_question_columns():
     regions = [
         doc_ir.Region(
-            id="left_q14", type=doc_ir.TEXT, bbox=[20, 20, 900, 70], reading_order=0,
+            id="left_q14",
+            type=doc_ir.TEXT,
+            bbox=[20, 20, 900, 70],
+            reading_order=0,
             content={"text": "14) Left-column question?"},
         ),
         doc_ir.Region(
-            id="right_q1", type=doc_ir.TEXT, bbox=[1320, 20, 2200, 70], reading_order=1,
+            id="right_q1",
+            type=doc_ir.TEXT,
+            bbox=[1320, 20, 2200, 70],
+            reading_order=1,
             content={"text": "1) Right-column question?"},
         ),
         doc_ir.Region(
-            id="left_answers", type=doc_ir.TEXT, bbox=[20, 90, 900, 140], reading_order=2,
+            id="left_answers",
+            type=doc_ir.TEXT,
+            bbox=[20, 90, 900, 140],
+            reading_order=2,
             content={"text": "○ left A ○ left B"},
         ),
         doc_ir.Region(
-            id="right_answers", type=doc_ir.TEXT, bbox=[1320, 90, 2200, 140], reading_order=3,
+            id="right_answers",
+            type=doc_ir.TEXT,
+            bbox=[1320, 90, 2200, 140],
+            reading_order=3,
             content={"text": "○ right A ○ right B"},
         ),
         doc_ir.Region(
-            id="left_q15", type=doc_ir.TEXT, bbox=[20, 200, 900, 250], reading_order=4,
+            id="left_q15",
+            type=doc_ir.TEXT,
+            bbox=[20, 200, 900, 250],
+            reading_order=4,
             content={"text": "15) Another left question?"},
         ),
         doc_ir.Region(
-            id="right_q2", type=doc_ir.TEXT, bbox=[1320, 200, 2200, 250], reading_order=5,
+            id="right_q2",
+            type=doc_ir.TEXT,
+            bbox=[1320, 200, 2200, 250],
+            reading_order=5,
             content={"text": "2) Another right question?"},
         ),
     ]
@@ -1142,7 +1264,11 @@ def test_matrix_prompt_schema_is_compact_and_keeps_ids():
 
 
 def test_no_schema_uses_same_contract_and_normalizes_unmapped_mark():
-    schema_hint = {"question_id": "p1_q4", "question_text": "Question?", "rows": []}
+    schema_hint = {
+        "question_id": "p1_q4",
+        "question_text": "Question?",
+        "rows": [],
+    }
     result = {
         "visible_row_ids": [],
         "marks": [],
@@ -1161,12 +1287,16 @@ def test_no_schema_uses_same_contract_and_normalizes_unmapped_mark():
     assert normalized[0]["question_id"] == "p1_q4"
     assert normalized[0]["rows"][0]["marks"][0]["label"] == "Mittelmässig"
     assert set(form_extract.MARK_ONLY_RESPONSE_SCHEMA["properties"]) == {
-        "visible_row_ids", "marks", "unmapped_marks"
+        "visible_row_ids",
+        "marks",
+        "unmapped_marks",
     }
 
 
 def test_ollama_audit_saves_exact_request_and_raw_answer():
-    audit_dir = pathlib.Path(tempfile.mkdtemp(prefix="textlab_vlm_audit_test_"))
+    audit_dir = pathlib.Path(
+        tempfile.mkdtemp(prefix="textlab_vlm_audit_test_")
+    )
     client = vision_enrich.OllamaVisionClient(
         model="fake-vl", base_url="http://127.0.0.1:1", audit_dir=audit_dir
     )
@@ -1186,7 +1316,10 @@ def test_ollama_audit_saves_exact_request_and_raw_answer():
     call_dir = next(audit_dir.glob("call_*_p1_q2"))
     assert result == raw_result
     assert (call_dir / "input.png").read_bytes() == b"exact-image-bytes"
-    assert json.loads((call_dir / "parsed_response.json").read_text()) == raw_result
+    assert (
+        json.loads((call_dir / "parsed_response.json").read_text())
+        == raw_result
+    )
     assert "eval_count" in (call_dir / "raw_response.json").read_text()
 
 

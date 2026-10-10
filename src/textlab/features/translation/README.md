@@ -112,7 +112,7 @@ translation/
 ```
 
 `documents/pdf_extract.py` is the only place that uses another feature: it
-calls the OCR feature (`features.ocr.auto_ocr`, `features.ocr.doc_ir`) for
+calls the OCR feature (`features.ocr.service`, `features.ocr.doc_ir`) for
 scanned pages. That connection is revisited when OCR is refactored.
 
 ## Files written

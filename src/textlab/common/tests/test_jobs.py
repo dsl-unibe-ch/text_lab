@@ -1,10 +1,13 @@
 """Worker processes: results, errors, crashes, cancellation and cleanup."""
 
+import os
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
+import textlab
 from textlab.common import jobs, storage
 from textlab.common.config import get_settings
 from textlab.common.progress import CancelledError, Progress
@@ -74,3 +77,26 @@ def test_an_error_in_the_progress_callback_stops_the_worker():
 def test_the_worker_can_import_textlab_without_pythonpath(monkeypatch):
     monkeypatch.delenv("PYTHONPATH", raising=False)
     assert run({"mode": "ok", "value": 1})["echo"] == 1
+
+
+def test_worker_environment_for_another_interpreter(tmp_path, monkeypatch):
+    python = tmp_path / "envs" / "paddle" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.touch()
+    monkeypatch.setenv("PATH", "/usr/bin")
+    monkeypatch.setenv("LD_LIBRARY_PATH", "")
+    env = jobs.worker_environment(str(python))
+    assert env["PATH"].split(os.pathsep)[:2] == [
+        str(python.parent.resolve()),
+        "/usr/bin",
+    ]
+    assert env["LD_LIBRARY_PATH"] == str(
+        python.parent.resolve().parent / "lib"
+    )
+    src_root = str(Path(textlab.__file__).resolve().parents[1])
+    assert env["PYTHONPATH"].split(os.pathsep)[0] == src_root
+
+
+def test_worker_environment_keeps_path_for_this_interpreter(monkeypatch):
+    monkeypatch.setenv("PATH", "/usr/bin")
+    assert jobs.worker_environment()["PATH"] == "/usr/bin"

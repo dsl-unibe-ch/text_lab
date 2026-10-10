@@ -13,23 +13,15 @@ import base64
 import fcntl
 import json
 import os
-from pathlib import Path
 import re
 import time
-from typing import Any, Dict, Optional, Protocol
 import urllib.error
 import urllib.request
+from pathlib import Path
+from typing import Any, Protocol
 
-try:
-    from textlab.features.ocr import doc_ir
-except ImportError:  # pragma: no cover - standalone imports
-    import doc_ir  # type: ignore
-
-
-#: How long to wait for Ollama to actually free a model's VRAM: the unload
-#: request returns while the model is still resident, and the runner takes
-#: seconds to exit.
-UNLOAD_WAIT_TIMEOUT = float(os.environ.get("TEXTLAB_UNLOAD_WAIT_TIMEOUT", "60"))
+from textlab.common.ollama import UNLOAD_WAIT_TIMEOUT
+from textlab.features.ocr import doc_ir
 
 
 class VisionModelError(RuntimeError):
@@ -37,21 +29,31 @@ class VisionModelError(RuntimeError):
 
 
 class VisionClient(Protocol):
+    """The interface of a vision-model client."""
+
     model: str
     provider: str
 
-    def analyze(self, image_bytes: bytes, prompt: str, schema: dict) -> Dict[str, Any]: ...
+    def analyze(
+        self, image_bytes: bytes, prompt: str, schema: dict
+    ) -> dict[str, Any]:
+        """Answer ``prompt`` about an image as JSON following ``schema``."""
+        ...
 
 
-def _base_url(value: Optional[str] = None) -> str:
+def _base_url(value: str | None = None) -> str:
     host = value or os.environ.get("OLLAMA_HOST", "127.0.0.1:11434")
     if not host.startswith(("http://", "https://")):
         host = "http://" + host
     return host.rstrip("/")
 
 
-def _ollama_request(base_url: str, path: str, payload: Optional[dict] = None,
-                    timeout: float = 60.0) -> dict:
+def _ollama_request(
+    base_url: str,
+    path: str,
+    payload: dict | None = None,
+    timeout: float = 60.0,
+) -> dict:
     data = None if payload is None else json.dumps(payload).encode("utf-8")
     request = urllib.request.Request(
         base_url + path,
@@ -61,54 +63,6 @@ def _ollama_request(base_url: str, path: str, payload: Optional[dict] = None,
     )
     with urllib.request.urlopen(request, timeout=timeout) as response:
         return json.load(response)
-
-
-def loaded_models(base_url: Optional[str] = None) -> list:
-    """Names of the models Ollama currently holds in VRAM."""
-    try:
-        response = _ollama_request(_base_url(base_url), "/api/ps")
-    except Exception:
-        return []
-    return [
-        str(item.get("model") or item.get("name") or "")
-        for item in (response.get("models") or [])
-        if isinstance(item, dict)
-    ]
-
-
-def free_gpu(base_url: Optional[str] = None,
-             timeout: float = None, keep=()) -> list:
-    """Evict Ollama models and block until the VRAM is really released.
-
-    Models named in ``keep`` (``name:tag``) stay loaded; everything else is
-    evicted.
-
-    For non-Ollama GPU consumers -- the PaddleOCR-VL worker allocates ~8.4 GiB
-    in its own process, which does not fit beside the ~20 GiB vision model on a
-    23 GiB card, and starting against a resident model kills it part-way through
-    loading. Called at the point of need, so a still-useful model stays warm.
-    """
-    if timeout is None:
-        timeout = UNLOAD_WAIT_TIMEOUT
-    url = _base_url(base_url)
-    keep = set(keep)
-    resident = [name for name in loaded_models(url) if name not in keep]
-    if not resident:
-        return []
-    for name in resident:
-        try:
-            _ollama_request(
-                url, "/api/generate",
-                {"model": name, "prompt": "", "stream": False, "keep_alive": 0},
-            )
-        except Exception:
-            pass
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if not set(loaded_models(url)) - keep:
-            break
-        time.sleep(0.25)
-    return resident
 
 
 class OllamaVisionClient:
@@ -125,15 +79,26 @@ class OllamaVisionClient:
 
     def __init__(
         self,
-        model: Optional[str] = None,
+        model: str | None = None,
         *,
-        base_url: Optional[str] = None,
+        base_url: str | None = None,
         timeout: int = 300,
         keep_alive: str = "5m",
         unload_others: bool = True,
         lock_timeout: int = 120,
         audit_dir=None,
     ):
+        """Set up the client; nothing is loaded before the first request.
+
+        Args:
+            model: The Ollama model; defaults to ``TEXTLAB_VISION_MODEL``.
+            base_url: The Ollama server; defaults to ``OLLAMA_HOST``.
+            timeout: Seconds a request may take.
+            keep_alive: How long Ollama keeps the model after a request.
+            unload_others: Unload other Ollama models before loading this one.
+            lock_timeout: Seconds to wait for another job using the GPU.
+            audit_dir: A folder for request and response records, if any.
+        """
         self.model = model or os.environ.get(
             "TEXTLAB_VISION_MODEL", "qwen3-vl:30b-a3b-instruct"
         )
@@ -150,7 +115,9 @@ class OllamaVisionClient:
         # the headroom is for that worst case rather than for reasoning. Do not
         # lower this below ~7000 without re-checking the widest matrix in
         # instruct-model-benchmark-results.md.
-        self.num_predict = int(os.environ.get("TEXTLAB_VISION_NUM_PREDICT", "8000"))
+        self.num_predict = int(
+            os.environ.get("TEXTLAB_VISION_NUM_PREDICT", "8000")
+        )
         self._lock_file = None
         self._prepared = False
         self._audit_count = 0
@@ -166,18 +133,24 @@ class OllamaVisionClient:
             return None
         self._audit_count += 1
         question_match = re.search(r'"question_id":"([^"]+)"', prompt)
-        section_match = re.search(r"Audit section reference:\s*([A-Za-z0-9_-]+)", prompt)
+        section_match = re.search(
+            r"Audit section reference:\s*([A-Za-z0-9_-]+)", prompt
+        )
         question_id = (
             question_match.group(1)
             if question_match
             else (section_match.group(1) if section_match else "vision")
         )
-        contract_match = re.search(r"Contract version:\s*([A-Za-z0-9_.-]+)", prompt)
+        contract_match = re.search(
+            r"Contract version:\s*([A-Za-z0-9_.-]+)", prompt
+        )
         safe_id = re.sub(r"[^A-Za-z0-9_.-]", "_", question_id)[:80] or "vision"
         call_dir = self.audit_dir / f"call_{self._audit_count:04d}_{safe_id}"
         while call_dir.exists():
             self._audit_count += 1
-            call_dir = self.audit_dir / f"call_{self._audit_count:04d}_{safe_id}"
+            call_dir = (
+                self.audit_dir / f"call_{self._audit_count:04d}_{safe_id}"
+            )
         call_dir.mkdir(parents=True, exist_ok=False)
         (call_dir / "input.png").write_bytes(image_bytes)
         (call_dir / "prompt.txt").write_text(prompt, encoding="utf-8")
@@ -195,7 +168,9 @@ class OllamaVisionClient:
                     "seed": 42,
                     "num_ctx": self.num_ctx,
                     "num_predict": self.num_predict,
-                    "contract_version": contract_match.group(1) if contract_match else "",
+                    "contract_version": contract_match.group(1)
+                    if contract_match
+                    else "",
                 },
                 indent=2,
             ),
@@ -208,7 +183,7 @@ class OllamaVisionClient:
         if call_dir is not None:
             (call_dir / filename).write_text(str(value), encoding="utf-8")
 
-    def _request(self, path: str, payload: Optional[dict] = None) -> dict:
+    def _request(self, path: str, payload: dict | None = None) -> dict:
         data = None if payload is None else json.dumps(payload).encode("utf-8")
         request = urllib.request.Request(
             self.base_url + path,
@@ -217,16 +192,26 @@ class OllamaVisionClient:
             method="GET" if payload is None else "POST",
         )
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            with urllib.request.urlopen(
+                request, timeout=self.timeout
+            ) as response:
                 return json.load(response)
-        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
-            raise VisionModelError(f"Ollama request failed ({path}): {exc}") from exc
+        except (
+            urllib.error.URLError,
+            TimeoutError,
+            json.JSONDecodeError,
+        ) as exc:
+            raise VisionModelError(
+                f"Ollama request failed ({path}): {exc}"
+            ) from exc
 
     def _acquire_lock(self):
         if self._lock_file is not None:
             return
         endpoint = re.sub(r"[^A-Za-z0-9_.-]", "_", self.base_url)
-        lock_path = Path("/tmp") / f"textlab_vision_{os.getuid()}_{endpoint}.lock"
+        lock_path = (
+            Path("/tmp") / f"textlab_vision_{os.getuid()}_{endpoint}.lock"
+        )
         handle = lock_path.open("a+")
         deadline = time.monotonic() + self.lock_timeout
         while True:
@@ -238,8 +223,9 @@ class OllamaVisionClient:
                 if time.monotonic() >= deadline:
                     handle.close()
                     raise VisionModelError(
-                        "Timed out waiting for another TextLab GPU analysis job"
-                    )
+                        "Timed out waiting for another TextLab GPU analysis "
+                        "job"
+                    ) from None
                 time.sleep(0.25)
 
     def _available_models(self) -> set[str]:
@@ -262,10 +248,20 @@ class OllamaVisionClient:
                 continue
             self._request(
                 "/api/generate",
-                {"model": name, "prompt": "", "stream": False, "keep_alive": 0},
+                {
+                    "model": name,
+                    "prompt": "",
+                    "stream": False,
+                    "keep_alive": 0,
+                },
             )
 
     def prepare(self):
+        """Take the GPU lock, check the model and unload other models.
+
+        Raises:
+            VisionModelError: If the model is not available in Ollama.
+        """
         if self._prepared:
             return
         self._acquire_lock()
@@ -273,7 +269,8 @@ class OllamaVisionClient:
             available = self._available_models()
             if self.model not in available:
                 raise VisionModelError(
-                    f"Local vision model '{self.model}' is not staged in Ollama"
+                    f"Local vision model '{self.model}' is not staged in "
+                    "Ollama"
                 )
             if self.unload_others:
                 self._unload_other_models()
@@ -282,7 +279,19 @@ class OllamaVisionClient:
             self.close()
             raise
 
-    def analyze(self, image_bytes: bytes, prompt: str, schema: dict) -> Dict[str, Any]:
+    def analyze(
+        self, image_bytes: bytes, prompt: str, schema: dict
+    ) -> dict[str, Any]:
+        """Ask the model about an image and return its JSON answer.
+
+        Args:
+            image_bytes: The image.
+            prompt: The question.
+            schema: JSON schema the answer must follow.
+
+        Returns:
+            The parsed answer.
+        """
         self.prepare()
         audit_call = self._begin_audit(image_bytes, prompt, schema)
         payload = {
@@ -312,7 +321,8 @@ class OllamaVisionClient:
             raise
         if audit_call is not None:
             (audit_call / "raw_response.json").write_text(
-                json.dumps(response, ensure_ascii=False, indent=2), encoding="utf-8"
+                json.dumps(response, ensure_ascii=False, indent=2),
+                encoding="utf-8",
             )
         message = response.get("message") or {}
         content = message.get("content") if isinstance(message, dict) else None
@@ -324,21 +334,29 @@ class OllamaVisionClient:
             result = json.loads(content)
         except json.JSONDecodeError as exc:
             self._write_audit_text(audit_call, "error.txt", repr(exc))
-            raise VisionModelError("Vision model returned invalid JSON") from exc
+            raise VisionModelError(
+                "Vision model returned invalid JSON"
+            ) from exc
         if not isinstance(result, dict):
-            self._write_audit_text(audit_call, "error.txt", "JSON was not an object")
+            self._write_audit_text(
+                audit_call, "error.txt", "JSON was not an object"
+            )
             raise VisionModelError("Vision model JSON must be an object")
         if audit_call is not None:
             (audit_call / "parsed_response.json").write_text(
-                json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8"
+                json.dumps(result, ensure_ascii=False, indent=2),
+                encoding="utf-8",
             )
         return result
 
-    def close(self, *, unload_model: bool = False, wait_for_unload: bool = True):
+    def close(
+        self, *, unload_model: bool = False, wait_for_unload: bool = True
+    ):
         """Release the job lock; optionally evict the model from VRAM.
 
         Eviction is rarely wanted: the model expires after ``keep_alive`` and
-        whatever needs the card next calls :func:`free_gpu`, so unloading here
+        whatever needs the card next calls
+        :func:`textlab.common.ollama.release_models`, so unloading here
         would discard a warm 20 GiB model the next document may reuse.
         """
         if unload_model and self._prepared:
@@ -381,10 +399,12 @@ class OllamaVisionClient:
             time.sleep(0.25)
 
     def __enter__(self):
+        """Prepare the client for use in a ``with`` block."""
         self.prepare()
         return self
 
     def __exit__(self, exc_type, exc, tb):
+        """Release the GPU lock; the model stays loaded until it expires."""
         self.close()
 
 
@@ -399,7 +419,7 @@ FIGURE_DESCRIPTION_SCHEMA = {
 }
 
 
-def describe_page_figures(page: "doc_ir.Page", client: VisionClient):
+def describe_page_figures(page: doc_ir.Page, client: VisionClient):
     """Attach generated descriptions to figure regions that carry an asset."""
     for region in page.regions:
         if region.type != doc_ir.FIGURE or not region.asset:
@@ -411,12 +431,18 @@ def describe_page_figures(page: "doc_ir.Page", client: VisionClient):
             image_bytes = base64.b64decode(encoded)
             printed_context = region.text.strip()
             prompt = (
-                "Describe this document figure or image for a reader who cannot see it. "
-                "Be factual and concise; do not infer facts not visible in the image. "
-                "Transcribe important visible text separately. The printed OCR caption, "
-                f"if any, is: {printed_context!r}. Return only the requested JSON."
+                "Describe this document figure or image for a reader who "
+                "cannot see it. "
+                "Be factual and concise; do not infer facts not visible in "
+                "the image. "
+                "Transcribe important visible text separately. The printed "
+                "OCR caption, "
+                f"if any, is: {printed_context!r}. Return only the requested "
+                "JSON."
             )
-            result = client.analyze(image_bytes, prompt, FIGURE_DESCRIPTION_SCHEMA)
+            result = client.analyze(
+                image_bytes, prompt, FIGURE_DESCRIPTION_SCHEMA
+            )
             description = str(result.get("description") or "").strip()
             visible_text = str(result.get("visible_text") or "").strip()
             if not description:

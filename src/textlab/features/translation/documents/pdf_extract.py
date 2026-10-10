@@ -101,7 +101,7 @@ def extract_document(
                     plan.number,
                 )
         if ocr_plans:
-            from textlab.features.ocr import auto_ocr
+            from textlab.features.ocr import service as ocr_service
 
             from ..engine import free_translation_vram
             from ..gpu_memory import translation_session
@@ -136,7 +136,7 @@ def extract_document(
                         subset.save(input_path)
                     workspace = root / "workspace"
                     workspace.mkdir()
-                    recognized = auto_ocr.process_document(
+                    recognized = ocr_service.process_document(
                         input_path,
                         workspace,
                         native_fast_lane=False,

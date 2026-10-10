@@ -7,7 +7,9 @@ import signal
 import pytest
 
 from textlab.common import gpu_manager
-from textlab.features.ocr import vision_enrich
+
+#: The real function, before the fixture below replaces it.
+UNLOAD_OLLAMA = gpu_manager._unload_ollama
 
 
 @pytest.fixture(autouse=True)
@@ -54,32 +56,27 @@ def test_ollama_keeps_only_the_requested_model(monkeypatch):
     assert seen == ["qwen3"]
 
 
-def test_free_gpu_spares_kept_ollama_models(monkeypatch):
-    unloaded = []
-    resident = ["chat:8b", "qwen3:latest"]
+def test_ollama_release_spares_the_kept_model(monkeypatch):
+    seen = []
 
-    def fake_request(base_url, path, payload=None, timeout=60.0):
-        if path == "/api/generate":
-            unloaded.append(payload["model"])
-            resident.remove(payload["model"])
-            return {}
-        return {"models": [{"model": name} for name in resident]}
+    def release_models(keep):
+        seen.append(keep)
+        return ["chat:8b"]
 
-    monkeypatch.setattr(vision_enrich, "_ollama_request", fake_request)
-    assert vision_enrich.free_gpu(keep={"qwen3:latest"}) == ["chat:8b"]
-    assert unloaded == ["chat:8b"]
-    assert gpu_manager._normalize("qwen3") == "qwen3:latest"
-    assert gpu_manager._normalize("qwen3:8b") == "qwen3:8b"
+    monkeypatch.setattr(gpu_manager, "release_models", release_models)
+    assert UNLOAD_OLLAMA("qwen3") == ["chat:8b"]
+    assert UNLOAD_OLLAMA(None) == ["chat:8b"]
+    assert seen == [{"qwen3:latest"}, set()]
 
 
 def test_only_our_own_workers_of_released_features_are_stopped(monkeypatch):
     me = os.getpid()
     processes = {
         # pid: (parent, command line)
-        101: (me, "python paddle_vl_worker.py --serve"),
+        101: (me, "python -m textlab.features.ocr.paddle_vl_worker --serve"),
         102: (me, "python -m textlab.features.transcription.worker /job"),
         103: (1, "/usr/local/lib/ollama/llama-server"),       # Ollama
-        104: (999, "python paddle_vl_worker.py --serve"),     # not ours
+        104: (999, "python paddle_ocr_worker.py --lang en"),  # not ours
         105: (me, "python something_else.py"),                # unknown
         999: (1, "other user's process"),
     }

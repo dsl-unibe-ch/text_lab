@@ -21,7 +21,7 @@ import json
 import re
 import zipfile
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any
 
 import pandas as pd
 
@@ -46,8 +46,9 @@ OTHER = "other"
 #: Region types that carry an image crop rather than (or in addition to) text.
 ASSET_TYPES = {FIGURE, SEAL, CHECKBOX}
 
-#: Maps a raw PaddleOCR-VL / PP-DocLayoutV3 ``block_label`` to an IR region type.
-#: Unknown labels fall back to :data:`OTHER` while keeping their text content.
+#: Maps a raw PaddleOCR-VL / PP-DocLayoutV3 ``block_label`` to an IR region
+#: type. Unknown labels fall back to :data:`OTHER` while keeping their text
+#: content.
 _LABEL_TO_TYPE = {
     # plain text-ish blocks
     "text": TEXT,
@@ -94,7 +95,7 @@ _LABEL_TO_TYPE = {
 }
 
 
-def label_to_type(block_label: Optional[str]) -> str:
+def label_to_type(block_label: str | None) -> str:
     """Map a raw engine layout label to an IR region type."""
     if not block_label:
         return OTHER
@@ -108,7 +109,9 @@ def label_to_type(block_label: Optional[str]) -> str:
 #: Everything outside XML 1.0's ``Char`` production. Tab, newline and carriage
 #: return are the only control characters a well-formed XML document may hold,
 #: which makes this the exact set ``lxml`` — and so ``python-docx`` — rejects.
-_XML_ILLEGAL = re.compile("[^\u0009\u000a\u000d\u0020-\ud7ff\ue000-\ufffd\U00010000-\U0010ffff]")
+_XML_ILLEGAL = re.compile(
+    "[^\u0009\u000a\u000d\u0020-\ud7ff\ue000-\ufffd\U00010000-\U0010ffff]"
+)
 
 
 def xml_safe(text: str) -> str:
@@ -139,10 +142,11 @@ class Observation:
     source: str
     value: str
     method: str = ""
-    score: Optional[float] = None
+    score: float | None = None
     raw: Any = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
+        """Return the observation as a JSON-serializable dictionary."""
         return {
             "source": self.source,
             "value": self.value,
@@ -160,9 +164,10 @@ class VisualDescription:
     visible_text: str = ""
     source: str = ""
     model: str = ""
-    warnings: List[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
+        """Return the description as a JSON-serializable dictionary."""
         return {
             "description": self.description,
             "visible_text": self.visible_text,
@@ -180,13 +185,16 @@ class FormOption:
     label: str
     state: str = "unselected"  # selected|unselected|cancelled|ambiguous
     visual_mark: str = "none"  # none|x|tick|filled|scribbled|other|uncertain
-    bbox: List[float] = field(default_factory=list)
-    observations: List[Observation] = field(default_factory=list)
-    warnings: List[str] = field(default_factory=list)
+    bbox: list[float] = field(default_factory=list)
+    observations: list[Observation] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
     associated_text: str = ""  # respondent text linked to this marked choice
-    evidence_crop_b64: Optional[str] = None  # runtime/bundle asset; omitted from JSON
+    evidence_crop_b64: str | None = (
+        None  # runtime/bundle asset; omitted from JSON
+    )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
+        """Return the option as a JSON-serializable dictionary."""
         return {
             "id": self.id,
             "label": self.label,
@@ -205,12 +213,13 @@ class FormRow:
 
     id: str
     label: str = ""
-    options: List[FormOption] = field(default_factory=list)
+    options: list[FormOption] = field(default_factory=list)
     status: str = "accepted"  # accepted|recovered|needs_review|failed
-    review_reasons: List[str] = field(default_factory=list)
-    warnings: List[str] = field(default_factory=list)
+    review_reasons: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
+        """Return the row as a JSON-serializable dictionary."""
         return {
             "id": self.id,
             "label": self.label,
@@ -223,28 +232,31 @@ class FormRow:
 
 @dataclass
 class FormGroup:
-    """Question-level semantic response annotation spanning one or more regions."""
+    """A question's answer, possibly spanning several regions."""
 
     id: str
-    bbox: List[float] = field(default_factory=list)
+    bbox: list[float] = field(default_factory=list)
     question_text: str = ""
     question_type: str = "unknown"  # single|multiple|rating|matrix|unknown
     selection_rule: str = "zero_or_more"
-    rows: List[FormRow] = field(default_factory=list)
+    rows: list[FormRow] = field(default_factory=list)
     status: str = "accepted"
-    review_reasons: List[str] = field(default_factory=list)
-    warnings: List[str] = field(default_factory=list)
+    review_reasons: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
     parent_question_id: str = ""
     condition_text: str = ""
-    provenance: Dict[str, Any] = field(default_factory=dict)
+    provenance: dict[str, Any] = field(default_factory=dict)
     #: Regions this group stands in for when the document is rendered: the
-    #: printed grid a matrix was read off says nothing the answers below do not,
-    #: and its OCR cells are empty. Producers that would lose printed text by
-    #: replacing a region leave it out, and the region is kept as well.
-    covered_region_ids: List[str] = field(default_factory=list)
-    source_crop_b64: Optional[str] = None  # runtime/bundle asset; omitted from JSON
+    #: printed grid a matrix was read off says nothing the answers below do
+    #: not, and its OCR cells are empty. Producers that would lose printed text
+    #: by replacing a region leave it out, and the region is kept as well.
+    covered_region_ids: list[str] = field(default_factory=list)
+    source_crop_b64: str | None = (
+        None  # runtime/bundle asset; omitted from JSON
+    )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
+        """Return the group as a JSON-serializable dictionary."""
         return {
             "id": self.id,
             "bbox": [_num(v) for v in self.bbox] if self.bbox else [],
@@ -268,27 +280,40 @@ class Region:
 
     id: str
     type: str
-    bbox: List[float]  # [x1, y1, x2, y2] in the coordinate space of Page.image_b64
+    bbox: list[
+        float
+    ]  # [x1, y1, x2, y2] in the coordinate space of Page.image_b64
     reading_order: int
-    content: Dict[str, str] = field(default_factory=dict)  # {"text"|"html"|"latex"|"markdown": ...}
-    confidence: Dict[str, Optional[float]] = field(default_factory=dict)  # {"layout":.., "ocr":..}
-    asset: Optional[Dict[str, str]] = None  # {"b64":.., "ext":"png", "filename":..}
+    content: dict[str, str] = field(
+        default_factory=dict
+    )  # {"text"|"html"|"latex"|"markdown": ...}
+    confidence: dict[str, float | None] = field(
+        default_factory=dict
+    )  # {"layout":.., "ocr":..}
+    asset: dict[str, str] | None = (
+        None  # {"b64":.., "ext":"png", "filename":..}
+    )
     source: str = "paddleocr-vl-1.6"
-    warnings: List[str] = field(default_factory=list)
-    markup: Optional[Dict[str, Any]] = None  # {"state":.., "method":.., "score":..} for CHECKBOX
-    visual_description: Optional[VisualDescription] = None
+    warnings: list[str] = field(default_factory=list)
+    markup: dict[str, Any] | None = (
+        None  # {"state":.., "method":.., "score":..} for CHECKBOX
+    )
+    visual_description: VisualDescription | None = None
 
     def __post_init__(self) -> None:
-        # Every adapter funnels its recognised text through ``content``, so this
-        # is the one place that has to hold the XML-safety guarantee the .docx
-        # exporter depends on.
+        """Make the content XML-safe, for the Word export."""
+        # Every adapter funnels its recognised text through ``content``, so
+        # this is the one place that has to hold the XML-safety guarantee the
+        # .docx exporter depends on.
         for key, value in self.content.items():
             if isinstance(value, str):
                 self.content[key] = xml_safe(value)
 
-    # -- convenience accessors -------------------------------------------------
+    # -- convenience accessors
+    # -------------------------------------------------
     @property
     def text(self) -> str:
+        """The region's text: plain text, else Markdown, else empty."""
         return (
             self.content.get("text")
             or self.content.get("markdown")
@@ -297,7 +322,8 @@ class Region:
             or ""
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
+        """Return the region as a JSON-serializable dictionary."""
         return {
             "id": self.id,
             "type": self.type,
@@ -310,44 +336,56 @@ class Region:
             "warnings": self.warnings,
             "markup": self.markup,
             "visual_description": (
-                self.visual_description.to_dict() if self.visual_description else None
+                self.visual_description.to_dict()
+                if self.visual_description
+                else None
             ),
         }
 
 
 @dataclass
 class Page:
+    """One page of a document: its regions, preview and form responses.
+
+    Region boxes are in the coordinates of the page preview (``image_b64``).
+    """
+
     page_number: int
-    regions: List[Region] = field(default_factory=list)
-    width: Optional[int] = None
-    height: Optional[int] = None
-    image_b64: Optional[str] = None  # rendered page raster (PNG) for the layout preview
-    #: Pixel ``(width, height)`` of that preview. Region boxes are scaled to it,
-    #: so a consumer that drops the raster to save memory can record the size
-    #: here and still place a box on the page.
-    preview_size: Optional[Tuple[int, int]] = None
+    regions: list[Region] = field(default_factory=list)
+    width: int | None = None
+    height: int | None = None
+    image_b64: str | None = (
+        None  # rendered page raster (PNG) for the layout preview
+    )
+    #: Pixel ``(width, height)`` of that preview. Region boxes are scaled to
+    #: it, so a consumer that drops the raster to save memory can record the
+    #: size here and still place a box on the page.
+    preview_size: tuple[int, int] | None = None
     source: str = "paddleocr-vl-1.6"
-    markdown: Optional[str] = None  # engine-native markdown, if any
-    form_groups: List[FormGroup] = field(default_factory=list)
-    #: Invisible-PDF-layer entries in raster pixels, from :mod:`searchable_pdf`.
-    #: Transient: valid only while that raster exists.
-    text_layer: Optional[List[Dict[str, Any]]] = None
+    markdown: str | None = None  # engine-native markdown, if any
+    form_groups: list[FormGroup] = field(default_factory=list)
+    #: Invisible-PDF-layer entries in raster pixels, from
+    #: :mod:`searchable_pdf`. Transient: valid only while that raster exists.
+    text_layer: list[dict[str, Any]] | None = None
     #: Pixel ``(width, height)`` of that raster, so the PDF writer derives the
     #: pixel->point scale from geometry rather than an assumed DPI. Transient.
-    raster_size: Optional[Tuple[int, int]] = None
+    raster_size: tuple[int, int] | None = None
     #: Engine that supplied the geometry, kept for the citable summary.
     text_layer_engine: str = ""
 
     def __post_init__(self) -> None:
+        """Make the engine's Markdown XML-safe, like the regions' content."""
         # The engine-native markdown is a second, independent copy of the page
         # text, so it needs the same guarantee the regions get.
         if self.markdown:
             self.markdown = xml_safe(self.markdown)
 
-    def ordered_regions(self) -> List[Region]:
+    def ordered_regions(self) -> list[Region]:
+        """Return the regions in reading order."""
         return sorted(self.regions, key=lambda r: (r.reading_order, r.id))
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
+        """Return the page as a JSON-serializable dictionary."""
         return {
             "page_number": self.page_number,
             "width": self.width,
@@ -362,21 +400,25 @@ class Page:
 
 @dataclass
 class Document:
-    pages: List[Page] = field(default_factory=list)
+    """A recognized document: its pages, the searchable PDF and provenance."""
+
+    pages: list[Page] = field(default_factory=list)
     source_name: str = ""
     #: Original pages plus an invisible text layer, when requested. Bytes, so
     #: not part of :meth:`to_dict`.
-    searchable_pdf: Optional[bytes] = None
-    #: Tools not inferable from the regions, e.g. ``{"text_layer": "Tesseract"}``;
-    #: merged in by :func:`model_provenance`.
-    extra_tools: Dict[str, str] = field(default_factory=dict)
+    searchable_pdf: bytes | None = None
+    #: Tools not inferable from the regions, e.g. ``{"text_layer":
+    #: "Tesseract"}``; merged in by :func:`model_provenance`.
+    extra_tools: dict[str, str] = field(default_factory=dict)
 
     def all_regions(self):
+        """Yield ``(page, region)`` for every region, in reading order."""
         for page in self.pages:
             for region in page.ordered_regions():
                 yield page, region
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
+        """Return the document as a JSON-serializable dictionary."""
         return {
             "source_name": self.source_name,
             "n_pages": len(self.pages),
@@ -398,14 +440,14 @@ def _num(value):
 # ==========================================
 
 
-def _as_bbox(raw) -> List[float]:
+def _as_bbox(raw) -> list[float]:
     """Normalise a bbox/coordinate into [x1, y1, x2, y2]."""
     if raw is None:
         return []
     try:
         flat = []
         for v in raw:
-            if isinstance(v, (list, tuple)):
+            if isinstance(v, list | tuple):
                 flat.extend(v)
             else:
                 flat.append(v)
@@ -422,7 +464,7 @@ def _as_bbox(raw) -> List[float]:
     return nums
 
 
-def _iou(a: List[float], b: List[float]) -> float:
+def _iou(a: list[float], b: list[float]) -> float:
     if len(a) < 4 or len(b) < 4:
         return 0.0
     ax1, ay1, ax2, ay2 = a[:4]
@@ -439,7 +481,9 @@ def _iou(a: List[float], b: List[float]) -> float:
     return inter / union if union > 0 else 0.0
 
 
-def _match_layout_score(bbox: List[float], layout_boxes: List[dict]) -> Optional[float]:
+def _match_layout_score(
+    bbox: list[float], layout_boxes: list[dict]
+) -> float | None:
     """Best-overlap layout confidence for a parsing block."""
     best_score = None
     best_iou = 0.0
@@ -453,18 +497,21 @@ def _match_layout_score(bbox: List[float], layout_boxes: List[dict]) -> Optional
     return best_score if best_iou >= 0.3 else None
 
 
-def from_paddle_vl(page_json: Dict[str, Any]) -> Page:
+def from_paddle_vl(page_json: dict[str, Any]) -> Page:
     """Build a :class:`Page` from one page of PaddleOCR-VL worker output.
 
     Expected (best-effort) ``page_json`` keys::
 
         page_number, width, height, image_b64, markdown,
-        parsing_res_list: [{block_label, block_content, block_bbox, block_order}],
+        parsing_res_list: [{block_label, block_content, block_bbox,
+                            block_order}],
         layout_det_res:   [{label, score, coordinate}],
         assets:           {"<index>": {"b64":.., "ext":"png"}}
     """
     page = Page(
-        page_number=int(page_json.get("page_number") or page_json.get("page") or 1),
+        page_number=int(
+            page_json.get("page_number") or page_json.get("page") or 1
+        ),
         width=page_json.get("width"),
         height=page_json.get("height"),
         image_b64=page_json.get("image_b64"),
@@ -485,7 +532,7 @@ def from_paddle_vl(page_json: Dict[str, Any]) -> Page:
             raw_content = block.get("content", "")
         content_str = "" if raw_content is None else str(raw_content)
 
-        content: Dict[str, str] = {}
+        content: dict[str, str] = {}
         if rtype == TABLE:
             content["html"] = content_str
         elif rtype == FORMULA:
@@ -496,7 +543,7 @@ def from_paddle_vl(page_json: Dict[str, Any]) -> Page:
             content["markdown"] = content_str
 
         order = block.get("block_order")
-        reading_order = int(order) if isinstance(order, (int, float)) else idx
+        reading_order = int(order) if isinstance(order, int | float) else idx
 
         asset = None
         for key in (str(idx), idx):
@@ -514,7 +561,9 @@ def from_paddle_vl(page_json: Dict[str, Any]) -> Page:
             content=content,
             confidence={
                 "layout": _match_layout_score(bbox, layout_boxes),
-                "ocr": _num(block["block_score"]) if block.get("block_score") is not None else None,
+                "ocr": _num(block["block_score"])
+                if block.get("block_score") is not None
+                else None,
             },
             asset=asset,
             source="paddleocr-vl-1.6",
@@ -531,7 +580,7 @@ def from_paddle_vl(page_json: Dict[str, Any]) -> Page:
 # ==========================================
 
 
-def extract_html_table(html_content: str) -> Optional[pd.DataFrame]:
+def extract_html_table(html_content: str) -> pd.DataFrame | None:
     """Parse the first HTML ``<table>`` in *html_content* into a DataFrame.
 
     Generalised, per-region version of the whole-text regex that used to live
@@ -548,8 +597,8 @@ def extract_html_table(html_content: str) -> Optional[pd.DataFrame]:
     return dfs[0] if dfs else None
 
 
-def tables_to_dataframes(document: Document) -> List[Dict[str, Any]]:
-    """Return one entry per parseable table region across the whole document."""
+def tables_to_dataframes(document: Document) -> list[dict[str, Any]]:
+    """Return one entry per parseable table region in the document."""
     tables = []
     for page, region in document.all_regions():
         if region.type != TABLE:
@@ -584,7 +633,9 @@ def _safe_slug(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]", "_", str(value or "item"))
 
 
-def _region_to_markdown(region: Region, asset_dir: str, embed_assets: bool) -> str:
+def _region_to_markdown(
+    region: Region, asset_dir: str, embed_assets: bool
+) -> str:
     rtype = region.type
     if rtype == TITLE:
         text = region.text.strip()
@@ -597,7 +648,11 @@ def _region_to_markdown(region: Region, asset_dir: str, embed_assets: bool) -> s
         return f"$$\n{latex}\n$$" if latex else ""
     if rtype == CHECKBOX:
         state = (region.markup or {}).get("state", "uncertain")
-        marker = {"checked": "[x]", "unchecked": "[ ]", "uncertain": "[?]"}.get(state, "[?]")
+        marker = {
+            "checked": "[x]",
+            "unchecked": "[ ]",
+            "uncertain": "[?]",
+        }.get(state, "[?]")
         label = region.text.strip()
         return f"- {marker} {label}".rstrip()
     if rtype in ASSET_TYPES and region.asset and embed_assets:
@@ -609,7 +664,7 @@ def _region_to_markdown(region: Region, asset_dir: str, embed_assets: bool) -> s
     return region.text.strip()
 
 
-def _covered_fraction(inner: List[float], outer: List[float]) -> float:
+def _covered_fraction(inner: list[float], outer: list[float]) -> float:
     """How much of *inner* lies inside *outer*, 0..1."""
     if len(inner) < 4 or len(outer) < 4:
         return 0.0
@@ -622,7 +677,7 @@ def _covered_fraction(inner: List[float], outer: List[float]) -> float:
 
 
 def _form_answer_text(option: FormOption) -> str:
-    """One option as it reads in an answer: its label, plus any written-in text."""
+    """One option as it reads in an answer: label and written-in text."""
     label = option.label.strip() or option.id
     if not option.associated_text:
         return label
@@ -630,16 +685,20 @@ def _form_answer_text(option: FormOption) -> str:
 
 
 def _form_row_answer(row: FormRow) -> str:
-    """What one question row answers: the chosen options, or why there is none."""
-    selected = [_form_answer_text(o) for o in row.options if o.state == "selected"]
+    """What a question row answers: the chosen options, or why none."""
+    selected = [
+        _form_answer_text(o) for o in row.options if o.state == "selected"
+    ]
     unread = any(o.state == "ambiguous" for o in row.options)
     if selected:
-        return " | ".join(selected) + (" (+ unreadable mark)" if unread else "")
+        return " | ".join(selected) + (
+            " (+ unreadable mark)" if unread else ""
+        )
     return "unreadable" if unread else "no answer"
 
 
-def _form_group_lines(group: FormGroup, *, markup: bool) -> List[str]:
-    """A group as flat lines: the question, then one line per row it answers."""
+def _form_group_lines(group: FormGroup, *, markup: bool) -> list[str]:
+    """A group as lines: the question, then one line per answered row."""
     strong = "**" if markup else ""
     bullet = "- " if markup else "  "
     header = group.question_text.strip() or group.id
@@ -647,7 +706,11 @@ def _form_group_lines(group: FormGroup, *, markup: bool) -> List[str]:
         header = f"{header} (needs review)"
     lines = [f"{strong}{header}{strong}"]
     if group.condition_text.strip():
-        lines.append(f"_{group.condition_text.strip()}_" if markup else group.condition_text.strip())
+        lines.append(
+            f"_{group.condition_text.strip()}_"
+            if markup
+            else group.condition_text.strip()
+        )
     for row in group.rows:
         label = row.label.strip()
         answer = f"{strong}{_form_row_answer(row)}{strong}"
@@ -671,27 +734,35 @@ def _page_stream(page: Page):
         return [("region", region) for region in regions]
 
     covered = {rid for group in groups for rid in group.covered_region_ids}
-    anchors: Dict[int, List[FormGroup]] = {}
-    trailing: List[FormGroup] = []
+    anchors: dict[int, list[FormGroup]] = {}
+    trailing: list[FormGroup] = []
     for group in groups:
         overlapping = [
-            index for index, region in enumerate(regions)
+            index
+            for index, region in enumerate(regions)
             if _covered_fraction(region.bbox, group.bbox) > 0
         ]
         if not overlapping:
-            # Nothing to sit next to: fall back to vertical position, so a group
-            # whose controls the layout model never boxed still lands in place.
+            # Nothing to sit next to: fall back to vertical position, so a
+            # group whose controls the layout model never boxed still lands in
+            # place.
             top = group.bbox[1] if len(group.bbox) >= 4 else None
             overlapping = [
-                index for index, region in enumerate(regions)
-                if top is not None and len(region.bbox) >= 4 and region.bbox[3] <= top
+                index
+                for index, region in enumerate(regions)
+                if top is not None
+                and len(region.bbox) >= 4
+                and region.bbox[3] <= top
             ]
         if overlapping:
             anchors.setdefault(max(overlapping), []).append(group)
         else:
             trailing.append(group)
         for region in regions:
-            if region.type == CHECKBOX and _covered_fraction(region.bbox, group.bbox) >= 0.5:
+            if (
+                region.type == CHECKBOX
+                and _covered_fraction(region.bbox, group.bbox) >= 0.5
+            ):
                 covered.add(region.id)
 
     stream = []
@@ -704,9 +775,11 @@ def _page_stream(page: Page):
     return stream
 
 
-def to_markdown(document: Document, asset_dir: str = "assets", embed_assets: bool = True) -> str:
-    """Deterministic markdown rendering of the whole document (reading order)."""
-    chunks: List[str] = []
+def to_markdown(
+    document: Document, asset_dir: str = "assets", embed_assets: bool = True
+) -> str:
+    """Render the whole document as Markdown, in reading order."""
+    chunks: list[str] = []
     for page in document.pages:
         if len(document.pages) > 1:
             chunks.append(f"<!-- page {page.page_number} -->")
@@ -733,7 +806,11 @@ def _region_to_text(region: Region) -> str:
         return region.content.get("latex", "").strip()
     if rtype == CHECKBOX:
         state = (region.markup or {}).get("state", "uncertain")
-        marker = {"checked": "[x]", "unchecked": "[ ]", "uncertain": "[?]"}.get(state, "[?]")
+        marker = {
+            "checked": "[x]",
+            "unchecked": "[ ]",
+            "uncertain": "[?]",
+        }.get(state, "[?]")
         return f"{marker} {region.text.strip()}".rstrip()
     if rtype in ASSET_TYPES and region.asset:
         caption = region.text.strip()
@@ -743,7 +820,7 @@ def _region_to_text(region: Region) -> str:
 
 def to_text(document: Document, page_separator: bool = True) -> str:
     """Plain-text rendering of the whole document in reading order."""
-    chunks: List[str] = []
+    chunks: list[str] = []
     for page in document.pages:
         if page_separator and len(document.pages) > 1:
             chunks.append(f"--- page {page.page_number} ---")
@@ -758,11 +835,11 @@ def to_text(document: Document, page_separator: bool = True) -> str:
     return "\n\n".join(chunks).strip() + "\n"
 
 
-def build_docx(document: Document, doc_stem: str = "document") -> Optional[bytes]:
+def build_docx(document: Document, doc_stem: str = "document") -> bytes | None:
     """An editable .docx with headings, paragraphs, real tables and figures.
 
-    Returns ``None`` when ``python-docx`` is unavailable, so the caller can hide
-    the download instead of failing the whole export.
+    Returns ``None`` when ``python-docx`` is unavailable, so the caller can
+    hide the download instead of failing the whole export.
     """
     try:
         import docx
@@ -795,11 +872,15 @@ def build_docx(document: Document, doc_stem: str = "document") -> Optional[bytes
                     continue
                 table = doc.add_table(rows=1, cols=max(len(df.columns), 1))
                 table.style = "Table Grid"
-                for cell, column in zip(table.rows[0].cells, df.columns):
+                for cell, column in zip(
+                    table.rows[0].cells, df.columns, strict=False
+                ):
                     run = cell.paragraphs[0].add_run(str(column))
                     run.bold = True
                 for record in df.itertuples(index=False):
-                    for cell, value in zip(table.add_row().cells, record):
+                    for cell, value in zip(
+                        table.add_row().cells, record, strict=False
+                    ):
                         cell.text = "" if pd.isna(value) else str(value)
             elif rtype == FORMULA:
                 latex = region.content.get("latex", "").strip()
@@ -809,18 +890,28 @@ def build_docx(document: Document, doc_stem: str = "document") -> Optional[bytes
                     run.font.size = Pt(10)
             elif rtype == CHECKBOX:
                 state = (region.markup or {}).get("state", "uncertain")
-                marker = {"checked": "☒", "unchecked": "☐", "uncertain": "☐?"}.get(state, "☐?")
+                marker = {
+                    "checked": "☒",
+                    "unchecked": "☐",
+                    "uncertain": "☐?",
+                }.get(state, "☐?")
                 doc.add_paragraph(f"{marker} {region.text.strip()}".rstrip())
-            elif rtype in ASSET_TYPES and region.asset and region.asset.get("b64"):
+            elif (
+                rtype in ASSET_TYPES
+                and region.asset
+                and region.asset.get("b64")
+            ):
                 try:
                     doc.add_picture(
-                        io.BytesIO(base64.b64decode(region.asset["b64"])), width=Inches(5.5)
+                        io.BytesIO(base64.b64decode(region.asset["b64"])),
+                        width=Inches(5.5),
                     )
                 except Exception:
                     doc.add_paragraph(f"[{rtype} could not be embedded]")
                 caption = region.text.strip()
                 if caption:
-                    # Italics live on the run; ``Paragraph.italic`` silently does nothing.
+                    # Italics live on the run; ``Paragraph.italic`` silently
+                    # does nothing.
                     doc.add_paragraph().add_run(caption).italic = True
             elif region.text.strip():
                 doc.add_paragraph(region.text.strip())
@@ -830,9 +921,9 @@ def build_docx(document: Document, doc_stem: str = "document") -> Optional[bytes
     return buf.getvalue()
 
 
-def collect_assets(document: Document) -> Dict[str, bytes]:
-    """Return ``{filename: png_bytes}`` for every region that carries a crop."""
-    out: Dict[str, bytes] = {}
+def collect_assets(document: Document) -> dict[str, bytes]:
+    """Return ``{filename: png_bytes}`` for every region with a crop."""
+    out: dict[str, bytes] = {}
     for _, region in document.all_regions():
         if region.type not in ASSET_TYPES or not region.asset:
             continue
@@ -867,20 +958,27 @@ def collect_assets(document: Document) -> Dict[str, bytes]:
     return out
 
 
-def form_responses_to_dataframe(document: Document) -> Optional[pd.DataFrame]:
+def form_responses_to_dataframe(document: Document) -> pd.DataFrame | None:
     """Flatten semantic form responses into one row per question/matrix row."""
+
     def _answer(option: FormOption) -> str:
         if not option.associated_text:
             return option.label
         return f"{option.label.rstrip().rstrip(':')}: {option.associated_text}"
 
-    records: List[Dict[str, Any]] = []
+    records: list[dict[str, Any]] = []
     for page in document.pages:
         for group in page.form_groups:
             for row in group.rows:
-                selected = [_answer(o) for o in row.options if o.state == "selected"]
-                cancelled = [_answer(o) for o in row.options if o.state == "cancelled"]
-                ambiguous = [_answer(o) for o in row.options if o.state == "ambiguous"]
+                selected = [
+                    _answer(o) for o in row.options if o.state == "selected"
+                ]
+                cancelled = [
+                    _answer(o) for o in row.options if o.state == "cancelled"
+                ]
+                ambiguous = [
+                    _answer(o) for o in row.options if o.state == "ambiguous"
+                ]
                 records.append(
                     {
                         "page": page.page_number,
@@ -899,7 +997,9 @@ def form_responses_to_dataframe(document: Document) -> Optional[pd.DataFrame]:
                             else row.status
                         ),
                         "review_reasons": " | ".join(
-                            dict.fromkeys(group.review_reasons + row.review_reasons)
+                            dict.fromkeys(
+                                group.review_reasons + row.review_reasons
+                            )
                         ),
                         "evidence_sources": " | ".join(
                             dict.fromkeys(
@@ -914,7 +1014,7 @@ def form_responses_to_dataframe(document: Document) -> Optional[pd.DataFrame]:
     return pd.DataFrame(records) if records else None
 
 
-def build_form_responses_csv(document: Document) -> Optional[bytes]:
+def build_form_responses_csv(document: Document) -> bytes | None:
     """Semantic form-response CSV, or ``None`` if no groups were extracted."""
     df = form_responses_to_dataframe(document)
     if df is None:
@@ -929,29 +1029,33 @@ _SOURCE_CITATIONS = {
 }
 
 
-def model_provenance(document: Document) -> Dict[str, Any]:
+def model_provenance(document: Document) -> dict[str, Any]:
     """Which models produced this result, for citation in a publication.
 
     Read off the per-page lane tag and the model named on each generated
     description, so it cannot drift from what ran; transcription and generated
     descriptions stay distinguishable.
     """
-    recognition: List[str] = []
+    recognition: list[str] = []
     for page in document.pages:
         name = _SOURCE_CITATIONS.get(page.source, page.source)
         if name and name not in recognition:
             recognition.append(name)
 
-    descriptions: List[str] = []
+    descriptions: list[str] = []
     for _, region in document.all_regions():
         described = region.visual_description
         if described is None or not described.model:
             continue
-        name = f"{described.model} ({described.source})" if described.source else described.model
+        name = (
+            f"{described.model} ({described.source})"
+            if described.source
+            else described.model
+        )
         if name not in descriptions:
             descriptions.append(name)
 
-    models: Dict[str, Any] = {"text_recognition": recognition}
+    models: dict[str, Any] = {"text_recognition": recognition}
     if descriptions:
         models["figure_descriptions"] = descriptions
     for key, value in (document.extra_tools or {}).items():
@@ -960,13 +1064,13 @@ def model_provenance(document: Document) -> Dict[str, Any]:
     return models
 
 
-def merge_provenance(summaries) -> Dict[str, Any]:
+def merge_provenance(summaries) -> dict[str, Any]:
     """Union of several documents' summaries, in first-seen order.
 
-    A batch is not uniform -- a scan and a born-digital PDF take different lanes,
-    and only files with figures involve the description model.
+    A batch is not uniform -- a scan and a born-digital PDF take different
+    lanes, and only files with figures involve the description model.
     """
-    merged: Dict[str, Any] = {}
+    merged: dict[str, Any] = {}
     for summary in summaries:
         for key, value in (summary or {}).items():
             values = value if isinstance(value, list) else [value]
@@ -977,7 +1081,7 @@ def merge_provenance(summaries) -> Dict[str, Any]:
     return merged
 
 
-def provenance_to_text(provenance: Dict[str, Any]) -> str:
+def provenance_to_text(provenance: dict[str, Any]) -> str:
     """A provenance summary as lines suitable for a README or a caption."""
     labels = {
         "text_recognition": "Text recognition",
@@ -989,7 +1093,9 @@ def provenance_to_text(provenance: Dict[str, Any]) -> str:
         if not value:
             continue
         joined = ", ".join(value) if isinstance(value, list) else str(value)
-        lines.append(f"{labels.get(key, key.replace('_', ' ').capitalize())}: {joined}")
+        lines.append(
+            f"{labels.get(key, key.replace('_', ' ').capitalize())}: {joined}"
+        )
     return "\n".join(lines)
 
 
@@ -999,6 +1105,7 @@ def model_provenance_text(document: Document) -> str:
 
 
 def to_json(document: Document, indent: int = 2) -> str:
+    """Return the document as JSON text, the canonical export."""
     return json.dumps(document.to_dict(), ensure_ascii=False, indent=indent)
 
 
@@ -1007,7 +1114,9 @@ def to_json(document: Document, indent: int = 2) -> str:
 # ==========================================
 
 
-def build_markdown_zip(document: Document, doc_stem: str = "document") -> bytes:
+def build_markdown_zip(
+    document: Document, doc_stem: str = "document"
+) -> bytes:
     """A ZIP with ``document.md`` plus an ``assets/`` folder of crops."""
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -1017,8 +1126,8 @@ def build_markdown_zip(document: Document, doc_stem: str = "document") -> bytes:
     return buf.getvalue()
 
 
-def build_tables_csv_zip(document: Document) -> Optional[bytes]:
-    """A ZIP of one CSV per parseable table region, or ``None`` if no tables."""
+def build_tables_csv_zip(document: Document) -> bytes | None:
+    """Return a ZIP of one CSV per table, or ``None`` without tables."""
     tables = tables_to_dataframes(document)
     if not tables:
         return None
@@ -1031,7 +1140,7 @@ def build_tables_csv_zip(document: Document) -> Optional[bytes]:
 
 
 def build_full_bundle(document: Document, doc_stem: str = "document") -> bytes:
-    """Everything: markdown, plain text, .docx, canonical JSON, assets, table CSVs."""
+    """Return a ZIP of every format: Markdown, text, Word, JSON, CSVs."""
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr(f"{doc_stem}.md", to_markdown(document))
@@ -1062,9 +1171,9 @@ def write_document_outputs(
     stem: str = "document",
     *,
     provenance: bool = True,
-    skip_tables: Optional[Set[str]] = None,
+    skip_tables: set[str] | None = None,
     form_responses: bool = True,
-) -> List[str]:
+) -> list[str]:
     """Write every export format for one document into *out_dir*.
 
     Shared with the batch runner, so a format cannot reach one path and not the
@@ -1076,12 +1185,16 @@ def write_document_outputs(
 
     out_dir = str(out_dir)
     os.makedirs(out_dir, exist_ok=True)
-    written: List[str] = []
+    written: list[str] = []
 
     def _write(name: str, data, binary: bool = False):
         path = os.path.join(out_dir, name)
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "wb" if binary else "w", **({} if binary else {"encoding": "utf-8"})) as fh:
+        with open(
+            path,
+            "wb" if binary else "w",
+            **({} if binary else {"encoding": "utf-8"}),
+        ) as fh:
             fh.write(data)
         written.append(name)
 

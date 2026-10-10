@@ -1,21 +1,14 @@
-"""Backend for the OCR feature.
+"""Text, tables and layout from PDFs and images.
 
-Text, table and layout extraction from images and PDFs, with an automatic
-pipeline and manual engine selection (olmOCR, GLM-OCR, PaddleOCR, EasyOCR),
-plus searchable-PDF export.
+Interfaces use :mod:`.service` and the result model :mod:`.doc_ir`. The
+automatic pipeline (:mod:`.pipeline`) reads born-digital pages directly
+(:mod:`.native`) and recognizes the others with the PaddleOCR-VL worker
+(:mod:`.vl_session`, :mod:`.paddle_vl_worker`); :mod:`.marks` and
+:mod:`.markup_detect` handle checkboxes and marks, :mod:`.searchable_pdf`
+the invisible text layer and :mod:`.vision_enrich` figure descriptions.
 
-Moved from ``src/core`` with only import and path updates. The modules are
-reorganized when the feature is refactored (see ``docs/dev/architecture.md``):
+Manual engine selection still uses :mod:`.ocr_engine` and
+:mod:`.paddle_ocr_worker` (until refactor phase 6b).
 
-- ``auto_ocr``: the automatic OCR pipeline.
-- ``doc_ir``: typed intermediate representation of an OCR result.
-- ``markup_detect``: checkbox and survey-mark detection.
-- ``ocr_engine``: result handling and previews for the manually selected
-  engines.
-- ``paddle_ocr_worker``: PaddleOCR subprocess, run in the ``paddle_backend``
-  environment.
-- ``paddle_vl_worker``: PaddleOCR-VL subprocess, run in the
-  ``paddle_vl_backend`` environment.
-- ``searchable_pdf``: PDF export with an invisible text layer.
-- ``vision_enrich``: local vision-model client and optional enrichments.
+See ``README.md`` in this folder for the pipeline and the files written.
 """

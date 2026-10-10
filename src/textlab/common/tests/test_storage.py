@@ -92,6 +92,22 @@ def test_temp_dir_is_removed_afterwards_even_on_error(tmp_path):
     assert not seen.exists()
 
 
+def test_temp_dir_removes_read_only_content(tmp_path):
+    workspace = storage.Workspace(tmp_path / "root")
+    with workspace.temp_dir("ocr") as path:
+        locked = path / "cache" / "model"
+        locked.mkdir(parents=True)
+        (locked / "weights.bin").write_bytes(b"x")
+        (locked / "weights.bin").chmod(0o400)
+        locked.chmod(0o500)
+        seen = path
+    assert not seen.exists()
+
+
+def test_remove_tree_ignores_a_missing_directory(tmp_path):
+    storage.remove_tree(tmp_path / "gone")
+
+
 def test_nothing_is_written_into_the_source_tree(env):
     src_dir = Path(storage.__file__).resolve().parents[2]
     root = storage.get_workspace().root

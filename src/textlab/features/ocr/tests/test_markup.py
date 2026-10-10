@@ -1,13 +1,15 @@
 """Markup detection: stroke-aware observations without OCR mutation."""
 
-
 import base64
 
-import numpy as np
 import cv2
+import numpy as np
 
+from textlab.features.ocr import doc_ir
 from textlab.features.ocr import markup_detect as md
-from textlab.features.ocr import auto_ocr, doc_ir
+from textlab.features.ocr.marks import apply_markup
+from textlab.features.ocr.native import page_has_math
+from textlab.features.ocr.pipeline import document_summary
 
 
 def b64(img):
@@ -24,13 +26,21 @@ def box_crop(box_px, stroke, kind):
         cv2.line(img, (a, a), (b, b), (0, 0, 0), stroke)
         cv2.line(img, (b, a), (a, b), (0, 0, 0), stroke)
     elif kind == "check":
-        cv2.line(img, (a, int(box_px * 0.55)), (int(box_px * 0.45), b), (0, 0, 0), stroke)
+        cv2.line(
+            img,
+            (a, int(box_px * 0.55)),
+            (int(box_px * 0.45), b),
+            (0, 0, 0),
+            stroke,
+        )
         cv2.line(img, (int(box_px * 0.45), b), (b, a), (0, 0, 0), stroke)
     return img
 
 
-def survey_row(n=4, crossed=(1,), rad=15, y=30, W=420, H=60, label_words=None):
-    img = np.full((H, W, 3), 255, np.uint8)
+def survey_row(
+    n=4, crossed=(1,), rad=15, y=30, width=420, height=60, label_words=None
+):
+    img = np.full((height, width, 3), 255, np.uint8)
     xs = [40 + i * 100 for i in range(n)]
     for i, x in enumerate(xs):
         cv2.circle(img, (x, y), rad, (0, 0, 0), 1)
@@ -40,7 +50,16 @@ def survey_row(n=4, crossed=(1,), rad=15, y=30, W=420, H=60, label_words=None):
             cv2.line(img, (x + d, y - d), (x - d, y + d), (0, 0, 0), 2)
     if label_words:
         for x, word in label_words:
-            cv2.putText(img, word, (x, y + 6), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 1, cv2.LINE_AA)
+            cv2.putText(
+                img,
+                word,
+                (x, y + 6),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (0, 0, 0),
+                1,
+                cv2.LINE_AA,
+            )
     return img
 
 
@@ -63,15 +82,29 @@ def test_stroke_aware_classifier():
 
 
 def test_glyph_extraction():
-    assert [i["state"] for i in md.extract_mark_glyphs("○ Ja ○ Nein")] == ["unchecked", "unchecked"]
-    assert [i["state"] for i in md.extract_mark_glyphs("<td>☒</td><td>☐</td>")] == ["checked", "unchecked"]
-    assert [i["state"] for i in md.extract_mark_glyphs("○\t✗\t○")] == ["unchecked", "checked", "unchecked"]
+    assert [i["state"] for i in md.extract_mark_glyphs("○ Ja ○ Nein")] == [
+        "unchecked",
+        "unchecked",
+    ]
+    assert [
+        i["state"] for i in md.extract_mark_glyphs("<td>☒</td><td>☐</td>")
+    ] == ["checked", "unchecked"]
+    assert [i["state"] for i in md.extract_mark_glyphs("○\t✗\t○")] == [
+        "unchecked",
+        "checked",
+        "unchecked",
+    ]
     assert md.extract_mark_glyphs("plain text") == []
 
 
 def test_find_marks_and_letter_filtering():
     marks = md.find_marks(survey_row(n=4, crossed=(1,)), n_expected=4)
-    assert [m["state"] for m in marks] == ["unchecked", "checked", "unchecked", "unchecked"]
+    assert [m["state"] for m in marks] == [
+        "unchecked",
+        "checked",
+        "unchecked",
+        "unchecked",
+    ]
     marks2 = md.find_marks(
         survey_row(n=2, crossed=(0,), label_words=[(70, "Ja"), (170, "Nein")]),
         n_expected=2,
@@ -94,7 +127,12 @@ def test_reconcile_is_non_mutating_by_default():
         md.extract_mark_glyphs(content), marks, allow_override=True
     )
     baseline_states = [i["state"] for i in baseline]
-    assert baseline_states == ["unchecked", "checked", "unchecked", "unchecked"]
+    assert baseline_states == [
+        "unchecked",
+        "checked",
+        "unchecked",
+        "unchecked",
+    ]
     assert baseline[1]["method"] == "geometric-override"
     new_content, changed = md.apply_states_to_content(content, baseline_states)
     assert changed and new_content == "○\t☒\t○\t○"
@@ -105,7 +143,9 @@ def test_reconcile_is_non_mutating_by_default():
     )
     assert items2[0]["state"] == "checked"
     # count mismatch -> untouched
-    items3, status3 = md.reconcile_marks(md.extract_mark_glyphs(content), marks[:3])
+    items3, status3 = md.reconcile_marks(
+        md.extract_mark_glyphs(content), marks[:3]
+    )
     assert status3 == "count_mismatch"
     assert [i["state"] for i in items3] == ["unchecked"] * 4
 
@@ -114,15 +154,27 @@ def test_apply_markup_end_to_end():
     page_img = np.full((800, 600, 3), 255, np.uint8)
     page_img[100:160, 90:510] = survey_row(n=4, crossed=(2,))
     region = doc_ir.Region(
-        id="p1_r0", type=doc_ir.TABLE, bbox=[90, 100, 510, 160], reading_order=0,
-        content={"html": "<table><tr><td>○</td><td>○</td><td>○</td><td>○</td></tr></table>"},
+        id="p1_r0",
+        type=doc_ir.TABLE,
+        bbox=[90, 100, 510, 160],
+        reading_order=0,
+        content={
+            "html": "<table><tr><td>○</td><td>○</td><td>○</td>"
+            "<td>○</td></tr></table>"
+        },
     )
     cb = doc_ir.Region(
-        id="p1_r1", type=doc_ir.CHECKBOX, bbox=[50, 300, 140, 390], reading_order=1,
-        content={"text": ""}, asset={"b64": b64(box_crop(90, 2, "X")), "ext": "png"},
+        id="p1_r1",
+        type=doc_ir.CHECKBOX,
+        bbox=[50, 300, 140, 390],
+        reading_order=1,
+        content={"text": ""},
+        asset={"b64": b64(box_crop(90, 2, "X")), "ext": "png"},
     )
-    page = doc_ir.Page(page_number=1, regions=[region, cb], source="paddleocr-vl-1.6")
-    auto_ocr._apply_markup(page, page_img)
+    page = doc_ir.Page(
+        page_number=1, regions=[region, cb], source="paddleocr-vl-1.6"
+    )
+    apply_markup(page, page_img)
     mk = region.markup
     assert mk["status"] == "geometry_disagreement"
     assert mk["n_checked"] == 0 and mk["n_overridden"] == 0
@@ -130,7 +182,7 @@ def test_apply_markup_end_to_end():
     assert "☒" not in region.content["html"]
     assert cb.markup["state"] == "uncertain"
     assert cb.markup["observations"][0]["source"] == "geometric"
-    summ = auto_ocr.document_summary(doc_ir.Document(pages=[page]))
+    summ = document_summary(doc_ir.Document(pages=[page]))
     assert summ["n_marks"] == 5 and summ["n_overridden_marks"] == 0
     assert summ["n_markup_disagreements"] == 1
     disputed = [i for i in mk["items"] if i.get("needs_review")]
@@ -146,13 +198,29 @@ def test_math_routing():
             if mode == "text":
                 return self._t
             if mode == "dict":
-                return {"blocks": [{"lines": [{"spans": [{"font": f, "text": "x"} for f in self._f]}]}]}
+                return {
+                    "blocks": [
+                        {
+                            "lines": [
+                                {
+                                    "spans": [
+                                        {"font": f, "text": "x"}
+                                        for f in self._f
+                                    ]
+                                }
+                            ]
+                        }
+                    ]
+                }
             return []
 
-    assert auto_ocr._page_has_math(FakePage("∑ ∫ α β γ ≤ ≥ ± √ formulas")) is True
-    assert auto_ocr._page_has_math(FakePage("Ganz normaler deutscher Text über Tourismus.")) is False
-    assert auto_ocr._page_has_math(FakePage("short", fonts=("CMMI10", "CMSY7"))) is True
-    assert auto_ocr._page_has_math(FakePage("footnote²  ", fonts=("Arial",))) is False
+    assert page_has_math(FakePage("∑ ∫ α β γ ≤ ≥ ± √ formulas")) is True
+    assert (
+        page_has_math(FakePage("Ganz normaler deutscher Text über Tourismus."))
+        is False
+    )
+    assert page_has_math(FakePage("short", fonts=("CMMI10", "CMSY7"))) is True
+    assert page_has_math(FakePage("footnote²  ", fonts=("Arial",))) is False
 
 
 if __name__ == "__main__":

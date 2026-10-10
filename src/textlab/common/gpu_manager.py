@@ -34,6 +34,8 @@ import threading
 import time
 from typing import Callable, Dict, Iterable, List, Optional
 
+from textlab.common.ollama import canonical_model_name, release_models
+
 LOGGER = logging.getLogger(__name__)
 
 #: Owner names used by the features. A feature keeps its own owner (and any
@@ -51,7 +53,7 @@ LLM = "llm"
 #: Matched against the command line, only for the last-resort cleanup of
 #: leftovers (e.g. a run interrupted before its ``finally`` block ran).
 _WORKER_SCRIPTS = {
-    "paddle_vl_worker.py": OCR,
+    "textlab.features.ocr.paddle_vl_worker": OCR,
     "paddle_ocr_worker.py": OCR,
     "textlab.features.transcription.worker": TRANSCRIBE,
 }
@@ -103,18 +105,10 @@ def prepare_gpu(
     return freed
 
 
-def _normalize(model: str) -> str:
-    return model if ":" in model else model + ":latest"
-
-
 def _unload_ollama(keep_model: Optional[str]) -> List[str]:
+    keep = {canonical_model_name(keep_model)} if keep_model else set()
     try:
-        from textlab.features.ocr import vision_enrich
-    except ImportError:  # pragma: no cover - standalone imports
-        import vision_enrich  # type: ignore
-    keep = {_normalize(keep_model)} if keep_model else set()
-    try:
-        return vision_enrich.free_gpu(keep=keep)
+        return release_models(keep=keep)
     except Exception:
         LOGGER.exception("Unloading Ollama models failed")
         return []

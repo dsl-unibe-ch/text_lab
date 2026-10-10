@@ -117,16 +117,14 @@ def test_native_markdown_keeps_short_and_blank_pages_without_unload(
 
 
 def _stub_ocr(monkeypatch, callback):
-    from textlab.features import ocr
+    from textlab.features.ocr import service as ocr_service
 
-    module = SimpleNamespace(process_document=callback)
     monkeypatch.setattr(
         gpu_profile,
         "sequential_ocr_allowed",
         lambda **kwargs: True,
     )
-    monkeypatch.setitem(sys.modules, "textlab.features.ocr.auto_ocr", module)
-    monkeypatch.setattr(ocr, "auto_ocr", module, raising=False)
+    monkeypatch.setattr(ocr_service, "process_document", callback)
 
 
 def test_only_ocr_subset_is_sent_to_worker_and_original_order_is_restored(

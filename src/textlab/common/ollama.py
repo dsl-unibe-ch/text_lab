@@ -16,7 +16,7 @@ import functools
 import os
 import socket
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
 import ollama
@@ -31,6 +31,11 @@ CHARS_PER_TOKEN = 4
 MAX_CONTEXT_TOKENS = 75_000
 #: Tokens per chunk when a text is split (about 56k characters).
 CHUNK_SIZE_TOKENS = 14_000
+
+#: Seconds to wait at most for Ollama to free a model's memory.
+UNLOAD_WAIT_TIMEOUT = float(
+    os.environ.get("TEXTLAB_UNLOAD_WAIT_TIMEOUT", "60")
+)
 
 
 # ---------------------------------------------------------------------------
@@ -395,6 +400,40 @@ def unload_all_models() -> list[str]:
     for name in loaded:
         unload_model(name)
     return loaded
+
+
+def release_models(
+    keep: Iterable[str] = (), timeout: float | None = None
+) -> list[str]:
+    """Unload every model but ``keep`` and wait until Ollama has let go.
+
+    Ollama answers an unload request while the model is still in memory;
+    its runner takes seconds to exit. Code that is about to put something
+    else on the GPU (an OCR worker, another feature's model) must wait for
+    that, or it runs out of memory while loading.
+
+    Args:
+        keep: Canonical names (``name:tag``) of models to leave loaded.
+        timeout: Seconds to wait at most; defaults to
+            :data:`UNLOAD_WAIT_TIMEOUT`.
+
+    Returns:
+        The names of the models that were unloaded.
+    """
+    if timeout is None:
+        timeout = UNLOAD_WAIT_TIMEOUT
+    keep = set(keep)
+    resident = [name for name in get_loaded_models() if name not in keep]
+    if not resident:
+        return []
+    for name in resident:
+        unload_model(name)
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not set(get_loaded_models()) - keep:
+            break
+        time.sleep(0.25)
+    return resident
 
 
 def warm_model(model_name: str, keep_alive: int = 300) -> bool:

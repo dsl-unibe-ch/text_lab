@@ -8,7 +8,7 @@ templates and batch scoring.
 `__init__.py` says what each one does.
 
 - Modules: `cli.py`, `form_extract.py`, `survey_batch.py`, `survey_label.py`, `survey_template.py`
-- UI: the survey review in `src/textlab/ui/streamlit/pages/OCR.py` (currently
+- UI: the survey review in `src/textlab/ui/streamlit/ocr/review.py` (currently
   hidden)
 - Tests: `tests/test_survey_template.py`
 
