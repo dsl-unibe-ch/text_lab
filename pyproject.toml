@@ -1,0 +1,123 @@
+# Project metadata and tool configuration for Text Lab.
+#
+# Runtime dependencies are not listed here: they are pinned in
+# deploy/container/text_lab.def and ship inside the Apptainer image, which is
+# the only environment the app runs in. This file configures the development
+# tools (ruff, pytest, import-linter) and names the package.
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "textlab"
+version = "2.0.0.dev0"
+description = "AI and NLP tools for research data, served through Open OnDemand"
+readme = "readme.MD"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+# Tools used by CI and for local checks; not needed to run the app.
+dev = [
+    "ruff==0.11.10",
+    "import-linter==2.3",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["textlab*"]
+
+# --------------------------------------------------------------------------
+# ruff: linting and formatting
+# --------------------------------------------------------------------------
+
+[tool.ruff]
+line-length = 79
+target-version = "py311"
+src = ["src"]
+# Code moved into src/textlab but not refactored yet: it still follows the
+# old conventions, so it is excluded until its feature is refactored. Each
+# refactor phase removes its entries from this list.
+extend-exclude = [
+    # Shared backend
+    "src/textlab/common/gpu_manager.py",
+    "src/textlab/common/html_safety.py",
+    "src/textlab/common/language_mappings.py",
+    "src/textlab/common/model_config.py",
+    "src/textlab/common/upload_safety.py",
+    "src/textlab/common/tests/test_gpu_manager.py",
+    "src/textlab/common/tests/test_html_safety.py",
+    "src/textlab/common/tests/test_upload_safety.py",
+    # Streamlit app
+    "src/textlab/ui/streamlit/Home.py",
+    "src/textlab/ui/streamlit/auth.py",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # import sorting
+    "N",   # PEP 8 naming
+    "D",   # docstrings
+    "UP",  # modern Python syntax
+    "B",   # likely bugs
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+# Test functions are documented by their names.
+"**/tests/**" = ["D"]
+# Streamlit derives page titles from file names such as
+# Meeting_Notes_Generator.py, which cannot be PEP 8 module names.
+"src/textlab/ui/streamlit/pages/*.py" = ["N999"]
+# Image height and width are H and W, beside the lowercase h and w of boxes.
+"src/textlab/features/ocr/markup_detect.py" = ["N803", "N806"]
+# A homography is H and a scaling matrix S, as in OpenCV's documentation.
+"src/textlab/features/survey/survey_batch.py" = ["N806"]
+"src/textlab/features/survey/survey_template.py" = ["N803", "N806"]
+# The tools' docstrings are the descriptions the models read; they are kept
+# exactly as written.
+"src/textlab/features/visualization/mcp_server.py" = ["D205", "E501"]
+# A regression's design matrix is X, as in statsmodels' documentation.
+"src/textlab/features/visualization/stats_analysis.py" = ["N806"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["textlab"]
+
+# --------------------------------------------------------------------------
+# pytest
+# --------------------------------------------------------------------------
+
+[tool.pytest.ini_options]
+# Feature tests live next to their code in src/textlab/features/*/tests/;
+# tests/ holds cross-cutting tests only.
+testpaths = ["src/textlab", "tests"]
+pythonpath = ["src"]
+addopts = ["--import-mode=importlib", "-ra", "--strict-markers"]
+markers = [
+    "gpu: needs a CUDA GPU",
+    "container: needs the Text Lab Apptainer image (models, binaries)",
+    "ollama: needs a running Ollama server",
+    "slow: takes more than about a minute",
+]
+
+# --------------------------------------------------------------------------
+# import-linter: architecture rules
+# --------------------------------------------------------------------------
+
+[tool.importlinter]
+root_packages = ["textlab"]
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Backend never imports a user interface"
+type = "forbidden"
+source_modules = ["textlab.features", "textlab.common"]
+forbidden_modules = ["streamlit", "textlab.ui"]

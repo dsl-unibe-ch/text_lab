@@ -12,7 +12,7 @@ All processing runs on the university cluster. Your documents are never sent to 
 2. **Pick the column** that contains the text (tables only).
 3. **Choose an algorithm.** If you are unsure, start with **BERTopic** and the default settings.
 4. **Select the primary language** of your texts.
-5. Click **Run Topic Extraction**.
+5. Click **Run Topic Extraction**. A status box shows each step; to cancel, refresh the page. Notes about the run, such as skipped rows or long documents, appear when it finishes.
 6. **Explore the results** on the page and click **Download Extraction Package (.zip)** to keep them.
 
 Running again with different settings replaces the previous results on the page, so download anything you want to keep first.

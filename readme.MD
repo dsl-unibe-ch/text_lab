@@ -1,7 +1,7 @@
 # Text Lab
 
 <p align="center">
-  <img src="src/assets/text_lab_logo.png" alt="Text Lab Logo" width="200"/>
+  <img src="src/textlab/ui/streamlit/assets/text_lab_logo.png" alt="Text Lab Logo" width="200"/>
 </p>
 
 **Text Lab** is a secure, interactive suite of advanced Artificial Intelligence and Natural Language Processing (NLP) tools designed to run directly on the University of Bern's High-Performance Computing cluster (UBELIX).
@@ -15,25 +15,40 @@ For comprehensive instructions, tutorials, capabilities, and best practices, ple
 
 ---
 
-##  Features 
+## Features
 
 The application features a modular, secure architecture offering the following tools:
 
-- ** Audio Transcription:** Highly accurate multi-lingual transcription using Whisper. Includes **Speaker Diarization**, VAD pre-filtering, and dedicated support for Swiss German.
-- ** AI Chat:** A private AI assistant (powered by Ollama) that allows you to upload and interact directly with your own documents (PDFs, text, datasets).
-- ** Advanced OCR:** Extract text, complex tables, and layouts from images and PDFs using a choice of state-of-the-art vision models (GLM-OCR, olmOCR, PaddleOCR, EasyOCR).
-- ** AI Data Visualiser:** Upload your tabular data and instruct an AI agent (via an internal MCP server) to automatically write Python code and generate interactive plots.
-- ** Knowledge Graph Generator:** Process collections of scientific papers using Grobid to automatically extract metadata, citations, and research topics via LLMs, visualizing them as an interactive network graph.
-- ** Topic Modeling:** Extract topics from raw text data using SOTA models.
----
-
-##  Privacy & Security
-
-Because all models run on university hardware via the Open OnDemand platform, your sensitive research data **never leaves the university network**. The application utilizes zero-footprint, ephemeral session states to ensure maximum security on shared infrastructure.
+- **Audio Transcription:** Highly accurate multi-lingual transcription using Whisper. Includes **Speaker Diarization**, VAD pre-filtering, and dedicated support for Swiss German.
+- **AI Chat:** A private AI assistant (powered by Ollama) that allows you to upload and interact directly with your own documents (PDFs, text, datasets).
+- **Advanced OCR:** Extract text, complex tables, and layouts from images and PDFs using a choice of state-of-the-art vision models (GLM-OCR, olmOCR, PaddleOCR, EasyOCR).
+- **AI Data Visualiser:** Upload your tabular data and instruct an AI agent (via an internal MCP server) to automatically write Python code and generate interactive plots.
+- **Knowledge Graph Generator:** Process collections of scientific papers using Grobid to automatically extract metadata, citations, and research topics via LLMs, visualizing them as an interactive network graph.
+- **Topic Modeling:** Extract topics from raw text data using SOTA models.
+- **Translation:** Translate text and documents (Word, PowerPoint, Excel, PDF) with local models while keeping their formatting.
+- **Meeting Notes Generator:** Turn a meeting recording into a transcript and structured notes.
 
 ---
 
-##  Launching the App
+## Privacy & Security
+
+All models run on university hardware, in the user's own Slurm job: nothing is sent to external services such as OpenAI, Google or Anthropic. The one exception is optional and stays on university infrastructure: the Knowledge Graph can use the University of Bern's GPUStack service for topic extraction instead of the local model.
+
+Text Lab keeps temporary user data in a private workspace per job (owner-only permissions), inside the job's `$TMPDIR`, and deletes it when the session ends. On UBELIX, Slurm also removes `$TMPDIR` at the end of every job, so the data is gone even if the session is killed.
+
+| What | Where | Removed |
+|---|---|---|
+| Uploaded files and intermediate results (OCR, Chat and Visualize Data tables and charts, transcription audio, PDF pages translation sends to OCR, the table Topic Modeling hands to its worker, Grobid working copies) | Session workspace in the job's `$TMPDIR` | When the run finishes where the feature does so, and always when the session ends |
+| Results shown on the page | The browser session (Streamlit session state) | When the page is reloaded or closed, or the session ends |
+| Knowledge Graph output | The folder the user chooses | When the user deletes it |
+| Session logs (`output.log`, `streamlit.log`, `ollama.log`) | The session folder in the user's home directory (Open OnDemand) | When the user deletes the session folder |
+| Custom embedding models chosen in Topic Modeling | The user's Hugging Face cache (`~/.cache/huggingface`) | When the user deletes them; these are model files, not user data |
+
+Developers: the rules behind this, and the tests that enforce them, are described in the [developer guide](https://text-lab.dsl.unibe.ch/dev/data-handling/).
+
+---
+
+## Launching the App
 
 The app is accessible via [UBELIX Open OnDemand](https://ondemand.hpc.unibe.ch/) and is available **only within the Unibe internal network (or via VPN)**.
 
@@ -49,17 +64,23 @@ For more detailed guidelines on job submission, please refer to the [HPC Documen
 
 ---
 
-##  Repository Structure (NOT UP TO DATE INFO)
+## Repository Structure
 
-- `src/pages/`: Streamlit UI frontend interface files.
-- `src/core/`: Backend business logic, LLM interaction, MCP server, and data processing engines.
-- `src/assets/`: Application icons and logos.
-- `docs/`: MkDocs documentation site source code.
-- `template/` & `form.yml`: Open OnDemand deployment configurations.
+Each feature's processing logic (backend) is separate from the Streamlit pages (frontend). The [Developer Guide](https://text-lab.dsl.unibe.ch/dev/) describes the structure, testing and deployment.
+
+- `src/textlab/features/`: backend, one package per feature (transcription, OCR, translation, ...).
+- `src/textlab/common/`: backend code shared by several features.
+- `src/textlab/ui/streamlit/`: the Streamlit app (`Home.py` and `pages/`).
+- `deploy/container/`: Apptainer definition of the image that holds all dependencies.
+- `deploy/sbatch/`: batch job templates (planned).
+- `scripts/`: developer scripts, such as running the tests on a compute node.
+- `tests/`: cross-cutting tests; each feature keeps its own tests in its `tests/` folder.
+- `docs/`: MkDocs site with the user guide and the developer guide.
+- `manifest.yml`, `form.yml`, `submit.yml.erb`, `template/`: Open OnDemand app files. `template/script.sh.erb` starts the app.
 
 ---
 
-##  Support & Further Information
+## Support & Further Information
 
 Maintained by the Data Science Lab (DSL) at the University of Bern.  
 For support with the app, bug reports, or related NLP services, please contact: **[support.dsl@unibe.ch](mailto:support.dsl@unibe.ch)**

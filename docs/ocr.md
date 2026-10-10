@@ -56,7 +56,7 @@ Choose **Batch OCR (ZIP)**, upload a `.zip` of PDFs/images, and press **Parse ba
 
 ### Survey/form response extraction (not enabled)
 
-A question-level survey/form response extractor is present in the codebase but **switched off in the interface** while it is validated against a representative multi-document benchmark. It renders complete 300-DPI question sections to the local vision-language model, assigns its own IDs, verifies each marked position against an echoed choice label, derives selection constraints independently, and flags empty or inconsistent responses; OCR text and table HTML are never modified by it. Developers can reach it through `auto_ocr.process_document(..., extract_survey=True)`, or re-expose the UI controls, the **Responses** tab, and the form-responses CSV by setting `SURVEY_EXTRACTION_UI_ENABLED = True` in `src/pages/OCR.py`.
+A question-level survey/form response extractor is present in the codebase but **switched off in the interface** while it is validated against a representative multi-document benchmark. It renders complete 300-DPI question sections to the local vision-language model, assigns its own IDs, verifies each marked position against an echoed choice label, derives selection constraints independently, and flags empty or inconsistent responses; OCR text and table HTML are never modified by it. Developers can reach it through `OcrOptions(extract_survey=True)` in `textlab.features.ocr.service`, or re-expose the UI controls, the **Responses** tab, and the form-responses CSV by setting `SURVEY_EXTRACTION_UI_ENABLED = True` in `src/textlab/ui/streamlit/ocr/state.py`.
 
 ## Advanced: legacy engines
 
@@ -67,7 +67,9 @@ The previous engine-picker workflow is still available under the **“Advanced: 
 3. **OlmOCR:** tuned for converting scientific PDFs into clean Markdown.
 4. **GLM-OCR:** a large vision model with selectable Text / Table / Figure extraction modes.
 
-Each legacy engine returns a single plain-text (or Markdown) string per page, exactly as before. For most documents — and for anything with tables or checkboxes — the automatic mode above is recommended.
+Each legacy engine returns plain text (or Markdown) per page. For most documents — and for anything with tables or checkboxes — the automatic mode above is recommended.
+
+The downloads of a single document are the whole text (`.txt`), the engine's result with positions and scores (`.json`; OlmOCR gives its own `.jsonl` record), and a ZIP with both plus one text and JSON file per page. In a batch, each file gets a folder with the same files, mirroring your ZIP's folders. If an engine fails on one file, the batch stops with an error naming it.
 
 > *Warning:* Do not close the tab while a "Running" indicator is active.
 
@@ -80,7 +82,7 @@ Text Lab is designed to handle highly sensitive, confidential, and proprietary d
 Here is exactly what happens to your data when you use the OCR tool:
 
 * **100% Local Processing:** Your documents are **never** sent to external cloud services or APIs (like Adobe, Google Cloud Vision, or AWS). All text extraction is performed entirely on the University of Bern's secure UBELIX high-performance computing nodes.
-* **Isolated User Workspaces:** The automatic pipeline, advanced AI vision models (like OlmOCR), and Batch ZIP processing all need to read files from disk (uploads, rasterised pages, cropped regions). To accommodate this, Text Lab generates a unique, temporary workspace located strictly within your private University home directory (`$HOME/ondemand_text_lab_ocr_jobs`). Other users on the cluster cannot access this space.
-* **Instant Auto-Deletion (Self-Cleaning):** The exact moment the AI finishes extracting the text (or if the process encounters an error), the application runs an aggressive `shutil.rmtree()` command. **This guarantees that the entire temporary workspace—including your original documents, intermediate images, and raw data files—is instantly and permanently deleted from the hard drive.**
-* **Ephemeral Results:** The final extracted text and tables presented on your screen are stored strictly in your browser's volatile memory (`st.session_state`). When you close the tab, refresh the page, or your HPC job ends, all traces of the document and its extracted text are destroyed by Python's garbage collector.
+* **Private session workspace:** The automatic pipeline, advanced AI vision models (like OlmOCR), and Batch ZIP processing all need to read files from disk (uploads, rasterised pages, cropped regions). Text Lab keeps these in a private workspace that is created for your session on the compute node and that only your user account can open. Nothing is written to your home directory.
+* **Automatic deletion:** As soon as the extraction finishes, or fails, the working folder of that run is deleted, including your original documents, intermediate images and raw data files. If a run is interrupted, for example because the session ends, the whole session workspace is deleted when the session ends.
+* **Results in your browser session:** The extracted text and tables shown on the page are kept only in your open session (Streamlit's `st.session_state`). When you close the tab, reload the page, or your Text Lab session ends, they are gone. Download anything you want to keep.
 * **No AI Training:** The vision models only perform *inference* (looking at the image to extract text). They do not learn from your documents, and your data is never used to train or improve the AI.

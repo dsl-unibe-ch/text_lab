@@ -45,6 +45,17 @@ If you check **Advanced Slurm Options**, additional parameters will appear.
 2. Wait for the job to start. The status will change from **Queued** to **Running**.
 3. Click **Connect to Text Lab** to open the interface in your browser.
 
+## Reporting a Problem
+
+If something goes wrong in Text Lab, the session's log files help us find out what happened. Each session writes them to its own folder in your home directory:
+
+1. In Open OnDemand, open **My Interactive Sessions**.
+2. On the card of the session where the problem happened, click the link next to **Session ID**. It opens the session folder in the file browser.
+3. Download `output.log`, `streamlit.log` and `ollama.log`.
+4. Send them to [support.dsl@unibe.ch](mailto:support.dsl@unibe.ch), together with the date and time of the problem and what you were doing.
+
+The logs contain technical messages such as errors, file names and model names. An error message can occasionally quote a short piece of the text being processed, so treat the logs as confidentially as your data. They stay in your home directory until you delete the session folder.
+
 ## More Information
 
 For more information about Slurm parameters and job configuration on UBELIX, see the **[UBELIX documentation](https://hpc-unibe-ch.github.io/)**.

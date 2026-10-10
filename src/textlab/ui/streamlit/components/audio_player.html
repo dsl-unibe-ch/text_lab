@@ -1,0 +1,134 @@
+<div class="ws-container" id="${component_id}_container">
+  <div id="${component_id}_waveform"></div>
+  <div class="ws-controls">
+    <button id="${component_id}_toggle">Play / Pause</button>
+    <span id="${component_id}_time" class="ws-time">00:00:000</span>
+  </div>
+  <div id="${component_id}_transcript" class="ws-transcript"></div>
+</div>
+
+<script src="https://unpkg.com/wavesurfer.js@7"></script>
+<script>
+  const audioUrl = "${safe_audio_url}";
+  const items = ${items_json};
+  const mode = "${safe_mode}";
+  const waveformId = "${component_id}_waveform";
+  const transcriptId = "${component_id}_transcript";
+  const toggleId = "${component_id}_toggle";
+  const timeId = "${component_id}_time";
+
+  const ws = WaveSurfer.create({
+    container: "#" + waveformId,
+    waveColor: "#c9c9c9",
+    progressColor: "#2d2d2d",
+    cursorColor: "#e76f51",
+    height: 120,
+    barWidth: 2,
+    barGap: 2,
+    normalize: true
+  });
+
+  const transcriptEl = document.getElementById(transcriptId);
+  const timeEl = document.getElementById(timeId);
+  const toggleEl = document.getElementById(toggleId);
+  let activeIndex = -1;
+
+  function formatTime(seconds) {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    const millis = Math.floor((seconds - Math.floor(seconds)) * 1000);
+    return (
+      String(mins).padStart(2, "0") +
+      ":" +
+      String(secs).padStart(2, "0") +
+      ":" +
+      String(millis).padStart(3, "0")
+    );
+  }
+
+  function renderTranscript() {
+    transcriptEl.innerHTML = "";
+    items.forEach((item, idx) => {
+      const el = document.createElement(mode === "word" ? "span" : "div");
+      el.className = mode === "word" ? "ws-word" : "ws-seg";
+      el.dataset.start = item.start;
+      el.dataset.end = item.end;
+      if (mode === "word") {
+        el.textContent = item.text + " ";
+      } else {
+        const header = document.createElement("div");
+        header.className = "ws-meta";
+        const label = item.speaker ? item.speaker + " " : "";
+        header.textContent = label + formatTime(item.start) + " - " + formatTime(item.end);
+        const text = document.createElement("div");
+        text.className = "ws-text";
+        text.textContent = item.text;
+        el.appendChild(header);
+        el.appendChild(text);
+      }
+      el.addEventListener("click", () => {
+        const duration = ws.getDuration() || 1;
+        ws.seekTo(item.start / duration);
+      });
+      transcriptEl.appendChild(el);
+    });
+  }
+
+  function updateActive(currentTime) {
+    if (!items.length) return;
+    let idx = -1;
+    for (let i = 0; i < items.length; i++) {
+      if (currentTime >= items[i].start && currentTime <= items[i].end) {
+        idx = i;
+        break;
+      }
+    }
+    if (idx === activeIndex) return;
+    if (activeIndex >= 0) {
+      const prev = transcriptEl.children[activeIndex];
+      if (prev) prev.classList.remove("ws-active");
+    }
+    if (idx >= 0) {
+      const next = transcriptEl.children[idx];
+      if (next) {
+        next.classList.add("ws-active");
+        next.scrollIntoView({block: "nearest"});
+      }
+    }
+    activeIndex = idx;
+  }
+
+  function syncTime() {
+    const t = ws.getCurrentTime();
+    timeEl.textContent = formatTime(t);
+    updateActive(t);
+  }
+
+  ws.on("ready", () => {
+    renderTranscript();
+    syncTime();
+  });
+  ws.on("timeupdate", syncTime);
+  ws.on("audioprocess", syncTime);
+  ws.on("seek", syncTime);
+
+  toggleEl.addEventListener("click", () => {
+    ws.playPause();
+  });
+
+  ws.load(audioUrl);
+</script>
+
+<style>
+  .ws-container { font-family: Arial, sans-serif; }
+  .ws-controls { display: flex; align-items: center; gap: 12px; margin: 8px 0 16px 0; color: #ffffff; }
+  .ws-time { font-variant-numeric: tabular-nums; background: #1b1b1b; border: 1px solid #3a3a3a; padding: 4px 8px; border-radius: 6px; }
+  .ws-transcript { border: 1px solid #e0e0e0; padding: 12px; max-height: 360px; overflow-y: auto; background: #fafafa; line-height: 1.5; }
+  .ws-seg { padding: 6px 8px; margin-bottom: 6px; border-radius: 6px; cursor: pointer; }
+  .ws-meta { font-size: 12px; color: #666666; margin-bottom: 4px; }
+  .ws-text { font-size: 14px; color: #000; }
+  .ws-word { cursor: pointer; padding: 2px 2px; border-radius: 4px; color: #000;}
+  .ws-active { background: #ffe8d6; }
+  button { border: 1px solid #333333; background: #ffffff; padding: 6px 10px; cursor: pointer; color: #000;}
+</style>
+

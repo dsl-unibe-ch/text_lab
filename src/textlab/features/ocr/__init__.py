@@ -1,0 +1,14 @@
+"""Text, tables and layout from PDFs and images.
+
+Interfaces use :mod:`.service` and the result model :mod:`.doc_ir`. The
+automatic pipeline (:mod:`.pipeline`) reads born-digital pages directly
+(:mod:`.native`) and recognizes the others with the PaddleOCR-VL worker
+(:mod:`.vl_session`, :mod:`.paddle_vl_worker`); :mod:`.marks` and
+:mod:`.markup_detect` handle checkboxes and marks, :mod:`.searchable_pdf`
+the invisible text layer and :mod:`.vision_enrich` figure descriptions.
+
+Manual engine selection (:mod:`.manual`) runs one chosen engine, each an
+adapter in :mod:`.engines`: EasyOCR, PaddleOCR, OlmOCR and GLM-OCR.
+
+See ``README.md`` in this folder for the pipeline and the files written.
+"""
