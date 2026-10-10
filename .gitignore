@@ -19,3 +19,9 @@ todo
 # one-off audit harnesses. Kept on disk for reference, deliberately out of the
 # repo, which holds code only.
 notes/
+# Tool caches and local test output.
+.ruff_cache/
+.pytest_cache/
+.import_linter_cache/
+textlab-tests-*.out
+*.egg-info/
