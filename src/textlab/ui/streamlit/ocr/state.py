@@ -19,20 +19,12 @@ def clear_results(reset_running=False):
         reset_running: Also clear the "a job is running" flag.
     """
     keys_to_clear = [
-        # legacy engines
-        "ocr_complete",
-        "extracted_text",
-        "json_content",
-        "txt_name",
-        "json_name",
-        "ocr_error",
-        "ocr_error_details",
-        "ocr_preview_images",
-        "ocr_preview_page",
-        "ocr_preview_engine",
-        "ocr_zip_bytes",
-        "batch_ocr_complete",
-        "batch_ocr_zip_bytes",
+        # manual engines
+        "manual_run",
+        "manual_batch_zip",
+        "manual_error",
+        "manual_error_details",
+        "manual_preview_page",
         # automatic pipeline
         "auto_complete",
         "auto_document",
@@ -42,11 +34,8 @@ def clear_results(reset_running=False):
         "batch_auto_complete",
         "batch_auto_zip",
         "batch_auto_elapsed",
-        # questionnaire batch: kept so the detected form can be reviewed and
-        # the tables rebuilt without parsing everything again
-        "survey_template",
-        "survey_readings",
-        "survey_documents",
+        # questionnaire batch, for the review of the detected form
+        "survey_batch",
     ]
     for key in keys_to_clear:
         if key in st.session_state:

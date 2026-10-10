@@ -24,7 +24,8 @@ SUFFIXES = {".pdf", ".png", ".jpg", ".jpeg", ".tif", ".tiff"}
 
 def _documents(folder) -> list:
     paths = sorted(
-        path for path in pathlib.Path(folder).rglob("*")
+        path
+        for path in pathlib.Path(folder).rglob("*")
         if path.suffix.lower() in SUFFIXES and not path.name.startswith("._")
     )
     if not paths:
@@ -37,13 +38,20 @@ def _write_overlays(template, blanks, out_dir) -> None:
 
     out_dir = pathlib.Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    for page, blank in zip(template.pages, blanks):
+    for page, blank in zip(template.pages, blanks, strict=False):
         vis = survey_template.overlay(
             blank.image,
-            [{"bbox": c.pixel_bbox(page.width, page.height), "shape": c.shape}
-             for c in page.controls],
+            [
+                {
+                    "bbox": c.pixel_bbox(page.width, page.height),
+                    "shape": c.shape,
+                }
+                for c in page.controls
+            ],
         )
-        cv2.imwrite(str(out_dir / f"template_page{page.page_index + 1}.png"), vis)
+        cv2.imwrite(
+            str(out_dir / f"template_page{page.page_index + 1}.png"), vis
+        )
 
 
 def _build(args) -> None:
@@ -55,14 +63,18 @@ def _build(args) -> None:
         dpi=args.dpi,
         progress=lambda _fraction, text: print(f"  {text}"),
     )
-    for page, blank in zip(template.pages, blanks):
+    for page, blank in zip(template.pages, blanks, strict=False):
         failed = ", ".join(name for name, _ in blank.failures) or "none"
-        print(f"  page {page.page_index + 1}: {len(page.controls)} controls "
-              f"from {len(blank.contributors)} copies (failed: {failed})")
+        print(
+            f"  page {page.page_index + 1}: {len(page.controls)} controls "
+            f"from {len(blank.contributors)} copies (failed: {failed})"
+        )
     singles = sum(1 for rule in template.rules.values() if rule == "single")
     named = sum(1 for value in template.row_labels.values() if value)
-    print(f"  {len(template.rules)} answer groups: {singles} single-choice, "
-          f"{len(template.rules) - singles} multi-select; {named} rows named")
+    print(
+        f"  {len(template.rules)} answer groups: {singles} single-choice, "
+        f"{len(template.rules) - singles} multi-select; {named} rows named"
+    )
 
     warning = template.provenance.get("small_batch_warning")
     if warning:
@@ -81,19 +93,28 @@ def _read(args) -> None:
     out = pathlib.Path(args.out)
 
     results = survey_batch.read_batch(
-        paths, template,
+        paths,
+        template,
         debug_dir=(out / "overlays") if args.overlays else None,
         progress=lambda _fraction, text: print(f"  {text}"),
     )
     summary = survey_batch.write_batch_outputs(results, template, out)
 
-    print(f"\n{summary['documents']} documents x {summary['controls_per_document']} controls")
+    print(
+        f"\n{summary['documents']} documents x "
+        f"{summary['controls_per_document']} controls"
+    )
     print(f"  marked        : {summary['checked']}")
-    print(f"  needs a look  : {summary['uncertain']} ({summary['uncertain_rate'] * 100:.2f}%)")
+    print(
+        f"  needs a look  : {summary['uncertain']} "
+        f"({summary['uncertain_rate'] * 100:.2f}%)"
+    )
     print(f"  worst page registration: {summary['worst_registration']}")
     if summary["unused_controls"]:
-        print(f"  {summary['unused_controls']} control(s) nobody marked "
-              f"- see unused_controls.csv")
+        print(
+            f"  {summary['unused_controls']} control(s) nobody marked "
+            f"- see unused_controls.csv"
+        )
     for result in results:
         for warning in result.warnings:
             print(f"  ! {result.document}: {warning}")
@@ -165,8 +186,10 @@ def _prune(args) -> None:
 
     survey_label.disambiguate_labels(template)
     template.save(args.template)
-    print(f"Removed {removed} control(s); {template.control_count} remain "
-          f"in {len(template.rules)} answer groups")
+    print(
+        f"Removed {removed} control(s); {template.control_count} remain "
+        f"in {len(template.rules)} answer groups"
+    )
     if removed != len(drop):
         print(f"  note: {len(drop) - removed} id(s) were not in the template")
 
@@ -175,17 +198,23 @@ def _sheet(args) -> None:
     template = survey_template.SurveyTemplate.load(args.template)
     names = (
         [n.strip() for n in args.documents.split(",") if n.strip()]
-        if args.documents else [p.name for p in _documents(args.input)]
+        if args.documents
+        else [p.name for p in _documents(args.input)]
     )
     sheet = survey_batch.answer_sheet(template, names)
     out = pathlib.Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     sheet.to_csv(out, index=False)
-    (out.parent / "HOW_TO_LABEL.md").write_text(LABEL_INSTRUCTIONS, encoding="utf-8")
+    (out.parent / "HOW_TO_LABEL.md").write_text(
+        LABEL_INSTRUCTIONS, encoding="utf-8"
+    )
     print(f"Blank answer sheet -> {out}")
     print(f"Instructions       -> {out.parent / 'HOW_TO_LABEL.md'}")
-    print(f"  {len(names)} document(s) x {len(sheet) // max(1, len(names))} answers each "
-          f"= {len(sheet)} lines to fill in")
+    print(
+        f"  {len(names)} document(s) x {len(sheet) // max(1, len(names))} "
+        "answers each "
+        f"= {len(sheet)} lines to fill in"
+    )
 
 
 def _score(args) -> None:
@@ -197,7 +226,9 @@ def _score(args) -> None:
     paths = [p for p in _documents(args.input) if p.name in names]
     missing = set(names) - {p.name for p in paths}
     if missing:
-        raise SystemExit(f"Documents named in the sheet but not found: {sorted(missing)}")
+        raise SystemExit(
+            f"Documents named in the sheet but not found: {sorted(missing)}"
+        )
 
     results = survey_batch.read_batch(paths, template)
     per_answer, summary = survey_batch.score_sheet(sheet, results, template)
@@ -205,8 +236,11 @@ def _score(args) -> None:
     out = pathlib.Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     per_answer.to_csv(out / "score_per_answer.csv", index=False)
-    wrong = per_answer[(~per_answer["correct"]) & (~per_answer["flagged"])
-                       & (~per_answer["human_unsure"])]
+    wrong = per_answer[
+        (~per_answer["correct"])
+        & (~per_answer["flagged"])
+        & (~per_answer["human_unsure"])
+    ]
     wrong.to_csv(out / "score_disagreements.csv", index=False)
 
     print()
@@ -214,8 +248,18 @@ def _score(args) -> None:
         print(f"  {key:34s} {value}")
     if len(wrong):
         print(f"\n  {len(wrong)} silent error(s) -> score_disagreements.csv")
-        print(wrong[["document", "answer_id", "row", "truth",
-                     "predicted", "certainty"]].to_string(index=False))
+        print(
+            wrong[
+                [
+                    "document",
+                    "answer_id",
+                    "row",
+                    "truth",
+                    "predicted",
+                    "certainty",
+                ]
+            ].to_string(index=False)
+        )
     print(f"\nWrote score_per_answer.csv, score_disagreements.csv to {out}")
 
 
@@ -230,54 +274,111 @@ def _run(args) -> None:
 
 
 def main(argv=None) -> None:
-    parser = argparse.ArgumentParser(description=__doc__,
-                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    """Run the command named on the command line (see the module docstring)."""
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    build = sub.add_parser("build-template", help="synthesize the blank and find controls")
-    build.add_argument("--input", required=True, help="folder of questionnaires")
-    build.add_argument("--template", required=True, help="template JSON to write")
+    build = sub.add_parser(
+        "build-template", help="synthesize the blank and find controls"
+    )
+    build.add_argument(
+        "--input", required=True, help="folder of questionnaires"
+    )
+    build.add_argument(
+        "--template", required=True, help="template JSON to write"
+    )
     build.add_argument("--overlay", help="folder for the audit overlay PNGs")
     build.add_argument("--dpi", type=int, default=survey_template.DEFAULT_DPI)
-    build.add_argument("--labels", action="store_true",
-                       help="name the controls with PaddleOCR-VL (needs the VL backend)")
+    build.add_argument(
+        "--labels",
+        action="store_true",
+        help="name the controls with PaddleOCR-VL (needs the VL backend)",
+    )
     build.set_defaults(func=_build)
 
-    read = sub.add_parser("read", help="read a batch against an existing template")
-    read.add_argument("--input", required=True, help="folder of questionnaires")
-    read.add_argument("--template", required=True, help="template JSON to read")
+    read = sub.add_parser(
+        "read", help="read a batch against an existing template"
+    )
+    read.add_argument(
+        "--input", required=True, help="folder of questionnaires"
+    )
+    read.add_argument(
+        "--template", required=True, help="template JSON to read"
+    )
     read.add_argument("--out", required=True, help="folder for the CSVs")
-    read.add_argument("--overlays", action="store_true", help="write per-document overlays")
+    read.add_argument(
+        "--overlays", action="store_true", help="write per-document overlays"
+    )
     read.set_defaults(func=_read)
 
     run = sub.add_parser("run", help="build the template and read the batch")
     run.add_argument("--input", required=True, help="folder of questionnaires")
-    run.add_argument("--out", required=True, help="folder for template and CSVs")
-    run.add_argument("--template", help="template JSON (default: <out>/survey_template.json)")
-    run.add_argument("--overlay", help="folder for template overlays (default: <out>/template)")
-    run.add_argument("--overlays", action="store_true", help="write per-document overlays")
+    run.add_argument(
+        "--out", required=True, help="folder for template and CSVs"
+    )
+    run.add_argument(
+        "--template",
+        help="template JSON (default: <out>/survey_template.json)",
+    )
+    run.add_argument(
+        "--overlay",
+        help="folder for template overlays (default: <out>/template)",
+    )
+    run.add_argument(
+        "--overlays", action="store_true", help="write per-document overlays"
+    )
     run.add_argument("--dpi", type=int, default=survey_template.DEFAULT_DPI)
-    run.add_argument("--labels", action="store_true",
-                     help="name the controls with PaddleOCR-VL (needs the VL backend)")
+    run.add_argument(
+        "--labels",
+        action="store_true",
+        help="name the controls with PaddleOCR-VL (needs the VL backend)",
+    )
     run.set_defaults(func=_run)
 
-    sheet = sub.add_parser("answer-sheet", help="blank sheet for hand-labelling ground truth")
-    sheet.add_argument("--template", required=True, help="template JSON to read")
-    sheet.add_argument("--input", help="folder of questionnaires (for the document names)")
-    sheet.add_argument("--documents", help="comma-separated filenames to label instead")
+    sheet = sub.add_parser(
+        "answer-sheet", help="blank sheet for hand-labelling ground truth"
+    )
+    sheet.add_argument(
+        "--template", required=True, help="template JSON to read"
+    )
+    sheet.add_argument(
+        "--input", help="folder of questionnaires (for the document names)"
+    )
+    sheet.add_argument(
+        "--documents", help="comma-separated filenames to label instead"
+    )
     sheet.add_argument("--out", required=True, help="CSV to write")
     sheet.set_defaults(func=_sheet)
 
-    score = sub.add_parser("score", help="score a filled answer sheet against the pipeline")
-    score.add_argument("--template", required=True, help="template JSON to read")
-    score.add_argument("--sheet", required=True, help="the filled-in answer sheet CSV")
-    score.add_argument("--input", required=True, help="folder holding the questionnaires")
-    score.add_argument("--out", required=True, help="folder for the score report")
+    score = sub.add_parser(
+        "score", help="score a filled answer sheet against the pipeline"
+    )
+    score.add_argument(
+        "--template", required=True, help="template JSON to read"
+    )
+    score.add_argument(
+        "--sheet", required=True, help="the filled-in answer sheet CSV"
+    )
+    score.add_argument(
+        "--input", required=True, help="folder holding the questionnaires"
+    )
+    score.add_argument(
+        "--out", required=True, help="folder for the score report"
+    )
     score.set_defaults(func=_score)
 
-    prune = sub.add_parser("prune-template", help="delete controls from a template")
-    prune.add_argument("--template", required=True, help="template JSON to edit in place")
-    prune.add_argument("--controls", required=True, help="comma-separated control ids")
+    prune = sub.add_parser(
+        "prune-template", help="delete controls from a template"
+    )
+    prune.add_argument(
+        "--template", required=True, help="template JSON to edit in place"
+    )
+    prune.add_argument(
+        "--controls", required=True, help="comma-separated control ids"
+    )
     prune.set_defaults(func=_prune)
 
     args = parser.parse_args(argv)

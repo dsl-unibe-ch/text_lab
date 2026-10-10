@@ -196,6 +196,28 @@ def test_running_model_names_are_unknown_when_untrustworthy(response):
     assert ollama.running_model_names(SimpleNamespace(ps=ps)) is None
 
 
+def test_installed_model_names_are_canonical():
+    server = SimpleNamespace(
+        list=lambda: SimpleNamespace(
+            models=[SimpleNamespace(model="glm-ocr"), {"name": "qwen3:8b"}]
+        )
+    )
+    assert ollama.installed_model_names(server) == {
+        "glm-ocr:latest",
+        "qwen3:8b",
+    }
+
+
+@pytest.mark.parametrize("response", [{"models": None}, ConnectionError()])
+def test_installed_model_names_are_unknown_without_an_answer(response):
+    def listing():
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+    assert ollama.installed_model_names(SimpleNamespace(list=listing)) is None
+
+
 class FakeServer:
     """Loaded models that leave memory a few polls after being unloaded."""
 

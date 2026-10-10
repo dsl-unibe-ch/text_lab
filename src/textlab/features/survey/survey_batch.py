@@ -9,27 +9,34 @@ what makes one row per respondent well defined. Mark state is read by
 from __future__ import annotations
 
 import pathlib
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any
 
+from textlab.common.storage import get_workspace
 from textlab.features.ocr import markup_detect
 from textlab.features.survey import survey_template
 
 UNCERTAIN = "uncertain"
 REGISTRATION_FAILED = "registration_failed"
 CSV_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+#: Workspace area for temporary files (``textlab.common.storage``).
+WORKSPACE_AREA = "survey"
 
 
 @dataclass
 class ControlReading:
+    """The state of one response control on one questionnaire."""
+
     control_id: str
     page_index: int
     state: str = UNCERTAIN
     score: float = 0.0
-    fill_ratio: Optional[float] = None
-    strike: Optional[float] = None
+    fill_ratio: float | None = None
+    strike: float | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
+        """Return the reading as JSON types, with a 1-based page."""
         return {
             "control_id": self.control_id,
             "page": self.page_index + 1,
@@ -42,18 +49,22 @@ class ControlReading:
 
 @dataclass
 class DocumentReading:
+    """One questionnaire's readings, page registration and warnings."""
+
     document: str
-    export_directory: Optional[str] = None
-    readings: List[ControlReading] = field(default_factory=list)
-    registration: Dict[int, float] = field(default_factory=dict)
-    warnings: List[str] = field(default_factory=list)
+    export_directory: str | None = None
+    readings: list[ControlReading] = field(default_factory=list)
+    registration: dict[int, float] = field(default_factory=dict)
+    warnings: list[str] = field(default_factory=list)
 
     @property
     def checked(self) -> int:
+        """Number of controls read as checked."""
         return sum(1 for r in self.readings if r.state == "checked")
 
     @property
     def uncertain(self) -> int:
+        """Number of controls that could not be read confidently."""
         return sum(1 for r in self.readings if r.state == UNCERTAIN)
 
 
@@ -73,7 +84,7 @@ def read_document(
     pdf_path,
     template: survey_template.SurveyTemplate,
     *,
-    dpi: Optional[int] = None,
+    dpi: int | None = None,
     min_quality: float = survey_template.MIN_REGISTRATION_QUALITY,
     debug_dir=None,
 ) -> DocumentReading:
@@ -108,17 +119,20 @@ def read_document(
         result.registration[page.page_index] = round(quality, 3)
         if H is None or quality < min_quality:
             result.warnings.append(
-                f"page {page.page_index + 1}: {REGISTRATION_FAILED} (quality={quality:.2f})"
+                f"page {page.page_index + 1}: {REGISTRATION_FAILED} "
+                f"(quality={quality:.2f})"
             )
             result.readings.extend(
-                ControlReading(control.id, page.page_index, state=REGISTRATION_FAILED)
+                ControlReading(
+                    control.id, page.page_index, state=REGISTRATION_FAILED
+                )
                 for control in page.controls
             )
             continue
 
         warped = survey_template.warp_to_reference(gray, H, reference.shape)
         residual = survey_template.residual_ink(reference, warped)
-        states: List[str] = []
+        states: list[str] = []
         for control in page.controls:
             x1, y1, x2, y2 = control.pixel_bbox(page.width, page.height)
             verdict = survey_template.classify_residual(
@@ -153,16 +167,25 @@ def read_document(
             out.mkdir(parents=True, exist_ok=True)
             vis = survey_template.overlay(
                 warped,
-                [{"bbox": c.pixel_bbox(page.width, page.height), "shape": c.shape}
-                 for c in page.controls],
+                [
+                    {
+                        "bbox": c.pixel_bbox(page.width, page.height),
+                        "shape": c.shape,
+                    }
+                    for c in page.controls
+                ],
                 states=states,
             )
-            cv2.imwrite(str(out / f"{path.stem}_page{page.page_index + 1}.png"), vis)
+            cv2.imwrite(
+                str(out / f"{path.stem}_page{page.page_index + 1}.png"), vis
+            )
 
     return result
 
 
-SHARED_MARK_SCORE = 0.5  # answered, but the contest stays visible in the export
+SHARED_MARK_SCORE = (
+    0.5  # answered, but the contest stays visible in the export
+)
 
 
 def _resolve_shared_marks(result, page, template, residual) -> None:
@@ -173,7 +196,7 @@ def _resolve_shared_marks(result, page, template, residual) -> None:
     change an answer that was already unambiguous.
     """
     by_id = {reading.control_id: reading for reading in result.readings}
-    groups: Dict[str, List[survey_template.TemplateControl]] = {}
+    groups: dict[str, list[survey_template.TemplateControl]] = {}
     for control in page.controls:
         groups.setdefault(control.row_id or control.id, []).append(control)
 
@@ -181,7 +204,8 @@ def _resolve_shared_marks(result, page, template, residual) -> None:
         if template.rules.get(row_id, "single") != "single":
             continue
         checked = [
-            control for control in controls
+            control
+            for control in controls
             if control.id in by_id and by_id[control.id].state == "checked"
         ]
         if len(checked) < 2:
@@ -201,16 +225,22 @@ def read_batch(
     pdf_paths: Sequence[Any],
     template: survey_template.SurveyTemplate,
     *,
-    dpi: Optional[int] = None,
+    dpi: int | None = None,
     debug_dir=None,
     progress=None,
-) -> List[DocumentReading]:
+) -> list[DocumentReading]:
+    """Read every questionnaire of a batch against the template."""
     results = []
     paths = [pathlib.Path(p) for p in pdf_paths]
     for index, path in enumerate(paths, start=1):
         if progress is not None:
-            progress(index / len(paths), f"Reading {path.name} ({index}/{len(paths)})")
-        results.append(read_document(path, template, dpi=dpi, debug_dir=debug_dir))
+            progress(
+                index / len(paths),
+                f"Reading {path.name} ({index}/{len(paths)})",
+            )
+        results.append(
+            read_document(path, template, dpi=dpi, debug_dir=debug_dir)
+        )
     return results
 
 
@@ -219,15 +249,19 @@ def read_batch(
 # ==========================================
 
 
-def _column_names(template: Optional[survey_template.SurveyTemplate]) -> Dict[str, str]:
+def _column_names(
+    template: survey_template.SurveyTemplate | None,
+) -> dict[str, str]:
     """Readable, unique column name per control id."""
     if template is None:
         return {}
-    names: Dict[str, str] = {}
-    used: Dict[str, int] = {}
+    names: dict[str, str] = {}
+    used: dict[str, int] = {}
     for page in template.pages:
         for control in page.controls:
-            parts = [part for part in (control.question_id, control.label) if part]
+            parts = [
+                part for part in (control.question_id, control.label) if part
+            ]
             if not parts:
                 continue
             name = " | ".join(parts)
@@ -238,13 +272,18 @@ def _column_names(template: Optional[survey_template.SurveyTemplate]) -> Dict[st
     return names
 
 
-def readings_in(result: DocumentReading,
-                template: Optional[survey_template.SurveyTemplate]):
+def readings_in(
+    result: DocumentReading, template: survey_template.SurveyTemplate | None
+):
     """Return readings for controls still present in the template."""
     if template is None:
         return result.readings
-    known = {control.id for page in template.pages for control in page.controls}
-    return [reading for reading in result.readings if reading.control_id in known]
+    known = {
+        control.id for page in template.pages for control in page.controls
+    }
+    return [
+        reading for reading in result.readings if reading.control_id in known
+    ]
 
 
 def _spreadsheet_safe(value):
@@ -262,24 +301,31 @@ def safe_csv(frame, path_or_buf=None):
     return safe.to_csv(path_or_buf, index=False)
 
 
-def to_wide(results: Sequence[DocumentReading],
-            template: Optional[survey_template.SurveyTemplate] = None):
+def to_wide(
+    results: Sequence[DocumentReading],
+    template: survey_template.SurveyTemplate | None = None,
+):
     """One row per respondent, one column per control."""
     import pandas as pd
 
     names = _column_names(template)
     records = []
     for result in results:
-        row: Dict[str, Any] = {"document": result.document}
-        row.update({
-            names.get(r.control_id, r.control_id): r.state
-            for r in readings_in(result, template)
-        })
+        row: dict[str, Any] = {"document": result.document}
+        row.update(
+            {
+                names.get(r.control_id, r.control_id): r.state
+                for r in readings_in(result, template)
+            }
+        )
         records.append(row)
     return pd.DataFrame(records)
 
 
-def to_long(results: Sequence[DocumentReading], template: survey_template.SurveyTemplate):
+def to_long(
+    results: Sequence[DocumentReading],
+    template: survey_template.SurveyTemplate,
+):
     """One row per respondent-control, carrying the geometric evidence."""
     import pandas as pd
 
@@ -291,20 +337,24 @@ def to_long(results: Sequence[DocumentReading], template: survey_template.Survey
     records = []
     for result in results:
         for reading in readings_in(result, template):
-            question_id, row_id, label = labels.get(reading.control_id, ("", "", ""))
-            records.append({
-                "document": result.document,
-                "control_id": reading.control_id,
-                "question_id": question_id,
-                "row_id": row_id,
-                "row_label": template.row_labels.get(row_id, ""),
-                "label": label,
-                "page": reading.page_index + 1,
-                "state": reading.state,
-                "score": reading.score,
-                "fill_ratio": reading.fill_ratio,
-                "strike": reading.strike,
-            })
+            question_id, row_id, label = labels.get(
+                reading.control_id, ("", "", "")
+            )
+            records.append(
+                {
+                    "document": result.document,
+                    "control_id": reading.control_id,
+                    "question_id": question_id,
+                    "row_id": row_id,
+                    "row_label": template.row_labels.get(row_id, ""),
+                    "label": label,
+                    "page": reading.page_index + 1,
+                    "state": reading.state,
+                    "score": reading.score,
+                    "fill_ratio": reading.fill_ratio,
+                    "strike": reading.strike,
+                }
+            )
     return pd.DataFrame(records)
 
 
@@ -312,7 +362,7 @@ CERTAINTY_SUFFIX = " [certainty]"
 MULTIPLE = "MULTIPLE"
 
 
-def resolve_single(states) -> Tuple[str, float]:
+def resolve_single(states) -> tuple[str, float]:
     """Collapse one single-choice answer's controls into a value.
 
     *states* is ``[(control, state, score), ...]``. Returns the chosen option's
@@ -332,19 +382,19 @@ def resolve_single(states) -> Tuple[str, float]:
     return "", weakest
 
 
-def _unique(name: str, used: Dict[str, int]) -> str:
+def _unique(name: str, used: dict[str, int]) -> str:
     used[name] = used.get(name, 0) + 1
     return name if used[name] == 1 else f"{name} ({used[name]})"
 
 
 def _row_plan(template: survey_template.SurveyTemplate):
     """Ordered (row_id, rule, [(control, column name)]) for the whole form."""
-    rows: Dict[str, List[survey_template.TemplateControl]] = {}
+    rows: dict[str, list[survey_template.TemplateControl]] = {}
     for page in template.pages:
         for control in page.controls:
-            rows.setdefault(control.row_id or control.question_id or "ungrouped", []).append(
-                control
-            )
+            rows.setdefault(
+                control.row_id or control.question_id or "ungrouped", []
+            ).append(control)
 
     plan, used = [], {}
     for row_id, controls in rows.items():
@@ -354,7 +404,9 @@ def _row_plan(template: survey_template.SurveyTemplate):
             (control, _unique(f"{name} | {control.label or control.id}", used))
             for control in controls
         ]
-        plan.append((row_id, name, template.rules.get(row_id, "single"), columns))
+        plan.append(
+            (row_id, name, template.rules.get(row_id, "single"), columns)
+        )
     return plan
 
 
@@ -369,9 +421,9 @@ def to_checkbox_table(
     column is followed by its certainty, so a reviewer can sort on it and only
     open the questionnaires that need a human.
 
-    Certainty is the geometric margin of the read (how far the measured ink sits
-    from the decision thresholds), not a validated probability. 1.0 means the
-    control was unambiguously empty or unambiguously marked.
+    Certainty is the geometric margin of the read (how far the measured ink
+    sits from the decision thresholds), not a validated probability. 1.0 means
+    the control was unambiguously empty or unambiguously marked.
     """
     import pandas as pd
 
@@ -379,9 +431,11 @@ def to_checkbox_table(
     records = []
     for result in results:
         readings = {r.control_id: r for r in result.readings}
-        record: Dict[str, Any] = {
+        record: dict[str, Any] = {
             "document": result.document,
-            "registration": round(min(result.registration.values(), default=0.0), 3),
+            "registration": round(
+                min(result.registration.values(), default=0.0), 3
+            ),
         }
 
         for _row_id, row_name, rule, columns in plan:
@@ -389,9 +443,15 @@ def to_checkbox_table(
             for control, column in columns:
                 reading = readings.get(control.id)
                 state = reading.state if reading else UNCERTAIN
-                states.append((control, state, reading.score if reading else 0.0))
-                record[column] = {"checked": True, "unchecked": False}.get(state, "")
-                record[column + CERTAINTY_SUFFIX] = round(reading.score if reading else 0.0, 3)
+                states.append(
+                    (control, state, reading.score if reading else 0.0)
+                )
+                record[column] = {"checked": True, "unchecked": False}.get(
+                    state, ""
+                )
+                record[column + CERTAINTY_SUFFIX] = round(
+                    reading.score if reading else 0.0, 3
+                )
 
             if rule != "single":
                 continue
@@ -413,13 +473,18 @@ def to_checkbox_table(
     return frame[[c for c in order if c in frame.columns]]
 
 
-def review_queue(results: Sequence[DocumentReading], template: survey_template.SurveyTemplate):
+def review_queue(
+    results: Sequence[DocumentReading],
+    template: survey_template.SurveyTemplate,
+):
     """Every cell a human should look at, most doubtful first."""
     long = to_long(results, template)
     if long.empty:
         return long
     flagged = long[long["state"].isin({UNCERTAIN, REGISTRATION_FAILED})]
-    return flagged.sort_values(["score", "document", "control_id"]).reset_index(drop=True)
+    return flagged.sort_values(
+        ["score", "document", "control_id"]
+    ).reset_index(drop=True)
 
 
 def unused_controls(
@@ -437,12 +502,14 @@ def unused_controls(
 
     marked = {
         reading.control_id
-        for result in results for reading in result.readings
+        for result in results
+        for reading in result.readings
         if reading.state == "checked"
     }
     rows_marked = {
         control.row_id
-        for page in template.pages for control in page.controls
+        for page in template.pages
+        for control in page.controls
         if control.id in marked
     }
     records = [
@@ -455,25 +522,32 @@ def unused_controls(
             "shape": control.shape,
             "whole_row_unused": control.row_id not in rows_marked,
         }
-        for page in template.pages for control in page.controls
+        for page in template.pages
+        for control in page.controls
         if control.id not in marked
     ]
     frame = pd.DataFrame(records)
     if not frame.empty:
         frame = frame.sort_values(
-            ["whole_row_unused", "page", "row_id"], ascending=[False, True, True]
+            ["whole_row_unused", "page", "row_id"],
+            ascending=[False, True, True],
         ).reset_index(drop=True)
     return frame
 
 
 def summarize(
     results: Sequence[DocumentReading],
-    template: Optional[survey_template.SurveyTemplate] = None,
-) -> Dict[str, Any]:
+    template: survey_template.SurveyTemplate | None = None,
+) -> dict[str, Any]:
+    """Return counts over a batch's readings, for an overview."""
     kept = [readings_in(result, template) for result in results]
     total = sum(len(readings) for readings in kept)
-    checked = sum(1 for readings in kept for r in readings if r.state == "checked")
-    uncertain = sum(1 for readings in kept for r in readings if r.state == UNCERTAIN)
+    checked = sum(
+        1 for readings in kept for r in readings if r.state == "checked"
+    )
+    uncertain = sum(
+        1 for readings in kept for r in readings if r.state == UNCERTAIN
+    )
     return {
         "documents": len(results),
         "controls_per_document": total // max(1, len(results)),
@@ -482,7 +556,11 @@ def summarize(
         "uncertain_rate": round(uncertain / max(1, total), 4),
         "documents_with_warnings": sum(1 for r in results if r.warnings),
         "worst_registration": round(
-            min((min(r.registration.values(), default=0.0) for r in results), default=0.0), 3
+            min(
+                (min(r.registration.values(), default=0.0) for r in results),
+                default=0.0,
+            ),
+            3,
         ),
     }
 
@@ -491,12 +569,14 @@ def summarize(
 #          GROUND TRUTH AND SCORING
 # ==========================================
 
-BLANK_MARK = ""          # respondent left the answer empty
-AMBIGUOUS_MARK = "?"     # a human could not tell either
+BLANK_MARK = ""  # respondent left the answer empty
+AMBIGUOUS_MARK = "?"  # a human could not tell either
 MULTI_SEPARATOR = ";"
 
 
-def answer_sheet(template: survey_template.SurveyTemplate, documents: Sequence[str]):
+def answer_sheet(
+    template: survey_template.SurveyTemplate, documents: Sequence[str]
+):
     """A blank sheet for a human to fill in, one line per answer.
 
     Deliberately blank rather than pre-filled with the pipeline's reads: a
@@ -507,7 +587,8 @@ def answer_sheet(template: survey_template.SurveyTemplate, documents: Sequence[s
 
     scan_page = {
         control.row_id: page.page_index
-        for page in template.pages for control in page.controls
+        for page in template.pages
+        for control in page.controls
     }
     rows = template.rows()
 
@@ -516,16 +597,20 @@ def answer_sheet(template: survey_template.SurveyTemplate, documents: Sequence[s
     ordered = sorted(
         rows.items(),
         key=lambda item: (
-            scan_page.get(item[0], 0), item[1][0].column, item[1][0].bbox[1]
+            scan_page.get(item[0], 0),
+            item[1][0].column,
+            item[1][0].bbox[1],
         ),
     )
 
     # Where a question has several answers and no printed row name, say which
     # one this is: otherwise two rows of "option 1..4" are indistinguishable.
-    siblings: Dict[str, int] = {}
-    for row_id, controls in ordered:
-        siblings[controls[0].question_id] = siblings.get(controls[0].question_id, 0) + 1
-    position: Dict[str, int] = {}
+    siblings: dict[str, int] = {}
+    for _row_id, controls in ordered:
+        siblings[controls[0].question_id] = (
+            siblings.get(controls[0].question_id, 0) + 1
+        )
+    position: dict[str, int] = {}
 
     records = []
     for document in documents:
@@ -535,27 +620,32 @@ def answer_sheet(template: survey_template.SurveyTemplate, documents: Sequence[s
             position[question] = position.get(question, 0) + 1
             row = template.row_labels.get(row_id, "")
             if not row and siblings[question] > 1:
-                row = f"row {position[question]} of {siblings[question]} (top to bottom)"
+                row = (
+                    f"row {position[question]} of {siblings[question]} "
+                    "(top to bottom)"
+                )
             number = question.rsplit("_q", 1)[-1]
-            records.append({
-                "document": document,
-                "answer_id": row_id,
-                "sheet_page": controls[0].sheet_page or "?",
-                "question": f"Q{number}" if number else "",
-                "row": row,
-                "type": template.rules.get(row_id, "single"),
-                "options": " | ".join(c.label or c.id for c in controls),
-                "answer": "",
-            })
+            records.append(
+                {
+                    "document": document,
+                    "answer_id": row_id,
+                    "sheet_page": controls[0].sheet_page or "?",
+                    "question": f"Q{number}" if number else "",
+                    "row": row,
+                    "type": template.rules.get(row_id, "single"),
+                    "options": " | ".join(c.label or c.id for c in controls),
+                    "answer": "",
+                }
+            )
     return pd.DataFrame(records)
 
 
 def _pipeline_answers(
     results: Sequence[DocumentReading],
     template: survey_template.SurveyTemplate,
-) -> Dict[Tuple[str, str], Tuple[str, float]]:
+) -> dict[tuple[str, str], tuple[str, float]]:
     """(document, answer_id) -> (value, certainty), matching the export."""
-    rows: Dict[str, List[survey_template.TemplateControl]] = {}
+    rows: dict[str, list[survey_template.TemplateControl]] = {}
     for page in template.pages:
         for control in page.controls:
             rows.setdefault(control.row_id, []).append(control)
@@ -568,8 +658,12 @@ def _pipeline_answers(
             states = [
                 (
                     control,
-                    readings[control.id].state if control.id in readings else UNCERTAIN,
-                    readings[control.id].score if control.id in readings else 0.0,
+                    readings[control.id].state
+                    if control.id in readings
+                    else UNCERTAIN,
+                    readings[control.id].score
+                    if control.id in readings
+                    else 0.0,
                 )
                 for control in controls
             ]
@@ -577,11 +671,15 @@ def _pipeline_answers(
                 answers[(result.document, row_id)] = resolve_single(states)
             else:
                 chosen = sorted(
-                    (c.label or c.id) for c, state, _ in states if state == "checked"
+                    (c.label or c.id)
+                    for c, state, _ in states
+                    if state == "checked"
                 )
                 unread = any(state == UNCERTAIN for _, state, _ in states)
                 answers[(result.document, row_id)] = (
-                    UNCERTAIN.upper() if unread else MULTI_SEPARATOR.join(chosen),
+                    UNCERTAIN.upper()
+                    if unread
+                    else MULTI_SEPARATOR.join(chosen),
                     min((score for _, _, score in states), default=0.0),
                 )
     return answers
@@ -594,7 +692,7 @@ def _norm_text(value: str) -> str:
     return re.sub(r"[^\w\s]", "", value, flags=re.UNICODE).casefold().strip()
 
 
-def match_option(text: str, options: Sequence[str]) -> Optional[str]:
+def match_option(text: str, options: Sequence[str]) -> str | None:
     """Resolve a hand-written answer to one of the printed options.
 
     A labeller copying a long option shortens it ("Ja Falls ja" for "Ja Falls
@@ -613,15 +711,19 @@ def match_option(text: str, options: Sequence[str]) -> Optional[str]:
         lambda a, b: a.startswith(b) or b.startswith(a),
         lambda a, b: a in b or b in a,
     ):
-        hits = [option for norm, option in lookup.items() if test(norm, wanted)]
+        hits = [
+            option for norm, option in lookup.items() if test(norm, wanted)
+        ]
         if len(hits) == 1:
             return hits[0]
     return None
 
 
 def _resolve_answer(value: str, options: Sequence[str]):
-    """(canonical answer, unresolved parts) for a possibly multi-part answer."""
-    parts = [p.strip() for p in str(value or "").split(MULTI_SEPARATOR) if p.strip()]
+    """Return (canonical answer, unresolved parts) of a multi-part answer."""
+    parts = [
+        p.strip() for p in str(value or "").split(MULTI_SEPARATOR) if p.strip()
+    ]
     if not parts:
         return "", []
     resolved, unresolved = [], []
@@ -662,19 +764,22 @@ def score_sheet(
         choices = options.get(key[1], [])
         truth_canonical, unresolved = _resolve_answer(truth, choices)
         value_canonical, _ = _resolve_answer(value, choices)
-        records.append({
-            "document": key[0],
-            "answer_id": key[1],
-            "row": row.get("row", ""),
-            "truth": truth,
-            "predicted": value,
-            "certainty": certainty,
-            "flagged": flagged,
-            "correct": (not flagged) and not unresolved
-            and truth_canonical == value_canonical,
-            "human_unsure": truth == AMBIGUOUS_MARK,
-            "unmatched_label": MULTI_SEPARATOR.join(unresolved),
-        })
+        records.append(
+            {
+                "document": key[0],
+                "answer_id": key[1],
+                "row": row.get("row", ""),
+                "truth": truth,
+                "predicted": value,
+                "certainty": certainty,
+                "flagged": flagged,
+                "correct": (not flagged)
+                and not unresolved
+                and truth_canonical == value_canonical,
+                "human_unsure": truth == AMBIGUOUS_MARK,
+                "unmatched_label": MULTI_SEPARATOR.join(unresolved),
+            }
+        )
 
     per_answer = pd.DataFrame(records)
     if per_answer.empty:
@@ -690,15 +795,23 @@ def score_sheet(
         "flagged_for_review": int(scorable["flagged"].sum()),
         "auto_accepted": int(len(auto)),
         "auto_accepted_correct": int(auto["correct"].sum()),
-        "auto_accepted_accuracy": round(auto["correct"].mean(), 4) if len(auto) else None,
+        "auto_accepted_accuracy": round(auto["correct"].mean(), 4)
+        if len(auto)
+        else None,
         "silent_errors": int(len(wrong)),
         "human_unsure": int(per_answer["human_unsure"].sum()),
-        "labels_not_matched_to_an_option": int((per_answer["unmatched_label"] != "").sum()),
+        "labels_not_matched_to_an_option": int(
+            (per_answer["unmatched_label"] != "").sum()
+        ),
     }
     if len(wrong):
         # The number that matters: does certainty actually rank the mistakes?
-        summary["max_certainty_of_a_silent_error"] = round(wrong["certainty"].max(), 3)
-        summary["median_certainty_of_a_silent_error"] = round(wrong["certainty"].median(), 3)
+        summary["max_certainty_of_a_silent_error"] = round(
+            wrong["certainty"].max(), 3
+        )
+        summary["median_certainty_of_a_silent_error"] = round(
+            wrong["certainty"].median(), 3
+        )
     return per_answer, summary
 
 
@@ -711,13 +824,14 @@ def prepare_template(
     paths: Sequence[Any],
     *,
     label: bool = True,
-    dpi: Optional[int] = None,
+    dpi: int | None = None,
     progress=None,
     vl_session=None,
 ):
     """Learn the questionnaire from a batch: blank, controls, structure, names.
 
-    Shared by the CLI and the TextLab batch page so the two cannot drift.
+    Shared by the CLI and :class:`.service.QuestionnaireBatch` (the OCR
+    batch) so the two cannot drift.
     *label* runs PaddleOCR-VL over the synthesized blanks to recover question
     grouping and option text; everything else needs only OpenCV and Tesseract.
     *vl_session* is a resident worker to run that on, so the batch loads the
@@ -730,7 +844,8 @@ def prepare_template(
             progress(fraction, text)
 
     template, blanks = survey_template.build_template(
-        paths, dpi=dpi or survey_template.DEFAULT_DPI,
+        paths,
+        dpi=dpi or survey_template.DEFAULT_DPI,
         progress=lambda f, t: _say(0.1 + 0.5 * f, t),
     )
 
@@ -748,9 +863,11 @@ def prepare_template(
     stacked = min((len(b.contributors) for b in blanks), default=0)
     if stacked < survey_template.MIN_BLANK_DOCUMENTS:
         template.provenance["small_batch_warning"] = (
-            f"The blank form was averaged from only {stacked} questionnaire(s). "
+            f"The blank form was averaged from only {stacked} "
+            "questionnaire(s). "
             f"Below {survey_template.MIN_BLANK_DOCUMENTS} an option that most "
-            "respondents chose can survive as a faint mark on the blank and be "
+            "respondents chose can survive as a faint mark on the blank and "
+            "be "
             "subtracted from every answer. Results are usable but check the "
             "template overlay."
         )
@@ -768,15 +885,13 @@ def prepare_template(
 
 def _blank_layout(template, blanks, vl_session=None):
     """Run the layout/OCR worker over the synthesized blanks."""
-    import tempfile
-
     import cv2
 
     from textlab.features.ocr.vl_session import run_vl_worker
 
-    with tempfile.TemporaryDirectory() as tmp:
+    with get_workspace().temp_dir(WORKSPACE_AREA, prefix="blank-") as tmp:
         images = []
-        for page, blank in zip(template.pages, blanks):
+        for page, blank in zip(template.pages, blanks, strict=False):
             path = pathlib.Path(tmp) / f"blank_page{page.page_index + 1}.png"
             cv2.imwrite(str(path), blank.image)
             images.append(path)
@@ -785,7 +900,7 @@ def _blank_layout(template, blanks, vl_session=None):
 
 def template_overlays(
     template: survey_template.SurveyTemplate, *, tag_answers: bool = True
-) -> Dict[str, bytes]:
+) -> dict[str, bytes]:
     """Audit PNG per page: the synthesized blank with every control outlined.
 
     Each answer group is tagged with the name it carries in the exports, so the
@@ -802,14 +917,21 @@ def template_overlays(
             continue
         vis = survey_template.overlay(
             blank,
-            [{"bbox": c.pixel_bbox(page.width, page.height), "shape": c.shape}
-             for c in page.controls],
+            [
+                {
+                    "bbox": c.pixel_bbox(page.width, page.height),
+                    "shape": c.shape,
+                }
+                for c in page.controls
+            ],
         )
         if tag_answers:
             _tag_answers(vis, page, template)
         ok, encoded = cv2.imencode(".png", vis)
         if ok:
-            images[f"template_page{page.page_index + 1}.png"] = encoded.tobytes()
+            images[f"template_page{page.page_index + 1}.png"] = (
+                encoded.tobytes()
+            )
     return images
 
 
@@ -820,7 +942,9 @@ def question_tag(control: survey_template.TemplateControl) -> str:
     ``document.md``, so one name finds a question in all three.
     """
     number = (
-        control.question_id.rsplit("_q", 1)[-1] if "_q" in control.question_id else ""
+        control.question_id.rsplit("_q", 1)[-1]
+        if "_q" in control.question_id
+        else ""
     )
     parts = [
         f"p{control.sheet_page}" if control.sheet_page else "",
@@ -847,9 +971,11 @@ def _tag_answers(image, page, template) -> None:
 
     questions = {}
     for control in page.controls:
-        questions.setdefault(control.question_id or control.row_id, []).append(control)
+        questions.setdefault(control.question_id or control.row_id, []).append(
+            control
+        )
 
-    for question_id, controls in questions.items():
+    for _question_id, controls in questions.items():
         boxes = [c.pixel_bbox(page.width, page.height) for c in controls]
         x1 = max(0, min(b[0] for b in boxes) - pad)
         y1 = max(0, min(b[1] for b in boxes) - pad)
@@ -859,15 +985,31 @@ def _tag_answers(image, page, template) -> None:
 
         first = survey_template.reading_order(controls)[0]
         text = question_tag(first)
-        (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, scale, thickness)
+        (tw, th), _ = cv2.getTextSize(
+            text, cv2.FONT_HERSHEY_SIMPLEX, scale, thickness
+        )
 
         tx = min(x1, max(0, image.shape[1] - tw - 4))
         ty = y1 - int(6 * scale)
         if ty - th < 0:
             ty = y2 + th + int(6 * scale)
-        cv2.rectangle(image, (tx - 3, ty - th - 5), (tx + tw + 3, ty + 4), (255, 255, 255), -1)
-        cv2.putText(image, text, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX,
-                    scale, colour, thickness, cv2.LINE_AA)
+        cv2.rectangle(
+            image,
+            (tx - 3, ty - th - 5),
+            (tx + tw + 3, ty + 4),
+            (255, 255, 255),
+            -1,
+        )
+        cv2.putText(
+            image,
+            text,
+            (tx, ty),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            scale,
+            colour,
+            thickness,
+            cv2.LINE_AA,
+        )
 
 
 def drop_controls(
@@ -900,27 +1042,31 @@ def answer_overview(
 
     marked = {
         reading.control_id
-        for result in results for reading in result.readings
+        for result in results
+        for reading in result.readings
         if reading.state == "checked"
     }
     records = []
     for row_id, controls in template.rows().items():
         respondents = {
             result.document
-            for result in results for reading in result.readings
+            for result in results
+            for reading in result.readings
             if reading.state == "checked"
             and reading.control_id in {c.id for c in controls}
         }
-        records.append({
-            "answer": template.display_name(row_id),
-            "answer_id": row_id,
-            "sheet_page": controls[0].sheet_page,
-            "type": template.rules.get(row_id, "single"),
-            "options": len(controls),
-            "answered_by": len(respondents),
-            "never_marked": not any(c.id in marked for c in controls),
-            "control_ids": ",".join(c.id for c in controls),
-        })
+        records.append(
+            {
+                "answer": template.display_name(row_id),
+                "answer_id": row_id,
+                "sheet_page": controls[0].sheet_page,
+                "type": template.rules.get(row_id, "single"),
+                "options": len(controls),
+                "answered_by": len(respondents),
+                "never_marked": not any(c.id in marked for c in controls),
+                "control_ids": ",".join(c.id for c in controls),
+            }
+        )
     return pd.DataFrame(records)
 
 
@@ -1004,7 +1150,7 @@ guarantee for a different form.
    tables, each `<file>/survey_answers.csv`, and each `<file>/document.*`.
 2. Work through `review_queue.csv`.
 3. Check any questionnaire with a low `registration`.
-"""
+"""  # noqa: E501 (Markdown tables cannot be wrapped)
 
 
 def slim_document(document):
@@ -1017,10 +1163,8 @@ def slim_document(document):
     return document
 
 
-def _document_exports(template, readings, documents) -> Dict[str, bytes]:
-    """Render per-file exports for the current template as ``{path: bytes}``."""
-    import tempfile
-
+def _document_exports(template, readings, documents) -> dict[str, bytes]:
+    """Render each file's exports for the template as ``{path: bytes}``."""
     from textlab.features.ocr import doc_ir
 
     by_directory = {
@@ -1033,8 +1177,8 @@ def _document_exports(template, readings, documents) -> Dict[str, bytes]:
         for reading in readings
         if not reading.export_directory
     }
-    out: Dict[str, bytes] = {}
-    with tempfile.TemporaryDirectory() as tmp:
+    out: dict[str, bytes] = {}
+    with get_workspace().temp_dir(WORKSPACE_AREA, prefix="exports-") as tmp:
         for rel_dir, document in documents.items():
             reading = by_directory.get(rel_dir)
             if reading is None:
@@ -1044,25 +1188,27 @@ def _document_exports(template, readings, documents) -> Dict[str, bytes]:
             to_form_groups(reading, template, document)
             target = pathlib.Path(tmp) / rel_dir
             names = doc_ir.write_document_outputs(
-                document, target, "document", provenance=False,
+                document,
+                target,
+                "document",
+                provenance=False,
                 skip_tables=survey_table_regions(document, template),
                 form_responses=False,
             )
             for name in names:
                 out[f"{rel_dir}/{pathlib.PurePosixPath(name).as_posix()}"] = (
-                    (target / name).read_bytes()
-                )
+                    target / name
+                ).read_bytes()
     return out
 
 
 def rebuild_exports(zip_bytes, template, readings, documents=None):
-    """Rebuild answer exports from stored readings and return ZIP bytes plus summary."""
+    """Rebuild answer exports from stored readings; return ZIP and summary."""
     import io
-    import tempfile
     import zipfile
 
     documents = documents or {}
-    with tempfile.TemporaryDirectory() as tmp:
+    with get_workspace().temp_dir(WORKSPACE_AREA, prefix="rebuild-") as tmp:
         out = pathlib.Path(tmp) / "survey"
         summary = write_batch_outputs(readings, template, out)
         replacements = {
@@ -1086,7 +1232,9 @@ def rebuild_exports(zip_bytes, template, readings, documents=None):
                 parent = pathlib.PurePosixPath(item).parent.as_posix()
                 reading = per_file.get(parent)
                 if reading is None:
-                    reading = stem_readings.get(pathlib.PurePosixPath(item).parent.name)
+                    reading = stem_readings.get(
+                        pathlib.PurePosixPath(item).parent.name
+                    )
                 if reading is not None:
                     replacements[item] = safe_csv(
                         answers_for_document(reading, template)
@@ -1110,12 +1258,14 @@ def write_batch_outputs(
     results: Sequence[DocumentReading],
     template: survey_template.SurveyTemplate,
     out_dir,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Write the questionnaire tables and audit artifacts for one batch."""
     out = pathlib.Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
 
-    safe_csv(to_checkbox_table(results, template), out / "responses_checkboxes.csv")
+    safe_csv(
+        to_checkbox_table(results, template), out / "responses_checkboxes.csv"
+    )
     safe_csv(to_wide(results, template), out / "responses_matrix.csv")
     safe_csv(to_long(results, template), out / "responses_long.csv")
     safe_csv(review_queue(results, template), out / "review_queue.csv")
@@ -1149,19 +1299,24 @@ def answers_for_document(
     readings = {r.control_id: r for r in result.readings}
     scan_page = {
         control.row_id: page.page_index
-        for page in template.pages for control in page.controls
+        for page in template.pages
+        for control in page.controls
     }
     records = []
     for row_id, controls in sorted(
         template.rows().items(),
         key=lambda item: (
-            scan_page.get(item[0], 0), item[1][0].column, item[1][0].bbox[1]
+            scan_page.get(item[0], 0),
+            item[1][0].column,
+            item[1][0].bbox[1],
         ),
     ):
         states = [
             (
                 control,
-                readings[control.id].state if control.id in readings else UNCERTAIN,
+                readings[control.id].state
+                if control.id in readings
+                else UNCERTAIN,
                 readings[control.id].score if control.id in readings else 0.0,
             )
             for control in controls
@@ -1170,30 +1325,40 @@ def answers_for_document(
         if rule == "single":
             answer, certainty = resolve_single(states)
         else:
-            chosen = [c.label or c.id for c, state, _ in states if state == "checked"]
+            chosen = [
+                c.label or c.id for c, state, _ in states if state == "checked"
+            ]
             unread = any(state == UNCERTAIN for _, state, _ in states)
-            answer = UNCERTAIN.upper() if unread else MULTI_SEPARATOR.join(sorted(chosen))
+            answer = (
+                UNCERTAIN.upper()
+                if unread
+                else MULTI_SEPARATOR.join(sorted(chosen))
+            )
             certainty = min((score for _, _, score in states), default=0.0)
 
         number = controls[0].question_id.rsplit("_q", 1)[-1]
-        records.append({
-            "document": result.document,
-            "sheet_page": controls[0].sheet_page,
-            "question": f"Q{number}" if number else "",
-            "row": template.row_labels.get(row_id, ""),
-            "type": rule,
-            "answer": answer,
-            "certainty": round(float(certainty), 3),
-            "marked": MULTI_SEPARATOR.join(
-                (c.label or c.id) for c, state, _ in states if state == "checked"
-            ),
-            "options": " | ".join(c.label or c.id for c in controls),
-            "answer_id": row_id,
-        })
+        records.append(
+            {
+                "document": result.document,
+                "sheet_page": controls[0].sheet_page,
+                "question": f"Q{number}" if number else "",
+                "row": template.row_labels.get(row_id, ""),
+                "type": rule,
+                "answer": answer,
+                "certainty": round(float(certainty), 3),
+                "marked": MULTI_SEPARATOR.join(
+                    (c.label or c.id)
+                    for c, state, _ in states
+                    if state == "checked"
+                ),
+                "options": " | ".join(c.label or c.id for c in controls),
+                "answer_id": row_id,
+            }
+        )
     return pd.DataFrame(records)
 
 
-def preview_size(page) -> Optional[Tuple[int, int]]:
+def preview_size(page) -> tuple[int, int] | None:
     """Pixel size of the raster a parsed page's region boxes are measured in.
 
     Uses the preview raster, its cached size, or the page dimensions.
@@ -1207,7 +1372,9 @@ def preview_size(page) -> Optional[Tuple[int, int]]:
         try:
             from PIL import Image
 
-            with Image.open(_io.BytesIO(base64.b64decode(page.image_b64))) as preview:
+            with Image.open(
+                _io.BytesIO(base64.b64decode(page.image_b64))
+            ) as preview:
                 return preview.size
         except Exception:
             pass
@@ -1227,7 +1394,9 @@ def survey_table_regions(document, template) -> set:
     from textlab.features.ocr import doc_ir
 
     grids = set()
-    for page, template_page in zip(document.pages, template.pages):
+    for page, template_page in zip(
+        document.pages, template.pages, strict=False
+    ):
         size = preview_size(page)
         if not size:
             continue
@@ -1241,10 +1410,14 @@ def survey_table_regions(document, template) -> set:
             if region.type != doc_ir.TABLE or len(region.bbox) < 4:
                 continue
             x1, y1, x2, y2 = (
-                region.bbox[0] / width, region.bbox[1] / height,
-                region.bbox[2] / width, region.bbox[3] / height,
+                region.bbox[0] / width,
+                region.bbox[1] / height,
+                region.bbox[2] / width,
+                region.bbox[3] / height,
             )
-            inside = sum(1 for cx, cy in centres if x1 <= cx <= x2 and y1 <= cy <= y2)
+            inside = sum(
+                1 for cx, cy in centres if x1 <= cx <= x2 and y1 <= cy <= y2
+            )
             if inside >= 2:
                 grids.add(region.id)
     return grids
@@ -1268,9 +1441,12 @@ def to_form_groups(
 
     readings = {r.control_id: r for r in result.readings}
     attached = 0
-    for page, template_page in zip(document.pages, template.pages):
+    for page, template_page in zip(
+        document.pages, template.pages, strict=False
+    ):
         page.form_groups = [
-            group for group in page.form_groups
+            group
+            for group in page.form_groups
             if group.provenance.get("method") != FORM_GROUP_METHOD
         ]
         size = preview_size(page)
@@ -1278,15 +1454,19 @@ def to_form_groups(
             continue
         width, height = size
 
-        by_question: Dict[str, List[survey_template.TemplateControl]] = {}
+        by_question: dict[str, list[survey_template.TemplateControl]] = {}
         for control in survey_template.reading_order(template_page.controls):
-            by_question.setdefault(control.question_id or control.row_id, []).append(control)
+            by_question.setdefault(
+                control.question_id or control.row_id, []
+            ).append(control)
 
         groups, centres, labelled = [], {}, {}
         for question_id, controls in by_question.items():
-            by_row: Dict[str, List[survey_template.TemplateControl]] = {}
+            by_row: dict[str, list[survey_template.TemplateControl]] = {}
             for control in controls:
-                by_row.setdefault(control.row_id or control.id, []).append(control)
+                by_row.setdefault(control.row_id or control.id, []).append(
+                    control
+                )
 
             rows, boxes = [], []
             for row_id, row_controls in by_row.items():
@@ -1297,46 +1477,66 @@ def to_form_groups(
                     unread = unread or state not in _FORM_STATE
                     box = control.pixel_bbox(width, height)
                     boxes.append(box)
-                    options.append(doc_ir.FormOption(
-                        id=control.id,
-                        label=control.label or control.id,
-                        state=_FORM_STATE.get(state, "ambiguous"),
-                        visual_mark=_FORM_MARK.get(state, "uncertain"),
-                        bbox=[float(v) for v in box],
-                        observations=[doc_ir.Observation(
-                            source="textlab-omr",
-                            value=state,
-                            method=FORM_GROUP_METHOD,
-                            score=round(float(reading.score), 3) if reading else None,
-                        )],
-                    ))
-                rows.append(doc_ir.FormRow(
-                    id=row_id,
-                    label=template.row_labels.get(row_id, ""),
-                    options=options,
-                    status="needs_review" if unread else "accepted",
-                    review_reasons=["mark could not be read"] if unread else [],
-                ))
+                    options.append(
+                        doc_ir.FormOption(
+                            id=control.id,
+                            label=control.label or control.id,
+                            state=_FORM_STATE.get(state, "ambiguous"),
+                            visual_mark=_FORM_MARK.get(state, "uncertain"),
+                            bbox=[float(v) for v in box],
+                            observations=[
+                                doc_ir.Observation(
+                                    source="textlab-omr",
+                                    value=state,
+                                    method=FORM_GROUP_METHOD,
+                                    score=round(float(reading.score), 3)
+                                    if reading
+                                    else None,
+                                )
+                            ],
+                        )
+                    )
+                rows.append(
+                    doc_ir.FormRow(
+                        id=row_id,
+                        label=template.row_labels.get(row_id, ""),
+                        options=options,
+                        status="needs_review" if unread else "accepted",
+                        review_reasons=["mark could not be read"]
+                        if unread
+                        else [],
+                    )
+                )
 
             rules = {template.rules.get(row.id, "single") for row in rows}
             multiple = rules == {"multiple"}
             group = doc_ir.FormGroup(
                 id=question_id,
                 bbox=[
-                    float(min(b[0] for b in boxes)), float(min(b[1] for b in boxes)),
-                    float(max(b[2] for b in boxes)), float(max(b[3] for b in boxes)),
+                    float(min(b[0] for b in boxes)),
+                    float(min(b[1] for b in boxes)),
+                    float(max(b[2] for b in boxes)),
+                    float(max(b[3] for b in boxes)),
                 ],
                 question_text=question_tag(controls[0]),
-                question_type=("matrix" if len(rows) > 1 else
-                               ("multiple" if multiple else "single")),
+                question_type=(
+                    "matrix"
+                    if len(rows) > 1
+                    else ("multiple" if multiple else "single")
+                ),
                 selection_rule="zero_or_more" if multiple else "zero_or_one",
                 rows=rows,
-                status=("needs_review" if any(r.status == "needs_review" for r in rows)
-                        else "accepted"),
+                status=(
+                    "needs_review"
+                    if any(r.status == "needs_review" for r in rows)
+                    else "accepted"
+                ),
                 provenance={
                     "method": FORM_GROUP_METHOD,
                     "template_controls": len(controls),
-                    "registration": result.registration.get(template_page.page_index),
+                    "registration": result.registration.get(
+                        template_page.page_index
+                    ),
                 },
             )
             groups.append(group)
@@ -1346,17 +1546,22 @@ def to_form_groups(
             labelled[group.id] = all(row.label.strip() for row in rows)
 
         # The printed grid is what the layout model saw: empty cells whose row
-        # stems the answers above already carry. Standing in for it is only safe
-        # when every row of every question on it was named, or the document
-        # would silently lose printed text.
+        # stems the answers above already carry. Standing in for it is only
+        # safe when every row of every question on it was named, or the
+        # document would silently lose printed text.
         for region in page.regions:
             if region.type != doc_ir.TABLE or len(region.bbox) < 4:
                 continue
             x1, y1, x2, y2 = region.bbox
             owners = [
-                group for group in groups
-                if sum(1 for cx, cy in centres[group.id]
-                       if x1 <= cx <= x2 and y1 <= cy <= y2) >= 2
+                group
+                for group in groups
+                if sum(
+                    1
+                    for cx, cy in centres[group.id]
+                    if x1 <= cx <= x2 and y1 <= cy <= y2
+                )
+                >= 2
             ]
             if owners and all(labelled[group.id] for group in owners):
                 owners[0].covered_region_ids.append(region.id)

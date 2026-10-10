@@ -1,15 +1,17 @@
-"""Backend for the Survey feature.
+"""Backend for the Survey feature: answers of filled-in paper questionnaires.
 
-Extraction of filled-in survey and form responses from scanned documents, with
-templates and batch scoring.
+Interfaces and the OCR feature use :mod:`.service`. The modules behind it:
 
-Moved from ``src/core`` with only import and path updates. The modules are
-reorganized when the feature is refactored (see ``docs/dev/architecture.md``):
-
-- ``cli``: command-line batch extraction (``python -m
+- ``survey_template``: the blank form, learned once per batch, and its
+  response controls.
+- ``survey_label``: names of questions, answers and options, read from the
+  form's printed text.
+- ``survey_batch``: reading a batch of questionnaires against the form,
+  tables, overlays and rebuilt exports.
+- ``form_extract``: question-level extraction with a vision model
+  (experimental, hidden in the app).
+- ``cli``: command line for developers (``python -m
   textlab.features.survey.cli``).
-- ``form_extract``: question-level response extraction.
-- ``survey_batch``: reading a batch of questionnaires against a template.
-- ``survey_label``: naming the controls on a synthesized blank form.
-- ``survey_template``: the printed form, learned once per batch.
+
+See ``README.md`` in this folder for the pipeline and the files written.
 """

@@ -14,7 +14,6 @@ import pandas as pd
 import streamlit as st
 
 from textlab.features.ocr import doc_ir, service
-from textlab.features.survey import survey_batch
 
 
 def _b64_bytes(b64):
@@ -29,18 +28,17 @@ def _b64_bytes(b64):
 
 def render_survey_review():
     """Let the user check the detected form and drop anything spurious."""
-    template = st.session_state.get("survey_template")
-    readings = st.session_state.get("survey_readings")
-    if not template or not readings:
+    survey = st.session_state.get("survey_batch")
+    if survey is None or not survey.readings:
         return
 
     st.markdown("### The questionnaire TextLab detected")
     st.caption(
-        f"{template.control_count} response controls in {len(template.rules)} "
+        f"{survey.control_count} response controls in {survey.answer_count} "
         f"answers, learned from the batch itself. Check the outlines below: "
         "printed text can occasionally be mistaken for an empty checkbox."
     )
-    overlays = survey_batch.template_overlays(template)
+    overlays = survey.overlays()
     if overlays:
         tabs = st.tabs([f"Page {i + 1}" for i in range(len(overlays))])
         for tab, (name, data) in zip(
@@ -49,7 +47,7 @@ def render_survey_review():
             with tab:
                 st.image(data, caption=name, use_container_width=True)
 
-    overview = survey_batch.answer_overview(readings, template)
+    overview = survey.overview()
     dead = overview[overview["never_marked"]]
     if len(dead):
         st.warning(
@@ -83,15 +81,10 @@ def render_survey_review():
     )
     if chosen and st.button("Rebuild the exports", key="survey_rebuild"):
         ids = [i for name in chosen for i in labels[name].split(",") if i]
-        removed = survey_batch.drop_controls(template, ids)
-        zip_bytes, summary = survey_batch.rebuild_exports(
-            st.session_state.batch_auto_zip,
-            template,
-            readings,
-            st.session_state.get("survey_documents"),
+        zip_bytes, removed, summary = survey.drop_controls(
+            ids, st.session_state.batch_auto_zip
         )
         st.session_state.batch_auto_zip = zip_bytes
-        st.session_state.survey_template = template
         st.success(
             f"Removed {removed} control(s); {summary['controls']} remain in "
             f"{summary['answer_groups']} answers. Every export was rewritten "

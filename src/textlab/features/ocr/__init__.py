@@ -7,8 +7,8 @@ automatic pipeline (:mod:`.pipeline`) reads born-digital pages directly
 :mod:`.markup_detect` handle checkboxes and marks, :mod:`.searchable_pdf`
 the invisible text layer and :mod:`.vision_enrich` figure descriptions.
 
-Manual engine selection still uses :mod:`.ocr_engine` and
-:mod:`.paddle_ocr_worker` (until refactor phase 6b).
+Manual engine selection (:mod:`.manual`) runs one chosen engine, each an
+adapter in :mod:`.engines`: EasyOCR, PaddleOCR, OlmOCR and GLM-OCR.
 
 See ``README.md`` in this folder for the pipeline and the files written.
 """

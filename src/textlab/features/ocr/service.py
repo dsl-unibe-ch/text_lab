@@ -5,24 +5,24 @@ pipeline (:mod:`.pipeline`) on one uploaded PDF or image and prepares every
 download; :func:`recognize_batch` does the same for a ZIP archive, keeping
 the recognition model loaded for the whole batch, and optionally reads a
 batch of filled-in questionnaires against the form they share
-(:mod:`textlab.features.survey.survey_batch`).
+(:mod:`textlab.features.survey.service`). Manual engine selection
+(:mod:`.manual`: EasyOCR, PaddleOCR, OlmOCR, GLM-OCR) is reached through
+:func:`recognize_with_engine` and :func:`recognize_batch_with_engine`.
 
 Uploads, page images and intermediate files go to a job folder in the
 workspace (area ``ocr``), which is removed when the run ends; results are
 returned in memory.
 
-The few names interfaces need from other modules (the result model
-:mod:`.doc_ir`, Tesseract languages, the layout preview) are re-exported
-here, so interfaces import only this module and :mod:`.doc_ir`.
+The few names interfaces need from other modules (Tesseract languages, the
+layout preview, the manual engines) are re-exported here, so interfaces
+import only this module and the result model :mod:`.doc_ir`.
 """
 
 from __future__ import annotations
 
 import dataclasses
-import io
 import os
 import time
-import zipfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, BinaryIO
@@ -30,14 +30,28 @@ from typing import Any, BinaryIO
 from textlab.common.progress import Progress, ProgressCallback, no_progress
 from textlab.common.storage import get_workspace, remove_tree
 from textlab.common.upload_safety import (
-    extract_zip_safely,
     safe_upload_name,
     unique_output_directory,
 )
 from textlab.features.ocr import doc_ir, vision_enrich
+from textlab.features.ocr.archives import (
+    INPUT_EXTENSIONS,
+    extract_inputs,
+    zip_folder,
+)
 from textlab.features.ocr.layout_preview import (
     LAYOUT_TYPE_COLORS,
     render_layout_preview,
+)
+from textlab.features.ocr.manual import (
+    ENGINES,
+    EngineError,
+    EngineOptions,
+    EngineRun,
+    contains_html_table,
+    html_table,
+    recognize_batch_with_engine,
+    recognize_with_engine,
 )
 from textlab.features.ocr.pipeline import document_summary, process_document
 from textlab.features.ocr.searchable_pdf import (
@@ -45,7 +59,10 @@ from textlab.features.ocr.searchable_pdf import (
     TESSERACT_LANGUAGES,
 )
 from textlab.features.ocr.vl_session import VLWorkerSession
-from textlab.features.survey import form_extract, survey_batch
+from textlab.features.survey.service import (
+    QuestionnaireBatch,
+    SameLayoutTemplate,
+)
 
 __all__ = [
     "INPUT_EXTENSIONS",
@@ -53,7 +70,6 @@ __all__ = [
     "DocumentDownloads",
     "DocumentResult",
     "OcrOptions",
-    "SurveyBatch",
     "document_summary",
     "process_document",
     "recognize_batch",
@@ -63,10 +79,16 @@ __all__ = [
     "LAYOUT_TYPE_COLORS",
     "TESSERACT_LANGUAGES",
     "render_layout_preview",
+    # Manual engine selection
+    "ENGINES",
+    "EngineError",
+    "EngineOptions",
+    "EngineRun",
+    "contains_html_table",
+    "html_table",
+    "recognize_batch_with_engine",
+    "recognize_with_engine",
 ]
-
-#: File types the automatic pipeline reads, alone or inside a ZIP archive.
-INPUT_EXTENSIONS = (".pdf", ".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif")
 
 #: Workspace area for job folders.
 WORKSPACE_AREA = "ocr"
@@ -178,25 +200,6 @@ class DocumentResult:
 
 
 @dataclasses.dataclass
-class SurveyBatch:
-    """A batch of questionnaires read against the form they share.
-
-    Attributes:
-        template: The blank form learned from the batch.
-        readings: Each questionnaire's answers.
-        documents: Each file's recognized document, slimmed, by its folder
-            in the result ZIP; used to rebuild the exports after review.
-        warning: A note for the user when the batch is too small to learn
-            the form reliably.
-    """
-
-    template: Any
-    readings: list[Any]
-    documents: dict[str, Any]
-    warning: str | None = None
-
-
-@dataclasses.dataclass
 class BatchResult:
     """The outcome of :func:`recognize_batch`.
 
@@ -210,7 +213,7 @@ class BatchResult:
     zip_bytes: bytes
     file_count: int
     elapsed: float
-    survey: SurveyBatch | None = None
+    survey: QuestionnaireBatch | None = None
 
 
 def recognize_document(
@@ -286,7 +289,7 @@ def recognize_batch(
         else None
     )
     same_layout_template = (
-        form_extract.SameLayoutTemplate()
+        SameLayoutTemplate()
         if options.extract_survey and options.same_template
         else None
     )
@@ -329,7 +332,7 @@ def _recognize_batch(
     input_dir.mkdir()
     results_dir.mkdir(parents=True)
 
-    files = _extract_inputs(archive, input_dir)
+    files = extract_inputs(archive, input_dir)
     if not files:
         raise ValueError("No valid documents or images found in the ZIP.")
     n_files = len(files)
@@ -337,33 +340,8 @@ def _recognize_batch(
     # The consensus template needs all questionnaires up front.
     survey = None
     if options.survey_batch_mode:
-
-        def template_progress(fraction: float, text: str) -> None:
-            on_progress(
-                Progress(
-                    f"Questionnaire layout — {text}",
-                    min(0.99, max(0.0, fraction)),
-                )
-            )
-
-        template_progress(0.0, f"reading {n_files} file(s)...")
-        template, _blanks = survey_batch.prepare_template(
-            files,
-            label=True,
-            progress=template_progress,
-            vl_session=vl_session,
-        )
-        on_progress(
-            Progress(
-                f"Questionnaire layout — {template.control_count} response "
-                f"controls in {len(template.rules)} answers"
-            )
-        )
-        survey = SurveyBatch(
-            template=template,
-            readings=[],
-            documents={},
-            warning=template.provenance.get("small_batch_warning"),
+        survey = QuestionnaireBatch.learn(
+            files, on_progress=on_progress, vl_session=vl_session
         )
 
     batch_provenance = []
@@ -406,16 +384,8 @@ def _recognize_batch(
 
         skip_tables = None
         if survey is not None:
-            reading = survey_batch.read_document(file_path, survey.template)
-            reading.export_directory = output_rel_dir.as_posix()
-            survey.readings.append(reading)
-            survey_batch.safe_csv(
-                survey_batch.answers_for_document(reading, survey.template),
-                file_output_dir / "survey_answers.csv",
-            )
-            survey_batch.to_form_groups(reading, survey.template, document)
-            skip_tables = survey_batch.survey_table_regions(
-                document, survey.template
+            skip_tables = survey.read(
+                file_path, document, file_output_dir, output_rel_dir.as_posix()
             )
 
         doc_ir.write_document_outputs(
@@ -428,8 +398,7 @@ def _recognize_batch(
         )
         batch_provenance.append(doc_ir.model_provenance(document))
         if survey is not None:
-            folder = file_output_dir.relative_to(results_dir).as_posix()
-            survey.documents[folder] = survey_batch.slim_document(document)
+            survey.keep_document(output_rel_dir.as_posix(), document)
 
         # Page images are only needed while a file is recognized.
         remove_tree(file_workspace)
@@ -442,9 +411,7 @@ def _recognize_batch(
 
     if survey is not None:
         on_progress(Progress("Collecting questionnaire responses..."))
-        survey_batch.write_batch_outputs(
-            survey.readings, survey.template, results_dir / "survey"
-        )
+        survey.write_outputs(results_dir / "survey")
 
     elapsed = time.monotonic() - batch_started
     print(
@@ -471,38 +438,11 @@ def _recognize_batch(
             merged_provenance + "\n", encoding="utf-8"
         )
     return BatchResult(
-        zip_bytes=_zip_folder(results_dir),
+        zip_bytes=zip_folder(results_dir),
         file_count=n_files,
         elapsed=elapsed,
         survey=survey,
     )
-
-
-def _extract_inputs(
-    archive: BinaryIO | str | os.PathLike, input_dir: Path
-) -> list[Path]:
-    """Extract the supported files of a ZIP archive, in a stable order.
-
-    macOS resource-fork files (``._name``) are left out.
-    """
-    with zipfile.ZipFile(archive, "r") as source:
-        files = extract_zip_safely(
-            source, input_dir, allowed_extensions=set(INPUT_EXTENSIONS)
-        )
-    files = [path for path in files if not path.name.startswith("._")]
-    files.sort(key=lambda path: str(path.relative_to(input_dir)).casefold())
-    return files
-
-
-def _zip_folder(folder: Path) -> bytes:
-    """Return a ZIP archive of a folder's files, with relative names."""
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
-        for root, _dirs, names in os.walk(folder):
-            for name in names:
-                path = Path(root) / name
-                archive.write(path, path.relative_to(folder))
-    return buffer.getvalue()
 
 
 def _progress_adapter(

@@ -583,8 +583,9 @@ def from_paddle_vl(page_json: dict[str, Any]) -> Page:
 def extract_html_table(html_content: str) -> pd.DataFrame | None:
     """Parse the first HTML ``<table>`` in *html_content* into a DataFrame.
 
-    Generalised, per-region version of the whole-text regex that used to live
-    in ``ocr_engine.py``. Returns ``None`` if there is no parseable table.
+    Used per table region, and on the whole text of a manual engine
+    (``engines.base.html_table``). Returns ``None`` if there is no parseable
+    table.
     """
     if not html_content:
         return None

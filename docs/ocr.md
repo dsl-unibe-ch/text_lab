@@ -67,7 +67,9 @@ The previous engine-picker workflow is still available under the **“Advanced: 
 3. **OlmOCR:** tuned for converting scientific PDFs into clean Markdown.
 4. **GLM-OCR:** a large vision model with selectable Text / Table / Figure extraction modes.
 
-Each legacy engine returns a single plain-text (or Markdown) string per page, exactly as before. For most documents — and for anything with tables or checkboxes — the automatic mode above is recommended.
+Each legacy engine returns plain text (or Markdown) per page. For most documents — and for anything with tables or checkboxes — the automatic mode above is recommended.
+
+The downloads of a single document are the whole text (`.txt`), the engine's result with positions and scores (`.json`; OlmOCR gives its own `.jsonl` record), and a ZIP with both plus one text and JSON file per page. In a batch, each file gets a folder with the same files, mirroring your ZIP's folders. If an engine fails on one file, the batch stops with an error naming it.
 
 > *Warning:* Do not close the tab while a "Running" indicator is active.
 

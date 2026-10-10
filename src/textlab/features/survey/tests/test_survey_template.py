@@ -1,5 +1,4 @@
-"""Template-first survey extraction: registration, consensus blank, mark reads."""
-
+"""Template-first survey extraction: registration, blank, mark reads."""
 
 import io
 import pathlib
@@ -7,7 +6,6 @@ import tempfile
 
 import cv2
 import numpy as np
-import pytest
 
 from textlab.features.ocr import doc_ir as di
 from textlab.features.survey import survey_batch as sb
@@ -16,7 +14,9 @@ from textlab.features.survey import survey_template as st
 
 W, H = 1800, 1400
 RADIUS = 17
-CENTRES = [(200 + col * 300, 380 + row * 220) for row in range(4) for col in range(5)]
+CENTRES = [
+    (200 + col * 300, 380 + row * 220) for row in range(4) for col in range(5)
+]
 
 # Registration keys on printed detail, so the fixture carries a page worth of
 # it — a near-empty synthetic page would fail here for reasons a real scan
@@ -33,22 +33,50 @@ _BODY = [
 def blank_form():
     """A printed form: body text plus a grid of empty response circles."""
     img = np.full((H, W), 255, np.uint8)
-    cv2.putText(img, "Bevoelkerungsbefragung", (120, 90),
-                cv2.FONT_HERSHEY_SIMPLEX, 1.6, 0, 3)
+    cv2.putText(
+        img,
+        "Bevoelkerungsbefragung",
+        (120, 90),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        1.6,
+        0,
+        3,
+    )
     for row, line in enumerate(_BODY):
-        cv2.putText(img, line, (120, 150 + row * 34),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.62, 0, 1)
-        cv2.putText(img, line[::-1], (120, 1200 + row * 34),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.62, 0, 1)
+        cv2.putText(
+            img,
+            line,
+            (120, 150 + row * 34),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.62,
+            0,
+            1,
+        )
+        cv2.putText(
+            img,
+            line[::-1],
+            (120, 1200 + row * 34),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.62,
+            0,
+            1,
+        )
     for index, (x, y) in enumerate(CENTRES):
         cv2.circle(img, (x, y), RADIUS, 0, 2)
-        cv2.putText(img, f"option {index}", (x + 30, y + 8),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, 0, 1)
+        cv2.putText(
+            img,
+            f"option {index}",
+            (x + 30, y + 8),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.55,
+            0,
+            1,
+        )
     return img
 
 
 def filled_form(marked, *, angle=0.0, shift=(0, 0)):
-    """One respondent: the form, crosses in *marked*, and a scan-like offset."""
+    """One respondent: the form, crosses in *marked*, a scan-like offset."""
     img = blank_form()
     for index in marked:
         x, y = CENTRES[index]
@@ -71,13 +99,16 @@ RESPONDENTS = [
 
 
 def registered_stack():
-    reference = filled_form(*RESPONDENTS[0][0:1], angle=RESPONDENTS[0][1],
-                            shift=RESPONDENTS[0][2])
+    reference = filled_form(
+        *RESPONDENTS[0][0:1], angle=RESPONDENTS[0][1], shift=RESPONDENTS[0][2]
+    )
     stack = [reference]
     for marked, angle, shift in RESPONDENTS[1:]:
         moving = filled_form(marked, angle=angle, shift=shift)
         matrix, quality = st.register(moving, reference)
-        assert matrix is not None and quality > 0.3, f"registration failed ({quality})"
+        assert matrix is not None and quality > 0.3, (
+            f"registration failed ({quality})"
+        )
         stack.append(st.warp_to_reference(moving, matrix, reference.shape))
     return reference, stack
 
@@ -107,23 +138,26 @@ def test_consensus_blank_cancels_respondent_ink():
     truth = blank_form()
     # every respondent's crosses are gone: the interiors are paper again
     for x, y in CENTRES:
-        interior = blank[y - 6: y + 6, x - 6: x + 6]
+        interior = blank[y - 6 : y + 6, x - 6 : x + 6]
         assert interior.min() > 200, f"ink survived the median at {(x, y)}"
     # ...while the printed circles and text survive
     assert np.count_nonzero(truth < 128) > 0
-    assert abs(np.count_nonzero(blank < 128) - np.count_nonzero(truth < 128)) < (
-        0.25 * np.count_nonzero(truth < 128)
-    )
+    assert abs(
+        np.count_nonzero(blank < 128) - np.count_nonzero(truth < 128)
+    ) < (0.25 * np.count_nonzero(truth < 128))
 
 
 def test_find_controls_locates_every_circle_and_no_text():
     controls = st.find_controls(blank_form())
     assert len(controls) == len(CENTRES)
     found = sorted(
-        ((c["bbox"][0] + c["bbox"][2]) // 2, (c["bbox"][1] + c["bbox"][3]) // 2)
+        (
+            (c["bbox"][0] + c["bbox"][2]) // 2,
+            (c["bbox"][1] + c["bbox"][3]) // 2,
+        )
         for c in controls
     )
-    for (fx, fy), (ex, ey) in zip(found, sorted(CENTRES)):
+    for (fx, fy), (ex, ey) in zip(found, sorted(CENTRES), strict=False):
         assert abs(fx - ex) <= 3 and abs(fy - ey) <= 3
     assert {c["shape"] for c in controls} == {"circle"}
 
@@ -134,7 +168,7 @@ def test_residual_read_separates_marked_from_empty():
     respondent = filled_form(marked)
     residual = st.residual_ink(blank, respondent)
     for index, (x, y) in enumerate(CENTRES):
-        crop = residual[y - RADIUS: y + RADIUS, x - RADIUS: x + RADIUS]
+        crop = residual[y - RADIUS : y + RADIUS, x - RADIUS : x + RADIUS]
         verdict = st.classify_residual(crop)
         expected = "checked" if index in marked else "unchecked"
         assert verdict["state"] == expected, (
@@ -147,10 +181,12 @@ def test_residual_read_survives_registration_slack():
     blank = blank_form()
     respondent = filled_form([7], angle=0.35, shift=(2, -2))
     matrix, _ = st.register(respondent, blank)
-    residual = st.residual_ink(blank, st.warp_to_reference(respondent, matrix, blank.shape))
+    residual = st.residual_ink(
+        blank, st.warp_to_reference(respondent, matrix, blank.shape)
+    )
     states = []
     for x, y in CENTRES:
-        crop = residual[y - RADIUS: y + RADIUS, x - RADIUS: x + RADIUS]
+        crop = residual[y - RADIUS : y + RADIUS, x - RADIUS : x + RADIUS]
         states.append(st.classify_residual(crop)["state"])
     assert states.count("checked") == 1
     assert states[7] == "checked"
@@ -206,9 +242,15 @@ def _template_with(controls, rules=None):
         page.controls.append(
             st.TemplateControl(
                 id=f"p1_c{index:03d}",
-                bbox=[(x - RADIUS) / W, (y - RADIUS) / H,
-                      (x + RADIUS) / W, (y + RADIUS) / H],
-                shape=shape, label=label, question_id=question,
+                bbox=[
+                    (x - RADIUS) / W,
+                    (y - RADIUS) / H,
+                    (x + RADIUS) / W,
+                    (y + RADIUS) / H,
+                ],
+                shape=shape,
+                label=label,
+                question_id=question,
             )
         )
     template.pages.append(page)
@@ -222,16 +264,21 @@ def _template_with(controls, rules=None):
 def test_matrix_rows_become_one_single_choice_answer_each():
     grid = [
         (200 + col * 300, 380 + row * 220, "circle", str(col), "q1")
-        for row in range(3) for col in range(4)
+        for row in range(3)
+        for col in range(4)
     ]
     template = _template_with(grid)
     rows = {c.row_id for c in template.pages[0].controls}
-    assert len(rows) == 3, f"expected one answer group per matrix row, got {rows}"
+    assert len(rows) == 3, (
+        f"expected one answer group per matrix row, got {rows}"
+    )
     assert set(template.rules.values()) == {"single"}
 
 
 def test_vertical_checkbox_list_is_one_multi_select_answer():
-    column = [(200, 380 + i * 120, "box", f"option {i}", "q2") for i in range(5)]
+    column = [
+        (200, 380 + i * 120, "box", f"option {i}", "q2") for i in range(5)
+    ]
     template = _template_with(column)
     rows = {c.row_id for c in template.pages[0].controls}
     assert len(rows) == 1
@@ -241,8 +288,10 @@ def test_vertical_checkbox_list_is_one_multi_select_answer():
 def test_shape_splits_a_question_holding_both_kinds():
     """A Ja/Nein pair beside a checkbox list must not become one answer."""
     controls = [
-        (200, 380, "circle", "Ja", "q3"), (400, 380, "circle", "Nein", "q3"),
-        (200, 560, "box", "a", "q3"), (200, 680, "box", "b", "q3"),
+        (200, 380, "circle", "Ja", "q3"),
+        (400, 380, "circle", "Nein", "q3"),
+        (200, 560, "box", "a", "q3"),
+        (200, 680, "box", "b", "q3"),
     ]
     template = _template_with(controls)
     by_row = {}
@@ -259,8 +308,13 @@ def _reading(document, states, template):
     return sb.DocumentReading(
         document=document,
         readings=[
-            sb.ControlReading(control.id, 0, state=state, score=1.0 if state != "uncertain" else 0.1)
-            for control, state in zip(controls, states)
+            sb.ControlReading(
+                control.id,
+                0,
+                state=state,
+                score=1.0 if state != "uncertain" else 0.1,
+            )
+            for control, state in zip(controls, states, strict=False)
         ],
     )
 
@@ -271,18 +325,33 @@ def test_checkbox_export_has_a_certainty_beside_every_data_column():
     )
     row_id = template.pages[0].controls[0].row_id
     results = [
-        _reading("a.pdf", ["unchecked", "checked", "unchecked", "unchecked"], template),
-        _reading("b.pdf", ["checked", "unchecked", "unchecked", "checked"], template),
-        _reading("c.pdf", ["unchecked", "unchecked", "uncertain", "unchecked"], template),
+        _reading(
+            "a.pdf",
+            ["unchecked", "checked", "unchecked", "unchecked"],
+            template,
+        ),
+        _reading(
+            "b.pdf", ["checked", "unchecked", "unchecked", "checked"], template
+        ),
+        _reading(
+            "c.pdf",
+            ["unchecked", "unchecked", "uncertain", "unchecked"],
+            template,
+        ),
     ]
     frame = sb.to_checkbox_table(results, template)
 
     # "registration" is scan metadata, not an answer, so it has no certainty
-    data_columns = [c for c in frame.columns
-                    if c not in ("document", "registration")
-                    and not c.endswith(sb.CERTAINTY_SUFFIX)]
+    data_columns = [
+        c
+        for c in frame.columns
+        if c not in ("document", "registration")
+        and not c.endswith(sb.CERTAINTY_SUFFIX)
+    ]
     for column in data_columns:
-        assert column + sb.CERTAINTY_SUFFIX in frame.columns, f"{column} has no certainty"
+        assert column + sb.CERTAINTY_SUFFIX in frame.columns, (
+            f"{column} has no certainty"
+        )
 
     # single choice: a value column naming the chosen option
     assert frame.loc[0, row_id] == "1"
@@ -303,10 +372,14 @@ def test_checkbox_export_orders_a_scale_left_to_right():
     )
     row_id = template.pages[0].controls[0].row_id
     frame = sb.to_checkbox_table(
-        [_reading("a.pdf", ["checked"] + ["unchecked"] * 3, template)], template
+        [_reading("a.pdf", ["checked"] + ["unchecked"] * 3, template)],
+        template,
     )
-    checkboxes = [c for c in frame.columns
-                  if c.startswith(f"{row_id} | ") and not c.endswith(sb.CERTAINTY_SUFFIX)]
+    checkboxes = [
+        c
+        for c in frame.columns
+        if c.startswith(f"{row_id} | ") and not c.endswith(sb.CERTAINTY_SUFFIX)
+    ]
     assert checkboxes == [f"{row_id} | {i}" for i in range(4)]
 
 
@@ -320,8 +393,15 @@ def two_column_page():
     img = np.full((900, 2000), 255, np.uint8)
     for x0 in (100, 1200):
         for row in range(6):
-            cv2.putText(img, "Naturpark Diemtigtal Umfrage", (x0, 120 + row * 90),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, 0, 2)
+            cv2.putText(
+                img,
+                "Naturpark Diemtigtal Umfrage",
+                (x0, 120 + row * 90),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                0,
+                2,
+            )
     return img
 
 
@@ -342,9 +422,16 @@ def md_ink(gray):
 def test_stem_span_ignores_a_table_rule():
     """A full-width row rule must not hide the gap before the controls."""
     img = np.full((200, 1400), 255, np.uint8)
-    cv2.putText(img, "Nachhaltige Landwirtschaft", (60, 110),
-                cv2.FONT_HERSHEY_SIMPLEX, 1.0, 0, 2)
-    cv2.line(img, (0, 170), (1399, 170), 0, 2)          # the table rule
+    cv2.putText(
+        img,
+        "Nachhaltige Landwirtschaft",
+        (60, 110),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        1.0,
+        0,
+        2,
+    )
+    cv2.line(img, (0, 170), (1399, 170), 0, 2)  # the table rule
     ink = md_ink(img)
     columns = [(0, 1400)]
     span = sl._stem_span(ink, columns, x_limit=1200, y1=40, y2=190)
@@ -378,8 +465,18 @@ def test_unused_controls_separates_dead_rows_from_unpopular_options():
     controls = [c for page in template.pages for c in page.controls]
     # first row: option 0 chosen every time; second row: nobody marked anything
     results = [
-        _reading("a.pdf", ["checked", "unchecked", "unchecked",
-                           "unchecked", "unchecked", "unchecked"], template),
+        _reading(
+            "a.pdf",
+            [
+                "checked",
+                "unchecked",
+                "unchecked",
+                "unchecked",
+                "unchecked",
+                "unchecked",
+            ],
+            template,
+        ),
     ]
     unused = sb.unused_controls(results, template)
     dead = unused[unused["whole_row_unused"]]
@@ -387,7 +484,8 @@ def test_unused_controls_separates_dead_rows_from_unpopular_options():
     assert len(dead) == 3
     # the unpopular options in the answered row are listed but not flagged
     assert set(unused[~unused["whole_row_unused"]]["control_id"]) == {
-        controls[1].id, controls[2].id
+        controls[1].id,
+        controls[2].id,
     }
 
 
@@ -409,10 +507,14 @@ def test_export_carries_registration_quality():
 
 def test_reading_order_keeps_a_row_left_to_right_despite_jitter():
     """Scanned controls on one line differ by a few pixels vertically."""
-    template = _template_with([
-        (200, 380, "circle", "0", "q1"), (500, 383, "circle", "1", "q1"),
-        (800, 377, "circle", "2", "q1"), (1100, 381, "circle", "3", "q1"),
-    ])
+    template = _template_with(
+        [
+            (200, 380, "circle", "0", "q1"),
+            (500, 383, "circle", "1", "q1"),
+            (800, 377, "circle", "2", "q1"),
+            (1100, 381, "circle", "3", "q1"),
+        ]
+    )
     ordered = st.reading_order(template.pages[0].controls)
     assert [c.label for c in ordered] == ["0", "1", "2", "3"]
 
@@ -445,22 +547,34 @@ def test_scoring_finds_a_wrong_answer_and_excludes_the_unsure_ones():
     )
     row_id = template.pages[0].controls[0].row_id
     results = [
-        _reading("a.pdf", ["unchecked", "checked", "unchecked", "unchecked"], template),
-        _reading("b.pdf", ["checked", "unchecked", "unchecked", "unchecked"], template),
-        _reading("c.pdf", ["checked", "unchecked", "unchecked", "checked"], template),
+        _reading(
+            "a.pdf",
+            ["unchecked", "checked", "unchecked", "unchecked"],
+            template,
+        ),
+        _reading(
+            "b.pdf",
+            ["checked", "unchecked", "unchecked", "unchecked"],
+            template,
+        ),
+        _reading(
+            "c.pdf", ["checked", "unchecked", "unchecked", "checked"], template
+        ),
     ]
     sheet = sb.answer_sheet(template, ["a.pdf", "b.pdf", "c.pdf"])
     truth = {"a.pdf": "1", "b.pdf": "2", "c.pdf": sb.AMBIGUOUS_MARK}
     sheet["answer"] = [truth[d] for d in sheet["document"]]
 
     per_answer, summary = sb.score_sheet(sheet, results, template)
-    assert summary["answers_scored"] == 2      # the "?" row is not scorable
+    assert summary["answers_scored"] == 2  # the "?" row is not scorable
     assert summary["human_unsure"] == 1
     assert summary["auto_accepted"] == 2
-    assert summary["silent_errors"] == 1       # b.pdf: read 0, truth 2
+    assert summary["silent_errors"] == 1  # b.pdf: read 0, truth 2
     assert summary["auto_accepted_accuracy"] == 0.5
 
-    wrong = per_answer[(~per_answer["correct"]) & (~per_answer["human_unsure"])]
+    wrong = per_answer[
+        (~per_answer["correct"]) & (~per_answer["human_unsure"])
+    ]
     assert list(wrong["document"]) == ["b.pdf"]
     assert wrong.iloc[0]["predicted"] == "0"
     assert wrong.iloc[0]["truth"] == "2"
@@ -472,7 +586,9 @@ def test_scoring_counts_a_flagged_answer_separately_from_an_error():
     template = _template_with(
         [(200 + i * 300, 380, "circle", str(i), "q1") for i in range(3)]
     )
-    results = [_reading("a.pdf", ["checked", "checked", "unchecked"], template)]
+    results = [
+        _reading("a.pdf", ["checked", "checked", "unchecked"], template)
+    ]
     sheet = sb.answer_sheet(template, ["a.pdf"])
     sheet["answer"] = "0;1"
 
@@ -500,15 +616,16 @@ def test_answer_sheet_locates_each_answer_on_the_printed_page():
     q7 = sheet[sheet["question"] == "Q7"]
     assert list(q4["row"]) == [""]
     assert sorted(q7["row"]) == [
-        "row 1 of 2 (top to bottom)", "row 2 of 2 (top to bottom)"
+        "row 1 of 2 (top to bottom)",
+        "row 2 of 2 (top to bottom)",
     ]
 
 
 def test_answer_sheet_is_ordered_down_the_printed_page():
     template = _template_with(
-        [(2000, 300, "circle", "a", "p1_q9")]      # right column, top
-        + [(200, 900, "circle", "b", "p1_q2")]     # left column, lower
-        + [(200, 300, "circle", "c", "p1_q1")]     # left column, top
+        [(2000, 300, "circle", "a", "p1_q9")]  # right column, top
+        + [(200, 900, "circle", "b", "p1_q2")]  # left column, lower
+        + [(200, 300, "circle", "c", "p1_q1")]  # left column, top
     )
     controls = {c.label: c for c in template.pages[0].controls}
     controls["a"].column = 1
@@ -543,7 +660,7 @@ def test_a_stroke_clipping_the_control_is_doubted_not_called_empty():
 
     residual = st.residual_ink(blank, marked)
     box = (x - RADIUS, y - RADIUS, x + RADIUS, y + RADIUS)
-    crop = residual[box[1]:box[3], box[0]:box[2]]
+    crop = residual[box[1] : box[3], box[0] : box[2]]
 
     assert st.classify_residual(crop)["state"] == "unchecked", (
         "the interior really is empty; the halo is what carries the signal"
@@ -561,7 +678,8 @@ def test_an_untouched_control_stays_confidently_empty():
             continue
         box = (x - RADIUS, y - RADIUS, x + RADIUS, y + RADIUS)
         verdict = st.classify_residual(
-            residual[box[1]:box[3], box[0]:box[2]], st.halo_crop(residual, box)
+            residual[box[1] : box[3], box[0] : box[2]],
+            st.halo_crop(residual, box),
         )
         assert verdict["state"] == "unchecked", f"control {index}: {verdict}"
 
@@ -598,7 +716,7 @@ def test_one_stroke_across_two_controls_belongs_to_the_one_holding_it():
 
 
 def test_two_separate_marks_are_not_resolved_away():
-    """A real double answer must stay flagged, not be silently reduced to one."""
+    """A real double answer must stay flagged, not be reduced to one."""
     blank = blank_form()
     marked = blank.copy()
     for index in (0, 1):
@@ -609,8 +727,12 @@ def test_two_separate_marks_are_not_resolved_away():
 
     residual = st.residual_ink(blank, marked)
     boxes = [
-        (CENTRES[i][0] - RADIUS, CENTRES[i][1] - RADIUS,
-         CENTRES[i][0] + RADIUS, CENTRES[i][1] + RADIUS)
+        (
+            CENTRES[i][0] - RADIUS,
+            CENTRES[i][1] - RADIUS,
+            CENTRES[i][0] + RADIUS,
+            CENTRES[i][1] + RADIUS,
+        )
         for i in (0, 1)
     ]
     assert st.dominant_control(residual, boxes) is None
@@ -633,7 +755,9 @@ def _write_batch(folder, count=6):
     paths = []
     for index in range(count):
         marked = [index % len(CENTRES), (index * 7 + 3) % len(CENTRES)]
-        image = filled_form(marked, angle=0.3 * (index % 3 - 1), shift=(index, -index))
+        image = filled_form(
+            marked, angle=0.3 * (index % 3 - 1), shift=(index, -index)
+        )
         png = folder / f"respondent_{index:02d}.png"
         cv2.imwrite(str(png), image)
         pdf = folder / f"respondent_{index:02d}.pdf"
@@ -654,7 +778,9 @@ def test_batch_orchestration_produces_the_survey_tables():
 
         # label=False keeps this off the PaddleOCR-VL backend; the geometry,
         # grouping and export are what this exercises.
-        template, _blanks = sb.prepare_template(paths, label=False, dpi=FIXTURE_DPI)
+        template, _blanks = sb.prepare_template(
+            paths, label=False, dpi=FIXTURE_DPI
+        )
         assert template.control_count == len(CENTRES)
         assert template.rules, "structure inference produced no answer groups"
 
@@ -667,9 +793,13 @@ def test_batch_orchestration_produces_the_survey_tables():
         assert summary["controls"] == len(CENTRES)
 
         for name in (
-            "responses_checkboxes.csv", "responses_matrix.csv",
-            "responses_long.csv", "review_queue.csv", "unused_controls.csv",
-            "answers_overview.csv", "survey_template.json",
+            "responses_checkboxes.csv",
+            "responses_matrix.csv",
+            "responses_long.csv",
+            "review_queue.csv",
+            "unused_controls.csv",
+            "answers_overview.csv",
+            "survey_template.json",
             "template_page1.png",
         ):
             assert (out / name).exists(), f"{name} was not written"
@@ -686,7 +816,7 @@ def test_batch_orchestration_produces_the_survey_tables():
 
 
 def test_single_document_answers_are_one_row_per_question():
-    """The batch table is wide; a single file's own answers read better long."""
+    """The batch table is wide; one file's own answers read better long."""
     with tempfile.TemporaryDirectory() as tmp:
         folder = pathlib.Path(tmp)
         paths = _write_batch(folder, count=5)
@@ -696,9 +826,13 @@ def test_single_document_answers_are_one_row_per_question():
 
         assert len(frame) == len(template.rules), "one line per answer"
         assert set(frame["document"]) == {paths[0].name}
-        assert {"question", "answer", "certainty", "options", "answer_id"} <= set(
-            frame.columns
-        )
+        assert {
+            "question",
+            "answer",
+            "certainty",
+            "options",
+            "answer_id",
+        } <= set(frame.columns)
         # the respondent's marks show up as answers
         assert (frame["answer"].astype(str).str.strip() != "").any()
 
@@ -724,7 +858,9 @@ def test_documents_with_a_different_page_count_are_left_out():
             doubled.insert_pdf(source)
             doubled.save(str(odd))
 
-        template, _ = sb.prepare_template(paths + [odd], label=False, dpi=FIXTURE_DPI)
+        template, _ = sb.prepare_template(
+            paths + [odd], label=False, dpi=FIXTURE_DPI
+        )
         assert len(template.pages) == 1, "the majority page count wins"
         assert odd.name in template.provenance["skipped_wrong_page_count"]
 
@@ -791,13 +927,18 @@ def test_dropping_a_row_does_not_leave_a_stale_name_on_another_row():
     different row -- a wrong label on real data, not a missing one.
     """
     template = _template_with(
-        [(200 + i * 300, 380 + r * 220, "circle", str(i), "p1_q9")
-         for r in range(3) for i in range(4)]
+        [
+            (200 + i * 300, 380 + r * 220, "circle", str(i), "p1_q9")
+            for r in range(3)
+            for i in range(4)
+        ]
     )
     rows = sorted(template.rows())
     assert len(rows) == 3
     template.row_labels = {
-        rows[0]: "first row", rows[1]: "second row", rows[2]: "third row",
+        rows[0]: "first row",
+        rows[1]: "second row",
+        rows[2]: "third row",
     }
     # no blanks on this synthetic template, so naming cannot re-derive anything
     victim = [c.id for c in template.rows()[rows[0]]]
@@ -832,11 +973,15 @@ def test_template_overlay_boxes_and_names_each_question():
     # the tag is drawn, so the tagged image differs near the first control
     import numpy as np
 
-    a = cv2.imdecode(np.frombuffer(plain["template_page1.png"], np.uint8), cv2.IMREAD_COLOR)
-    b = cv2.imdecode(np.frombuffer(tagged["template_page1.png"], np.uint8), cv2.IMREAD_COLOR)
+    a = cv2.imdecode(
+        np.frombuffer(plain["template_page1.png"], np.uint8), cv2.IMREAD_COLOR
+    )
+    b = cv2.imdecode(
+        np.frombuffer(tagged["template_page1.png"], np.uint8), cv2.IMREAD_COLOR
+    )
     x, y = CENTRES[0]
-    band_a = a[max(0, y - 60):y, max(0, x - 40):x + 400]
-    band_b = b[max(0, y - 60):y, max(0, x - 40):x + 400]
+    band_a = a[max(0, y - 60) : y, max(0, x - 40) : x + 400]
+    band_b = b[max(0, y - 60) : y, max(0, x - 40) : x + 400]
     assert not np.array_equal(band_a, band_b), "no tag above the first control"
 
 
@@ -871,11 +1016,15 @@ def test_rebuilding_keeps_a_file_s_own_answers_one_row_per_question():
 
         stem = pathlib.Path(results[0].document).stem
         frame = pd.read_csv(
-            io.BytesIO(zipfile.ZipFile(io.BytesIO(rebuilt)).read(
-                f"{stem}/survey_answers.csv"
-            ))
+            io.BytesIO(
+                zipfile.ZipFile(io.BytesIO(rebuilt)).read(
+                    f"{stem}/survey_answers.csv"
+                )
+            )
         )
-        assert len(frame) == len(template.rules), "one line per answer, not one wide row"
+        assert len(frame) == len(template.rules), (
+            "one line per answer, not one wide row"
+        )
         assert len(frame) == before - 1, "the removed answer is still there"
         assert "answer" in frame.columns and "certainty" in frame.columns
         remaining = {c.id for page in template.pages for c in page.controls}
@@ -895,12 +1044,19 @@ def test_the_survey_folder_explains_itself():
         readme = (out / "README.md").read_text(encoding="utf-8")
         # every file it names must actually be written beside it
         written = {p.name for p in out.iterdir()}
-        for name in ("responses_checkboxes.csv", "review_queue.csv",
-                     "responses_long.csv", "responses_matrix.csv",
-                     "answers_overview.csv", "unused_controls.csv",
-                     "survey_template.json"):
+        for name in (
+            "responses_checkboxes.csv",
+            "review_queue.csv",
+            "responses_long.csv",
+            "responses_matrix.csv",
+            "answers_overview.csv",
+            "unused_controls.csv",
+            "survey_template.json",
+        ):
             assert name in readme, f"README does not mention {name}"
-            assert name in written, f"README names {name} but it was not written"
+            assert name in written, (
+                f"README names {name} but it was not written"
+            )
         # and the values a reader will hit
         for token in ("MULTIPLE", "UNCERTAIN", "registration", "[certainty]"):
             assert token in readme, f"README does not explain {token}"
@@ -909,10 +1065,12 @@ def test_the_survey_folder_explains_itself():
 def test_survey_csv_neutralizes_spreadsheet_formulas():
     import pandas as pd
 
-    frame = pd.DataFrame({
-        "=heading": ["+value", "ordinary"],
-        "safe": ["@name", "-2+3"],
-    })
+    frame = pd.DataFrame(
+        {
+            "=heading": ["+value", "ordinary"],
+            "safe": ["@name", "-2+3"],
+        }
+    )
     csv_text = sb.safe_csv(frame)
 
     assert "'=heading" in csv_text
@@ -929,7 +1087,10 @@ def test_survey_csv_neutralizes_spreadsheet_formulas():
 def _row_template(labels=("0", "1", "2", "3"), row_label="Frage A"):
     """One question, one row of circles, optionally with a printed row stem."""
     template = _template_with(
-        [(200 + i * 300, 380, "circle", label, "q1") for i, label in enumerate(labels)]
+        [
+            (200 + i * 300, 380, "circle", label, "q1")
+            for i, label in enumerate(labels)
+        ]
     )
     row_id = template.pages[0].controls[0].row_id
     if row_label:
@@ -940,29 +1101,41 @@ def _row_template(labels=("0", "1", "2", "3"), row_label="Frage A"):
 def _parsed_document(with_grid=True):
     """A parsed page holding a question line and the grid it was printed in."""
     regions = [
-        di.Region(id="r1", type=di.TEXT, bbox=[150, 200, 1200, 260],
-                  reading_order=0, content={"text": "Wie gut kennst du den Naturpark?"}),
+        di.Region(
+            id="r1",
+            type=di.TEXT,
+            bbox=[150, 200, 1200, 260],
+            reading_order=0,
+            content={"text": "Wie gut kennst du den Naturpark?"},
+        ),
     ]
     if with_grid:
         regions.append(
-            di.Region(id="r2", type=di.TABLE, bbox=[150, 340, 1200, 420],
-                      reading_order=1,
-                      content={"html": "<table><tr><td>sehr gut</td></tr></table>"})
+            di.Region(
+                id="r2",
+                type=di.TABLE,
+                bbox=[150, 340, 1200, 420],
+                reading_order=1,
+                content={"html": "<table><tr><td>sehr gut</td></tr></table>"},
+            )
         )
     page = di.Page(page_number=1, width=W, height=H, regions=regions)
     return di.Document(pages=[page], source_name="a.pdf")
 
 
 def test_answers_are_written_into_the_parsed_document():
-    """The marks are ink no text extractor reads, so document.md must carry them."""
+    """No text extractor reads the marks, so document.md must carry them."""
     template, row_id = _row_template()
     document = _parsed_document()
-    reading = _reading("a.pdf", ["unchecked", "checked", "unchecked", "unchecked"], template)
+    reading = _reading(
+        "a.pdf", ["unchecked", "checked", "unchecked", "unchecked"], template
+    )
 
     assert sb.to_form_groups(reading, template, document) == 1
     markdown = di.to_markdown(document)
     assert "Frage A: **1**" in markdown, markdown
-    # the printed question is still there, the empty grid it was read off is not
+    # the printed question is still there, the empty grid it was read off is
+    # not
     assert "Naturpark" in markdown
     assert "<table" not in markdown
     # and in reading order: the answer sits where the question is printed
@@ -973,18 +1146,24 @@ def test_an_unnamed_row_keeps_the_printed_grid():
     """Standing in for the grid must not cost the document its printed text."""
     template, _ = _row_template(row_label="")
     document = _parsed_document()
-    reading = _reading("a.pdf", ["unchecked", "checked", "unchecked", "unchecked"], template)
+    reading = _reading(
+        "a.pdf", ["unchecked", "checked", "unchecked", "unchecked"], template
+    )
 
     sb.to_form_groups(reading, template, document)
     markdown = di.to_markdown(document)
-    assert "<table" in markdown, "the grid carries text the answers do not repeat"
+    assert "<table" in markdown, (
+        "the grid carries text the answers do not repeat"
+    )
     assert "**1**" in markdown
 
 
 def test_an_unread_mark_says_so_instead_of_answering():
     template, _ = _row_template()
     document = _parsed_document()
-    reading = _reading("a.pdf", ["unchecked", "uncertain", "unchecked", "unchecked"], template)
+    reading = _reading(
+        "a.pdf", ["unchecked", "uncertain", "unchecked", "unchecked"], template
+    )
 
     sb.to_form_groups(reading, template, document)
     markdown = di.to_markdown(document)
@@ -1004,33 +1183,43 @@ def test_no_answer_is_reported_as_such():
 
 
 def test_rebuilding_replaces_the_answers_instead_of_stacking_them():
-    """Dropping a control has to leave the document, not just the CSVs, clean."""
+    """Dropping a control must clean the document, not just the CSVs."""
     template, _ = _row_template()
     document = _parsed_document()
-    reading = _reading("a.pdf", ["unchecked", "checked", "unchecked", "unchecked"], template)
+    reading = _reading(
+        "a.pdf", ["unchecked", "checked", "unchecked", "unchecked"], template
+    )
     sb.to_form_groups(reading, template, document)
 
     dropped = template.pages[0].controls[1].id
     sb.drop_controls(template, [dropped])
     assert sb.to_form_groups(reading, template, document) == 1
-    assert len(document.pages[0].form_groups) == 1, "answers were attached twice"
+    assert len(document.pages[0].form_groups) == 1, (
+        "answers were attached twice"
+    )
 
     markdown = di.to_markdown(document)
-    assert "**1**" not in markdown, "a dropped control still answers the question"
+    assert "**1**" not in markdown, (
+        "a dropped control still answers the question"
+    )
     assert "no answer" in markdown
 
 
 def test_a_document_stripped_of_its_preview_still_places_the_answers():
-    """A rebuild works on a slimmed-down document; the boxes must still line up."""
+    """A rebuild works on a slimmed document; the boxes must still line up."""
     template, _ = _row_template()
     document = _parsed_document()
     document.pages[0].preview_size = (W, H)
     document.pages[0].image_b64 = None
-    reading = _reading("a.pdf", ["unchecked", "checked", "unchecked", "unchecked"], template)
+    reading = _reading(
+        "a.pdf", ["unchecked", "checked", "unchecked", "unchecked"], template
+    )
 
     sb.to_form_groups(reading, template, document)
     group = document.pages[0].form_groups[0]
-    assert group.covered_region_ids == ["r2"], "the grid was not matched in preview pixels"
+    assert group.covered_region_ids == ["r2"], (
+        "the grid was not matched in preview pixels"
+    )
 
 
 def test_a_rebuild_rewrites_every_file_that_carries_an_answer():
@@ -1039,14 +1228,19 @@ def test_a_rebuild_rewrites_every_file_that_carries_an_answer():
 
     template, _ = _row_template()
     document = _parsed_document()
-    reading = _reading("a.pdf", ["unchecked", "checked", "unchecked", "unchecked"], template)
+    reading = _reading(
+        "a.pdf", ["unchecked", "checked", "unchecked", "unchecked"], template
+    )
     sb.to_form_groups(reading, template, document)
     sb.slim_document(document)
 
     with tempfile.TemporaryDirectory() as tmp:
         folder = pathlib.Path(tmp)
         di.write_document_outputs(
-            document, folder / "a", "document", provenance=False,
+            document,
+            folder / "a",
+            "document",
+            provenance=False,
             skip_tables=sb.survey_table_regions(document, template),
             form_responses=False,
         )
@@ -1070,22 +1264,40 @@ def test_a_rebuild_rewrites_every_file_that_carries_an_answer():
     assert summary["controls"] == 3
     with zipfile.ZipFile(io.BytesIO(rebuilt)) as zf:
         names = set(zf.namelist())
-        assert "a/document.md" in names and "survey/responses_checkboxes.csv" in names
+        assert (
+            "a/document.md" in names
+            and "survey/responses_checkboxes.csv" in names
+        )
         markdown = zf.read("a/document.md").decode("utf-8")
         answers = zf.read("a/survey_answers.csv").decode("utf-8")
         matrix = zf.read("survey/responses_matrix.csv").decode("utf-8")
-    for name, content in (("document.md", markdown), ("survey_answers.csv", answers),
-                          ("responses_matrix.csv", matrix)):
-        assert dropped not in content, f"{name} still names the dropped control"
-    assert "no answer" in markdown, "document.md kept the answer of a dropped control"
+    for name, content in (
+        ("document.md", markdown),
+        ("survey_answers.csv", answers),
+        ("responses_matrix.csv", matrix),
+    ):
+        assert dropped not in content, (
+            f"{name} still names the dropped control"
+        )
+    assert "no answer" in markdown, (
+        "document.md kept the answer of a dropped control"
+    )
 
 
 def test_a_rebuild_keeps_duplicate_basenames_attached_to_the_right_document():
     import zipfile
 
     template, _ = _row_template()
-    first = _reading("report.pdf", ["checked", "unchecked", "unchecked", "unchecked"], template)
-    second = _reading("report.pdf", ["unchecked", "checked", "unchecked", "unchecked"], template)
+    first = _reading(
+        "report.pdf",
+        ["checked", "unchecked", "unchecked", "unchecked"],
+        template,
+    )
+    second = _reading(
+        "report.pdf",
+        ["unchecked", "checked", "unchecked", "unchecked"],
+        template,
+    )
     first.export_directory = "a/report"
     second.export_directory = "b/report"
     first_document = _parsed_document()

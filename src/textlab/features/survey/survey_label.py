@@ -8,14 +8,17 @@ for every respondent in the batch.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from collections.abc import Sequence
+from typing import Any
 
 from textlab.features.ocr import doc_ir, markup_detect
 from textlab.features.survey import form_extract, survey_template
 
-MAX_LABEL_GAP = 0.16   # fraction of page width a label may sit from its control
-_BAND_TOLERANCE = 0.6  # share of control height a label must vertically overlap
-MAX_LABEL_CHARS = 70   # labels become spreadsheet headers, so keep them short
+MAX_LABEL_GAP = 0.16  # fraction of page width a label may sit from its control
+_BAND_TOLERANCE = (
+    0.6  # share of control height a label must vertically overlap
+)
+MAX_LABEL_CHARS = 70  # labels become spreadsheet headers, so keep them short
 
 
 def sanitize(text: str) -> str:
@@ -34,21 +37,23 @@ def sanitize(text: str) -> str:
 
 
 def _plain_lines(value: str) -> str:
-    """Strip markup but keep line breaks.
+    r"""Strip markup but keep line breaks.
 
     ``form_extract._plain`` collapses newlines into spaces, which would merge a
-    block like "Ja\\nFalls ja, E-Mail oder Telefonnummer" into one label and
+    block like "Ja\nFalls ja, E-Mail oder Telefonnummer" into one label and
     leave nothing for the per-line pick below to work with.
     """
     import re
     from html import unescape
 
     text = unescape(form_extract._TAG.sub(" ", str(value or "")))
-    lines = [re.sub(r"[^\S\n]+", " ", line).strip() for line in text.splitlines()]
+    lines = [
+        re.sub(r"[^\S\n]+", " ", line).strip() for line in text.splitlines()
+    ]
     return "\n".join(line for line in lines if line)
 
 
-def _blocks(page: "doc_ir.Page") -> List[Tuple[List[float], str]]:
+def _blocks(page: doc_ir.Page) -> list[tuple[list[float], str]]:
     out = []
     for region in page.ordered_regions():
         text = _plain_lines(region.text)
@@ -91,26 +96,39 @@ def _label_for(control_bbox: Sequence[float], blocks, max_gap: float) -> str:
     return sanitize(best)
 
 
-def _sections(page: "doc_ir.Page", width: int, height: int) -> List[Dict[str, Any]]:
+def _sections(
+    page: doc_ir.Page, width: int, height: int
+) -> list[dict[str, Any]]:
     sections = []
-    for index, section in enumerate(form_extract._question_sections(page), start=1):
+    for index, section in enumerate(
+        form_extract._question_sections(page), start=1
+    ):
         bbox = form_extract._section_bbox(
-            section["regions"], width, height, crop_limits=section.get("crop_limits")
+            section["regions"],
+            width,
+            height,
+            crop_limits=section.get("crop_limits"),
         )
         if not bbox:
             continue
-        text = form_extract._clean_question_text(
-            form_extract._plain(section["regions"][0].text)
-        ) if section.get("regions") else ""
-        sections.append({
-            "id": f"q{section.get('number') or index}",
-            "bbox": bbox,
-            "text": text,
-        })
+        text = (
+            form_extract._clean_question_text(
+                form_extract._plain(section["regions"][0].text)
+            )
+            if section.get("regions")
+            else ""
+        )
+        sections.append(
+            {
+                "id": f"q{section.get('number') or index}",
+                "bbox": bbox,
+                "text": text,
+            }
+        )
     return sections
 
 
-def _section_for(control_bbox: Sequence[float], sections) -> Dict[str, Any]:
+def _section_for(control_bbox: Sequence[float], sections) -> dict[str, Any]:
     cx = (control_bbox[0] + control_bbox[2]) / 2.0
     cy = (control_bbox[1] + control_bbox[3]) / 2.0
     for section in sections:
@@ -123,9 +141,9 @@ def _section_for(control_bbox: Sequence[float], sections) -> Dict[str, Any]:
 _SCALE_TOKEN = None  # compiled lazily; a rating point like "3", "4,5" or "2.5"
 
 
-def _horizontal_runs(controls, width: int, height: int) -> List[List[int]]:
+def _horizontal_runs(controls, width: int, height: int) -> list[list[int]]:
     """Group control indices into left-to-right runs sharing a baseline."""
-    rows: Dict[int, List[int]] = {}
+    rows: dict[int, list[int]] = {}
     for index, control in enumerate(controls):
         x1, y1, x2, y2 = control.pixel_bbox(width, height)
         tolerance = max(6, (y2 - y1) // 2)
@@ -141,7 +159,7 @@ def _horizontal_runs(controls, width: int, height: int) -> List[List[int]]:
     ]
 
 
-def _scale_tokens(text: str) -> List[str]:
+def _scale_tokens(text: str) -> list[str]:
     global _SCALE_TOKEN
     if _SCALE_TOKEN is None:
         import re
@@ -169,15 +187,17 @@ def _label_horizontal_runs(controls, width: int, height: int) -> None:
         for position, index in enumerate(run):
             control = controls[index]
             control.label = (
-                tokens[position] if len(tokens) == len(run) else f"option {position + 1}"
+                tokens[position]
+                if len(tokens) == len(run)
+                else f"option {position + 1}"
             )
 
 
 def label_page(
     template_page: survey_template.TemplatePage,
-    page_json: Dict[str, Any],
+    page_json: dict[str, Any],
     *,
-    max_gap: Optional[float] = None,
+    max_gap: float | None = None,
 ) -> int:
     """Attach option labels and question ids to one template page in place."""
     page = doc_ir.from_paddle_vl(page_json)
@@ -193,7 +213,9 @@ def label_page(
         control.label = _label_for(bbox, blocks, gap)
         section = _section_for(bbox, sections)
         control.question_id = (
-            f"p{template_page.page_index + 1}_{section['id']}" if section else ""
+            f"p{template_page.page_index + 1}_{section['id']}"
+            if section
+            else ""
         )
         if control.label:
             labelled += 1
@@ -201,7 +223,7 @@ def label_page(
     # Per question, not per page: an A3 spread holds two columns of questions
     # whose rows share a baseline, and grouping across them merges unrelated
     # controls into one run.
-    by_question: Dict[str, List[Any]] = {}
+    by_question: dict[str, list[Any]] = {}
     for control in template_page.controls:
         by_question.setdefault(control.question_id, []).append(control)
     for group in by_question.values():
@@ -233,23 +255,29 @@ def assign_sheet_pages(template) -> int:
             np.frombuffer(base64.b64decode(page.blank_png_b64), np.uint8),
             cv2.IMREAD_GRAYSCALE,
         )
-        columns = _content_columns(markup_detect._ink_mask(
-            cv2.cvtColor(blank, cv2.COLOR_GRAY2BGR)
-        ))
+        columns = _content_columns(
+            markup_detect._ink_mask(cv2.cvtColor(blank, cv2.COLOR_GRAY2BGR))
+        )
         if not columns:
             continue
 
         footers = []
         for x1, x2 in columns:
-            strip = blank[int(page.height * FOOTER_BAND):page.height, x1:x2]
+            strip = blank[int(page.height * FOOTER_BAND) : page.height, x1:x2]
             text = _ocr_plain(strip)
             match = re.search(r"(\d+)\s*/\s*(\d+)", text)
-            footers.append(f"{match.group(1)}/{match.group(2)}" if match else "")
+            footers.append(
+                f"{match.group(1)}/{match.group(2)}" if match else ""
+            )
 
         for control in page.controls:
             centre = (control.bbox[0] + control.bbox[2]) / 2 * page.width
             index = next(
-                (i for i, (x1, x2) in enumerate(columns) if x1 <= centre <= x2),
+                (
+                    i
+                    for i, (x1, x2) in enumerate(columns)
+                    if x1 <= centre <= x2
+                ),
                 0,
             )
             control.column = index
@@ -265,7 +293,9 @@ def _ocr_plain(crop) -> str:
     except Exception:
         return ""
     try:
-        return pytesseract.image_to_string(crop, lang=OCR_LANG, config="--psm 7").strip()
+        return pytesseract.image_to_string(
+            crop, lang=OCR_LANG, config="--psm 7"
+        ).strip()
     except Exception:
         return ""
 
@@ -292,9 +322,9 @@ def name_options(template) -> int:
             np.frombuffer(base64.b64decode(page.blank_png_b64), np.uint8),
             cv2.IMREAD_GRAYSCALE,
         )
-        columns = _content_columns(markup_detect._ink_mask(
-            cv2.cvtColor(blank, cv2.COLOR_GRAY2BGR)
-        ))
+        columns = _content_columns(
+            markup_detect._ink_mask(cv2.cvtColor(blank, cv2.COLOR_GRAY2BGR))
+        )
         boxes = {
             control.id: control.pixel_bbox(page.width, page.height)
             for control in page.controls
@@ -306,7 +336,8 @@ def name_options(template) -> int:
             centre = (y1 + y2) / 2
 
             right = next(
-                (c[1] for c in columns if c[0] <= (x1 + x2) / 2 <= c[1]), page.width
+                (c[1] for c in columns if c[0] <= (x1 + x2) / 2 <= c[1]),
+                page.width,
             )
             for other in page.controls:
                 ox1, oy1, ox2, oy2 = boxes[other.id]
@@ -317,7 +348,7 @@ def name_options(template) -> int:
                 right = min(right, ox1)
 
             pad = (y2 - y1) // 3
-            crop = blank[max(0, y1 - pad):y2 + pad, x2 + 2:right]
+            crop = blank[max(0, y1 - pad) : y2 + pad, x2 + 2 : right]
             if crop.size == 0 or crop.shape[1] < 20:
                 continue
             text = _ocr(crop, OCR_LANG)
@@ -335,10 +366,12 @@ def disambiguate_labels(template) -> int:
     headers and give a human nothing to label against, so they are replaced
     by their printed position. Requires ``infer_structure`` to have run.
     """
-    rows: Dict[str, List[Any]] = {}
+    rows: dict[str, list[Any]] = {}
     for page in template.pages:
         for control in page.controls:
-            rows.setdefault(control.row_id or control.id, []).append((page, control))
+            rows.setdefault(control.row_id or control.id, []).append(
+                (page, control)
+            )
 
     fixed = 0
     for members in rows.values():
@@ -356,14 +389,20 @@ def disambiguate_labels(template) -> int:
 #            ROW STEM NAMING
 # ==========================================
 
-MIN_GUTTER = 120       # px of blank columns that separate content columns
-MIN_STEM_GAP = 20      # px of blank columns between a stem and its controls
-MIN_TEXT_HEIGHT = 6    # px of ink in a column before it counts as text, not a rule
-MIN_OCR_CONFIDENCE = 65  # mean Tesseract word confidence below which a stem is dropped
+MIN_GUTTER = 120  # px of blank columns that separate content columns
+MIN_STEM_GAP = 20  # px of blank columns between a stem and its controls
+MIN_TEXT_HEIGHT = (
+    6  # px of ink in a column before it counts as text, not a rule
+)
+MIN_OCR_CONFIDENCE = (
+    65  # mean Tesseract word confidence below which a stem is dropped
+)
 OCR_LANG = "deu"
 
 
-def _content_columns(ink, min_gutter: int = MIN_GUTTER) -> List[Tuple[int, int]]:
+def _content_columns(
+    ink, min_gutter: int = MIN_GUTTER
+) -> list[tuple[int, int]]:
     """Column bands separated by full-height vertical whitespace.
 
     A two-up A3 scan holds two pages side by side; without this bound a row
@@ -391,7 +430,9 @@ def _content_columns(ink, min_gutter: int = MIN_GUTTER) -> List[Tuple[int, int]]
     return columns
 
 
-def _stem_span(ink, columns, x_limit: int, y1: int, y2: int) -> Optional[Tuple[int, int]]:
+def _stem_span(
+    ink, columns, x_limit: int, y1: int, y2: int
+) -> tuple[int, int] | None:
     """Horizontal span of the text block immediately left of a row's controls.
 
     Walks left from the controls: skip the whitespace separating them from the
@@ -401,7 +442,7 @@ def _stem_span(ink, columns, x_limit: int, y1: int, y2: int) -> Optional[Tuple[i
     if column is None:
         return None
     left_bound = column[0]
-    band = ink[max(0, y1):y2, left_bound:x_limit]
+    band = ink[max(0, y1) : y2, left_bound:x_limit]
     if band.size == 0:
         return None
     # Count ink height per column rather than presence: a table's horizontal
@@ -409,7 +450,7 @@ def _stem_span(ink, columns, x_limit: int, y1: int, y2: int) -> Optional[Tuple[i
     has_ink = (band > 0).sum(axis=0) >= MIN_TEXT_HEIGHT
 
     x = len(has_ink) - 1
-    while x >= 0 and not has_ink[x]:          # gap between stem and controls
+    while x >= 0 and not has_ink[x]:  # gap between stem and controls
         x -= 1
     if x < 0 or (len(has_ink) - 1 - x) < MIN_STEM_GAP:
         return None
@@ -426,7 +467,7 @@ def _stem_span(ink, columns, x_limit: int, y1: int, y2: int) -> Optional[Tuple[i
     return left_bound + x + gap + 1, left_bound + end + 1
 
 
-def _row_bands(groups, width: int, height: int) -> Dict[str, Tuple[int, int]]:
+def _row_bands(groups, width: int, height: int) -> dict[str, tuple[int, int]]:
     """Vertical extent to read for each row: up to its neighbours' midpoints.
 
     A matrix stem often wraps onto a second line, so reading only the control's
@@ -435,14 +476,22 @@ def _row_bands(groups, width: int, height: int) -> Dict[str, Tuple[int, int]]:
     centres = []
     for row_id, controls in groups.items():
         boxes = [c.pixel_bbox(width, height) for c in controls]
-        centres.append((sum((b[1] + b[3]) / 2 for b in boxes) / len(boxes), row_id, boxes))
+        centres.append(
+            (sum((b[1] + b[3]) / 2 for b in boxes) / len(boxes), row_id, boxes)
+        )
     centres.sort()
 
     bands = {}
     for index, (centre, row_id, boxes) in enumerate(centres):
-        above = centres[index - 1][0] if index else centre - (centre - min(b[1] for b in boxes)) * 4
-        below = centres[index + 1][0] if index + 1 < len(centres) else (
-            centre + (max(b[3] for b in boxes) - centre) * 4
+        above = (
+            centres[index - 1][0]
+            if index
+            else centre - (centre - min(b[1] for b in boxes)) * 4
+        )
+        below = (
+            centres[index + 1][0]
+            if index + 1 < len(centres)
+            else (centre + (max(b[3] for b in boxes) - centre) * 4)
         )
         bands[row_id] = (
             int(max(0, (above + centre) / 2 + 2)),
@@ -463,14 +512,18 @@ def _ocr(crop, lang: str) -> str:
         return ""
     try:
         data = pytesseract.image_to_data(
-            crop, lang=lang, config="--psm 6",
+            crop,
+            lang=lang,
+            config="--psm 6",
             output_type=pytesseract.Output.DICT,
         )
     except Exception:
         return ""
 
     words, confidences = [], []
-    for text, confidence in zip(data.get("text", []), data.get("conf", [])):
+    for text, confidence in zip(
+        data.get("text", []), data.get("conf", []), strict=False
+    ):
         try:
             confidence = float(confidence)
         except (TypeError, ValueError):
@@ -513,7 +566,7 @@ def name_answer_rows(template, *, lang: str = OCR_LANG) -> int:
         ink = markup_detect._ink_mask(cv2.cvtColor(blank, cv2.COLOR_GRAY2BGR))
         columns = _content_columns(ink)
 
-        by_question: Dict[str, Dict[str, List[Any]]] = {}
+        by_question: dict[str, dict[str, list[Any]]] = {}
         for control in page.controls:
             by_question.setdefault(control.question_id, {}).setdefault(
                 control.row_id, []
@@ -524,16 +577,20 @@ def name_answer_rows(template, *, lang: str = OCR_LANG) -> int:
             for row_id, controls in groups.items():
                 if len(controls) < 2:
                     continue
-                boxes = [c.pixel_bbox(page.width, page.height) for c in controls]
+                boxes = [
+                    c.pixel_bbox(page.width, page.height) for c in controls
+                ]
                 # Only a horizontal run has a stem beside it; a vertical option
                 # list is already named by the text against each option.
                 if max(b[1] for b in boxes) >= min(b[3] for b in boxes):
                     continue
                 y1, y2 = bands[row_id]
-                span = _stem_span(ink, columns, min(b[0] for b in boxes), y1, y2)
+                span = _stem_span(
+                    ink, columns, min(b[0] for b in boxes), y1, y2
+                )
                 if span is None:
                     continue
-                stem = _ocr(blank[y1:y2, span[0]:span[1]], lang)
+                stem = _ocr(blank[y1:y2, span[0] : span[1]], lang)
                 if stem:
                     template.row_labels[row_id] = stem
                     named += 1
@@ -542,10 +599,10 @@ def name_answer_rows(template, *, lang: str = OCR_LANG) -> int:
 
 def label_template(
     template: survey_template.SurveyTemplate,
-    page_jsons: Sequence[Dict[str, Any]],
+    page_jsons: Sequence[dict[str, Any]],
 ) -> int:
     """Label every page of *template* from the matching Paddle page result."""
     return sum(
         label_page(page, page_json)
-        for page, page_json in zip(template.pages, page_jsons)
+        for page, page_json in zip(template.pages, page_jsons, strict=False)
     )

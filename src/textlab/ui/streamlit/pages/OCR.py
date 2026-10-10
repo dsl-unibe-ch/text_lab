@@ -2,7 +2,7 @@
 
 The automatic pipeline (:mod:`textlab.features.ocr.service`) handles single
 documents and ZIP batches; manual engine selection is in an expander below
-(:mod:`textlab.ui.streamlit.ocr.legacy`). Results and review are drawn by
+(:mod:`textlab.ui.streamlit.ocr.manual`). Results and review are drawn by
 the modules in :mod:`textlab.ui.streamlit.ocr`.
 """
 
@@ -35,8 +35,8 @@ from textlab.common import gpu_manager  # noqa: E402
 from textlab.features.ocr import service  # noqa: E402
 from textlab.ui.streamlit.auth import check_token  # noqa: E402
 from textlab.ui.streamlit.components.gpu import free_gpu_for  # noqa: E402
-from textlab.ui.streamlit.ocr.legacy import (  # noqa: E402
-    legacy_engines_expander,
+from textlab.ui.streamlit.ocr.manual import (  # noqa: E402
+    manual_engines_expander,
 )
 from textlab.ui.streamlit.ocr.results import (  # noqa: E402
     render_document_result,
@@ -279,9 +279,7 @@ def _run_batch(batch_zip, options):
         st.session_state.batch_auto_zip = result.zip_bytes
         st.session_state.batch_auto_complete = True
         if result.survey is not None:
-            st.session_state.survey_template = result.survey.template
-            st.session_state.survey_readings = result.survey.readings
-            st.session_state.survey_documents = result.survey.documents
+            st.session_state.survey_batch = result.survey
     except Exception as error:
         st.session_state.auto_error = f"Batch automatic OCR failed: {error}"
         st.exception(error)
@@ -403,4 +401,4 @@ else:
     auto_batch_ui()
 
 st.divider()
-legacy_engines_expander(workflow_mode)
+manual_engines_expander(workflow_mode)

@@ -14,16 +14,21 @@ from __future__ import annotations
 
 import json
 import pathlib
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any
 
 import numpy as np
 
 from textlab.features.ocr import markup_detect
 
 DEFAULT_DPI = 300  # matches ocr.pipeline.SURVEY_DPI
-BLANK_SAMPLE = 15  # copies stacked for the median; more adds cost, not accuracy
-MIN_BLANK_DOCUMENTS = 6  # below this the median stops reliably cancelling the ink
+BLANK_SAMPLE = (
+    15  # copies stacked for the median; more adds cost, not accuracy
+)
+MIN_BLANK_DOCUMENTS = (
+    6  # below this the median stops reliably cancelling the ink
+)
 MIN_REGISTRATION_QUALITY = 0.30
 CIRCLE_MAX_EXTENT = 0.85  # bbox fill below this is a ring, above it a square
 _ORB_FEATURES = 8000
@@ -37,6 +42,7 @@ _MEDIAN_STRIP = 400  # rows per pass, so a 4960x3507 stack stays off the heap
 
 
 def page_count(pdf_path) -> int:
+    """Return the number of pages of a PDF."""
     import fitz
 
     with fitz.open(str(pdf_path)) as doc:
@@ -75,8 +81,12 @@ def register(moving_gray, reference_gray, scale: float = _ORB_SCALE):
     """
     import cv2
 
-    m_small = cv2.resize(moving_gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
-    r_small = cv2.resize(reference_gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+    m_small = cv2.resize(
+        moving_gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA
+    )
+    r_small = cv2.resize(
+        reference_gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA
+    )
 
     orb = cv2.ORB_create(nfeatures=_ORB_FEATURES)
     kp_m, des_m = orb.detectAndCompute(m_small, None)
@@ -85,7 +95,11 @@ def register(moving_gray, reference_gray, scale: float = _ORB_SCALE):
         return None, 0.0
 
     pairs = cv2.BFMatcher(cv2.NORM_HAMMING).knnMatch(des_m, des_r, k=2)
-    good = [a for a, b in (p for p in pairs if len(p) == 2) if a.distance < 0.75 * b.distance]
+    good = [
+        a
+        for a, b in (p for p in pairs if len(p) == 2)
+        if a.distance < 0.75 * b.distance
+    ]
     if len(good) < 12:
         return None, 0.0
 
@@ -100,13 +114,15 @@ def register(moving_gray, reference_gray, scale: float = _ORB_SCALE):
     return np.linalg.inv(S) @ H_small @ S, quality
 
 
-def warp_to_reference(moving_gray, H, shape: Tuple[int, int]):
-    """Warp *moving_gray* into the reference frame, padding with paper white."""
+def warp_to_reference(moving_gray, H, shape: tuple[int, int]):
+    """Warp *moving_gray* into the reference frame, padded with white."""
     import cv2
 
     height, width = shape
     return cv2.warpPerspective(
-        moving_gray, H, (width, height),
+        moving_gray,
+        H,
+        (width, height),
         flags=cv2.INTER_LINEAR,
         borderMode=cv2.BORDER_CONSTANT,
         borderValue=255,
@@ -142,11 +158,12 @@ class BlankPage:
     page_index: int
     image: Any
     reference: str
-    contributors: List[Tuple[str, float]] = field(default_factory=list)
-    failures: List[Tuple[str, float]] = field(default_factory=list)
+    contributors: list[tuple[str, float]] = field(default_factory=list)
+    failures: list[tuple[str, float]] = field(default_factory=list)
 
     @property
-    def shape(self) -> Tuple[int, int]:
+    def shape(self) -> tuple[int, int]:
+        """Height and width of the blank page image."""
         return self.image.shape[:2]
 
 
@@ -156,7 +173,7 @@ def build_blank(
     *,
     dpi: int = DEFAULT_DPI,
     min_quality: float = MIN_REGISTRATION_QUALITY,
-    max_documents: Optional[int] = BLANK_SAMPLE,
+    max_documents: int | None = BLANK_SAMPLE,
 ) -> BlankPage:
     """Register copies of one page onto the first and median them.
 
@@ -174,13 +191,15 @@ def build_blank(
 
     reference = render_gray(paths[0], page_index, dpi)
     stack = [reference]
-    contributors: List[Tuple[str, float]] = [(paths[0].name, 1.0)]
-    failures: List[Tuple[str, float]] = []
+    contributors: list[tuple[str, float]] = [(paths[0].name, 1.0)]
+    failures: list[tuple[str, float]] = []
 
     for path in paths[1:]:
         moving = render_gray(path, page_index, dpi)
         if moving.shape != reference.shape:
-            moving = cv2.resize(moving, (reference.shape[1], reference.shape[0]))
+            moving = cv2.resize(
+                moving, (reference.shape[1], reference.shape[0])
+            )
         H, quality = register(moving, reference)
         if H is None or quality < min_quality:
             failures.append((path.name, quality))
@@ -202,7 +221,9 @@ def build_blank(
 # ==========================================
 
 
-def _modal_width(widths: Sequence[int], tolerance: float = 0.22) -> Optional[Tuple[int, int]]:
+def _modal_width(
+    widths: Sequence[int], tolerance: float = 0.22
+) -> tuple[int, int] | None:
     """Width band of the dominant candidate size cluster.
 
     Printed controls on one form are all the same size, so they form a tight
@@ -220,7 +241,9 @@ def _modal_width(widths: Sequence[int], tolerance: float = 0.22) -> Optional[Tup
             best, best_count = centre, count
     if best is None:
         return None
-    return int(round(best * (1 - tolerance))), int(round(best * (1 + tolerance)))
+    return int(round(best * (1 - tolerance))), int(
+        round(best * (1 + tolerance))
+    )
 
 
 def find_controls(
@@ -228,7 +251,7 @@ def find_controls(
     *,
     min_side: int = 14,
     max_side: int = 60,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Locate every empty response control on a blank form.
 
     Candidates must be square-ish, hollow, isolated from surrounding text, and
@@ -238,10 +261,12 @@ def find_controls(
     import cv2
 
     ink = markup_detect._ink_mask(cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR))
-    contours, _ = cv2.findContours(ink, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours, _ = cv2.findContours(
+        ink, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+    )
     page_width = gray.shape[1]
 
-    candidates: List[Dict[str, Any]] = []
+    candidates: list[dict[str, Any]] = []
     for cnt in contours:
         x, y, w, h = cv2.boundingRect(cnt)
         if not (min_side <= w <= max_side and min_side <= h <= max_side):
@@ -251,7 +276,9 @@ def find_controls(
         extent = cv2.contourArea(cnt) / float(w * h)
         if extent < 0.55:
             continue
-        interior = ink[y + h // 4: y + 3 * h // 4, x + w // 4: x + 3 * w // 4]
+        interior = ink[
+            y + h // 4 : y + 3 * h // 4, x + w // 4 : x + 3 * w // 4
+        ]
         if interior.size == 0 or interior.mean() > 40:
             continue
         if not markup_detect._is_isolated(ink, x, y, w, h, page_width):
@@ -262,13 +289,15 @@ def find_controls(
         ):
             continue
         # Shape decides single-choice (○) from multi-select (□) downstream, and
-        # the two separate cleanly on how much of the bbox the outline encloses:
-        # a ring reaches pi/4, a square outline nearly 1.
-        candidates.append({
-            "bbox": [int(x), int(y), int(x + w), int(y + h)],
-            "shape": "circle" if extent < CIRCLE_MAX_EXTENT else "box",
-            "w": int(w),
-        })
+        # the two separate cleanly on how much of the bbox the outline
+        # encloses: a ring reaches pi/4, a square outline nearly 1.
+        candidates.append(
+            {
+                "bbox": [int(x), int(y), int(x + w), int(y + h)],
+                "shape": "circle" if extent < CIRCLE_MAX_EXTENT else "box",
+                "w": int(w),
+            }
+        )
 
     band = _modal_width([c["w"] for c in candidates])
     if band is not None:
@@ -285,13 +314,17 @@ def find_controls(
 #         5. TEMPLATE DIFFERENCING
 # ==========================================
 
-RESIDUAL_INK = 40         # gray levels darker than the blank to count as new ink
-RESIDUAL_CHECKED = 0.08   # >= this fraction of the interior inked -> checked
-RESIDUAL_EMPTY = 0.025    # <= this fraction -> unchecked
-_RESIDUAL_TOLERANCE = 9   # px of registration slack absorbed before differencing
-_RESIDUAL_MARGIN = 0.26   # fraction trimmed per side, clearing the printed outline
-HALO_GROW = 0.5           # how far beyond the control the halo reaches, as a fraction
-HALO_INK = 0.05           # halo ink that makes an empty interior doubtful
+RESIDUAL_INK = 40  # gray levels darker than the blank to count as new ink
+RESIDUAL_CHECKED = 0.08  # >= this fraction of the interior inked -> checked
+RESIDUAL_EMPTY = 0.025  # <= this fraction -> unchecked
+_RESIDUAL_TOLERANCE = (
+    9  # px of registration slack absorbed before differencing
+)
+_RESIDUAL_MARGIN = (
+    0.26  # fraction trimmed per side, clearing the printed outline
+)
+HALO_GROW = 0.5  # how far beyond the control the halo reaches, as a fraction
+HALO_INK = 0.05  # halo ink that makes an empty interior doubtful
 
 
 def residual_ink(blank_gray, registered_gray):
@@ -307,11 +340,15 @@ def residual_ink(blank_gray, registered_gray):
     return cv2.subtract(cv2.erode(blank_gray, kernel), registered_gray)
 
 
-MARK_CLOSE = 7      # px, bridges gaps the erosion leaves where a stroke crosses print
-MIN_MARK_AREA = 40  # px, below this a residual blob is scanner noise, not a mark
+MARK_CLOSE = (
+    7  # px, bridges gaps the erosion leaves where a stroke crosses print
+)
+MIN_MARK_AREA = (
+    40  # px, below this a residual blob is scanner noise, not a mark
+)
 
 
-def dominant_control(residual, boxes: Sequence[Sequence[int]]) -> Optional[int]:
+def dominant_control(residual, boxes: Sequence[Sequence[int]]) -> int | None:
     """Which control a single stroke spanning several of them belongs to.
 
     A respondent whose X carries a long tail leaves ink inside the neighbouring
@@ -342,16 +379,18 @@ def dominant_control(residual, boxes: Sequence[Sequence[int]]) -> Optional[int]:
     if count < 2:
         return None
 
-    share: Dict[int, Dict[int, int]] = {}
+    share: dict[int, dict[int, int]] = {}
     for index, box in enumerate(boxes):
         bx1, by1, bx2, by2 = box
         my = int((by2 - by1) * _RESIDUAL_MARGIN)
         mx = int((bx2 - bx1) * _RESIDUAL_MARGIN)
-        inner = labels[by1 - y1 + my: by2 - y1 - my, bx1 - x1 + mx: bx2 - x1 - mx]
+        inner = labels[
+            by1 - y1 + my : by2 - y1 - my, bx1 - x1 + mx : bx2 - x1 - mx
+        ]
         if inner.size == 0:
             continue
         values, counts = np.unique(inner, return_counts=True)
-        for value, pixels in zip(values, counts):
+        for value, pixels in zip(values, counts, strict=False):
             if value == 0 or stats[value, cv2.CC_STAT_AREA] < MIN_MARK_AREA:
                 continue
             share.setdefault(int(value), {})[index] = int(pixels)
@@ -363,15 +402,17 @@ def dominant_control(residual, boxes: Sequence[Sequence[int]]) -> Optional[int]:
 
 
 def halo_crop(residual, bbox: Sequence[int], grow: float = HALO_GROW):
-    """The control's box widened by *grow* on each side, clipped to the page."""
+    """The control's box widened by *grow* per side, clipped to the page."""
     x1, y1, x2, y2 = [int(v) for v in bbox]
     gx, gy = int((x2 - x1) * grow), int((y2 - y1) * grow)
     height, width = residual.shape[:2]
-    return residual[max(0, y1 - gy):min(height, y2 + gy),
-                    max(0, x1 - gx):min(width, x2 + gx)]
+    return residual[
+        max(0, y1 - gy) : min(height, y2 + gy),
+        max(0, x1 - gx) : min(width, x2 + gx),
+    ]
 
 
-def classify_residual(residual_crop, halo=None) -> Dict[str, Any]:
+def classify_residual(residual_crop, halo=None) -> dict[str, Any]:
     """Mark state from the residual inside one control.
 
     Takes the residual over the control's full bbox and measures its interior.
@@ -381,13 +422,23 @@ def classify_residual(residual_crop, halo=None) -> Dict[str, Any]:
     0.2, with 1.6% of cells in between.
     """
     if residual_crop is None or residual_crop.size == 0:
-        return {"state": "uncertain", "method": "residual", "score": 0.0, "fill_ratio": None}
+        return {
+            "state": "uncertain",
+            "method": "residual",
+            "score": 0.0,
+            "fill_ratio": None,
+        }
 
     height, width = residual_crop.shape[:2]
     my, mx = int(height * _RESIDUAL_MARGIN), int(width * _RESIDUAL_MARGIN)
-    interior = residual_crop[my: height - my, mx: width - mx]
+    interior = residual_crop[my : height - my, mx : width - mx]
     if interior.size == 0:
-        return {"state": "uncertain", "method": "residual", "score": 0.0, "fill_ratio": None}
+        return {
+            "state": "uncertain",
+            "method": "residual",
+            "score": 0.0,
+            "fill_ratio": None,
+        }
 
     fill = float(np.count_nonzero(interior > RESIDUAL_INK)) / interior.size
 
@@ -414,7 +465,10 @@ def classify_residual(residual_crop, halo=None) -> Dict[str, Any]:
     else:
         state = "uncertain"
         span = RESIDUAL_CHECKED - RESIDUAL_EMPTY
-        score = max(0.0, 0.5 - min(RESIDUAL_CHECKED - fill, fill - RESIDUAL_EMPTY) / span)
+        score = max(
+            0.0,
+            0.5 - min(RESIDUAL_CHECKED - fill, fill - RESIDUAL_EMPTY) / span,
+        )
 
     return {
         "state": state,
@@ -425,7 +479,11 @@ def classify_residual(residual_crop, halo=None) -> Dict[str, Any]:
     }
 
 
-def overlay(gray, controls: Sequence[Dict[str, Any]], states: Optional[Sequence[str]] = None):
+def overlay(
+    gray,
+    controls: Sequence[dict[str, Any]],
+    states: Sequence[str] | None = None,
+):
     """Audit image: every control outlined, coloured by state when given."""
     import cv2
 
@@ -440,7 +498,11 @@ def overlay(gray, controls: Sequence[Dict[str, Any]], states: Optional[Sequence[
         if states is not None and index < len(states):
             color = colors.get(states[index], (0, 0, 255))
         else:
-            color = (0, 160, 0) if control.get("shape") == "circle" else (220, 60, 0)
+            color = (
+                (0, 160, 0)
+                if control.get("shape") == "circle"
+                else (220, 60, 0)
+            )
         cv2.rectangle(vis, (x1 - 3, y1 - 3), (x2 + 3, y2 + 3), color, 2)
     return vis
 
@@ -455,15 +517,16 @@ class TemplateControl:
     """One response control, in page-normalized coordinates."""
 
     id: str
-    bbox: List[float]  # [x1, y1, x2, y2] as fractions of page width/height
+    bbox: list[float]  # [x1, y1, x2, y2] as fractions of page width/height
     shape: str = "circle"
     label: str = ""
     question_id: str = ""
-    row_id: str = ""      # the answer group this control competes in
+    row_id: str = ""  # the answer group this control competes in
     sheet_page: str = ""  # printed page of the questionnaire, e.g. "1/4"
-    column: int = 0       # content column on the scan, left to right
+    column: int = 0  # content column on the scan, left to right
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
+        """Return the control as JSON types."""
         return {
             "id": self.id,
             "bbox": [round(float(v), 6) for v in self.bbox],
@@ -475,7 +538,8 @@ class TemplateControl:
             "column": self.column,
         }
 
-    def pixel_bbox(self, width: int, height: int) -> List[int]:
+    def pixel_bbox(self, width: int, height: int) -> list[int]:
+        """Return the box in pixels of a page of the given size."""
         x1, y1, x2, y2 = self.bbox
         return [
             max(0, int(round(x1 * width))),
@@ -487,17 +551,21 @@ class TemplateControl:
 
 @dataclass
 class TemplatePage:
+    """One page of the form: its size, controls and blank image."""
+
     page_index: int
     width: int
     height: int
-    controls: List[TemplateControl] = field(default_factory=list)
-    blank_png_b64: Optional[str] = None
+    controls: list[TemplateControl] = field(default_factory=list)
+    blank_png_b64: str | None = None
 
     def blank_filename(self, stem: str) -> str:
+        """Return the file name of the page's blank image."""
         return f"{stem}_blank_page{self.page_index + 1}.png"
 
-    def to_dict(self, stem: str = "") -> Dict[str, Any]:
-        data: Dict[str, Any] = {
+    def to_dict(self, stem: str = "") -> dict[str, Any]:
+        """Return the page as JSON types, naming its blank image file."""
+        data: dict[str, Any] = {
             "page_index": self.page_index,
             "width": self.width,
             "height": self.height,
@@ -512,17 +580,21 @@ class TemplatePage:
 class SurveyTemplate:
     """The printed form: where every response control is, in every page."""
 
-    pages: List[TemplatePage] = field(default_factory=list)
+    pages: list[TemplatePage] = field(default_factory=list)
     dpi: int = DEFAULT_DPI
-    provenance: Dict[str, Any] = field(default_factory=dict)
-    rules: Dict[str, str] = field(default_factory=dict)  # row_id -> single|multiple
-    row_labels: Dict[str, str] = field(default_factory=dict)  # row_id -> printed stem
+    provenance: dict[str, Any] = field(default_factory=dict)
+    # row_id -> single|multiple
+    rules: dict[str, str] = field(default_factory=dict)
+    # row_id -> printed stem
+    row_labels: dict[str, str] = field(default_factory=dict)
 
     @property
     def control_count(self) -> int:
+        """Number of response controls on all pages."""
         return sum(len(page.controls) for page in self.pages)
 
-    def to_dict(self, stem: str = "") -> Dict[str, Any]:
+    def to_dict(self, stem: str = "") -> dict[str, Any]:
+        """Return the template as JSON types, naming its blank images."""
         return {
             "dpi": self.dpi,
             "provenance": dict(self.provenance),
@@ -531,12 +603,14 @@ class SurveyTemplate:
             "pages": [page.to_dict(stem) for page in self.pages],
         }
 
-    def rows(self) -> Dict[str, List[TemplateControl]]:
+    def rows(self) -> dict[str, list[TemplateControl]]:
         """Controls of each answer group, in printed order."""
-        grouped: Dict[str, List[TemplateControl]] = {}
+        grouped: dict[str, list[TemplateControl]] = {}
         for page in self.pages:
             for control in page.controls:
-                grouped.setdefault(control.row_id or control.id, []).append(control)
+                grouped.setdefault(control.row_id or control.id, []).append(
+                    control
+                )
         return {key: reading_order(value) for key, value in grouped.items()}
 
     def display_name(self, row_id: str) -> str:
@@ -553,7 +627,11 @@ class SurveyTemplate:
         parts = []
         if first.sheet_page:
             parts.append(f"p{first.sheet_page}")
-        number = first.question_id.rsplit("_q", 1)[-1] if "_q" in first.question_id else ""
+        number = (
+            first.question_id.rsplit("_q", 1)[-1]
+            if "_q" in first.question_id
+            else ""
+        )
         if number:
             parts.append(f"Q{number}")
 
@@ -562,7 +640,8 @@ class SurveyTemplate:
             parts.append(label)
         elif row_id.rsplit("_r", 1)[-1].isdigit():
             siblings = [
-                key for key in self.rows()
+                key
+                for key in self.rows()
                 if key.rsplit("_r", 1)[0] == row_id.rsplit("_r", 1)[0]
             ]
             if len(siblings) > 1:
@@ -581,7 +660,8 @@ class SurveyTemplate:
         path = pathlib.Path(path)
         stem = path.stem
         path.write_text(
-            json.dumps(self.to_dict(stem), indent=2, ensure_ascii=False), encoding="utf-8"
+            json.dumps(self.to_dict(stem), indent=2, ensure_ascii=False),
+            encoding="utf-8",
         )
         for page in self.pages:
             if page.blank_png_b64:
@@ -590,7 +670,8 @@ class SurveyTemplate:
                 )
 
     @classmethod
-    def load(cls, path) -> "SurveyTemplate":
+    def load(cls, path) -> SurveyTemplate:
+        """Read a template written by :meth:`save`, with its blank images."""
         import base64
 
         path = pathlib.Path(path)
@@ -623,7 +704,9 @@ class SurveyTemplate:
             ],
         )
 
-        for page, page_raw in zip(template.pages, raw.get("pages") or []):
+        for page, page_raw in zip(
+            template.pages, raw.get("pages") or [], strict=False
+        ):
             blank = page_raw.get("blank_image")
             if not blank:
                 continue
@@ -635,7 +718,7 @@ class SurveyTemplate:
         return template
 
 
-def reading_order(controls) -> List[Any]:
+def reading_order(controls) -> list[Any]:
     """Printed order within one answer group.
 
     Left-to-right for a row, top-to-bottom for a vertical list. The vertical
@@ -649,13 +732,16 @@ def reading_order(controls) -> List[Any]:
     quantum = max(1e-6, heights[len(heights) // 2])
     return sorted(
         controls,
-        key=lambda c: (round(((c.bbox[1] + c.bbox[3]) / 2) / quantum), c.bbox[0]),
+        key=lambda c: (
+            round(((c.bbox[1] + c.bbox[3]) / 2) / quantum),
+            c.bbox[0],
+        ),
     )
 
 
-def _rows_of(controls, width: int, height: int) -> List[List[Any]]:
+def _rows_of(controls, width: int, height: int) -> list[list[Any]]:
     """Split controls into left-to-right runs sharing a baseline."""
-    rows: Dict[int, List[Any]] = {}
+    rows: dict[int, list[Any]] = {}
     for control in controls:
         x1, y1, x2, y2 = control.pixel_bbox(width, height)
         tolerance = max(6, (y2 - y1) // 2)
@@ -668,15 +754,15 @@ def _rows_of(controls, width: int, height: int) -> List[List[Any]]:
     ]
 
 
-def _answer_groups(controls, width: int, height: int) -> List[List[Any]]:
+def _answer_groups(controls, width: int, height: int) -> list[list[Any]]:
     """Partition one question's controls into the sets that compete together.
 
     A row holding several controls is one answer (a matrix row, a rating scale,
-    a "Ja / Nein" pair). A run of consecutive rows holding one control each is a
-    vertical option list, which is also one answer.
+    a "Ja / Nein" pair). A run of consecutive rows holding one control each is
+    a vertical option list, which is also one answer.
     """
-    groups: List[List[Any]] = []
-    pending: List[Any] = []
+    groups: list[list[Any]] = []
+    pending: list[Any] = []
     for row in _rows_of(controls, width, height):
         if len(row) >= 2:
             if pending:
@@ -690,7 +776,7 @@ def _answer_groups(controls, width: int, height: int) -> List[List[Any]]:
     return groups
 
 
-def infer_structure(template: "SurveyTemplate") -> Dict[str, str]:
+def infer_structure(template: SurveyTemplate) -> dict[str, str]:
     """Work out what each control competes with, and under which rule.
 
     Controls are split by printed shape before anything else: this form, like
@@ -700,12 +786,15 @@ def infer_structure(template: "SurveyTemplate") -> Dict[str, str]:
     """
     template.rules = {}
     for page in template.pages:
-        by_question: Dict[str, List[TemplateControl]] = {}
+        by_question: dict[str, list[TemplateControl]] = {}
         for control in page.controls:
-            key = (control.question_id or f"p{page.page_index + 1}", control.shape)
+            key = (
+                control.question_id or f"p{page.page_index + 1}",
+                control.shape,
+            )
             by_question.setdefault(key, []).append(control)
 
-        counters: Dict[str, int] = {}
+        counters: dict[str, int] = {}
         for (question_id, shape), controls in by_question.items():
             for group in _answer_groups(controls, page.width, page.height):
                 counters[question_id] = counters.get(question_id, 0) + 1
@@ -714,7 +803,9 @@ def infer_structure(template: "SurveyTemplate") -> Dict[str, str]:
                     row_id = f"{question_id}_r{counters[question_id]:02d}"
                 for control in group:
                     control.row_id = row_id
-                template.rules[row_id] = "multiple" if shape == "box" else "single"
+                template.rules[row_id] = (
+                    "multiple" if shape == "box" else "single"
+                )
     return template.rules
 
 
@@ -723,9 +814,9 @@ def build_template(
     *,
     dpi: int = DEFAULT_DPI,
     keep_blanks: bool = True,
-    max_blank_documents: Optional[int] = BLANK_SAMPLE,
+    max_blank_documents: int | None = BLANK_SAMPLE,
     progress=None,
-) -> Tuple[SurveyTemplate, List[BlankPage]]:
+) -> tuple[SurveyTemplate, list[BlankPage]]:
     """Synthesize the blank form from a batch and locate its controls.
 
     Documents whose page count differs from the majority are left out of the
@@ -752,12 +843,15 @@ def build_template(
     skipped = [p.name for p in paths if p not in usable]
 
     template = SurveyTemplate(dpi=dpi)
-    blanks: List[BlankPage] = []
+    blanks: list[BlankPage] = []
 
     for page_index in range(n_pages):
         if progress is not None:
-            progress(page_index / max(1, n_pages),
-                     f"Synthesizing the blank form, page {page_index + 1} of {n_pages}...")
+            progress(
+                page_index / max(1, n_pages),
+                f"Synthesizing the blank form, page {page_index + 1} of "
+                f"{n_pages}...",
+            )
         blank = build_blank(
             usable, page_index, dpi=dpi, max_documents=max_blank_documents
         )
@@ -778,7 +872,9 @@ def build_template(
         if keep_blanks:
             ok, encoded = cv2.imencode(".png", blank.image)
             if ok:
-                page.blank_png_b64 = base64.b64encode(encoded.tobytes()).decode("ascii")
+                page.blank_png_b64 = base64.b64encode(
+                    encoded.tobytes()
+                ).decode("ascii")
         template.pages.append(page)
 
     template.provenance = {
@@ -790,7 +886,9 @@ def build_template(
                 "reference": b.reference,
                 "contributors": len(b.contributors),
                 "failures": [name for name, _ in b.failures],
-                "min_quality": round(min((q for _, q in b.contributors), default=0.0), 3),
+                "min_quality": round(
+                    min((q for _, q in b.contributors), default=0.0), 3
+                ),
             }
             for b in blanks
         },

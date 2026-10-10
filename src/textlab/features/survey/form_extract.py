@@ -1,24 +1,25 @@
 """Question-level survey/form response extraction from high-resolution crops.
 
 This module is intentionally activated only when the user requests survey
-analysis. Paddle regions provide printed-text/schema hints; a targeted VLM reads
-the actual marks. The result is stored as :mod:`doc_ir` form annotations and
-never mutates the OCR transcription.
+analysis. Paddle regions provide printed-text/schema hints; a targeted VLM
+reads the actual marks. The result is stored as :mod:`doc_ir` form annotations
+and never mutates the OCR transcription.
 """
 
 from __future__ import annotations
 
 import base64
 import copy
-from dataclasses import dataclass, field
-from html import unescape
-from html.parser import HTMLParser
 import json
 import math
 import os
 import re
 import unicodedata
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from collections.abc import Iterable
+from dataclasses import dataclass, field
+from html import unescape
+from html.parser import HTMLParser
+from typing import Any
 
 try:
     from textlab.features.ocr import doc_ir, markup_detect
@@ -45,15 +46,29 @@ PADDLE_ID_CONTRACT = "paddle-id-v1"
 HYBRID_TABLE_CONTRACT = "hybrid-paddle-table-v1"
 DEFAULT_SURVEY_CONTRACT = SCHEMA_FREE_CONTRACT
 _VALID_STATES = {"selected", "cancelled", "ambiguous"}
-_VALID_VISUAL_MARKS = {"x", "tick", "filled", "scribbled", "other", "uncertain"}
+_VALID_VISUAL_MARKS = {
+    "x",
+    "tick",
+    "filled",
+    "scribbled",
+    "other",
+    "uncertain",
+}
 _VALID_RESPONSE_TYPES = {"single", "multiple", "rating", "matrix", "unknown"}
-_VALID_SELECTION_RULES = {"zero_or_one", "zero_or_more", "one_per_row", "unknown"}
+_VALID_SELECTION_RULES = {
+    "zero_or_one",
+    "zero_or_more",
+    "one_per_row",
+    "unknown",
+}
 
 
 def _model_has_release_approval(client) -> bool:
     approved = {
         name.strip()
-        for name in os.environ.get("TEXTLAB_APPROVED_SURVEY_MODELS", "").split(",")
+        for name in os.environ.get("TEXTLAB_APPROVED_SURVEY_MODELS", "").split(
+            ","
+        )
         if name.strip()
     }
     return str(getattr(client, "model", "")) in approved
@@ -67,14 +82,18 @@ class SameLayoutTemplate:
     conservative first step toward registered template differencing: it reuses
     question locations, but the VLM still reconstructs and reads every response
     image and no answer state is copied between documents. Switching later
-    respondents to a frozen ID-only structure remains gated on drift validation.
+    respondents to a frozen ID-only structure remains gated on drift
+    validation.
     """
 
-    pages: Dict[int, List[Dict[str, Any]]] = field(default_factory=dict)
+    pages: dict[int, list[dict[str, Any]]] = field(default_factory=dict)
     learned_pages: int = 0
     reused_pages: int = 0
 
-    def get(self, page_number: int, width: int, height: int) -> List[Dict[str, Any]]:
+    def get(
+        self, page_number: int, width: int, height: int
+    ) -> list[dict[str, Any]]:
+        """Return the jobs learned for a page, scaled to its size."""
         specs = self.pages.get(page_number) or []
         if not specs:
             return []
@@ -93,7 +112,9 @@ class SameLayoutTemplate:
                     "group_id": spec["group_id"],
                     "section_id": spec.get("section_id", spec["group_id"]),
                     "schema_hint": copy.deepcopy(spec["schema_hint"]),
-                    "candidate_evidence": list(spec.get("candidate_evidence") or []),
+                    "candidate_evidence": list(
+                        spec.get("candidate_evidence") or []
+                    ),
                     "validation_text": str(spec.get("validation_text") or ""),
                     "question_number": spec.get("question_number"),
                     "template_reused": True,
@@ -101,7 +122,14 @@ class SameLayoutTemplate:
             )
         return jobs
 
-    def learn(self, page_number: int, width: int, height: int, jobs: List[Dict[str, Any]]):
+    def learn(
+        self,
+        page_number: int,
+        width: int,
+        height: int,
+        jobs: list[dict[str, Any]],
+    ):
+        """Store a page's jobs, normalized to its size, for later pages."""
         if page_number in self.pages or width <= 0 or height <= 0:
             return
         specs = []
@@ -109,11 +137,18 @@ class SameLayoutTemplate:
             x1, y1, x2, y2 = job["bbox"]
             specs.append(
                 {
-                    "normalized_bbox": [x1 / width, y1 / height, x2 / width, y2 / height],
+                    "normalized_bbox": [
+                        x1 / width,
+                        y1 / height,
+                        x2 / width,
+                        y2 / height,
+                    ],
                     "group_id": job["group_id"],
                     "section_id": job.get("section_id", job["group_id"]),
                     "schema_hint": copy.deepcopy(job["schema_hint"]),
-                    "candidate_evidence": list(job.get("candidate_evidence") or []),
+                    "candidate_evidence": list(
+                        job.get("candidate_evidence") or []
+                    ),
                     "validation_text": str(job.get("validation_text") or ""),
                     "question_number": job.get("question_number"),
                 }
@@ -121,6 +156,7 @@ class SameLayoutTemplate:
         if specs:
             self.pages[page_number] = specs
             self.learned_pages += 1
+
 
 def _plain(value: str) -> str:
     return _SPACE.sub(" ", unescape(_TAG.sub(" ", str(value or "")))).strip()
@@ -147,8 +183,10 @@ def _clean_question_text(value: str) -> str:
     return text.strip(" \t|,.;:-")
 
 
-def _survey_contract(value: Optional[str]) -> str:
-    contract = value or os.environ.get("TEXTLAB_SURVEY_CONTRACT", DEFAULT_SURVEY_CONTRACT)
+def _survey_contract(value: str | None) -> str:
+    contract = value or os.environ.get(
+        "TEXTLAB_SURVEY_CONTRACT", DEFAULT_SURVEY_CONTRACT
+    )
     contract = contract.strip().casefold()
     aliases = {
         # v1 remains accepted as a CLI/config spelling, but resolves to the
@@ -185,9 +223,9 @@ def _label_is_resolved(value: str) -> bool:
 class _TableParser(HTMLParser):
     def __init__(self):
         super().__init__()
-        self.rows: List[List[str]] = []
-        self._row: Optional[List[str]] = None
-        self._cell: Optional[List[str]] = None
+        self.rows: list[list[str]] = []
+        self._row: list[str] | None = None
+        self._cell: list[str] | None = None
 
     def handle_starttag(self, tag, attrs):
         tag = tag.lower()
@@ -202,7 +240,11 @@ class _TableParser(HTMLParser):
 
     def handle_endtag(self, tag):
         tag = tag.lower()
-        if tag in ("td", "th") and self._row is not None and self._cell is not None:
+        if (
+            tag in ("td", "th")
+            and self._row is not None
+            and self._cell is not None
+        ):
             self._row.append(_SPACE.sub(" ", "".join(self._cell)).strip())
             self._cell = None
         elif tag == "tr" and self._row is not None:
@@ -210,7 +252,7 @@ class _TableParser(HTMLParser):
             self._row = None
 
 
-def _table_rows(html: str) -> List[List[str]]:
+def _table_rows(html: str) -> list[list[str]]:
     parser = _TableParser()
     try:
         parser.feed(html or "")
@@ -219,12 +261,12 @@ def _table_rows(html: str) -> List[List[str]]:
     return parser.rows
 
 
-def _question_number(text: str) -> Optional[str]:
+def _question_number(text: str) -> str | None:
     match = _QUESTION_START.match(_plain(text))
     return match.group(1) if match else None
 
 
-def _is_numbered_question_anchor(region: "doc_ir.Region", text: str) -> bool:
+def _is_numbered_question_anchor(region: doc_ir.Region, text: str) -> bool:
     """Distinguish question numbers from numbered list items.
 
     Parenthesis/colon numbering is normally form structure. A period is more
@@ -245,7 +287,7 @@ def _is_numbered_question_anchor(region: "doc_ir.Region", text: str) -> bool:
     )
 
 
-def _question_sections(page: "doc_ir.Page") -> List[Dict[str, Any]]:
+def _question_sections(page: doc_ir.Page) -> list[dict[str, Any]]:
     """Build high-recall question sections from Paddle's reading order.
 
     Numbered questions are the strongest boundary, but forms are not required
@@ -254,7 +296,7 @@ def _question_sections(page: "doc_ir.Page") -> List[Dict[str, Any]]:
     This runs only after the user explicitly requested survey extraction.
     """
     ordered = page.ordered_regions()
-    sections: List[Dict[str, Any]] = []
+    sections: list[dict[str, Any]] = []
     numbered_anchors = []
     question_anchors = []
     for index, region in enumerate(ordered):
@@ -274,19 +316,34 @@ def _question_sections(page: "doc_ir.Page") -> List[Dict[str, Any]]:
 
     def _top(entry):
         region = entry[3]
-        return float(region.bbox[1]) if len(region.bbox) >= 4 else float(entry[0]) * 1000
+        return (
+            float(region.bbox[1])
+            if len(region.bbox) >= 4
+            else float(entry[0]) * 1000
+        )
 
     def _center_x(region):
-        return (float(region.bbox[0]) + float(region.bbox[2])) / 2 if len(region.bbox) >= 4 else 0.0
+        return (
+            (float(region.bbox[0]) + float(region.bbox[2])) / 2
+            if len(region.bbox) >= 4
+            else 0.0
+        )
 
-    page_width = float(page.width or max(
-        (region.bbox[2] for region in ordered if len(region.bbox) >= 4),
-        default=1,
-    ))
-    centres = sorted(_center_x(entry[3]) for entry in anchors if len(entry[3].bbox) >= 4)
+    page_width = float(
+        page.width
+        or max(
+            (region.bbox[2] for region in ordered if len(region.bbox) >= 4),
+            default=1,
+        )
+    )
+    centres = sorted(
+        _center_x(entry[3]) for entry in anchors if len(entry[3].bbox) >= 4
+    )
     column_bounds = [(0.0, page_width)]
     if len(centres) >= 4 and page_width > 0:
-        gaps = [(centres[i + 1] - centres[i], i) for i in range(len(centres) - 1)]
+        gaps = [
+            (centres[i + 1] - centres[i], i) for i in range(len(centres) - 1)
+        ]
         largest_gap, gap_pos = max(gaps, default=(0.0, 0))
         if largest_gap >= page_width * 0.18:
             boundary = (centres[gap_pos] + centres[gap_pos + 1]) / 2
@@ -308,7 +365,9 @@ def _question_sections(page: "doc_ir.Page") -> List[Dict[str, Any]]:
     )
 
     covered = set()
-    for anchor_pos, (start, number, anchor_text, anchor_region) in enumerate(anchors):
+    for anchor_pos, (start, number, anchor_text, anchor_region) in enumerate(
+        anchors
+    ):
         crop_limits = None
         if len(anchor_region.bbox) >= 4:
             y_start = float(anchor_region.bbox[1])
@@ -340,13 +399,19 @@ def _question_sections(page: "doc_ir.Page") -> List[Dict[str, Any]]:
             ]
             crop_limits = [column_left, y_start, column_right, y_end]
         else:
-            next_index = anchors[anchor_pos + 1][0] if anchor_pos + 1 < len(anchors) else len(ordered)
+            next_index = (
+                anchors[anchor_pos + 1][0]
+                if anchor_pos + 1 < len(anchors)
+                else len(ordered)
+            )
             regions = ordered[start:next_index]
         if anchor_region not in regions:
             regions.insert(0, anchor_region)
         regions.sort(
             key=lambda region: (
-                region.bbox[1] if len(region.bbox) >= 4 else region.reading_order,
+                region.bbox[1]
+                if len(region.bbox) >= 4
+                else region.reading_order,
                 region.bbox[0] if len(region.bbox) >= 4 else 0,
             )
         )
@@ -363,14 +428,14 @@ def _question_sections(page: "doc_ir.Page") -> List[Dict[str, Any]]:
         covered.update(region.id for region in regions)
 
     # Fallback for unnumbered forms and for Paddle layouts where the question
-    # and options were merged into a table/text block without a separate anchor.
+    # and options were merged into a table/text block without a separate
+    # anchor.
     for index, region in enumerate(ordered):
         if region.id in covered:
             continue
         text = _plain(region.text)
-        is_candidate = (
-            region.type in (doc_ir.TABLE, doc_ir.CHECKBOX)
-            or bool(markup_detect.extract_mark_glyphs(text))
+        is_candidate = region.type in (doc_ir.TABLE, doc_ir.CHECKBOX) or bool(
+            markup_detect.extract_mark_glyphs(text)
         )
         if not is_candidate:
             continue
@@ -399,11 +464,11 @@ def _question_sections(page: "doc_ir.Page") -> List[Dict[str, Any]]:
 
 
 def _section_bbox(
-    regions: Iterable["doc_ir.Region"],
+    regions: Iterable[doc_ir.Region],
     width: int,
     height: int,
-    crop_limits: Optional[Iterable[float]] = None,
-) -> List[int]:
+    crop_limits: Iterable[float] | None = None,
+) -> list[int]:
     boxes = [r.bbox for r in regions if len(r.bbox) >= 4]
     if not boxes:
         return []
@@ -414,15 +479,18 @@ def _section_bbox(
     mx = max(12, int((x2 - x1) * 0.035))
     my = max(12, int((y2 - y1) * 0.06))
     bbox = [
-        max(0, int(x1) - mx), max(0, int(y1) - my),
-        min(width, int(x2) + mx), min(height, int(y2) + my),
+        max(0, int(x1) - mx),
+        max(0, int(y1) - my),
+        min(width, int(x2) + mx),
+        min(height, int(y2) + my),
     ]
     if crop_limits is not None:
         limits = list(crop_limits)
         if len(limits) >= 4:
             left, top, right, bottom = limits[:4]
             # Keep a tiny allowance for Paddle's bounding-box uncertainty, but
-            # never let generic crop padding pull in the previous/next question.
+            # never let generic crop padding pull in the previous/next
+            # question.
             #
             # The column limits come from the midpoint between question-anchor
             # centres, while regions are assigned to a column by their centre.
@@ -433,11 +501,17 @@ def _section_bbox(
             # padding, not the regions themselves.
             content_x1 = int(x1)
             content_x2 = int(x2)
-            bbox[0] = min(content_x1, max(bbox[0], max(0, int(math.floor(left)))))
+            bbox[0] = min(
+                content_x1, max(bbox[0], max(0, int(math.floor(left))))
+            )
             bbox[1] = max(bbox[1], max(0, int(math.floor(top)) - 3))
-            bbox[2] = max(content_x2, min(bbox[2], min(width, int(math.ceil(right)))))
+            bbox[2] = max(
+                content_x2, min(bbox[2], min(width, int(math.ceil(right))))
+            )
             if math.isfinite(bottom):
-                bbox[3] = min(bbox[3], max(bbox[1] + 8, int(math.floor(bottom)) - 3))
+                bbox[3] = min(
+                    bbox[3], max(bbox[1] + 8, int(math.floor(bottom)) - 3)
+                )
     return bbox
 
 
@@ -450,22 +524,22 @@ def _crop(image, bbox):
     return image[y1:y2, x1:x2]
 
 
-def _append_once(values: List[str], value: str) -> None:
+def _append_once(values: list[str], value: str) -> None:
     if value not in values:
         values.append(value)
 
 
 def _markup_evidence(
-    page: "doc_ir.Page", bbox: List[int]
-) -> Tuple[List[Tuple[dict, str]], List[dict]]:
+    page: doc_ir.Page, bbox: list[int]
+) -> tuple[list[tuple[dict, str]], list[dict]]:
     """Return answer-alignable geometry and diagnostics for one question crop.
 
     A geometric ``count_mismatch`` is deliberately diagnostic only. There is no
     one-to-one mapping between controls and answer options in that state, so it
     cannot establish doubt about an extracted answer.
     """
-    aligned: List[Tuple[dict, str]] = []
-    diagnostics: List[dict] = []
+    aligned: list[tuple[dict, str]] = []
+    diagnostics: list[dict] = []
     for region in page.ordered_regions():
         if not _region_overlaps_bbox(region, bbox):
             continue
@@ -474,7 +548,9 @@ def _markup_evidence(
             continue
         items = list(markup.get("items") or [])
         status = str(markup.get("status") or "unknown")
-        geometry_items = [item for item in items if isinstance(item.get("geometry"), dict)]
+        geometry_items = [
+            item for item in items if isinstance(item.get("geometry"), dict)
+        ]
         diagnostics.append(
             {
                 "region_id": region.id,
@@ -492,11 +568,11 @@ def _markup_evidence(
 
 
 def _reconcile_answer_geometry(
-    page: "doc_ir.Page",
-    bbox: List[int],
-    groups: List["doc_ir.FormGroup"],
+    page: doc_ir.Page,
+    bbox: list[int],
+    groups: list[doc_ir.FormGroup],
 ) -> None:
-    """Attach geometry to final options and flag only strong answer conflicts."""
+    """Attach geometry to final options; flag only strong answer conflicts."""
     evidence, diagnostics = _markup_evidence(page, bbox)
     option_rows = [
         (group, row, option)
@@ -507,7 +583,9 @@ def _reconcile_answer_geometry(
     alignment = (
         "aligned"
         if evidence and len(evidence) == len(option_rows)
-        else ("no_aligned_geometry" if not evidence else "answer_count_mismatch")
+        else (
+            "no_aligned_geometry" if not evidence else "answer_count_mismatch"
+        )
     )
     for group in groups:
         group.provenance["markup_diagnostics"] = copy.deepcopy(diagnostics)
@@ -515,7 +593,9 @@ def _reconcile_answer_geometry(
     if alignment != "aligned":
         return
 
-    for (group, row, option), (item, region_id) in zip(option_rows, evidence):
+    for (group, row, option), (item, region_id) in zip(
+        option_rows, evidence, strict=False
+    ):
         geometry = item["geometry"]
         geometry_state = str(geometry.get("state") or "uncertain")
         score = geometry.get("score")
@@ -533,13 +613,20 @@ def _reconcile_answer_geometry(
                 },
             )
         )
-        if geometry_state not in {"checked", "unchecked"} or (score or 0.0) < 0.55:
+        if (
+            geometry_state not in {"checked", "unchecked"}
+            or (score or 0.0) < 0.55
+        ):
             continue
         answer_state = "checked" if option.state == "selected" else "unchecked"
-        if option.state in {"cancelled", "ambiguous"} or answer_state == geometry_state:
+        if (
+            option.state in {"cancelled", "ambiguous"}
+            or answer_state == geometry_state
+        ):
             continue
         warning = (
-            f"extracted answer {answer_state!r} disagrees with strong geometric "
+            f"extracted answer {answer_state!r} disagrees with strong "
+            "geometric "
             f"evidence {geometry_state!r}"
         )
         _append_once(option.warnings, warning)
@@ -596,7 +683,7 @@ def _review_reason_for_warning(warning: str) -> str:
     return "validation_warning"
 
 
-def _finalize_review_reasons(groups: List["doc_ir.FormGroup"]) -> None:
+def _finalize_review_reasons(groups: list[doc_ir.FormGroup]) -> None:
     """Give every active review flag stable, machine-readable reason codes."""
     for group in groups:
         for row in group.rows:
@@ -604,10 +691,14 @@ def _finalize_review_reasons(groups: List["doc_ir.FormGroup"]) -> None:
                 continue
             warnings = list(row.warnings)
             warnings.extend(
-                warning for option in row.options for warning in option.warnings
+                warning
+                for option in row.options
+                for warning in option.warnings
             )
             for warning in warnings:
-                _append_once(row.review_reasons, _review_reason_for_warning(warning))
+                _append_once(
+                    row.review_reasons, _review_reason_for_warning(warning)
+                )
             if not row.review_reasons:
                 row.review_reasons.append("validation_warning")
             for reason in row.review_reasons:
@@ -615,7 +706,9 @@ def _finalize_review_reasons(groups: List["doc_ir.FormGroup"]) -> None:
         if group.status != "needs_review":
             continue
         for warning in group.warnings:
-            _append_once(group.review_reasons, _review_reason_for_warning(warning))
+            _append_once(
+                group.review_reasons, _review_reason_for_warning(warning)
+            )
         if not group.review_reasons:
             group.review_reasons.append("validation_warning")
 
@@ -629,7 +722,7 @@ def _png_bytes(image) -> bytes:
     return encoded.tobytes()
 
 
-def _complete_section_view(crop) -> Tuple[int, int, int, int, Any]:
+def _complete_section_view(crop) -> tuple[int, int, int, int, Any]:
     """Return one unfragmented question image.
 
     Earlier versions split wide and tall sections into independent VLM calls.
@@ -644,11 +737,15 @@ def _complete_section_view(crop) -> Tuple[int, int, int, int, Any]:
     return 0, 0, width, height, crop
 
 
-def _table_schema(region: "doc_ir.Region") -> List[dict]:
+def _table_schema(region: doc_ir.Region) -> list[dict]:
     rows = _table_rows(region.content.get("html", ""))
     hints = []
     for row_idx, cells in enumerate(rows):
-        marked_cols = [i for i, cell in enumerate(cells) if markup_detect.extract_mark_glyphs(cell)]
+        marked_cols = [
+            i
+            for i, cell in enumerate(cells)
+            if markup_detect.extract_mark_glyphs(cell)
+        ]
         if len(marked_cols) < 2:
             continue
         header = []
@@ -670,7 +767,11 @@ def _table_schema(region: "doc_ir.Region") -> List[dict]:
         for option_pos, col_idx in enumerate(marked_cols, start=1):
             glyphs = markup_detect.extract_mark_glyphs(cells[col_idx])
             paddle_state = glyphs[0]["state"] if glyphs else "unknown"
-            option_label = header[col_idx].strip() if header and col_idx < len(header) else ""
+            option_label = (
+                header[col_idx].strip()
+                if header and col_idx < len(header)
+                else ""
+            )
             if not _label_is_resolved(option_label):
                 option_label = f"option {option_pos}"
             options.append(
@@ -690,7 +791,7 @@ def _table_schema(region: "doc_ir.Region") -> List[dict]:
     return hints
 
 
-def _text_schema(region: "doc_ir.Region") -> List[dict]:
+def _text_schema(region: doc_ir.Region) -> list[dict]:
     text = _plain(region.text)
     glyphs = markup_detect.extract_mark_glyphs(text)
     if not glyphs:
@@ -711,7 +812,7 @@ def _text_schema(region: "doc_ir.Region") -> List[dict]:
     return [{"row_id": region.id, "label": prefix, "options": options}]
 
 
-def _reliable_table_rows(rows: List[dict]) -> bool:
+def _reliable_table_rows(rows: list[dict]) -> bool:
     """Whether Paddle recovered enough table structure to own the question.
 
     Matrix rows must agree on resolved column labels and have distinct,
@@ -728,13 +829,17 @@ def _reliable_table_rows(rows: List[dict]) -> bool:
     if option_count < 2:
         return False
     option_vectors = [
-        tuple(_normalized_label(option.get("label")) for option in row["options"])
+        tuple(
+            _normalized_label(option.get("label")) for option in row["options"]
+        )
         for row in rows
     ]
     if any(
         not label or label.startswith("option ")
         for row in rows
-        for label in (str(option.get("label") or "").strip() for option in row["options"])
+        for label in (
+            str(option.get("label") or "").strip() for option in row["options"]
+        )
     ):
         return False
     if any(vector != option_vectors[0] for vector in option_vectors[1:]):
@@ -743,10 +848,9 @@ def _reliable_table_rows(rows: List[dict]) -> bool:
         return option_count >= 4
     row_labels = [str(row.get("label") or "").strip() for row in rows]
     normalized_rows = [_normalized_label(label) for label in row_labels]
-    return (
-        all(_label_is_resolved(label) for label in row_labels)
-        and len(set(normalized_rows)) == len(normalized_rows)
-    )
+    return all(_label_is_resolved(label) for label in row_labels) and len(
+        set(normalized_rows)
+    ) == len(normalized_rows)
 
 
 def _schema_hint(section: dict, group_id: str) -> dict:
@@ -754,7 +858,11 @@ def _schema_hint(section: dict, group_id: str) -> dict:
     seen = set()
     reliable_tables = []
     for region in section["regions"]:
-        candidates = _table_schema(region) if region.type == doc_ir.TABLE else _text_schema(region)
+        candidates = (
+            _table_schema(region)
+            if region.type == doc_ir.TABLE
+            else _text_schema(region)
+        )
         if region.type == doc_ir.TABLE and _reliable_table_rows(candidates):
             reliable_tables.append((region.id, candidates))
         for row in candidates:
@@ -763,7 +871,8 @@ def _schema_hint(section: dict, group_id: str) -> dict:
                 seen.add(key)
                 rows.append(row)
     # Auto-routing requires one unambiguous table owner. When present, exclude
-    # incidental mark glyphs in titles/prose from the supplied mark-only schema.
+    # incidental mark glyphs in titles/prose from the supplied mark-only
+    # schema.
     structure_source = ""
     structure_region_id = ""
     if len(reliable_tables) == 1:
@@ -779,7 +888,7 @@ def _schema_hint(section: dict, group_id: str) -> dict:
 
 
 def _has_binary_option_pair(section: dict) -> bool:
-    """Recognise a compact yes/no option row when Paddle dropped its circles."""
+    """Recognise a compact yes/no row when Paddle dropped its circles."""
     for region in section["regions"]:
         text = _plain(region.text).casefold()
         # Apply the lexical fallback only to a compact region. This avoids
@@ -787,12 +896,15 @@ def _has_binary_option_pair(section: dict) -> bool:
         if not text or len(text) > 260:
             continue
         words = set(re.findall(r"[^\W\d_]+", text, flags=re.UNICODE))
-        if any(left in words and right in words for left, right in _BINARY_OPTION_PAIRS):
+        if any(
+            left in words and right in words
+            for left, right in _BINARY_OPTION_PAIRS
+        ):
             return True
     return False
 
 
-def _form_candidate_evidence(section: dict, crop) -> List[str]:
+def _form_candidate_evidence(section: dict, crop) -> list[str]:
     """Return conservative reasons why a Paddle question needs mark reading.
 
     Paddle's transcription/layout is authoritative for proposal. Geometry is
@@ -827,14 +939,17 @@ def _form_candidate_evidence(section: dict, crop) -> List[str]:
 
 
 def _section_validation_text(section: dict) -> str:
-    """Independent printed-text cues used only for deterministic review rules."""
+    """Printed-text cues used only for deterministic review rules."""
     return _SPACE.sub(
-        " ", " ".join(_plain(region.text) for region in section.get("regions") or [])
+        " ",
+        " ".join(
+            _plain(region.text) for region in section.get("regions") or []
+        ),
     ).strip()
 
 
 def _looks_like_form_section(section: dict, crop) -> bool:
-    """Compatibility predicate used by tests and callers outside this module."""
+    """Compatibility predicate for tests and callers outside this module."""
     return bool(_form_candidate_evidence(section, crop))
 
 
@@ -847,7 +962,10 @@ def _compact_prompt_schema(schema_hint: dict) -> dict:
     """
     source_rows = schema_hint.get("rows") or []
     label_vectors = [
-        [str(option.get("label") or "")[:160] for option in row.get("options") or []]
+        [
+            str(option.get("label") or "")[:160]
+            for option in row.get("options") or []
+        ]
         for row in source_rows
     ]
     is_matrix = (
@@ -870,7 +988,8 @@ def _compact_prompt_schema(schema_hint: dict) -> dict:
                 "row_id": row.get("row_id"),
                 "label": str(row.get("label") or "")[:220],
                 "option_ids_by_column": [
-                    option.get("option_id") for option in row.get("options") or []
+                    option.get("option_id")
+                    for option in row.get("options") or []
                 ],
             }
             for row in source_rows
@@ -915,7 +1034,12 @@ MARK_ONLY_RESPONSE_SCHEMA = {
                     "visual_mark": {
                         "type": "string",
                         "enum": [
-                            "x", "tick", "filled", "scribbled", "other", "uncertain"
+                            "x",
+                            "tick",
+                            "filled",
+                            "scribbled",
+                            "other",
+                            "uncertain",
                         ],
                     },
                 },
@@ -938,11 +1062,21 @@ MARK_ONLY_RESPONSE_SCHEMA = {
                     "visual_mark": {
                         "type": "string",
                         "enum": [
-                            "x", "tick", "filled", "scribbled", "other", "uncertain"
+                            "x",
+                            "tick",
+                            "filled",
+                            "scribbled",
+                            "other",
+                            "uncertain",
                         ],
                     },
                 },
-                "required": ["row_label", "option_label", "state", "visual_mark"],
+                "required": [
+                    "row_label",
+                    "option_label",
+                    "state",
+                    "visual_mark",
+                ],
                 "additionalProperties": False,
             },
         },
@@ -956,13 +1090,13 @@ UNIVERSAL_RESPONSE_SCHEMA = {
     "type": "object",
     "properties": {
         # Every array here is bounded. Constrained decoding never forces an
-        # unbounded array to close, and the non-thinking Qwen3-VL build reliably
-        # exploits that: after emitting the real answer it pads with empty
-        # question objects (63 on a two-option "Geschlecht" question) or empty
-        # rows (490 on a single-choice question) until num_predict truncates the
-        # JSON mid-string and the whole section is lost. The caps are generous
-        # relative to any real paper form, so they only ever bite on runaway
-        # generation.
+        # unbounded array to close, and the non-thinking Qwen3-VL build
+        # reliably exploits that: after emitting the real answer it pads with
+        # empty question objects (63 on a two-option "Geschlecht" question) or
+        # empty rows (490 on a single-choice question) until num_predict
+        # truncates the JSON mid-string and the whole section is lost. The caps
+        # are generous relative to any real paper form, so they only ever bite
+        # on runaway generation.
         "questions": {
             "type": "array",
             "minItems": 1,
@@ -1034,9 +1168,13 @@ UNIVERSAL_RESPONSE_SCHEMA = {
                                             },
                                             "visual_mark": {
                                                 "type": "string",
-                                                "enum": sorted(_VALID_VISUAL_MARKS),
+                                                "enum": sorted(
+                                                    _VALID_VISUAL_MARKS
+                                                ),
                                             },
-                                            "associated_text": {"type": "string"},
+                                            "associated_text": {
+                                                "type": "string"
+                                            },
                                         },
                                         "required": [
                                             "choice_position",
@@ -1049,7 +1187,11 @@ UNIVERSAL_RESPONSE_SCHEMA = {
                                     },
                                 },
                             },
-                            "required": ["row_text", "extra_choices", "marked_answers"],
+                            "required": [
+                                "row_text",
+                                "extra_choices",
+                                "marked_answers",
+                            ],
                             "additionalProperties": False,
                         },
                     },
@@ -1089,7 +1231,7 @@ UNIVERSAL_RESPONSE_SCHEMA = {
 }
 
 
-def _infer_question_contract(schema_hint: dict) -> Tuple[str, str]:
+def _infer_question_contract(schema_hint: dict) -> tuple[str, str]:
     rows = schema_hint.get("rows") or []
     option_counts = [len(row.get("options") or []) for row in rows]
     question = _plain(schema_hint.get("question_text") or "").casefold()
@@ -1102,29 +1244,39 @@ def _infer_question_contract(schema_hint: dict) -> Tuple[str, str]:
     if len(rows) >= 2 and sum(count >= 2 for count in option_counts) >= 2:
         return "matrix", "one_per_row"
     if len(rows) == 1 and option_counts and option_counts[0] >= 2:
-        return ("multiple", "zero_or_more") if multiple_hints else ("single", "zero_or_one")
+        return (
+            ("multiple", "zero_or_more")
+            if multiple_hints
+            else ("single", "zero_or_one")
+        )
     if rows:
         return "multiple", "zero_or_more"
     return "unknown", "zero_or_more"
 
 
-def _normalize_mark_only_result(result: dict, schema_hint: dict) -> List[dict]:
+def _normalize_mark_only_result(result: dict, schema_hint: dict) -> list[dict]:
     """Convert the minimal model response to the internal rich merge shape."""
     if not isinstance(result, dict):
         raise ValueError("mark-only response is not an object")
     visible = result.get("visible_row_ids")
     marks = result.get("marks")
     unmapped = result.get("unmapped_marks")
-    if not isinstance(visible, list) or not isinstance(marks, list) or not isinstance(unmapped, list):
+    if (
+        not isinstance(visible, list)
+        or not isinstance(marks, list)
+        or not isinstance(unmapped, list)
+    ):
         raise ValueError("mark-only response is missing required arrays")
 
-    hint_rows = {str(row.get("row_id")): row for row in schema_hint.get("rows") or []}
+    hint_rows = {
+        str(row.get("row_id")): row for row in schema_hint.get("rows") or []
+    }
     option_map = {}
     for row_id, row in hint_rows.items():
         for option in row.get("options") or []:
             option_map[str(option.get("option_id"))] = (row_id, option)
 
-    rows_out: Dict[str, dict] = {}
+    rows_out: dict[str, dict] = {}
     for row_id in visible:
         row_id = str(row_id)
         hint = hint_rows.get(row_id)
@@ -1164,7 +1316,11 @@ def _normalize_mark_only_result(result: dict, schema_hint: dict) -> List[dict]:
         hint = hint_rows[row_id]
         row = rows_out.setdefault(
             row_id,
-            {"row_id": row_id, "label": str(hint.get("label") or ""), "marks": []},
+            {
+                "row_id": row_id,
+                "label": str(hint.get("label") or ""),
+                "marks": [],
+            },
         )
         row["marks"].append(
             {
@@ -1191,7 +1347,9 @@ def _normalize_mark_only_result(result: dict, schema_hint: dict) -> List[dict]:
             "marks": [
                 {
                     "option_id": "",
-                    "label": str(mark.get("option_label") or "unmapped option"),
+                    "label": str(
+                        mark.get("option_label") or "unmapped option"
+                    ),
                     "state": state,
                     "visual_mark": visual,
                 }
@@ -1213,25 +1371,35 @@ def _normalize_mark_only_result(result: dict, schema_hint: dict) -> List[dict]:
 def _prompt(schema_hint: dict) -> str:
     output_instruction = (
         "Do not repeat or rewrite questions, rows, labels, or option text. "
-        "Return only: (1) the supplied row IDs actually visible in this section, "
+        "Return only: (1) the supplied row IDs actually visible in this "
+        "section, "
         "(2) visibly marked supplied option IDs with state/mark type, and "
         "(3) unmapped visible marks only when no supplied option ID matches. "
     )
     return (
-        "Read the actual handwritten response marks in this high-resolution paper "
-        "survey crop. Do not rely on OCR glyphs and never infer an answer from the "
-        "wording. A normal handwritten X, tick, or fill over a printed circle/box "
-        "is selected. A clean printed outline is unselected and must be omitted. "
+        "Read the actual handwritten response marks in this high-resolution "
+        "paper "
+        "survey crop. Do not rely on OCR glyphs and never infer an answer "
+        "from the "
+        "wording. A normal handwritten X, tick, or fill over a printed "
+        "circle/box "
+        "is selected. A clean printed outline is unselected and must be "
+        "omitted. "
         "A printed circle with a white/empty centre is NOT a response. Before "
-        "returning any mark, verify that separate handwritten ink visibly crosses "
+        "returning any mark, verify that separate handwritten ink visibly "
+        "crosses "
         "or fills that option's centre; never list all printed options merely "
         "because their outlines are visible. "
-        "A dense scribble or multiple cancellation strokes may be cancelled; if "
+        "A dense scribble or multiple cancellation strokes may be cancelled; "
+        "if "
         "intent is unclear use ambiguous. Return only visibly marked options. "
         + output_instruction
-        + "The image is one complete Paddle-bounded question section, including "
-        "its question, response labels, and marks. Judge each mark together with "
-        "its visible option; handwriting in a free-text line is not a checkbox or "
+        + "The image is one complete Paddle-bounded question section, "
+        "including "
+        "its question, response labels, and marks. Judge each mark together "
+        "with "
+        "its visible option; handwriting in a free-text line is not a "
+        "checkbox or "
         "radio response. "
         "Paddle schema hints follow:\n"
         + json.dumps(
@@ -1244,43 +1412,73 @@ def _prompt(schema_hint: dict) -> str:
 
 
 def _universal_prompt(section_id: str) -> str:
-    """Provider-neutral schema-free survey prompt (one complete section/call)."""
+    """Provider-neutral schema-free survey prompt, one section per call."""
     return (
         f"Contract version: textlab-survey-{SCHEMA_FREE_CONTRACT}. "
         f"Audit section reference: {section_id}. "
-        "Read this high-resolution scan of one complete paper-form question section. "
-        "Ignore OCR transcriptions and use only the visible pixels. Reconstruct every "
-        "logical question or conditional subquestion, every printed choice, and every "
-        "visible row in visual reading order. Keep text concise: question_text is only "
-        "the actual question, and choice_text is only a printed response label. Exclude "
-        "examples, prize/legal prose, handwriting, and free-text-only prompts from those "
-        "fields. Questions with different choice sets are separate objects. For single, "
-        "multiple, or rating return exactly one row with empty row_text, even when choices "
-        "are vertical. Only a matrix has multiple rows: use shared choices and one row per "
-        "statement; never duplicate choices as rows. Put a row-only N/A choice in "
+        "Read this high-resolution scan of one complete paper-form question "
+        "section. "
+        "Ignore OCR transcriptions and use only the visible pixels. "
+        "Reconstruct every "
+        "logical question or conditional subquestion, every printed choice, "
+        "and every "
+        "visible row in visual reading order. Keep text concise: "
+        "question_text is only "
+        "the actual question, and choice_text is only a printed response "
+        "label. Exclude "
+        "examples, prize/legal prose, handwriting, and free-text-only prompts "
+        "from those "
+        "fields. Questions with different choice sets are separate objects. "
+        "For single, "
+        "multiple, or rating return exactly one row with empty row_text, even "
+        "when choices "
+        "are vertical. Only a matrix has multiple rows: use shared choices "
+        "and one row per "
+        "statement; never duplicate choices as rows. Put a row-only N/A "
+        "choice in "
         "extra_choices. For a conditional subquestion set its one-based "
-        "parent_question_index and condition_text; otherwise use 0 and an empty string. "
-        "Do not create a question for a free-text-only follow-up. If its handwriting is "
-        "conditioned on a marked choice, put it in that mark's associated_text. "
-        "choice_position is one-based over shared choices then extra_choices. Return every "
-        "printed choice and matrix row, including unselected choices and unanswered rows. "
-        "In marked_answers return every choice with respondent-added ink, including "
+        "parent_question_index and condition_text; otherwise use 0 and an "
+        "empty string. "
+        "Do not create a question for a free-text-only follow-up. If its "
+        "handwriting is "
+        "conditioned on a marked choice, put it in that mark's "
+        "associated_text. "
+        "choice_position is one-based over shared choices then extra_choices. "
+        "Return every "
+        "printed choice and matrix row, including unselected choices and "
+        "unanswered rows. "
+        "In marked_answers return every choice with respondent-added ink, "
+        "including "
         "selected, cancelled, and ambiguous marks. A normal "
-        "handwritten X, tick, or fill over a printed circle or box is selected. A clean "
-        "printed outline is unselected and must be omitted. A printed circle with a "
-        "white/empty centre is not a response. Verify separate ink at each reported "
-        "control; never list printed outlines. A dense overwrite may be cancelled; if "
-        "intent is unclear use state ambiguous with visual_mark uncertain. Do not pair "
-        "visual_mark uncertain with state selected. Never infer an answer from wording. "
-        "For every marked answer, copy the exact visible printed choice into choice_text "
-        "as a positional echo. associated_text is only respondent text visibly linked "
-        "to that marked choice; otherwise it is empty. selection_rule is only your "
-        "structural observation; TextLab validates it independently. unmapped_marks is "
+        "handwritten X, tick, or fill over a printed circle or box is "
+        "selected. A clean "
+        "printed outline is unselected and must be omitted. A printed circle "
+        "with a "
+        "white/empty centre is not a response. Verify separate ink at each "
+        "reported "
+        "control; never list printed outlines. A dense overwrite may be "
+        "cancelled; if "
+        "intent is unclear use state ambiguous with visual_mark uncertain. Do "
+        "not pair "
+        "visual_mark uncertain with state selected. Never infer an answer "
+        "from wording. "
+        "For every marked answer, copy the exact visible printed choice into "
+        "choice_text "
+        "as a positional echo. associated_text is only respondent text "
+        "visibly linked "
+        "to that marked choice; otherwise it is empty. selection_rule is only "
+        "your "
+        "structural observation; TextLab validates it independently. "
+        "unmapped_marks is "
         "only stray response ink outside every logical question. "
-        "Ranking boxes containing written numbers and continuous mark-anywhere lines are "
-        "out of scope: use response_type unknown, retain any visible labelled targets as "
-        "choices, and do not interpret written ranks or line positions as choice marks. "
-        "Do not create identifiers. Return only JSON matching the supplied schema."
+        "Ranking boxes containing written numbers and continuous "
+        "mark-anywhere lines are "
+        "out of scope: use response_type unknown, retain any visible labelled "
+        "targets as "
+        "choices, and do not interpret written ranks or line positions as "
+        "choice marks. "
+        "Do not create identifiers. Return only JSON matching the supplied "
+        "schema."
     )
 
 
@@ -1288,10 +1486,10 @@ def _derived_selection_rule(
     printed_validation_text: str,
     question_text: str,
     condition_text: str,
-    rows: List[dict],
+    rows: list[dict],
     model_type: str = "unknown",
 ) -> str:
-    """Derive review constraints from question-local, corroborated print cues."""
+    """Derive review rules from question-local, corroborated print cues."""
     paddle_text = _plain(printed_validation_text).casefold()
     model_scope = _plain(f"{question_text} {condition_text}").casefold()
     multiple_cues = (
@@ -1321,7 +1519,9 @@ def _derived_selection_rule(
     return "zero_or_one"
 
 
-def _derived_question_type(model_type: str, rows: List[dict], rule: str) -> str:
+def _derived_question_type(
+    model_type: str, rows: list[dict], rule: str
+) -> str:
     if len(rows) > 1:
         return "matrix"
     if rule == "zero_or_more":
@@ -1329,7 +1529,7 @@ def _derived_question_type(model_type: str, rows: List[dict], rule: str) -> str:
     return model_type if model_type in _VALID_RESPONSE_TYPES else "unknown"
 
 
-def _region_overlaps_bbox(region: "doc_ir.Region", bbox: List[int]) -> bool:
+def _region_overlaps_bbox(region: doc_ir.Region, bbox: list[int]) -> bool:
     if len(region.bbox) < 4 or len(bbox) < 4:
         return False
     x1, y1, x2, y2 = bbox[:4]
@@ -1337,8 +1537,8 @@ def _region_overlaps_bbox(region: "doc_ir.Region", bbox: List[int]) -> bool:
     return min(x2, rx2) > max(x1, rx1) and min(y2, ry2) > max(y1, ry1)
 
 
-def _paddle_mark_presence(page: "doc_ir.Page", bbox: List[int]) -> bool:
-    """Weak section-level signal used only to strengthen under-selection review."""
+def _paddle_mark_presence(page: doc_ir.Page, bbox: list[int]) -> bool:
+    """Weak section-level signal; only strengthens under-selection review."""
     for region in page.regions:
         if not _region_overlaps_bbox(region, bbox):
             continue
@@ -1346,14 +1546,23 @@ def _paddle_mark_presence(page: "doc_ir.Page", bbox: List[int]) -> bool:
         if markup.get("state") in {"checked", "uncertain"}:
             return True
         for item in markup.get("items") or []:
-            if item.get("state") in {"checked", "uncertain"} or item.get("needs_review"):
+            if item.get("state") in {"checked", "uncertain"} or item.get(
+                "needs_review"
+            ):
                 return True
         source_text = (
             region.content.get("html")
             if region.type == doc_ir.TABLE
-            else (region.content.get("text") or region.content.get("markdown") or "")
+            else (
+                region.content.get("text")
+                or region.content.get("markdown")
+                or ""
+            )
         ) or ""
-        if any(item["state"] == "checked" for item in markup_detect.extract_mark_glyphs(source_text)):
+        if any(
+            item["state"] == "checked"
+            for item in markup_detect.extract_mark_glyphs(source_text)
+        ):
             return True
     return False
 
@@ -1362,21 +1571,30 @@ def _question_defect(raw_question: dict) -> str:
     """Return why this question is unusable, or "" when it is well formed.
 
     Mirrors the per-question field validation performed while materializing the
-    IR, so an unusable question can be dropped on its own instead of raising and
-    discarding every other question in the same section.
+    IR, so an unusable question can be dropped on its own instead of raising
+    and discarding every other question in the same section.
     """
-    question_text = _SPACE.sub(" ", str(raw_question.get("question_text") or "")).strip()
-    condition_text = _SPACE.sub(" ", str(raw_question.get("condition_text") or "")).strip()
+    question_text = _SPACE.sub(
+        " ", str(raw_question.get("question_text") or "")
+    ).strip()
+    condition_text = _SPACE.sub(
+        " ", str(raw_question.get("condition_text") or "")
+    ).strip()
     if len(question_text) > 800 or len(condition_text) > 240:
         return "schema-free response contains an overlong question field"
     if re.fullmatch(r"\d{1,3}\s*[).:]", question_text):
         return "schema-free question is only a numbering marker"
     model_type = str(raw_question.get("response_type") or "unknown")
     model_rule = str(raw_question.get("selection_rule") or "unknown")
-    if model_type not in _VALID_RESPONSE_TYPES or model_rule not in _VALID_SELECTION_RULES:
+    if (
+        model_type not in _VALID_RESPONSE_TYPES
+        or model_rule not in _VALID_SELECTION_RULES
+    ):
         return "schema-free response contains an invalid question enum"
     try:
-        choices = _choice_texts(raw_question.get("choices"), field_name="choices")
+        choices = _choice_texts(
+            raw_question.get("choices"), field_name="choices"
+        )
     except ValueError as exc:
         return str(exc)
     raw_rows = raw_question.get("rows")
@@ -1386,8 +1604,8 @@ def _question_defect(raw_question: dict) -> str:
 
 
 def _collapse_padded_non_matrix_rows(
-    raw_rows: List[dict], model_type: str
-) -> Tuple[List[dict], int]:
+    raw_rows: list[dict], model_type: str
+) -> tuple[list[dict], int]:
     """Collapse bounded-decoding padding without inventing answer structure.
 
     Qwen sometimes fills the 24-row safety bound for a simple question with
@@ -1401,7 +1619,9 @@ def _collapse_padded_non_matrix_rows(
     if not all(isinstance(row, dict) for row in raw_rows):
         return raw_rows, 0
     row_labels = [
-        _normalized_label(_SPACE.sub(" ", str(row.get("row_text") or "")).strip())
+        _normalized_label(
+            _SPACE.sub(" ", str(row.get("row_text") or "")).strip()
+        )
         for row in raw_rows
     ]
     if any(row_labels) or len(set(row_labels)) != 1:
@@ -1419,7 +1639,8 @@ def _collapse_padded_non_matrix_rows(
     marked_rows = [
         row
         for row in raw_rows
-        if isinstance(row.get("marked_answers"), list) and row["marked_answers"]
+        if isinstance(row.get("marked_answers"), list)
+        and row["marked_answers"]
     ]
     if len(marked_rows) > 1:
         return raw_rows, 0
@@ -1428,10 +1649,10 @@ def _collapse_padded_non_matrix_rows(
 
 
 def _collapse_choice_as_rows(
-    raw_rows: List[dict],
-    choices: List[str],
+    raw_rows: list[dict],
+    choices: list[str],
     model_type: str,
-) -> Tuple[List[dict], int, int]:
+) -> tuple[list[dict], int, int]:
     """Undo the model's ``choices -> rows`` diagonal hallucination.
 
     The observed failure repeats the complete shared choice vector on every
@@ -1441,25 +1662,32 @@ def _collapse_choice_as_rows(
     the deterministic choice structure. Model marks from this malformed shape
     are discarded and the caller keeps the group in review.
     """
-    if model_type == "matrix" or len(raw_rows) < 2 or len(raw_rows) != len(choices):
+    if (
+        model_type == "matrix"
+        or len(raw_rows) < 2
+        or len(raw_rows) != len(choices)
+    ):
         return raw_rows, 0, 0
     if not all(isinstance(row, dict) for row in raw_rows):
         return raw_rows, 0, 0
     normalized_choices = [_normalized_label(choice) for choice in choices]
-    if (
-        any(not choice for choice in normalized_choices)
-        or len(set(normalized_choices)) != len(normalized_choices)
-    ):
+    if any(not choice for choice in normalized_choices) or len(
+        set(normalized_choices)
+    ) != len(normalized_choices):
         return raw_rows, 0, 0
     normalized_rows = [
-        _normalized_label(_SPACE.sub(" ", str(row.get("row_text") or "")).strip())
+        _normalized_label(
+            _SPACE.sub(" ", str(row.get("row_text") or "")).strip()
+        )
         for row in raw_rows
     ]
     if normalized_rows != normalized_choices:
         return raw_rows, 0, 0
     if any(row.get("extra_choices") not in ([], None) for row in raw_rows):
         return raw_rows, 0, 0
-    if not all(isinstance(row.get("marked_answers"), list) for row in raw_rows):
+    if not all(
+        isinstance(row.get("marked_answers"), list) for row in raw_rows
+    ):
         return raw_rows, 0, 0
     discarded_marks = sum(len(row["marked_answers"]) for row in raw_rows)
     return (
@@ -1469,16 +1697,22 @@ def _collapse_choice_as_rows(
     )
 
 
-def _choice_texts(items: Any, *, field_name: str) -> List[str]:
+def _choice_texts(items: Any, *, field_name: str) -> list[str]:
     if not isinstance(items, list):
         raise ValueError(f"schema-free response {field_name} is not an array")
     output = []
     for item in items:
-        if not isinstance(item, dict) or not isinstance(item.get("choice_text"), str):
-            raise ValueError(f"schema-free response has an invalid {field_name} item")
+        if not isinstance(item, dict) or not isinstance(
+            item.get("choice_text"), str
+        ):
+            raise ValueError(
+                f"schema-free response has an invalid {field_name} item"
+            )
         value = _SPACE.sub(" ", item["choice_text"]).strip()
         if len(value) > 240:
-            raise ValueError(f"schema-free response {field_name} item is too long")
+            raise ValueError(
+                f"schema-free response {field_name} item is too long"
+            )
         output.append(value)
     return output
 
@@ -1498,8 +1732,8 @@ def _suspicious_choice_label(value: str) -> bool:
 
 
 def _prune_section_groups(
-    groups: List["doc_ir.FormGroup"],
-) -> List["doc_ir.FormGroup"]:
+    groups: list[doc_ir.FormGroup],
+) -> list[doc_ir.FormGroup]:
     """Drop stray empty-question groups and exact duplicates within a section.
 
     qwen-class reasoning models occasionally emit the same conditional twice,
@@ -1512,16 +1746,16 @@ def _prune_section_groups(
         return groups
     referenced = {g.parent_question_id for g in groups if g.parent_question_id}
 
-    def body(group: "doc_ir.FormGroup"):
+    def body(group: doc_ir.FormGroup):
         return tuple(
             (row.label, tuple((opt.label, opt.state) for opt in row.options))
             for row in group.rows
         )
 
-    def signature(group: "doc_ir.FormGroup"):
+    def signature(group: doc_ir.FormGroup):
         return (_normalized_label(group.question_text), body(group))
 
-    def body_signature(group: "doc_ir.FormGroup"):
+    def body_signature(group: doc_ir.FormGroup):
         """Text-independent identity, for matrix-like groups only.
 
         A bounded model still re-emits a whole matrix under an invented title,
@@ -1537,12 +1771,14 @@ def _prune_section_groups(
 
     seen: set = set()
     seen_bodies: set = set()
-    kept: List["doc_ir.FormGroup"] = []
+    kept: list[doc_ir.FormGroup] = []
     for group in groups:
         is_parent = group.id in referenced
         sig = signature(group)
         body_sig = body_signature(group)
-        duplicate = sig in seen or (body_sig is not None and body_sig in seen_bodies)
+        duplicate = sig in seen or (
+            body_sig is not None and body_sig in seen_bodies
+        )
         if not is_parent and (duplicate or not group.question_text.strip()):
             continue
         seen.add(sig)
@@ -1556,17 +1792,17 @@ def _universal_to_form_groups(
     result: dict,
     *,
     section_id: str,
-    bbox: List[int],
+    bbox: list[int],
     crop_b64: str,
     client,
     template_reused: bool,
-    candidate_evidence: Optional[List[str]],
+    candidate_evidence: list[str] | None,
     paddle_mark_present: bool,
     printed_validation_text: str,
-    expected_question_number: Optional[str] = None,
+    expected_question_number: str | None = None,
     geometric_control_count: int = 0,
-) -> List["doc_ir.FormGroup"]:
-    """Validate the universal wire format and materialize the existing row IR."""
+) -> list[doc_ir.FormGroup]:
+    """Validate the universal wire format and build the existing row IR."""
     if not isinstance(result, dict):
         raise ValueError("schema-free response is not an object")
     raw_questions = result.get("questions")
@@ -1582,30 +1818,42 @@ def _universal_to_form_groups(
             or raw_unmapped.get("state") not in _VALID_STATES
             or raw_unmapped.get("visual_mark") not in _VALID_VISUAL_MARKS
         ):
-            raise ValueError("schema-free response contains an invalid unmapped mark")
+            raise ValueError(
+                "schema-free response contains an invalid unmapped mark"
+            )
         if len(raw_unmapped["nearby_text"]) > 240:
-            raise ValueError("schema-free response unmapped nearby text is too long")
+            raise ValueError(
+                "schema-free response unmapped nearby text is too long"
+            )
 
     # Padding and imperfect layout boxes can expose a sliver of the neighboring
     # question. The crop anchor is independent Paddle evidence, so explicitly
     # numbered model questions that disagree with it are boundary spill, not a
     # second response group. Unnumbered conditional subquestions remain valid.
-    kept_questions: List[Tuple[int, dict]] = []
-    excluded_numbers: List[str] = []
-    malformed_questions: List[str] = []
+    kept_questions: list[tuple[int, dict]] = []
+    excluded_numbers: list[str] = []
+    malformed_questions: list[str] = []
     expected_number = str(expected_question_number or "").strip()
     for original_index, raw_question in enumerate(raw_questions, start=1):
         if not isinstance(raw_question, dict):
-            raise ValueError("schema-free response contains a non-object question")
-        visible_number = _question_number(str(raw_question.get("question_text") or ""))
-        if expected_number and visible_number and visible_number != expected_number:
+            raise ValueError(
+                "schema-free response contains a non-object question"
+            )
+        visible_number = _question_number(
+            str(raw_question.get("question_text") or "")
+        )
+        if (
+            expected_number
+            and visible_number
+            and visible_number != expected_number
+        ):
             excluded_numbers.append(visible_number)
             continue
         # A single malformed question must not cost the whole section. The
         # usual offender is printed prose the model mistook for a question (a
         # legal/prize paragraph becoming a 240+ character "choice"), which is
-        # junk we would drop anyway -- while the real question sitting beside it
-        # is perfectly good. Only raise if nothing survives.
+        # junk we would drop anyway -- while the real question sitting beside
+        # it is perfectly good. Only raise if nothing survives.
         defect = _question_defect(raw_question)
         if defect:
             malformed_questions.append(defect)
@@ -1619,32 +1867,49 @@ def _universal_to_form_groups(
     ]
     id_by_original_index = {
         original_index: question_ids[new_index - 1]
-        for new_index, (original_index, _) in enumerate(kept_questions, start=1)
+        for new_index, (original_index, _) in enumerate(
+            kept_questions, start=1
+        )
     }
-    groups: List[doc_ir.FormGroup] = []
+    groups: list[doc_ir.FormGroup] = []
     total_marked = 0
 
     for question_index, (original_index, raw_question) in enumerate(
         kept_questions, start=1
     ):
-        question_text = _SPACE.sub(" ", str(raw_question.get("question_text") or "")).strip()
-        condition_text = _SPACE.sub(" ", str(raw_question.get("condition_text") or "")).strip()
+        question_text = _SPACE.sub(
+            " ", str(raw_question.get("question_text") or "")
+        ).strip()
+        condition_text = _SPACE.sub(
+            " ", str(raw_question.get("condition_text") or "")
+        ).strip()
         if len(question_text) > 800 or len(condition_text) > 240:
-            raise ValueError("schema-free response contains an overlong question field")
+            raise ValueError(
+                "schema-free response contains an overlong question field"
+            )
         model_type = str(raw_question.get("response_type") or "unknown")
         model_rule = str(raw_question.get("selection_rule") or "unknown")
-        if model_type not in _VALID_RESPONSE_TYPES or model_rule not in _VALID_SELECTION_RULES:
-            raise ValueError("schema-free response contains an invalid question enum")
-        choices = _choice_texts(raw_question.get("choices"), field_name="choices")
+        if (
+            model_type not in _VALID_RESPONSE_TYPES
+            or model_rule not in _VALID_SELECTION_RULES
+        ):
+            raise ValueError(
+                "schema-free response contains an invalid question enum"
+            )
+        choices = _choice_texts(
+            raw_question.get("choices"), field_name="choices"
+        )
         raw_rows = raw_question.get("rows")
         if not choices or not isinstance(raw_rows, list) or not raw_rows:
-            raise ValueError("schema-free question must contain choices and rows")
+            raise ValueError(
+                "schema-free question must contain choices and rows"
+            )
         raw_rows, collapsed_padding_rows = _collapse_padded_non_matrix_rows(
             raw_rows, model_type
         )
 
         group_id = question_ids[question_index - 1]
-        group_warnings: List[str] = []
+        group_warnings: list[str] = []
         if collapsed_padding_rows:
             group_warnings.append(
                 f"collapsed {collapsed_padding_rows} padded row(s) from a "
@@ -1653,20 +1918,30 @@ def _universal_to_form_groups(
         parent_id = ""
         parent_index = raw_question.get("parent_question_index", 0)
         if not isinstance(parent_index, int) or parent_index < 0:
-            raise ValueError("schema-free response has an invalid parent_question_index")
+            raise ValueError(
+                "schema-free response has an invalid parent_question_index"
+            )
         if parent_index:
             if parent_index >= original_index:
-                group_warnings.append("conditional parent is not a preceding question")
+                group_warnings.append(
+                    "conditional parent is not a preceding question"
+                )
             elif parent_index not in id_by_original_index:
-                group_warnings.append("conditional parent was excluded as boundary spill")
+                group_warnings.append(
+                    "conditional parent was excluded as boundary spill"
+                )
             else:
                 parent_id = id_by_original_index[parent_index]
         if condition_text and not parent_id:
-            group_warnings.append("condition text has no valid parent question")
+            group_warnings.append(
+                "condition text has no valid parent question"
+            )
         if not question_text:
             group_warnings.append("visible question text was not resolved")
         if any(not choice for choice in choices):
-            group_warnings.append("one or more printed choice labels were not resolved")
+            group_warnings.append(
+                "one or more printed choice labels were not resolved"
+            )
         suspicious_choices = [
             index
             for index, choice in enumerate(choices, start=1)
@@ -1679,37 +1954,51 @@ def _universal_to_form_groups(
         )
         if suspicious_choices:
             group_warnings.append(
-                "one or more choice labels contain response glyphs or format leakage"
+                "one or more choice labels contain response glyphs or format "
+                "leakage"
             )
         if duplicate_choices:
-            group_warnings.append("model returned duplicate printed choice labels")
+            group_warnings.append(
+                "model returned duplicate printed choice labels"
+            )
         if (
             len(kept_questions) == 1
             and model_type in {"single", "multiple", "rating"}
             and geometric_control_count > len(choices)
         ):
             group_warnings.append(
-                "model returned fewer choices than independently detected controls"
+                "model returned fewer choices than independently detected "
+                "controls"
             )
 
         structural_rows_invalid = False
-        if model_type in {"single", "multiple", "rating"} and len(raw_rows) != 1:
+        if (
+            model_type in {"single", "multiple", "rating"}
+            and len(raw_rows) != 1
+        ):
             structural_rows_invalid = True
             group_warnings.append(
-                f"non-matrix response type {model_type!r} must contain exactly one row"
+                f"non-matrix response type {model_type!r} must contain "
+                "exactly one row"
             )
         elif model_type == "matrix" and len(raw_rows) < 2:
             structural_rows_invalid = True
-            group_warnings.append("matrix response contains fewer than two visible rows")
+            group_warnings.append(
+                "matrix response contains fewer than two visible rows"
+            )
         elif model_type == "unknown":
             group_warnings.append("response type could not be resolved")
 
-        final_rows: List[doc_ir.FormRow] = []
-        row_contracts: List[dict] = []
+        final_rows: list[doc_ir.FormRow] = []
+        row_contracts: list[dict] = []
         for row_index, raw_row in enumerate(raw_rows, start=1):
             if not isinstance(raw_row, dict):
-                raise ValueError("schema-free response contains a non-object row")
-            row_text = _SPACE.sub(" ", str(raw_row.get("row_text") or "")).strip()
+                raise ValueError(
+                    "schema-free response contains a non-object row"
+                )
+            row_text = _SPACE.sub(
+                " ", str(raw_row.get("row_text") or "")
+            ).strip()
             if len(row_text) > 400:
                 raise ValueError("schema-free response row text is too long")
             extra_choices = _choice_texts(
@@ -1723,7 +2012,9 @@ def _universal_to_form_groups(
             ]
             raw_marks = raw_row.get("marked_answers")
             if not isinstance(raw_marks, list):
-                raise ValueError("schema-free row marked_answers is not an array")
+                raise ValueError(
+                    "schema-free row marked_answers is not an array"
+                )
             row_contracts.append({"choice_count": len(effective_choices)})
             row_id = f"{group_id}_r{row_index}"
             options = [
@@ -1731,10 +2022,12 @@ def _universal_to_form_groups(
                     id=f"{row_id}_c{choice_index}",
                     label=choice_text,
                 )
-                for choice_index, choice_text in enumerate(effective_choices, start=1)
+                for choice_index, choice_text in enumerate(
+                    effective_choices, start=1
+                )
             ]
-            row_warnings: List[str] = []
-            seen_positions: Dict[int, Tuple[str, str]] = {}
+            row_warnings: list[str] = []
+            seen_positions: dict[int, tuple[str, str]] = {}
             row_needs_review = (
                 structural_rows_invalid
                 or bool(row_suspicious_choices)
@@ -1744,25 +2037,35 @@ def _universal_to_form_groups(
             if model_type in {"single", "multiple", "rating"} and row_text:
                 row_needs_review = True
                 row_warnings.append(
-                    "non-matrix response must use one row with an empty row label"
+                    "non-matrix response must use one row with an empty row "
+                    "label"
                 )
             if row_needs_review:
-                row_warnings.append("one or more row choice labels were not resolved")
+                row_warnings.append(
+                    "one or more row choice labels were not resolved"
+                )
                 for option in options:
                     if not option.label:
-                        option.warnings.append("printed choice label was not resolved")
+                        option.warnings.append(
+                            "printed choice label was not resolved"
+                        )
             for option_index in row_suspicious_choices:
                 if option_index <= len(options):
                     options[option_index - 1].warnings.append(
-                        "choice label contains response glyphs or model-format leakage"
+                        "choice label contains response glyphs or "
+                        "model-format leakage"
                     )
             if duplicate_choices:
                 for option in options[: len(choices)]:
-                    option.warnings.append("choice label is duplicated in this question")
+                    option.warnings.append(
+                        "choice label is duplicated in this question"
+                    )
 
             for raw_mark in raw_marks:
                 if not isinstance(raw_mark, dict):
-                    raise ValueError("schema-free response contains a non-object mark")
+                    raise ValueError(
+                        "schema-free response contains a non-object mark"
+                    )
                 position = raw_mark.get("choice_position")
                 state = raw_mark.get("state")
                 visual = raw_mark.get("visual_mark")
@@ -1771,30 +2074,39 @@ def _universal_to_form_groups(
                     " ", str(raw_mark.get("associated_text") or "")
                 ).strip()
                 if len(echo) > 240 or len(associated_text) > 800:
-                    raise ValueError("schema-free response contains an overlong mark field")
+                    raise ValueError(
+                        "schema-free response contains an overlong mark field"
+                    )
                 if (
                     not isinstance(position, int)
                     or state not in _VALID_STATES
                     or visual not in _VALID_VISUAL_MARKS
                 ):
-                    raise ValueError("schema-free response contains an invalid marked answer")
+                    raise ValueError(
+                        "schema-free response contains an invalid marked "
+                        "answer"
+                    )
                 if position < 1 or position > len(options):
                     row_warnings.append(
-                        f"marked choice position {position} is outside the visible choice list"
+                        f"marked choice position {position} is outside the "
+                        "visible choice list"
                     )
                     row_needs_review = True
                     continue
                 option = options[position - 1]
                 if _normalized_label(echo) != _normalized_label(option.label):
                     option.warnings.append(
-                        "choice-text echo does not match the reported choice position"
+                        "choice-text echo does not match the reported choice "
+                        "position"
                     )
                     row_needs_review = True
                 previous = seen_positions.get(position)
                 if previous is not None:
                     option.state = "ambiguous"
                     option.visual_mark = "uncertain"
-                    option.warnings.append("model returned this choice position more than once")
+                    option.warnings.append(
+                        "model returned this choice position more than once"
+                    )
                     row_needs_review = True
                 else:
                     option.state = state
@@ -1847,17 +2159,29 @@ def _universal_to_form_groups(
         # correct one-row answers with Gemma's common `one_per_row` mistake.
         if model_rule == "zero_or_more" and derived_rule == "zero_or_one":
             group_warnings.append(
-                f"model selection rule {model_rule!r} disagrees with TextLab rule {derived_rule!r}"
+                f"model selection rule {model_rule!r} disagrees with TextLab "
+                f"rule {derived_rule!r}"
             )
         for row in final_rows:
-            selected_count = sum(option.state == "selected" for option in row.options)
-            marked_count = sum(option.state != "unselected" for option in row.options)
-            if derived_rule in {"zero_or_one", "one_per_row"} and selected_count > 1:
+            selected_count = sum(
+                option.state == "selected" for option in row.options
+            )
+            marked_count = sum(
+                option.state != "unselected" for option in row.options
+            )
+            if (
+                derived_rule in {"zero_or_one", "one_per_row"}
+                and selected_count > 1
+            ):
                 row.status = "needs_review"
-                row.warnings.append("multiple visible marks violate the derived selection rule")
+                row.warnings.append(
+                    "multiple visible marks violate the derived selection rule"
+                )
                 for option in row.options:
                     if option.state == "selected":
-                        option.warnings.append("multiple marks in a single-choice row")
+                        option.warnings.append(
+                            "multiple marks in a single-choice row"
+                        )
             if derived_rule == "one_per_row" and marked_count == 0:
                 row.status = "needs_review"
                 row.warnings.append("matrix row has no visible response mark")
@@ -1870,7 +2194,9 @@ def _universal_to_form_groups(
                 id=group_id,
                 bbox=list(bbox),
                 question_text=question_text,
-                question_type=_derived_question_type(model_type, row_contracts, derived_rule),
+                question_type=_derived_question_type(
+                    model_type, row_contracts, derived_rule
+                ),
                 selection_rule=derived_rule,
                 rows=final_rows,
                 status="needs_review" if group_needs_review else "accepted",
@@ -1891,7 +2217,9 @@ def _universal_to_form_groups(
                     "candidate_evidence": list(candidate_evidence or []),
                     "same_layout_template": template_reused,
                     "unmapped_marks": copy.deepcopy(unmapped),
-                    "excluded_boundary_question_numbers": list(excluded_numbers),
+                    "excluded_boundary_question_numbers": list(
+                        excluded_numbers
+                    ),
                     "geometric_control_count": geometric_control_count,
                 },
                 source_crop_b64=crop_b64,
@@ -1904,7 +2232,10 @@ def _universal_to_form_groups(
                 id=f"{section_id}_q1",
                 bbox=list(bbox),
                 status="needs_review",
-                warnings=["model returned no logical questions for this candidate section"],
+                warnings=[
+                    "model returned no logical questions for this candidate "
+                    "section"
+                ],
                 provenance={
                     "provider": client.provider,
                     "model": client.model,
@@ -1913,7 +2244,9 @@ def _universal_to_form_groups(
                     "candidate_evidence": list(candidate_evidence or []),
                     "same_layout_template": template_reused,
                     "unmapped_marks": copy.deepcopy(unmapped),
-                    "excluded_boundary_question_numbers": list(excluded_numbers),
+                    "excluded_boundary_question_numbers": list(
+                        excluded_numbers
+                    ),
                     "geometric_control_count": geometric_control_count,
                 },
                 source_crop_b64=crop_b64,
@@ -1927,49 +2260,58 @@ def _universal_to_form_groups(
         for group in groups:
             group.status = "needs_review"
             group.warnings.append(
-                f"numbered question(s) {excluded} were excluded as crop-boundary spill"
+                f"numbered question(s) {excluded} were excluded as "
+                "crop-boundary spill"
             )
 
     if malformed_questions:
         for group in groups:
             group.status = "needs_review"
             group.warnings.append(
-                f"{len(malformed_questions)} unusable question(s) in this section were "
+                f"{len(malformed_questions)} unusable question(s) in this "
+                "section were "
                 f"dropped ({malformed_questions[0]})"
             )
 
     if unmapped:
         for group in groups:
             group.status = "needs_review"
-            group.warnings.append("visible response ink was not mapped to a logical choice")
+            group.warnings.append(
+                "visible response ink was not mapped to a logical choice"
+            )
     if total_marked == 0:
-        warning = "section returned zero marked answers and requires under-selection review"
+        warning = (
+            "section returned zero marked answers and requires "
+            "under-selection review"
+        )
         if paddle_mark_present:
-            warning += "; Paddle has weak evidence that response ink is present"
+            warning += (
+                "; Paddle has weak evidence that response ink is present"
+            )
         for group in groups:
             group.status = "needs_review"
             group.warnings.append(warning)
     return groups
 
 
-def _hint_rows(schema_hint: dict) -> Dict[str, dict]:
+def _hint_rows(schema_hint: dict) -> dict[str, dict]:
     return {str(row["row_id"]): row for row in schema_hint.get("rows") or []}
 
 
 def _merge_results(
-    results: List[List[dict]],
+    results: list[list[dict]],
     schema_hint: dict,
-    bbox: List[int],
+    bbox: list[int],
     crop_b64: str,
     page_number: int,
     section_index: int,
     client,
     *,
     template_reused: bool = False,
-    candidate_evidence: Optional[List[str]] = None,
-) -> List["doc_ir.FormGroup"]:
+    candidate_evidence: list[str] | None = None,
+) -> list[doc_ir.FormGroup]:
     """Reconcile a complete-section response with Paddle's schema hints."""
-    merged: Dict[str, dict] = {}
+    merged: dict[str, dict] = {}
     for response_groups in results:
         for raw_group in response_groups:
             # One crop represents one proposed question. Keep the stable local
@@ -1984,22 +2326,36 @@ def _merge_results(
                 },
             )
             returned_group_id = str(raw_group.get("question_id") or "").strip()
-            if returned_group_id and returned_group_id != schema_hint["question_id"]:
+            if (
+                returned_group_id
+                and returned_group_id != schema_hint["question_id"]
+            ):
                 warning = (
-                    f"targeted VLM returned unknown question ID {returned_group_id!r}"
+                    "targeted VLM returned unknown question ID "
+                    f"{returned_group_id!r}"
                 )
                 if warning not in group["warnings"]:
                     group["warnings"].append(warning)
             for raw_row in raw_group.get("rows") or []:
-                row_key = _key(raw_row.get("row_id") or raw_row.get("label")) or "row"
+                row_key = (
+                    _key(raw_row.get("row_id") or raw_row.get("label"))
+                    or "row"
+                )
                 row = group["rows"].setdefault(
                     row_key,
                     {"raw": raw_row, "marks": {}},
                 )
                 for mark in raw_row.get("marks") or []:
-                    mark_key = _key(mark.get("option_id") or mark.get("label")) or "option"
-                    entry = row["marks"].setdefault(mark_key, {"values": [], "raw": mark})
-                    entry["values"].append((mark.get("state"), mark.get("visual_mark")))
+                    mark_key = (
+                        _key(mark.get("option_id") or mark.get("label"))
+                        or "option"
+                    )
+                    entry = row["marks"].setdefault(
+                        mark_key, {"values": [], "raw": mark}
+                    )
+                    entry["values"].append(
+                        (mark.get("state"), mark.get("visual_mark"))
+                    )
 
     output = []
     hinted_rows = _hint_rows(schema_hint)
@@ -2015,13 +2371,15 @@ def _merge_results(
             "warnings": [],
         }
 
-    for group_pos, group_data in enumerate(merged.values(), start=1):
+    for _group_pos, group_data in enumerate(merged.values(), start=1):
         raw_group = group_data["raw"]
-        final_rows: List[doc_ir.FormRow] = []
+        final_rows: list[doc_ir.FormRow] = []
         used_hint_ids = set()
         group_needs_review = bool(group_data.get("warnings"))
 
-        for row_pos, row_data in enumerate(group_data["rows"].values(), start=1):
+        for row_pos, row_data in enumerate(
+            group_data["rows"].values(), start=1
+        ):
             raw_row = row_data["raw"]
             row_id = str(raw_row.get("row_id") or f"row_{row_pos}")
             hint = hinted_rows.get(row_id)
@@ -2031,7 +2389,8 @@ def _merge_results(
                     (
                         (candidate_id, candidate)
                         for candidate_id, candidate in hinted_rows.items()
-                        if label_key and _key(candidate.get("label")) == label_key
+                        if label_key
+                        and _key(candidate.get("label")) == label_key
                     ),
                     None,
                 )
@@ -2040,9 +2399,10 @@ def _merge_results(
             if hint:
                 used_hint_ids.add(row_id)
             option_hints = {
-                str(o["option_id"]): o for o in (hint or {}).get("options") or []
+                str(o["option_id"]): o
+                for o in (hint or {}).get("options") or []
             }
-            options: Dict[str, doc_ir.FormOption] = {}
+            options: dict[str, doc_ir.FormOption] = {}
             for option_id, option_hint in option_hints.items():
                 paddle_state = option_hint.get("paddle_state", "unknown")
                 option = doc_ir.FormOption(
@@ -2056,8 +2416,12 @@ def _merge_results(
                         )
                     ],
                 )
-                if not _label_is_resolved(option.label) or option.label.startswith("option "):
-                    option.warnings.append("printed option label was not resolved")
+                if not _label_is_resolved(
+                    option.label
+                ) or option.label.startswith("option "):
+                    option.warnings.append(
+                        "printed option label was not resolved"
+                    )
                 options[option_id] = option
 
             row_needs_review = bool(hinted_rows and hint is None)
@@ -2070,14 +2434,26 @@ def _merge_results(
                 label = str(raw_mark.get("label") or "").strip()
                 if option_id not in options:
                     matched = next(
-                        (oid for oid, opt in options.items() if _key(opt.label) == _key(label)),
+                        (
+                            oid
+                            for oid, opt in options.items()
+                            if _key(opt.label) == _key(label)
+                        ),
                         None,
                     )
-                    option_id = matched or option_id or f"discovered_{len(options) + 1}"
+                    option_id = (
+                        matched
+                        or option_id
+                        or f"discovered_{len(options) + 1}"
+                    )
                 option = options.get(option_id)
                 if option is None:
-                    option = doc_ir.FormOption(id=option_id, label=label or option_id)
-                    option.warnings.append("option was not present in Paddle schema")
+                    option = doc_ir.FormOption(
+                        id=option_id, label=label or option_id
+                    )
+                    option.warnings.append(
+                        "option was not present in Paddle schema"
+                    )
                     options[option_id] = option
                     row_needs_review = True
 
@@ -2090,14 +2466,19 @@ def _merge_results(
                     row_needs_review = True
                 else:
                     option.state = next(iter(states))
-                    option.visual_mark = next(iter(visuals)) if len(visuals) == 1 else "uncertain"
+                    option.visual_mark = (
+                        next(iter(visuals))
+                        if len(visuals) == 1
+                        else "uncertain"
+                    )
                 if option.state in ("cancelled", "ambiguous"):
                     option.warnings.append(
                         "changed or ambiguous response requires human review"
                     )
                     row_needs_review = True
                 if option.state == "selected" and any(
-                    "label was not resolved" in warning for warning in option.warnings
+                    "label was not resolved" in warning
+                    for warning in option.warnings
                 ):
                     row_needs_review = True
                 option.observations.append(
@@ -2105,34 +2486,55 @@ def _merge_results(
                         source=client.provider,
                         value=option.state,
                         method="complete-question-section",
-                        raw={"model": client.model, "votes": mark_data["values"]},
+                        raw={
+                            "model": client.model,
+                            "votes": mark_data["values"],
+                        },
                     )
                 )
                 paddle_values = {
-                    o.value for o in option.observations if o.source == "paddleocr-vl"
+                    o.value
+                    for o in option.observations
+                    if o.source == "paddleocr-vl"
                 }
                 if option.state == "selected" and "unchecked" in paddle_values:
-                    option.warnings.append("VLM selected mark disagrees with Paddle glyph")
+                    option.warnings.append(
+                        "VLM selected mark disagrees with Paddle glyph"
+                    )
                     row_needs_review = True
 
-            selected_count = sum(o.state == "selected" for o in options.values())
-            selection_rule = str(raw_group.get("selection_rule") or "zero_or_more")
-            if selection_rule in ("zero_or_one", "exactly_one", "one_per_row") and selected_count > 1:
+            selected_count = sum(
+                o.state == "selected" for o in options.values()
+            )
+            selection_rule = str(
+                raw_group.get("selection_rule") or "zero_or_more"
+            )
+            if (
+                selection_rule in ("zero_or_one", "exactly_one", "one_per_row")
+                and selected_count > 1
+            ):
                 row_needs_review = True
                 for option in options.values():
                     if option.state == "selected":
-                        option.warnings.append("multiple visible marks in a single-choice row")
+                        option.warnings.append(
+                            "multiple visible marks in a single-choice row"
+                        )
 
-            # A checked Paddle glyph omitted by a VLM response is a disagreement,
-            # but only when this row was returned as visible in the section.
+            # A checked Paddle glyph omitted by a VLM response is a
+            # disagreement, but only when this row was returned as visible in
+            # the section.
             for option in options.values():
                 paddle_checked = any(
                     o.source == "paddleocr-vl" and o.value == "checked"
                     for o in option.observations
                 )
-                has_vlm = any(o.source == client.provider for o in option.observations)
+                has_vlm = any(
+                    o.source == client.provider for o in option.observations
+                )
                 if paddle_checked and not has_vlm:
-                    option.warnings.append("Paddle reports selected but targeted VLM omitted it")
+                    option.warnings.append(
+                        "Paddle reports selected but targeted VLM omitted it"
+                    )
                     row_needs_review = True
 
             row_status = "needs_review" if row_needs_review else "accepted"
@@ -2140,7 +2542,9 @@ def _merge_results(
             final_rows.append(
                 doc_ir.FormRow(
                     id=row_id,
-                    label=str((hint or {}).get("label") or raw_row.get("label") or ""),
+                    label=str(
+                        (hint or {}).get("label") or raw_row.get("label") or ""
+                    ),
                     options=list(options.values()),
                     status=row_status,
                     warnings=row_warnings,
@@ -2149,8 +2553,8 @@ def _merge_results(
 
         # The prompt requires every visible row, including unanswered rows. A
         # hinted row omitted from the complete-section response is therefore
-        # not safe to silently call blank: retain its Paddle schema, but flag it
-        # for review instead of inventing a VLM observation.
+        # not safe to silently call blank: retain its Paddle schema, but flag
+        # it for review instead of inventing a VLM observation.
         for row_id, hint in hinted_rows.items():
             if row_id in used_hint_ids:
                 continue
@@ -2174,7 +2578,9 @@ def _merge_results(
                     label=str(hint.get("label") or ""),
                     options=options,
                     status="needs_review",
-                    warnings=["targeted VLM did not return this visible schema row"],
+                    warnings=[
+                        "targeted VLM did not return this visible schema row"
+                    ],
                 )
             )
             group_needs_review = True
@@ -2192,10 +2598,14 @@ def _merge_results(
                 id=group_id,
                 bbox=list(bbox),
                 question_text=str(
-                    raw_group.get("question") or schema_hint.get("question_text") or ""
+                    raw_group.get("question")
+                    or schema_hint.get("question_text")
+                    or ""
                 ),
                 question_type=str(raw_group.get("question_type") or "unknown"),
-                selection_rule=str(raw_group.get("selection_rule") or "zero_or_more"),
+                selection_rule=str(
+                    raw_group.get("selection_rule") or "zero_or_more"
+                ),
                 rows=final_rows,
                 status="needs_review" if group_needs_review else "accepted",
                 warnings=group_warnings,
@@ -2213,19 +2623,19 @@ def _merge_results(
 
 
 def extract_page_forms(
-    page: "doc_ir.Page",
+    page: doc_ir.Page,
     page_bgr,
     client,
     *,
-    same_layout_template: Optional[SameLayoutTemplate] = None,
-    contract: Optional[str] = None,
-) -> List["doc_ir.FormGroup"]:
-    """Extract question-level responses from one full-resolution page raster."""
+    same_layout_template: SameLayoutTemplate | None = None,
+    contract: str | None = None,
+) -> list[doc_ir.FormGroup]:
+    """Extract question-level responses from one full-resolution page."""
     if page_bgr is None:
         return []
     contract_name = _survey_contract(contract)
     height, width = page_bgr.shape[:2]
-    groups: List[doc_ir.FormGroup] = []
+    groups: list[doc_ir.FormGroup] = []
     jobs = (
         same_layout_template.get(page.page_number, width, height)
         if same_layout_template is not None
@@ -2234,7 +2644,9 @@ def extract_page_forms(
 
     if not jobs:
         used_group_ids = set()
-        for section_index, section in enumerate(_question_sections(page), start=1):
+        for section_index, section in enumerate(
+            _question_sections(page), start=1
+        ):
             bbox = _section_bbox(
                 section["regions"],
                 width,
@@ -2273,7 +2685,9 @@ def extract_page_forms(
         if crop is None:
             continue
         schema_hint = job["schema_hint"]
-        section_id = job.get("section_id") or f"p{page.page_number}_s{section_index}"
+        section_id = (
+            job.get("section_id") or f"p{page.page_number}_s{section_index}"
+        )
         crop_bytes = _png_bytes(crop)
         crop_b64 = base64.b64encode(crop_bytes).decode("ascii")
         errors = []
@@ -2286,14 +2700,16 @@ def extract_page_forms(
             contract_name == PADDLE_ID_CONTRACT or auto_table_hybrid
         )
         if use_mark_only_contract:
-            section_results: List[List[dict]] = []
+            section_results: list[list[dict]] = []
             try:
                 result = client.analyze(
                     _png_bytes(complete_section),
                     _prompt(schema_hint),
                     MARK_ONLY_RESPONSE_SCHEMA,
                 )
-                section_results.append(_normalize_mark_only_result(result, schema_hint))
+                section_results.append(
+                    _normalize_mark_only_result(result, schema_hint)
+                )
                 job["structure_valid"] = True
             except Exception as exc:
                 job["structure_valid"] = False
@@ -2343,7 +2759,9 @@ def extract_page_forms(
                     template_reused=bool(job.get("template_reused")),
                     candidate_evidence=job.get("candidate_evidence"),
                     paddle_mark_present=_paddle_mark_presence(page, bbox),
-                    printed_validation_text=str(job.get("validation_text") or ""),
+                    printed_validation_text=str(
+                        job.get("validation_text") or ""
+                    ),
                     expected_question_number=job.get("question_number"),
                     geometric_control_count=geometric_control_count,
                 )
@@ -2355,16 +2773,24 @@ def extract_page_forms(
                     doc_ir.FormGroup(
                         id=f"{section_id}_q1",
                         bbox=list(bbox),
-                        question_text=str(schema_hint.get("question_text") or ""),
+                        question_text=str(
+                            schema_hint.get("question_text") or ""
+                        ),
                         status="needs_review",
-                        warnings=["schema-free response could not be validated"],
+                        warnings=[
+                            "schema-free response could not be validated"
+                        ],
                         provenance={
                             "provider": client.provider,
                             "model": client.model,
                             "method": "schema-free-complete-question-section",
                             "contract_version": SCHEMA_FREE_CONTRACT,
-                            "candidate_evidence": list(job.get("candidate_evidence") or []),
-                            "same_layout_template": bool(job.get("template_reused")),
+                            "candidate_evidence": list(
+                                job.get("candidate_evidence") or []
+                            ),
+                            "same_layout_template": bool(
+                                job.get("template_reused")
+                            ),
                         },
                         source_crop_b64=crop_b64,
                     )
@@ -2373,7 +2799,8 @@ def extract_page_forms(
             for group in extracted:
                 group.status = "needs_review"
                 group.warnings.append(
-                    "survey model has not yet passed TextLab's release benchmark"
+                    "survey model has not yet passed TextLab's release "
+                    "benchmark"
                 )
         _reconcile_answer_geometry(page, bbox, extracted)
         if errors:

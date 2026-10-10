@@ -59,11 +59,13 @@ files. Worker processes (`textlab.common.jobs`) exchange their request,
 progress and result through a job folder in the caller's area, removed when
 the run ends; the transcription feature stages uploads the same way
 (`staged_uploads`, `staged_zip`), translation writes the PDF pages it
-sends to OCR to `translation/ocr-*`, and OCR keeps each run in `ocr/job-*`
-or `ocr/batch-*`. Temporary folders are removed even when a tool left
-read-only files in them (`storage.remove_tree`). Without `TEXT_LAB_WORKDIR` (tests,
-scripts run by hand), the workspace is a private folder under the system
-temporary directory.
+sends to OCR to `translation/ocr-*`, OCR keeps each run in `ocr/job-*`,
+`ocr/batch-*` or, for manual engine selection, `ocr/manual-*`, and Survey
+writes the blank form's images and rebuilt exports to `survey/*`.
+Temporary folders are removed even when a tool left read-only files in them
+(`storage.remove_tree`). Without `TEXT_LAB_WORKDIR` (tests, scripts run by
+hand), the workspace is a private folder under the system temporary
+directory.
 
 A workspace folder that already exists but belongs to another user is
 refused with `WorkspaceError`, so a shared `/tmp` cannot be used to read

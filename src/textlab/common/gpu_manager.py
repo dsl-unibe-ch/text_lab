@@ -54,7 +54,7 @@ LLM = "llm"
 #: leftovers (e.g. a run interrupted before its ``finally`` block ran).
 _WORKER_SCRIPTS = {
     "textlab.features.ocr.paddle_vl_worker": OCR,
-    "paddle_ocr_worker.py": OCR,
+    "textlab.features.ocr.engines.paddle_ocr_worker": OCR,
     "textlab.features.transcription.worker": TRANSCRIBE,
 }
 

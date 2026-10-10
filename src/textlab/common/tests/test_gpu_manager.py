@@ -76,7 +76,7 @@ def test_only_our_own_workers_of_released_features_are_stopped(monkeypatch):
         101: (me, "python -m textlab.features.ocr.paddle_vl_worker --serve"),
         102: (me, "python -m textlab.features.transcription.worker /job"),
         103: (1, "/usr/local/lib/ollama/llama-server"),       # Ollama
-        104: (999, "python paddle_ocr_worker.py --lang en"),  # not ours
+        104: (999, "python -m textlab.features.ocr.engines.paddle_ocr_worker"),  # not ours
         105: (me, "python something_else.py"),                # unknown
         999: (1, "other user's process"),
     }

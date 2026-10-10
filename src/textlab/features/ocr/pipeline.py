@@ -31,7 +31,7 @@ from textlab.features.ocr.native import (
 )
 from textlab.features.ocr.rasters import decode_bgr, downscale_png_b64
 from textlab.features.ocr.vl_session import VLWorkerSession, run_vl_worker
-from textlab.features.survey import form_extract
+from textlab.features.survey import service as survey_service
 
 #: Rasterization DPI of the PaddleOCR-VL lane.
 VL_DPI = 200
@@ -85,7 +85,7 @@ def _finalize_vl_page(
             raise RuntimeError(
                 "Survey extraction requires a configured vision client"
             )
-        form_extract.extract_page_forms(
+        survey_service.extract_page_forms(
             page,
             page_bgr,
             vision_client,

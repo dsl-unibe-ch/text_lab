@@ -102,7 +102,15 @@ Each feature package under `src/textlab/features/` holds:
 
 A feature may split its service into more modules when it grows (OCR has one
 adapter per engine, for example), but interfaces only import from
-`service.py` and `models.py`.
+`service.py` and `models.py`. A service re-exports the few other names its
+interfaces need and lists them in `__all__`; for Translation and OCR a test
+checks that the pages use nothing else.
+
+A feature that uses another feature calls its service: Translation calls
+`ocr.service` for scanned PDF pages, and the OCR batch calls
+`survey.service` for questionnaires. Survey is built on OCR's result model
+and image tools (`ocr.doc_ir`, `ocr.markup_detect`, `ocr.vl_session`) and
+imports them directly.
 
 The feature README covers the following; `features/transcription/README.md`
 is a complete example:
@@ -170,12 +178,15 @@ has separate conda environments for them (`common/container.py` names
 them). Their workers still start with `python -m textlab.features...`, with
 that environment's interpreter: `common.jobs.worker_environment(python)`
 makes `textlab` importable and puts the environment's programs and
-libraries first. Such a worker must not import anything from `textlab`
-beyond the standard library and its own environment, since the app's
-packages are not installed there. The PaddleOCR-VL worker of the OCR
-feature is the example; it also stays running for a whole batch
-(`ocr.vl_session.VLWorkerSession`), because loading its weights takes
-longer than recognizing a short document.
+libraries first. Such a worker may use only the standard library and its
+own environment's packages, since the app's packages are not installed
+there; it may import a `textlab` module only if that module follows the
+same limit (the PaddleOCR worker imports `ocr/engines/payloads.py`, and a
+test checks both). The OCR feature has two such workers: PaddleOCR-VL for
+the automatic pipeline, which stays running for a whole batch
+(`ocr.vl_session.VLWorkerSession`) because loading its weights takes longer
+than recognizing a short document, and PaddleOCR 2 for manual engine
+selection (`ocr.engines.paddle_ocr`).
 
 ### A large page
 
@@ -196,8 +207,8 @@ feature follows the rules above.
 |---|---|---|---|
 | Transcription | `features/transcription/` | `Transcribe.py` | Refactored |
 | Meeting Notes | `features/meeting_notes/` | `Meeting_Notes_Generator.py` | Refactored |
-| OCR | `features/ocr/` | `OCR.py` | Automatic pipeline refactored; manual engines moved |
-| Survey | `features/survey/` | part of `OCR.py` (partly hidden) | Moved |
+| OCR | `features/ocr/` | `OCR.py` | Refactored |
+| Survey | `features/survey/` | part of `OCR.py` (partly hidden) | Refactored |
 | Translation | `features/translation/` | `Translate.py` | Refactored |
 | Topic Modeling | `features/topic_modeling/` | `Topic_Modeling.py` | Moved |
 | Visualization | `features/visualization/` | `Visualize_Data.py` | Moved |
@@ -211,20 +222,14 @@ and language configuration) is in `src/textlab/common/`.
 
 Known issues to resolve during the refactor:
 
-- The PaddleOCR 2 worker of manual engine selection and the MCP server are
-  still started by file path, and `gpu_manager` recognizes leftover workers
-  by file or module name; they move to `common.jobs` when manual OCR engines
-  (phase 6b) and Visualization are refactored.
-- Manual OCR engine selection runs its engines in the UI
-  (`ui/streamlit/ocr/legacy.py`, not linted) until phase 6b.
+- The MCP server of Visualization is still started by file path, and
+  `gpu_manager` recognizes leftover workers by file or module name; it moves
+  to `common.jobs` when Visualization is refactored.
 - The home page still names the University of Bern and UBELIX in its text
   (allow-listed in `tests/test_data_footprint.py`).
-- Translation calls the OCR feature for scanned PDF pages
-  (`translation/documents/pdf_extract.py`, through `ocr.service`), and the
-  OCR batch reads questionnaires through `survey.survey_batch`; Survey gets
-  its own service in phase 6b.
-- About 190 emojis remain in the pages; they are removed as each feature is
-  refactored, keeping functional symbols such as checkbox glyphs.
+- About 75 emojis remain in the Chat and Knowledge Graph pages and the
+  login check (`auth.py`); they are removed as each feature is refactored,
+  keeping functional symbols such as checkbox glyphs.
 
 Code that is moved but not refactored is excluded from ruff
 (`extend-exclude` in `pyproject.toml`); refactoring a feature removes its

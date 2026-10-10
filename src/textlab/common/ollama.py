@@ -334,6 +334,25 @@ def running_model_names(client: Any = ollama) -> set[str] | None:
         return None
 
 
+def installed_model_names(client: Any = ollama) -> set[str] | None:
+    """Return the canonical names of the models a server has downloaded.
+
+    Args:
+        client: The ``ollama`` module or an ``ollama.Client``.
+
+    Returns:
+        The names, or ``None`` if the server cannot be reached or its answer
+        has an unexpected shape.
+    """
+    try:
+        models = _field(client.list(), "models")
+        if not isinstance(models, list | tuple):
+            return None
+        return {canonical_model_name(extract_model_name(m)) for m in models}
+    except Exception:
+        return None
+
+
 def _field(value: Any, name: str) -> Any:
     """Return a field of a response object or dictionary, or ``None``."""
     if isinstance(value, Mapping):

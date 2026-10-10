@@ -4,10 +4,10 @@ Started as ``python -m textlab.features.ocr.paddle_vl_worker`` by
 :mod:`textlab.features.ocr.vl_session`; it imports nothing from ``textlab``,
 because that environment does not have the app's dependencies.
 
-Mirrors ``paddle_ocr_worker.py``: the parent process invokes this script with a
-list of single-page image paths, the script runs the ``PaddleOCRVL`` doc-parser
-pipeline (paddleocr >= 3.6, ``[doc-parser]`` extra) fully offline, and prints a
-single marker line::
+Mirrors ``engines/paddle_ocr_worker.py``: the parent process invokes this
+script with a list of single-page image paths, the script runs the
+``PaddleOCRVL`` doc-parser pipeline (paddleocr >= 3.6, ``[doc-parser]`` extra)
+fully offline, and prints a single marker line::
 
     TEXTLAB_PADDLEVL_RESULT_JSON=<json>
 
@@ -32,7 +32,7 @@ from pathlib import Path
 
 import numpy as np
 
-# ---- offline hygiene: identical policy to paddle_ocr_worker.py --------------
+# ---- offline hygiene: the same policy as engines/paddle_ocr_worker.py -------
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("MKL_NUM_THREADS", "1")
 os.environ.setdefault("DISABLE_MODEL_SOURCE_CHECK", "True")
