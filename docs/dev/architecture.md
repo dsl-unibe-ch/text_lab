@@ -83,8 +83,9 @@ These rules apply to all code in `src/textlab/`.
    to the backend; anything else belongs in the backend.
 
 Rules 1, 4 and 5 are checked automatically: rule 1 by import-linter, rules 4
-and 5 by `tests/test_data_footprint.py`. Rules 3 and 6 get shared modules
-(`progress`, `jobs`) when the first feature is refactored.
+and 5 by `tests/test_data_footprint.py`. Rules 3 and 6 have shared modules in
+`textlab.common`: `progress` (progress updates and cancellation) and `jobs`
+(worker processes). LLM features share `textlab.common.ollama`.
 
 ## Feature packages
 
@@ -103,7 +104,8 @@ A feature may split its service into more modules when it grows (OCR has one
 adapter per engine, for example), but interfaces only import from
 `service.py` and `models.py`.
 
-The feature README covers:
+The feature README covers the following; `features/transcription/README.md`
+is a complete example:
 
 - **Purpose**: what the feature does, in two or three sentences.
 - **Pipeline**: the processing steps, from input to output.
@@ -112,6 +114,42 @@ The feature README covers:
   it is removed.
 - **Configuration**: environment variables and settings it reads.
 - **Tests**: what is covered and which markers the tests use.
+
+## A refactored feature: transcription
+
+Transcription was the first feature refactored and shows how the pieces fit.
+
+```
+features/transcription/
+├── service.py         # run_transcription(), transcribe_files(), staging
+├── models.py          # TranscriptionOptions, Transcript, TranscriptionResult
+├── audio.py           # decoding, language detection, VAD
+├── formats.py         # exports (CSV, ELAN, SRT, VTT) and readers
+├── whisper_models.py  # model choice per language
+├── worker.py          # python -m textlab.features.transcription.worker
+├── cli.py             # batch command (placeholder)
+├── README.md
+└── tests/
+```
+
+What happens when a user transcribes a recording on the Transcribe page:
+
+1. The page builds `TranscriptionOptions` from its widgets and writes the
+   upload to the job workspace with `staged_uploads()`.
+2. It calls `run_transcription(files, options, on_progress=status)`, where
+   `status` is a `StatusBox` from `ui/streamlit/components/progress.py`.
+3. `run_transcription` hands the request to `common.jobs.run_worker`, which
+   starts `python -m textlab.features.transcription.worker` with a job
+   folder in the workspace.
+4. The worker runs `transcribe_files()`, the WhisperX pipeline, and reports
+   progress through a file the parent polls and passes to `status`.
+5. The worker writes its result and exits, which releases all GPU memory.
+   The page receives a `TranscriptionResult`, the staged files are deleted,
+   and the page shows the transcript and the downloads from `formats`.
+
+A batch job would call `transcribe_files()` directly, and a web frontend
+would call `run_transcription()` with its own progress callback; neither
+needs the Streamlit page.
 
 ## Migration status
 
@@ -123,8 +161,8 @@ feature follows the rules above.
 
 | Feature | Backend | Page | Status |
 |---|---|---|---|
-| Transcription | `features/transcription/` | `Transcribe.py` | Moved |
-| Meeting Notes | `features/meeting_notes/` | `Meeting_Notes_Generator.py` | Moved |
+| Transcription | `features/transcription/` | `Transcribe.py` | Refactored |
+| Meeting Notes | `features/meeting_notes/` | `Meeting_Notes_Generator.py` | Refactored |
 | OCR | `features/ocr/` | `OCR.py` | Moved |
 | Survey | `features/survey/` | part of `OCR.py` (hidden) | Moved |
 | Translation | `features/translation/` | `Translate.py` | Moved |
@@ -134,18 +172,17 @@ feature follows the rules above.
 | Knowledge Graph | `features/knowledge_graph/` | `Knowledge_Graph.py` | Moved |
 
 Backend paths are relative to `src/textlab/`, pages to
-`src/textlab/ui/streamlit/pages/`. Shared code (GPU management, upload and
-HTML safety, model and language configuration) is in `src/textlab/common/`.
+`src/textlab/ui/streamlit/pages/`. Shared code (settings, workspace, worker
+processes, progress, Ollama, GPU management, upload and HTML safety, model
+and language configuration) is in `src/textlab/common/`.
 
 Known issues to resolve during the refactor:
 
 - `common/gpu_manager.py` imports `features/ocr/vision_enrich.py`, so shared
   code depends on a feature.
-- `features/chat/chat_engine.py` holds Ollama helpers used by Meeting Notes,
-  Translate and Visualization; they belong in `common/`.
-- Worker scripts and the MCP server are started by file path, and
-  `gpu_manager` recognizes leftover workers by file name, so these files
-  keep their names until the shared job runner replaces this.
+- The PaddleOCR workers and the MCP server are still started by file path,
+  and `gpu_manager` recognizes leftover workers by file or module name; they
+  move to `common.jobs` when OCR and Visualization are refactored.
 - The home page and the Translate page still name the University of Bern
   and UBELIX in their text (allow-listed in `tests/test_data_footprint.py`).
 - About 190 emojis remain in the pages; they are removed as each feature is

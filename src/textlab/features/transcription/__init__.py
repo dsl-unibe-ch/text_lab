@@ -1,13 +1,15 @@
 """Backend for the Transcription feature.
 
 Audio transcription with WhisperX, including speaker diarization, VAD
-pre-filtering and Swiss German models.
+pre-filtering and Swiss German models. Interfaces call
+:func:`service.run_transcription`, which runs the pipeline in a worker
+process; see ``README.md`` in this folder.
 
-Moved from ``src/core`` with only import and path updates. The modules are
-reorganized when the feature is refactored (see ``docs/dev/architecture.md``):
-
-- ``transcribe_engine``: audio decoding, language detection, VAD and the
-  transcript exports (CSV, SRT, VTT, ELAN).
-- ``transcribe_worker``: subprocess that runs the WhisperX pipeline for the
-  Meeting Notes Generator.
+- ``service``: the pipeline and its entry points, and staging of uploads.
+- ``models``: options and results.
+- ``audio``: decoding, language detection and voice activity detection.
+- ``formats``: the transcript exports and their readers.
+- ``whisper_models``: which model to use for a language.
+- ``worker``: the worker process's entry point.
+- ``cli``: batch command (placeholder).
 """

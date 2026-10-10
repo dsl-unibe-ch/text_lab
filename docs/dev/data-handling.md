@@ -55,7 +55,10 @@ session_dir = workspace.make_temp_dir("chat", prefix="chat-")
 ```
 
 Each feature uses its own area name, so features cannot delete each other's
-files. Without `TEXT_LAB_WORKDIR` (tests, scripts run by hand), the
+files. Worker processes (`textlab.common.jobs`) exchange their request,
+progress and result through a job folder in the caller's area, removed when
+the run ends; the transcription feature stages uploads the same way
+(`staged_uploads`, `staged_zip`). Without `TEXT_LAB_WORKDIR` (tests, scripts run by hand), the
 workspace is a private folder under the system temporary directory.
 
 A workspace folder that already exists but belongs to another user is

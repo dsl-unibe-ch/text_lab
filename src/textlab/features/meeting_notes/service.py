@@ -1,26 +1,37 @@
-"""
-Core summarization engine for the Meeting Notes Generator pipeline.
+"""Summarizing transcripts into notes: the Meeting Notes feature's API.
 
-Provides summary mode definitions, token-aware chunked summarization with a
-map-reduce strategy for long transcripts, streaming helpers, speaker-text
-formatting utilities, and a Markdown export formatter.
+A transcript that fits in the model's context window is summarized in one
+streamed request (:func:`get_summary_stream`). A longer one is summarized
+map-reduce style: :func:`get_partial_notes` extracts notes from each chunk,
+then :func:`get_synthesis_stream` streams the final summary from them. Use
+:func:`needs_chunking` to choose.
 
-All functions in this module are pure logic with no Streamlit dependency.
+The summary's structure depends on the mode (:data:`SUMMARY_MODES`), e.g.
+meeting notes with decisions and action items, or lecture notes. Helpers
+turn a transcript table into speaker-labeled text, apply names the user gave
+the speakers, and build the Markdown document users download.
+
+Streaming functions are plain generators of text, so any interface can
+display them as they arrive.
 """
+
+from __future__ import annotations
 
 import csv
 import io
 import re
-from typing import Any, Callable, Dict, Generator, List, Optional
+from collections.abc import Iterator
+from typing import Any
 
 import ollama
 
-from textlab.features.chat.chat_engine import (
+from textlab.common.ollama import (
     MAX_CONTEXT_TOKENS,
     chunk_text,
     estimate_tokens,
     message_text,
 )
+from textlab.common.progress import Progress, ProgressCallback, no_progress
 
 # Low temperature keeps summaries close to the transcript instead of
 # paraphrasing creatively or adding detail that was never said.
@@ -31,7 +42,7 @@ SUMMARY_TEMPERATURE = 0.2
 # Summary mode registry
 # ---------------------------------------------------------------------------
 
-SUMMARY_MODES: Dict[str, Dict[str, str]] = {
+SUMMARY_MODES: dict[str, dict[str, str]] = {
     "general": {
         "label": "General Summary",
         "description": (
@@ -39,12 +50,15 @@ SUMMARY_MODES: Dict[str, Dict[str, str]] = {
             "key points, and conclusions."
         ),
         "chunk_instruction": (
-            "Extract the main ideas, key statements, and important information "
+            "Extract the main ideas, key statements, and important "
+            "information "
             "from this section of the transcript. Be specific and factual."
         ),
         "synthesis_instruction": (
-            "Using the extracted notes from all parts, produce a well-structured summary "
-            "with: a short introduction paragraph, a bulleted list of key points, "
+            "Using the extracted notes from all parts, produce a "
+            "well-structured summary "
+            "with: a short introduction paragraph, a bulleted list of key "
+            "points, "
             "and a brief conclusion."
         ),
     },
@@ -71,7 +85,8 @@ SUMMARY_MODES: Dict[str, Dict[str, str]] = {
     "interview": {
         "label": "Interview Summary",
         "description": (
-            "Highlights the main themes, key responses, and notable statements "
+            "Highlights the main themes, key responses, and notable "
+            "statements "
             "from an interview or conversation."
         ),
         "chunk_instruction": (
@@ -83,7 +98,8 @@ SUMMARY_MODES: Dict[str, Dict[str, str]] = {
             "Produce an interview summary with these sections:\n"
             "**Overview** (what the conversation was about)\n"
             "**Main Themes**\n"
-            "**Key Statements and Notable Quotes** (use speaker names where available)\n"
+            "**Key Statements and Notable Quotes** (use speaker names where "
+            "available)\n"
             "**Conclusions or Outcomes**"
         ),
     },
@@ -95,7 +111,8 @@ SUMMARY_MODES: Dict[str, Dict[str, str]] = {
         ),
         "chunk_instruction": (
             "From this section extract: the research question or objective, "
-            "methodology described, findings reported, and any conclusions drawn."
+            "methodology described, findings reported, and any conclusions "
+            "drawn."
         ),
         "synthesis_instruction": (
             "Write a structured academic summary with these sections:\n"
@@ -133,18 +150,20 @@ SUMMARY_MODES: Dict[str, Dict[str, str]] = {
 
 SUMMARIZER_SYSTEM_PROMPT = (
     "You are an expert summarizer and structured note-taker. "
-    "You produce accurate, well-organized summaries of transcribed audio content. "
+    "You produce accurate, well-organized summaries of transcribed audio "
+    "content. "
     "You are concise but thorough, preserve factual accuracy, and use clear "
-    "Markdown formatting. Never fabricate information not present in the source text. "
-    "If a section is unclear or contains transcription artifacts, note it briefly "
+    "Markdown formatting. Never fabricate information not present in the "
+    "source text. "
+    "If a section is unclear or contains transcription artifacts, note it "
+    "briefly "
     "rather than guessing. "
     "Always follow the output language instruction given in the user message."
 )
 
 
-def _language_instruction(output_language: Optional[str]) -> str:
-    """
-    Build the language directive that is appended to every LLM prompt.
+def _language_instruction(output_language: str | None) -> str:
+    """Build the language directive that is appended to every LLM prompt.
 
     Args:
         output_language: The desired output language name (e.g. ``"English"``,
@@ -156,7 +175,8 @@ def _language_instruction(output_language: Optional[str]) -> str:
     """
     if not output_language or output_language.lower() == "transcript":
         return (
-            "Important: Write your entire response in the same language as the "
+            "Important: Write your entire response in the same language as "
+            "the "
             "transcript content."
         )
     return f"Important: Write your entire response in {output_language}."
@@ -166,14 +186,14 @@ def _language_instruction(output_language: Optional[str]) -> str:
 # Internal message builders
 # ---------------------------------------------------------------------------
 
+
 def _build_single_pass_messages(
     text: str,
     mode_key: str,
-    speaker_context: Optional[str],
-    output_language: Optional[str] = "English",
-) -> List[Dict[str, str]]:
-    """
-    Build an Ollama message list for a single-pass summarization call.
+    speaker_context: str | None,
+    output_language: str | None = "English",
+) -> list[dict[str, str]]:
+    """Build an Ollama message list for a single-pass summarization call.
 
     Args:
         text: The full transcript text.
@@ -188,7 +208,9 @@ def _build_single_pass_messages(
     """
     mode = SUMMARY_MODES[mode_key]
     context_note = (
-        f"\n\nContext about speakers: {speaker_context}" if speaker_context else ""
+        f"\n\nContext about speakers: {speaker_context}"
+        if speaker_context
+        else ""
     )
     lang_note = _language_instruction(output_language)
     prompt = (
@@ -208,11 +230,10 @@ def _build_chunk_messages(
     chunk_index: int,
     total_chunks: int,
     mode_key: str,
-    speaker_context: Optional[str],
-    output_language: Optional[str] = "English",
-) -> List[Dict[str, str]]:
-    """
-    Build an Ollama message list for processing one chunk in the map phase.
+    speaker_context: str | None,
+    output_language: str | None = "English",
+) -> list[dict[str, str]]:
+    """Build an Ollama message list for processing one chunk in the map phase.
 
     Args:
         chunk: Text fragment to analyze.
@@ -229,11 +250,14 @@ def _build_chunk_messages(
     """
     mode = SUMMARY_MODES[mode_key]
     context_note = (
-        f"\nContext about speakers: {speaker_context}" if speaker_context else ""
+        f"\nContext about speakers: {speaker_context}"
+        if speaker_context
+        else ""
     )
     lang_note = _language_instruction(output_language)
     prompt = (
-        f"You are processing part {chunk_index} of {total_chunks} of a transcript."
+        f"You are processing part {chunk_index} of {total_chunks} of a "
+        "transcript."
         f"{context_note}\n\n"
         f"--- Transcript Part {chunk_index}/{total_chunks} ---\n{chunk}\n"
         f"--- End of Part {chunk_index}/{total_chunks} ---\n\n"
@@ -247,12 +271,11 @@ def _build_chunk_messages(
 
 
 def _build_synthesis_messages(
-    partial_notes: List[str],
+    partial_notes: list[str],
     mode_key: str,
-    output_language: Optional[str] = "English",
-) -> List[Dict[str, str]]:
-    """
-    Build an Ollama message list for the reduce (synthesis) phase.
+    output_language: str | None = "English",
+) -> list[dict[str, str]]:
+    """Build an Ollama message list for the reduce (synthesis) phase.
 
     Args:
         partial_notes: Extracted notes from each chunk, in order.
@@ -271,7 +294,8 @@ def _build_synthesis_messages(
         for i, note in enumerate(partial_notes)
     )
     prompt = (
-        f"A transcript was split into {len(partial_notes)} parts and each was analyzed "
+        f"A transcript was split into {len(partial_notes)} parts and each "
+        "was analyzed "
         f"separately. Below are the extracted notes.\n\n"
         f"{parts_text}\n\n"
         f"--- End of Partial Notes ---\n\n"
@@ -288,14 +312,14 @@ def _build_synthesis_messages(
 # Internal Ollama call helpers
 # ---------------------------------------------------------------------------
 
+
 def _chat(
     model_name: str,
-    messages: List[Dict[str, str]],
+    messages: list[dict[str, str]],
     stream: bool,
     disable_thinking: bool = True,
 ) -> Any:
-    """
-    Call ``ollama.chat`` with the summarization options.
+    """Call ``ollama.chat`` with the summarization options.
 
     Reasoning ("thinking") is disabled by default: a summary needs no
     chain-of-thought, and thinking tokens only add latency and use up the
@@ -313,7 +337,7 @@ def _chat(
         A chat response, or an iterator of response chunks when ``stream``
         is true. For streams the HTTP request is only sent on iteration.
     """
-    kwargs: Dict[str, Any] = {
+    kwargs: dict[str, Any] = {
         "model": model_name,
         "messages": messages,
         "stream": stream,
@@ -333,8 +357,7 @@ def _is_think_rejection(exc: ollama.ResponseError) -> bool:
 
 
 def _response_text(response: Any) -> str:
-    """
-    Return the content of a chat response or stream chunk as a string.
+    """Return the content of a chat response or stream chunk as a string.
 
     Reasoning-only chunks carry ``None`` content, which is mapped to an
     empty string so callers can concatenate safely.
@@ -346,9 +369,8 @@ def _response_text(response: Any) -> str:
     return message_text(message)
 
 
-def _complete_text(model_name: str, messages: List[Dict[str, str]]) -> str:
-    """
-    Run one blocking chat call and return the reply text.
+def _complete_text(model_name: str, messages: list[dict[str, str]]) -> str:
+    """Run one blocking chat call and return the reply text.
 
     Args:
         model_name: The Ollama model identifier.
@@ -370,10 +392,9 @@ def _complete_text(model_name: str, messages: List[Dict[str, str]]) -> str:
 
 def _stream_text(
     model_name: str,
-    messages: List[Dict[str, str]],
-) -> Generator[str, None, None]:
-    """
-    Stream a chat reply as text tokens.
+    messages: list[dict[str, str]],
+) -> Iterator[str]:
+    """Stream a chat reply as text tokens.
 
     If the server rejects ``think=False`` before any token arrives, the
     request is retried once without it.
@@ -394,7 +415,9 @@ def _stream_text(
     except ollama.ResponseError as exc:
         if started or not _is_think_rejection(exc):
             raise
-    for chunk in _chat(model_name, messages, stream=True, disable_thinking=False):
+    for chunk in _chat(
+        model_name, messages, stream=True, disable_thinking=False
+    ):
         yield _response_text(chunk)
 
 
@@ -402,15 +425,28 @@ def _stream_text(
 # Public API: summarization
 # ---------------------------------------------------------------------------
 
+
+def needs_chunking(text: str) -> bool:
+    """Return True if a transcript is too long for one summarization request.
+
+    Args:
+        text: The transcript text.
+
+    Returns:
+        True if it exceeds :data:`MAX_CONTEXT_TOKENS` by estimate, so it
+        must go through :func:`get_partial_notes`.
+    """
+    return estimate_tokens(text) > MAX_CONTEXT_TOKENS
+
+
 def get_summary_stream(
     model_name: str,
     text: str,
     mode_key: str,
-    speaker_context: Optional[str] = None,
-    output_language: Optional[str] = "English",
-) -> Generator[str, None, None]:
-    """
-    Stream a summary for a transcript that fits within a single context window.
+    speaker_context: str | None = None,
+    output_language: str | None = "English",
+) -> Iterator[str]:
+    """Stream a summary of a transcript that fits in one context window.
 
     Use estimate_tokens(text) <= MAX_CONTEXT_TOKENS to confirm the text is
     short enough before calling this function. For longer texts use the
@@ -428,7 +464,9 @@ def get_summary_stream(
     Yields:
         Incremental string tokens from the language model.
     """
-    messages = _build_single_pass_messages(text, mode_key, speaker_context, output_language)
+    messages = _build_single_pass_messages(
+        text, mode_key, speaker_context, output_language
+    )
     yield from _stream_text(model_name, messages)
 
 
@@ -436,12 +474,11 @@ def get_partial_notes(
     model_name: str,
     text: str,
     mode_key: str,
-    speaker_context: Optional[str] = None,
-    progress_callback: Optional[Callable[[str, int, int], None]] = None,
-    output_language: Optional[str] = "English",
-) -> List[str]:
-    """
-    Run the map phase of chunked summarization.
+    speaker_context: str | None = None,
+    on_progress: ProgressCallback = no_progress,
+    output_language: str | None = "English",
+) -> list[str]:
+    """Run the map phase of chunked summarization.
 
     Splits a long transcript into chunks and extracts partial notes from each
     using a single blocking LLM call per chunk. Designed to be followed by
@@ -452,9 +489,8 @@ def get_partial_notes(
         text: The full transcript text (expected to exceed MAX_CONTEXT_TOKENS).
         mode_key: Key in SUMMARY_MODES.
         speaker_context: Optional sentence describing identified speakers.
-        progress_callback: Optional callable invoked before each chunk with
-            (status_label: str, completed: int, total_steps: int). The total
-            passed is len(chunks) + 1 to reserve one step for synthesis.
+        on_progress: Receives an update before each chunk. The fraction
+            counts the synthesis as one more step after the chunks.
         output_language: Language for extracted notes. Pass ``None`` or
             ``"transcript"`` to match the source transcript language.
             Defaults to ``"English"``.
@@ -464,13 +500,15 @@ def get_partial_notes(
     """
     chunks = chunk_text(text)
     total_steps = len(chunks) + 1  # +1 reserved for synthesis
-    partial_notes: List[str] = []
+    partial_notes: list[str] = []
 
     for i, chunk in enumerate(chunks, 1):
-        if progress_callback is not None:
-            progress_callback(
-                f"Analyzing part {i} of {len(chunks)}...", i - 1, total_steps
+        on_progress(
+            Progress(
+                f"Analyzing part {i} of {len(chunks)}...",
+                (i - 1) / total_steps,
             )
+        )
         messages = _build_chunk_messages(
             chunk=chunk,
             chunk_index=i,
@@ -486,12 +524,11 @@ def get_partial_notes(
 
 def get_synthesis_stream(
     model_name: str,
-    partial_notes: List[str],
+    partial_notes: list[str],
     mode_key: str,
-    output_language: Optional[str] = "English",
-) -> Generator[str, None, None]:
-    """
-    Stream the final synthesized summary from per-chunk partial notes.
+    output_language: str | None = "English",
+) -> Iterator[str]:
+    """Stream the final synthesized summary from per-chunk partial notes.
 
     This is the reduce phase of the map-reduce summarization strategy.
 
@@ -506,7 +543,9 @@ def get_synthesis_stream(
     Yields:
         Incremental string tokens from the language model.
     """
-    messages = _build_synthesis_messages(partial_notes, mode_key, output_language)
+    messages = _build_synthesis_messages(
+        partial_notes, mode_key, output_language
+    )
     yield from _stream_text(model_name, messages)
 
 
@@ -514,9 +553,9 @@ def get_synthesis_stream(
 # Public API: transcript text utilities
 # ---------------------------------------------------------------------------
 
+
 def transcript_csv_to_speaker_text(csv_text: str) -> str:
-    """
-    Convert a WhisperX transcription CSV/TSV into a speaker-labeled plain text.
+    """Convert a WhisperX segment table into speaker-labeled plain text.
 
     Each segment is formatted as ``SPEAKER_XX: segment text``. If no Speaker
     column is present, plain text lines are returned without a label prefix.
@@ -535,7 +574,7 @@ def transcript_csv_to_speaker_text(csv_text: str) -> str:
         return ""
 
     has_speaker_col = "Speaker" in rows[0]
-    lines: List[str] = []
+    lines: list[str] = []
 
     for row in rows:
         text = (row.get("Text") or row.get("text") or "").strip()
@@ -550,9 +589,8 @@ def transcript_csv_to_speaker_text(csv_text: str) -> str:
     return "\n".join(lines)
 
 
-def apply_speaker_labels(text: str, label_map: Dict[str, str]) -> str:
-    """
-    Replace generic speaker identifiers with human-readable labels.
+def apply_speaker_labels(text: str, label_map: dict[str, str]) -> str:
+    """Replace generic speaker identifiers with human-readable labels.
 
     Applies whole-word replacement so that e.g. ``SPEAKER_00`` is replaced
     with ``Interviewer`` throughout the transcript text.
@@ -573,9 +611,8 @@ def apply_speaker_labels(text: str, label_map: Dict[str, str]) -> str:
     return text
 
 
-def extract_unique_speakers(text: str) -> List[str]:
-    """
-    Find all unique speaker identifiers in speaker-labeled transcript text.
+def extract_unique_speakers(text: str) -> list[str]:
+    """Find all unique speaker identifiers in speaker-labeled transcript text.
 
     Matches patterns such as ``SPEAKER_00``, ``SPEAKER_01``, etc., which are
     the default labels produced by WhisperX diarization.
@@ -586,13 +623,12 @@ def extract_unique_speakers(text: str) -> List[str]:
     Returns:
         Sorted list of unique speaker identifier strings found in the text.
     """
-    pattern = re.compile(r'\bSPEAKER_\d+\b')
+    pattern = re.compile(r"\bSPEAKER_\d+\b")
     return sorted(set(pattern.findall(text)))
 
 
-def build_speaker_context(speaker_labels: List[str]) -> Optional[str]:
-    """
-    Build a short human-readable sentence describing identified speakers.
+def build_speaker_context(speaker_labels: list[str]) -> str | None:
+    """Build a short human-readable sentence describing identified speakers.
 
     This sentence is injected into LLM prompts to help the model understand
     the speaker structure of the transcript.
@@ -615,22 +651,22 @@ def build_speaker_context(speaker_labels: List[str]) -> Optional[str]:
 # Public API: export
 # ---------------------------------------------------------------------------
 
+
 def format_summary_document(
     summary: str,
     transcript_text: str,
     source_label: str,
     mode_key: str,
-    duration_str: Optional[str] = None,
+    duration_str: str | None = None,
 ) -> str:
-    """
-    Render a complete Markdown export document containing the summary and transcript.
+    """Build the Markdown document with the summary and the transcript.
 
     Args:
         summary: The generated summary text (may contain Markdown).
         transcript_text: The plain or speaker-labeled transcript text.
-        source_label: The original filename or path shown in the document header.
+        source_label: The original file name, shown in the document header.
         mode_key: The summary mode key used, for display in the header.
-        duration_str: Optional human-readable audio duration (e.g. ``"42m 10s"``).
+        duration_str: Human-readable audio duration, e.g. ``"42m 10s"``.
 
     Returns:
         A Markdown-formatted string ready for download as a ``.md`` file.

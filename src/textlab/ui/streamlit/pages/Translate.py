@@ -199,10 +199,8 @@ tgt_code = TRANSLATE_LANGUAGE_MAPPING[tgt_name]
 ollama_model = None
 if backend_key == "ollama":
     try:
-        from textlab.features.chat.chat_engine import (
-            check_ollama_server,
-            get_gpu_name,
-        )
+        from textlab.common.gpu_manager import get_gpu_name
+        from textlab.common.ollama import check_ollama_server
         from textlab.common.model_config import get_available_models
 
         if check_ollama_server():

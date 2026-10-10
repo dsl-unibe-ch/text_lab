@@ -6,6 +6,10 @@ Foundation for all features:
 
 - ``config``: site settings from the environment (``deploy/site.env``).
 - ``storage``: the private per-job workspace for temporary user files.
+- ``progress``: progress updates and cancellation for long-running work.
+- ``jobs``: running heavy work in a worker process.
+- ``ollama``: the session's Ollama server: chat, models in memory, and
+  keeping texts within the context window.
 
 Moved from ``src/core`` and ``src`` with only import and path updates:
 

@@ -28,7 +28,7 @@ from typing import Any, AsyncIterator, Callable, TypedDict
 from mcp import ClientSession, StdioServerParameters, types
 from mcp.client.stdio import get_default_environment, stdio_client
 
-from textlab.features.chat.chat_engine import chat_no_think, message_text
+from textlab.common.ollama import chat_no_think, message_text
 from textlab.features.visualization import r_code
 from textlab.features.visualization.plot_data import (
     get_all_columns_summary_impl,

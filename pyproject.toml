@@ -54,13 +54,16 @@ extend-exclude = [
     # Streamlit app
     "src/textlab/ui/streamlit/Home.py",
     "src/textlab/ui/streamlit/auth.py",
-    "src/textlab/ui/streamlit/pages",
+    "src/textlab/ui/streamlit/pages/Chat.py",
+    "src/textlab/ui/streamlit/pages/Knowledge_Graph.py",
+    "src/textlab/ui/streamlit/pages/OCR.py",
+    "src/textlab/ui/streamlit/pages/Topic_Modeling.py",
+    "src/textlab/ui/streamlit/pages/Translate.py",
+    "src/textlab/ui/streamlit/pages/Visualize_Data.py",
     # Chat
     "src/textlab/features/chat/chat_engine.py",
     # Knowledge graph
     "src/textlab/features/knowledge_graph/kg_engine.py",
-    # Meeting notes
-    "src/textlab/features/meeting_notes/summarize_engine.py",
     # OCR
     "src/textlab/features/ocr/auto_ocr.py",
     "src/textlab/features/ocr/doc_ir.py",
@@ -88,9 +91,6 @@ extend-exclude = [
     "src/textlab/features/topic_modeling/topic_pipeline.py",
     "src/textlab/features/topic_modeling/topic_utils.py",
     "src/textlab/features/topic_modeling/tests",
-    # Transcription
-    "src/textlab/features/transcription/transcribe_engine.py",
-    "src/textlab/features/transcription/transcribe_worker.py",
     # Translation
     "src/textlab/features/translation/__init__.py",
     "src/textlab/features/translation/chunking.py",
@@ -140,6 +140,9 @@ convention = "google"
 [tool.ruff.lint.per-file-ignores]
 # Test functions are documented by their names.
 "**/tests/**" = ["D"]
+# Streamlit derives page titles from file names such as
+# Meeting_Notes_Generator.py, which cannot be PEP 8 module names.
+"src/textlab/ui/streamlit/pages/*.py" = ["N999"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["textlab"]

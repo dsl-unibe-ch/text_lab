@@ -29,22 +29,24 @@ from textlab.ui.streamlit.auth import check_token
 from textlab.common import gpu_manager
 from textlab.ui.streamlit.components.gpu import free_gpu_for
 from textlab.common.storage import get_workspace
-from textlab.features.chat.chat_engine import (
+from textlab.common.gpu_manager import get_gpu_name
+from textlab.common.ollama import (
+    MAX_CONTEXT_TOKENS,
     check_ollama_server,
-    get_gpu_name,
-    is_model_loaded,
+    chunk_text,
+    estimate_tokens,
     extract_model_name,
+    is_model_loaded,
+)
+from textlab.features.chat.chat_engine import (
     process_uploaded_files,
     get_response_generator,
     format_chat_history,
     format_chat_history_html,
     _has_analysis_plots,
-    estimate_tokens,
-    chunk_text,
     get_chunk_answer,
     get_synthesis_generator,
     decide_tool_use,
-    MAX_CONTEXT_TOKENS,
 )
 
 from textlab.common.model_config import (

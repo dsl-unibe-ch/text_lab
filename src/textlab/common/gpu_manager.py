@@ -46,13 +46,14 @@ TOPIC_MODELING = "topic_modeling"
 #: beyond their Ollama model.
 LLM = "llm"
 
-#: Helper scripts that hold GPU memory in their own process, by owner. Used
-#: only for the last-resort cleanup of leftovers (e.g. a run interrupted
-#: before its ``finally`` block ran).
+#: Helper processes that hold GPU memory, by owner: script names, or module
+#: names for workers started with ``python -m`` (see textlab.common.jobs).
+#: Matched against the command line, only for the last-resort cleanup of
+#: leftovers (e.g. a run interrupted before its ``finally`` block ran).
 _WORKER_SCRIPTS = {
     "paddle_vl_worker.py": OCR,
     "paddle_ocr_worker.py": OCR,
-    "transcribe_worker.py": TRANSCRIBE,
+    "textlab.features.transcription.worker": TRANSCRIBE,
 }
 
 _RELEASERS: Dict[str, Dict[str, Callable[[], object]]] = {}
@@ -214,6 +215,23 @@ def _stop_leftover_workers(kept: set) -> List[str]:
         except OSError:
             LOGGER.exception("Stopping GPU worker %s failed", pid)
     return stopped
+
+
+def get_gpu_name() -> str:
+    """Return the name of the first visible GPU, as ``nvidia-smi`` reports it.
+
+    Returns:
+        The GPU name, e.g. ``"NVIDIA A100-SXM4-80GB"``, or ``"Unknown/CPU"``
+        if there is no GPU or ``nvidia-smi`` fails.
+    """
+    try:
+        output = subprocess.check_output(
+            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+            encoding="utf-8", stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        return "Unknown/CPU"
+    return output.strip()
 
 
 def gpu_memory_mb() -> Optional[tuple]:

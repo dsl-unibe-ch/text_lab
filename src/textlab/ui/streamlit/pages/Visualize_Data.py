@@ -27,7 +27,8 @@ from textlab.ui.streamlit.auth import check_token
 from textlab.common import gpu_manager
 from textlab.ui.streamlit.components.gpu import free_gpu_for
 from textlab.common.storage import get_workspace
-from textlab.features.chat.chat_engine import check_ollama_server, get_gpu_name
+from textlab.common.gpu_manager import get_gpu_name
+from textlab.common.ollama import check_ollama_server
 from textlab.features.visualization.viz_agent import run_analysis
 from textlab.features.visualization.viz_config import (
     DEFAULT_PROMPT,

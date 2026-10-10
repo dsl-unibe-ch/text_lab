@@ -29,6 +29,14 @@ or skipped:
 Unregistered markers are an error (`--strict-markers`), so add new ones to
 `pyproject.toml` first.
 
+Most tests replace models and servers with fakes, so they run anywhere: for
+example `features/transcription/tests/test_service.py` fakes WhisperX and
+ffmpeg, and `common/tests/test_ollama.py` fakes the Ollama client. A few
+tests run the real thing and carry the `container` marker, such as
+`features/transcription/tests/test_integration.py`; they skip themselves
+when the model stores are not mounted. Tests of worker processes start real
+subprocesses with a stub worker (`common/tests/stub_worker.py`).
+
 ## Running the tests
 
 The tests run inside the Apptainer image on a compute node, never on a login
@@ -68,8 +76,11 @@ From an `srun` or `salloc` session on a compute node:
 bash scripts/test_on_node.sbatch -k translation
 ```
 
-The script refuses to run outside a Slurm allocation. `TL_CONTAINER` selects
-a different image, for example a newly built one.
+The script refuses to run outside a Slurm allocation. It reads the site
+configuration (`deploy/site.env` in the repository, or `TEXT_LAB_SITE_ENV`)
+for the image and the model stores, and mounts them as the app does, so the
+`container` tests find the models. `TL_CONTAINER` selects a different image,
+for example a newly built one.
 
 ## Lint and architecture checks
 

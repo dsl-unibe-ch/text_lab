@@ -77,7 +77,7 @@ def test_only_our_own_workers_of_released_features_are_stopped(monkeypatch):
     processes = {
         # pid: (parent, command line)
         101: (me, "python paddle_vl_worker.py --serve"),
-        102: (me, "python transcribe_worker.py"),
+        102: (me, "python -m textlab.features.transcription.worker /job"),
         103: (1, "/usr/local/lib/ollama/llama-server"),       # Ollama
         104: (999, "python paddle_vl_worker.py --serve"),     # not ours
         105: (me, "python something_else.py"),                # unknown

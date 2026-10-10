@@ -14,9 +14,13 @@
 # All arguments are passed through to pytest. The image has no pytest, so it
 # is installed once into PYTEST_DEPS (see docs/dev/testing.md).
 #
+# The image, the model stores and the folders to bind come from the site
+# configuration, as for the app, so the tests see the same environment.
+#
 # Environment overrides:
-#   TL_CONTAINER  path to the .sif to test against
-#   PYTEST_DEPS   directory holding the pytest installation
+#   TEXT_LAB_SITE_ENV  site configuration (default: deploy/site.env here)
+#   TL_CONTAINER       path to the .sif to test against
+#   PYTEST_DEPS        directory holding the pytest installation
 
 #SBATCH --job-name=textlab-tests
 #SBATCH --partition=gpu
@@ -29,8 +33,6 @@
 
 set -euo pipefail
 
-# The container path moves into the site configuration in a later phase.
-TL_CONTAINER="${TL_CONTAINER:-/storage/research/dsl_shared/solutions/ondemand/text_lab/container/text_lab_210526.sif}"
 CONTAINER_PYTHON="/opt/conda/envs/text_lab_main/bin/python"
 PYTEST_DEPS="${PYTEST_DEPS:-$HOME/.cache/text_lab_pytest}"
 
@@ -49,15 +51,33 @@ fi
 # Under sbatch the script runs from a spool copy, so use the submit directory.
 cd "${SLURM_SUBMIT_DIR:-$PWD}"
 
+TEXT_LAB_SITE_ENV="${TEXT_LAB_SITE_ENV:-$PWD/deploy/site.env}"
+# shellcheck source=/dev/null
+source "$TEXT_LAB_SITE_ENV"
+
 echo "Repository: $PWD"
+echo "Site:       $TEXT_LAB_SITE_ENV"
 echo "Container:  $TL_CONTAINER"
 echo "Job:        $SLURM_JOB_ID on $(hostname)"
+
+# The model stores, mounted where the image expects them (as in
+# template/script.sh.erb), for the tests that run real models.
+binds=(
+  --bind "$HOST_WHISPER_DIR:/opt/whisper"
+  --bind "$HOST_WHISPERX_DIR:/opt/whisperx"
+  --bind "$HOST_TORCH_DIR:/opt/torch"
+  --bind "$HOST_HF_DIR:/opt/huggingface"
+)
+if [[ -n "${TEXT_LAB_EXTRA_BINDS:-}" ]]; then
+  binds+=(--bind "$TEXT_LAB_EXTRA_BINDS")
+fi
 
 # PYTHONNOUSERSITE keeps packages from ~/.local out of the container
 # environment; they break its transformers import.
 apptainer exec --nv \
-  --bind /storage \
+  "${binds[@]}" \
   --env PYTHONNOUSERSITE=1 \
   --env PYTHONPATH="$PYTEST_DEPS" \
+  --env HF_HOME=/opt/huggingface \
   "$TL_CONTAINER" \
   "$CONTAINER_PYTHON" -m pytest -p no:cacheprovider "$@"

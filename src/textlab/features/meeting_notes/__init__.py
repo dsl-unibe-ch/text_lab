@@ -1,11 +1,6 @@
 """Backend for the Meeting Notes feature.
 
-Meeting notes generated from a recording: transcription followed by LLM
-summarization.
-
-Moved from ``src/core`` with only import and path updates. The modules are
-reorganized when the feature is refactored (see ``docs/dev/architecture.md``):
-
-- ``summarize_engine``: chunked LLM summarization of a transcript into
-  structured notes.
+Structured notes from a recording or transcript, written by a local LLM.
+Transcription comes from the transcription feature; ``service`` holds the
+summarization and transcript helpers. See ``README.md`` in this folder.
 """
