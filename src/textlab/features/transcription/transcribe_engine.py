@@ -17,9 +17,18 @@ import soundfile as sf
 import whisperx
 from silero_vad import load_silero_vad, read_audio, get_speech_timestamps
 
+from textlab.common.config import get_settings
+
 # --- Constants ---
 WAVESURFER_MAX_BYTES = 75 * 1024 * 1024
 WAVESURFER_MAX_SECONDS = 30 * 60
+
+#: Swiss German Whisper models, as folder names inside the site's custom
+#: Whisper folder (TEXT_LAB_CUSTOM_WHISPER_DIR).
+SWHISPER_MODEL = "swhisper-large-1.1"
+#: CTranslate2-converted copy of Flurin17/whisper-large-v3-turbo-swiss-german,
+#: built once with ``ct2-transformers-converter`` so whisperx can load it.
+FLURIN_SWISS_MODEL = "flurin-swiss-german-turbo-ct2"
 
 # ==========================================
 #        DATA & TIME PARSING
@@ -246,6 +255,34 @@ def get_vad_segments(audio_file, max_pause=None, return_seconds=True, sampling_r
             sampling_rate=sampling_rate
         )
     return speech_timestamps
+
+def custom_whisper_model_path(model_name):
+    """Return the path of a model in the site's custom Whisper folder.
+
+    Args:
+        model_name: Folder name of the model, e.g. :data:`SWHISPER_MODEL`.
+
+    Returns:
+        The model path as a string, as ``whisperx.load_model`` expects.
+
+    Raises:
+        MissingSettingError: If TEXT_LAB_CUSTOM_WHISPER_DIR is not set.
+    """
+    return str(get_settings().require("custom_whisper_dir") / model_name)
+
+
+def hf_token_path():
+    """Return the configured Hugging Face token file, or ``""``.
+
+    Diarization is skipped when no token is available, so a missing setting
+    is not an error: :func:`read_hf_token` returns ``None`` for ``""``.
+
+    Returns:
+        The path from TEXT_LAB_HF_TOKEN_FILE as a string, or ``""``.
+    """
+    token_file = get_settings().hf_token_file
+    return str(token_file) if token_file else ""
+
 
 def read_hf_token(token_arg):
     if os.path.isfile(token_arg):

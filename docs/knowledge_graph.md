@@ -45,3 +45,10 @@ You can download any visualisation as an HTML file for offline use or sharing.
 The Full Corpus Graph brings your entire collection together in one interactive view. Click **"Generate Full Corpus Graph"** to render the complete network of interconnections across all papers.
 
 If the graph feels overwhelming, open the **Advanced** panel to filter which papers are included — then regenerate the graph to focus on what matters most. Like the ego graph, you can export this view as HTML for offline exploration.
+
+## Data privacy and security
+
+* **Your papers stay where they are.** Text Lab reads the PDFs from the folder you enter and does not copy them anywhere else permanently.
+* **Output goes where you choose.** The corpus folder with the extracted metadata, tables and topics is saved in the location you pick in Step 1. It stays there until you delete it, so you can come back to it in a later session.
+* **Temporary files are deleted.** While Grobid parses a paper, it keeps a working copy in your session's private workspace on the compute node, which only your user account can open. The workspace is deleted when your Text Lab session ends.
+* **Choice of language model for topics.** With **Ollama (Local)**, the title and abstract of each paper are processed by a model running in your own session on the compute node. With **GPUStack**, they are sent to the University of Bern's GPUStack service: they leave your session, but stay on university infrastructure and are not sent to external providers. Choose Ollama for papers that must not leave your session.

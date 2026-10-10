@@ -4,8 +4,10 @@
 
 - **Feature tests** live next to their feature, in
   `src/textlab/features/<feature>/tests/`.
-- **Cross-cutting tests** live in `tests/`: architecture rules, checks that
-  no user data stays on disk after a session, and shared fixtures.
+- **Cross-cutting tests** live in `tests/`: checks that no user data is
+  written outside the job workspace and that no site-specific values are
+  hardcoded (`test_data_footprint.py`), and that the site configuration
+  provides every setting (`test_site_config.py`).
 
 Shared code has its tests in `src/textlab/common/tests/`. Each `tests/`
 folder is a package (it has an `__init__.py`), so a test can import helpers

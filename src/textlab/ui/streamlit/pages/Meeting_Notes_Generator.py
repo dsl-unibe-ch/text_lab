@@ -53,6 +53,7 @@ from textlab.features.chat.chat_engine import (
     unload_all_models,
 )
 from textlab.common import gpu_manager
+from textlab.ui.streamlit.components.gpu import free_gpu_for
 from textlab.common.model_config import (
     get_available_models,
     is_high_memory_gpu,
@@ -71,6 +72,10 @@ from textlab.features.meeting_notes.summarize_engine import (
     transcript_csv_to_speaker_text,
 )
 from textlab.features.transcription.transcribe_engine import (
+    FLURIN_SWISS_MODEL,
+    SWHISPER_MODEL,
+    custom_whisper_model_path,
+    hf_token_path,
     detect_language_from_audio_bytes,
     transcription_text_from_csv,
 )
@@ -79,13 +84,7 @@ from textlab.common.language_mappings import (
     TRANSCRIBE_LANGUAGE_MAPPING as LANGUAGE_MAPPING,
 )
 
-HF_TOKEN_PATH = (
-    "/storage/research/dsl_shared/solutions/whisperx/cache/whisperx/cache/hf/hf_token.txt"
-)
-FLURIN_SWISS_MODEL_PATH = (
-    "/storage/research/dsl_shared/solutions/whisperx/cache/whisper/"
-    "flurin-swiss-german-turbo-ct2"
-)
+HF_TOKEN_PATH = hf_token_path()
 
 # Path to the standalone transcription worker script.
 _WORKER_PATH = importlib.util.find_spec(
@@ -581,7 +580,7 @@ def _run_summarization(
         The generated summary as a string.
     """
     # The transcription worker has exited; leave only the summary LLM.
-    gpu_manager.free_gpu_for(gpu_manager.LLM, ollama_model=model_name)
+    free_gpu_for(gpu_manager.LLM, ollama_model=model_name)
     token_count = estimate_tokens(transcript_text)
     needs_chunking = token_count > MAX_CONTEXT_TOKENS
 
@@ -684,13 +683,12 @@ def _render_audio_tab(gpu_name: str) -> None:
 
         # Swiss German model routing
         if language == "ch_de":
-            whisper_model_default = (
-                "/storage/research/dsl_shared/solutions/whisperx/cache/whisper/"
-                "swhisper-large-1.1"
-            )
+            whisper_model_default = custom_whisper_model_path(SWHISPER_MODEL)
             st.caption("Using Swiss German Whisper model.")
         elif language == "ch_de_flurin":
-            whisper_model_default = FLURIN_SWISS_MODEL_PATH
+            whisper_model_default = custom_whisper_model_path(
+                FLURIN_SWISS_MODEL
+            )
             st.caption("Using Flurin Swiss German Turbo model.")
         else:
             whisper_model_default = "large-v3-turbo"
@@ -768,7 +766,7 @@ def _render_audio_tab(gpu_name: str) -> None:
         if audio_file is None:
             st.error("Please upload an audio file before running.")
             st.stop()
-        gpu_manager.free_gpu_for(gpu_manager.TRANSCRIBE)
+        free_gpu_for(gpu_manager.TRANSCRIBE)
 
         try:
             # Read audio bytes once; reused for both language detection and transcription.

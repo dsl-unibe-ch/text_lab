@@ -141,6 +141,6 @@ The model is told to use only what is in the transcript and not to add informati
 Recordings of meetings and interviews often contain personal or confidential information. This is what happens to your data:
 
 * **Everything runs on the university cluster.** Transcription (WhisperX) and summarisation (language models served by Ollama) run on the UBELIX compute node of your Text Lab session. No audio or text is sent to an external service.
-* **Temporary files are deleted after transcription.** For transcription, your audio is written to a temporary folder on the compute node, together with the progress and result files. The folder is deleted as soon as the transcription ends, whether it succeeded or failed.
+* **Temporary files are deleted after transcription.** For transcription, your audio is written to a temporary folder in your session's private workspace on the compute node, together with the progress and result files. The folder is deleted as soon as the transcription ends, whether it succeeded or failed, and the whole workspace is deleted when your session ends.
 * **Results live only in your browser session.** The transcript and summary are kept in your open page only. They are not saved to your home directory, and they are gone when you reload the page, close the tab or your Text Lab session ends.
 * **No AI training.** The models only process your recording. They do not learn from it, and your data is never used to train or improve them.

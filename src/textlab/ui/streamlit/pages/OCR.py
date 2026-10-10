@@ -50,6 +50,8 @@ from textlab.features.ocr import (
     vision_enrich,
 )
 from textlab.common import gpu_manager, html_safety, upload_safety
+from textlab.common.storage import get_workspace
+from textlab.ui.streamlit.components.gpu import free_gpu_for
 from textlab.features.survey import form_extract, survey_batch
 
 try:
@@ -65,14 +67,10 @@ check_token()
 
 st.title("📄 Document & Image OCR")
 
-# --- 1. Get required paths from environment variables ---
-HOST_HOME = os.environ.get("HOME")
-
-if not HOST_HOME:
-    st.error("**Configuration Error:** `HOME` environment variable is not set.")
-    st.stop()
-
-OCR_JOBS_BASE_DIR = pathlib.Path(HOST_HOME) / "ondemand_text_lab_ocr_jobs"
+# --- 1. Working folders ---
+# Uploads and intermediate results live in this job's private workspace,
+# which is removed when the job ends. See textlab.common.storage.
+OCR_JOBS_BASE_DIR = get_workspace().dir("ocr")
 OLMOCR_GPU_MEMORY_UTILIZATION = os.environ.get("OLMOCR_GPU_MEMORY_UTILIZATION", "0.6")
 
 AUTO_INPUT_TYPES = ["pdf", "png", "jpg", "jpeg", "bmp", "tiff", "tif"]
@@ -1348,7 +1346,7 @@ def auto_single_ui():
             st.warning("⏳ A job is currently running. The button is disabled until completion.")
         if st.button("📑 Parse document", type="primary",
                      disabled=st.session_state.ocr_running, key="auto_single_btn"):
-            gpu_manager.free_gpu_for(gpu_manager.OCR)
+            free_gpu_for(gpu_manager.OCR)
             run_auto_single(
                 uploaded_file,
                 native_fast_lane=not opts["highest_quality"],
@@ -1385,7 +1383,7 @@ def auto_batch_ui():
             st.warning("⏳ A job is currently running. The button is disabled until completion.")
         if st.button("📦 Parse batch", type="primary",
                      disabled=st.session_state.ocr_running, key="auto_batch_btn"):
-            gpu_manager.free_gpu_for(gpu_manager.OCR)
+            free_gpu_for(gpu_manager.OCR)
             run_auto_batch(
                 batch_zip,
                 native_fast_lane=not opts["highest_quality"],
@@ -1438,7 +1436,7 @@ def legacy_single_flow(ocr_engine, ocr_language, glm_mode):
         if st.button("Run OCR", disabled=st.session_state.ocr_running, key="legacy_single_btn"):
             if st.session_state.ocr_running:
                 st.stop()
-            gpu_manager.free_gpu_for(gpu_manager.OCR)
+            free_gpu_for(gpu_manager.OCR)
 
             clear_results(reset_running=False)
             st.session_state.ocr_running = True
@@ -1772,7 +1770,7 @@ def legacy_batch_flow(ocr_engine, ocr_language, glm_mode):
         if st.button("Run Batch OCR", disabled=st.session_state.ocr_running, key="legacy_batch_btn"):
             if st.session_state.ocr_running:
                 st.stop()
-            gpu_manager.free_gpu_for(gpu_manager.OCR)
+            free_gpu_for(gpu_manager.OCR)
 
             clear_results(reset_running=False)
             st.session_state.ocr_running = True

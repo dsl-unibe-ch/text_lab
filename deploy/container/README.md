@@ -17,7 +17,8 @@ interpreters are exported as `PADDLE_BACKEND_PYTHON`,
 `PADDLE_VL_BACKEND_PYTHON` and `OLMOCR_BACKEND_PYTHON`.
 
 Models are not baked into the image. They live on research storage and are
-bind-mounted at runtime under `/opt/...` (see `template/script.sh.erb`).
+bind-mounted at runtime under `/opt/...`; their locations are set in
+`deploy/site.env`.
 
 ## Building
 

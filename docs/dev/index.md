@@ -18,6 +18,10 @@ The rest of the site is the user guide.
   contains.
 - [Testing](testing.md): where tests live, how to run them on a compute
   node, and what runs automatically on GitHub.
+- [Deployment](deployment.md): what the HPC team deploys and what you
+  control, the site configuration, sandbox apps, logs and releases.
+- [Data handling](data-handling.md): where user data may be written, the
+  job workspace, and the tests that keep the privacy promise true.
 
 ## Repository at a glance
 
@@ -27,6 +31,7 @@ The rest of the site is the user guide.
 | `src/textlab/features/` | Backend, one package per feature |
 | `src/textlab/common/` | Backend code shared by several features |
 | `src/textlab/ui/streamlit/` | The Streamlit app: `Home.py`, `pages/`, `auth.py`, `assets/` |
+| `deploy/site.env` | Site configuration: paths, images, model stores and settings for one cluster |
 | `deploy/container/` | Apptainer definition of the image that holds all dependencies |
 | `deploy/sbatch/` | Batch job templates (planned) |
 | `scripts/` | Developer scripts, such as running the tests on a compute node |
@@ -35,17 +40,10 @@ The rest of the site is the user guide.
 
 ## Running the app from your working tree
 
-The launch script `template/script.sh.erb` serves the code in `TEXT_LAB_SRC`,
-which defaults to the production release on research storage. To run your
-working tree in a sandbox Open OnDemand app instead, copy
-`template/dev.env.example` to `template/dev.env` and set `TEXT_LAB_SRC` to
-the `src/` folder of your checkout. Open OnDemand copies `template/` into the
-job directory, and the script loads `dev.env` from there at start-up; the job
-log shows which source tree and container it used.
-
-`template/dev.env` is gitignored, so the committed launch script always
-describes production. `TL_CONTAINER` in the same file selects a different
-image, for example one you have just built.
+A sandbox Open OnDemand app can serve your working tree instead of the
+production release: copy `template/dev.env.example` to `template/dev.env`
+(gitignored) and set the paths in it. [Deployment](deployment.md) explains
+the details, along with the site configuration and releases.
 
 The app imports the `textlab` package, so `src/` must be on `PYTHONPATH`. The
 launch script sets it inside the container; for tests, `pyproject.toml` does.

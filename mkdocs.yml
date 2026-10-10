@@ -50,6 +50,8 @@ nav:
     - Overview: dev/index.md
     - Architecture: dev/architecture.md
     - Testing: dev/testing.md
+    - Deployment: dev/deployment.md
+    - Data Handling: dev/data-handling.md
 
 # Extensions to make Markdown look better
 markdown_extensions:

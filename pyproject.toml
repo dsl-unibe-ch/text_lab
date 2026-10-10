@@ -43,15 +43,18 @@ src = ["src"]
 # refactor phase removes its entries from this list.
 extend-exclude = [
     # Shared backend
-    "src/textlab/common/artifacts.py",
     "src/textlab/common/gpu_manager.py",
     "src/textlab/common/html_safety.py",
     "src/textlab/common/language_mappings.py",
     "src/textlab/common/model_config.py",
     "src/textlab/common/upload_safety.py",
-    "src/textlab/common/tests",
+    "src/textlab/common/tests/test_gpu_manager.py",
+    "src/textlab/common/tests/test_html_safety.py",
+    "src/textlab/common/tests/test_upload_safety.py",
     # Streamlit app
-    "src/textlab/ui/streamlit",
+    "src/textlab/ui/streamlit/Home.py",
+    "src/textlab/ui/streamlit/auth.py",
+    "src/textlab/ui/streamlit/pages",
     # Chat
     "src/textlab/features/chat/chat_engine.py",
     # Knowledge graph
@@ -171,8 +174,3 @@ name = "Backend never imports a user interface"
 type = "forbidden"
 source_modules = ["textlab.features", "textlab.common"]
 forbidden_modules = ["streamlit", "textlab.ui"]
-# Existing violations, removed as their features are refactored. Do not add
-# new entries: move the UI code into textlab.ui instead.
-ignore_imports = [
-    "textlab.common.gpu_manager -> streamlit",
-]

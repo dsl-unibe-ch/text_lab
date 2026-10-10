@@ -228,22 +228,3 @@ def gpu_memory_mb() -> Optional[tuple]:
         return used, total
     except Exception:
         return None
-
-
-def free_gpu_for(
-    feature: str,
-    *,
-    ollama_model: Optional[str] = None,
-    keep: Iterable[str] = (),
-) -> List[str]:
-    """Page helper: :func:`prepare_gpu`, telling the user what was freed.
-
-    Call from the Streamlit script thread (not a background thread).
-    """
-    import streamlit as st
-
-    with st.spinner("Preparing the GPU..."):
-        freed = prepare_gpu(feature, ollama_model=ollama_model, keep=keep)
-    if freed:
-        st.toast("Freed GPU memory: " + "; ".join(freed), icon="🧹")
-    return freed

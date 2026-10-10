@@ -11,16 +11,16 @@ from pathlib import Path
 import pandas as pd
 from openai import OpenAI
 
+from textlab.common.config import MissingSettingError, get_settings
+from textlab.common.storage import get_workspace
+
 GROBID_HOST = "127.0.0.1"
 GROBID_PORT = int(os.environ.get("GROBID_PORT", 8070))
 GROBID_URL = f"http://{GROBID_HOST}:{GROBID_PORT}/api/processFulltextDocument"
 
-# --- CHANGE 1: Update path to match the bound storage path ---
-# Since /storage is bound, we can access the SIF directly at this path
-GROBID_CONTAINER = os.getenv("GROBID_CONTAINER", "/storage/research/dsl_shared/solutions/ondemand/text_lab/container/grobid_0.8.2.sif")
-
-# Ensure tmp dir is in a writable location (usually HOME in OOD)
-GROBID_TMP = os.getenv("GROBID_TMP", os.path.join(os.environ.get("HOME", os.getcwd()), "grobid-tmp"))
+# The Grobid image comes from the site configuration
+# (TEXT_LAB_GROBID_CONTAINER). Grobid keeps the PDFs it is processing in its
+# tmp folder, so that folder lives in the job's private workspace.
 
 NS = {"tei": "http://www.tei-c.org/ns/1.0"}
 
@@ -87,7 +87,11 @@ def ensure_grobid_server():
         return
 
     # 2. Prepare directories
-    os.makedirs(GROBID_TMP, exist_ok=True)
+    try:
+        grobid_container = str(get_settings().require("grobid_container"))
+    except MissingSettingError as exc:
+        raise GrobidError(str(exc)) from exc
+    grobid_tmp = str(get_workspace().dir("grobid"))
     
     # 3. Check for Apptainer inside the current container
     apptainer_cmd = None
@@ -107,8 +111,8 @@ def ensure_grobid_server():
             "Please use Document OCR or Chat features instead."
         )
 
-    if not os.path.exists(GROBID_CONTAINER):
-        raise GrobidError(f"Grobid container SIF not found at: {GROBID_CONTAINER}")
+    if not os.path.exists(grobid_container):
+        raise GrobidError(f"Grobid container SIF not found at: {grobid_container}")
 
     # 4. Build command (using the bound paths)
     #  Dynamically copy, rewrite, and load a custom YAML config! ---
@@ -123,9 +127,9 @@ def ensure_grobid_server():
     grobid_command = [
         apptainer_cmd, "exec",
         # We need to bind the temp directory from the host (inner container view)
-        "-B", f"{GROBID_TMP}:/opt/grobid/grobid-home/tmp",
+        "-B", f"{grobid_tmp}:/opt/grobid/grobid-home/tmp",
         "--env", "GROBID_HOME=/opt/grobid/grobid-home",
-        GROBID_CONTAINER,
+        grobid_container,
         "bash", "-c", bash_cmd
     ]
 

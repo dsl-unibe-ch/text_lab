@@ -25,7 +25,8 @@ app_dir = os.path.dirname(current_dir)
 
 from textlab.ui.streamlit.auth import check_token
 from textlab.common import gpu_manager
-from textlab.common.artifacts import ensure_artifacts_dir
+from textlab.ui.streamlit.components.gpu import free_gpu_for
+from textlab.common.storage import get_workspace
 from textlab.features.chat.chat_engine import check_ollama_server, get_gpu_name
 from textlab.features.visualization.viz_agent import run_analysis
 from textlab.features.visualization.viz_config import (
@@ -58,8 +59,9 @@ MCP_SERVER_SCRIPT = importlib.util.find_spec(
 # Max seconds before the analysis is cancelled and an error is shown.
 ANALYSIS_TIMEOUT_SECONDS = 600
 
-# Per user, and off the shared source tree; created 0700. See core.artifacts.
-ARTIFACTS_DIR = ensure_artifacts_dir()
+# Uploaded data and generated charts live in this job's private workspace,
+# which is removed when the job ends. See textlab.common.storage.
+ARTIFACTS_DIR = str(get_workspace().dir("visualization"))
 
 
 def _cleanup_orphaned_artifacts(max_age_hours: int = 12) -> None:
@@ -785,7 +787,7 @@ def main() -> None:
         st.button("Generating...", type="primary", disabled=True)
     else:
         if st.button("Generate Visualisations", type="primary", disabled=(not uploaded_file)):
-            gpu_manager.free_gpu_for(gpu_manager.LLM, ollama_model=selected_model)
+            free_gpu_for(gpu_manager.LLM, ollama_model=selected_model)
             _start_analysis_thread(
                 file_bytes=uploaded_file.getvalue(),
                 file_name=uploaded_file.name,

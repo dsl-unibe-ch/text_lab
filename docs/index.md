@@ -10,8 +10,9 @@ Developed by the **Data Science Lab (DSL)**, Text Lab allows you to process docu
 
 One of the primary advantages of Text Lab is **data sovereignty**
 
-* **Internal Processing:** All processing happens entirely within the University of Bern's network infrastructure (UBELIX).
+* **Internal Processing:** All processing happens within the University of Bern's infrastructure: on the UBELIX compute node of your session, or, only if you choose the GPUStack option in the Knowledge Graph, on the university's GPUStack service.
 * **No Third Parties:** Unlike commercial cloud services (like ChatGPT or Google Cloud), your data is **never** sent to external servers.
+* **Nothing Left Behind:** Files you upload and intermediate results are kept in a private workspace for your session, which only your user account can open, and are deleted when the session ends. What you keep is up to you: the files you download, and the output folder you choose in the Knowledge Graph. Each session also keeps technical log files in your home directory (see [Reporting a Problem](launch.md#reporting-a-problem)).
 * **Sensitive Data:** Text Lab is the better choice for working with potentially sensitive research data (e.g., for interviews and/or non-public documents).
 * **No coding required** Text lab offers advanced NLP models and tools without having to write code.
 
@@ -30,7 +31,7 @@ For processing large amount of data, please contact the Data Science Lab.
 
 ## Getting Support
 
-If you encounter issues, need any data science, research IT support, or have questions about using Text Lab, please contact the Data Science Lab:
+If you encounter issues, need any data science, research IT support, or have questions about using Text Lab, please contact the Data Science Lab. When reporting a problem, please attach the session's log files ([how to find them](launch.md#reporting-a-problem)):
  [support.dsl@unibe.ch](mailto:support.dsl@unibe.ch)
 
 If you'd like to be informed about updates and changes to Text Lab, please subscribe to the following [Mailing List](https://listserv.unibe.ch/mailman/listinfo/text-lab-announcement.dsl)

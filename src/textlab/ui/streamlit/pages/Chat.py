@@ -27,7 +27,8 @@ st.set_page_config(
 
 from textlab.ui.streamlit.auth import check_token
 from textlab.common import gpu_manager
-from textlab.common.artifacts import ensure_artifacts_dir
+from textlab.ui.streamlit.components.gpu import free_gpu_for
+from textlab.common.storage import get_workspace
 from textlab.features.chat.chat_engine import (
     check_ollama_server,
     get_gpu_name,
@@ -66,10 +67,9 @@ MCP_SERVER_SCRIPT = importlib.util.find_spec(
 ANALYSIS_TIMEOUT_SECONDS = 600
 TABULAR_EXTENSIONS = (".csv", ".tsv", ".xls", ".xlsx", ".json")
 
-# Per user, and off the shared source tree: uploaded data is private, so these
-# directories are 0700, and a single shared one can only ever serve whoever
-# created it. See core.artifacts.
-ARTIFACTS_DIR = ensure_artifacts_dir()
+# Uploaded data and generated charts live in this job's private workspace,
+# which is removed when the job ends. See textlab.common.storage.
+ARTIFACTS_DIR = str(get_workspace().dir("chat"))
 
 check_token()
 
@@ -431,7 +431,7 @@ def main():
     if user_text:
         # Chat keeps its LLM; other features' models are released so they
         # cannot starve the chat model of VRAM.
-        gpu_manager.free_gpu_for(gpu_manager.LLM, ollama_model=model_name)
+        free_gpu_for(gpu_manager.LLM, ollama_model=model_name)
 
     if user_text and data_file_path:
         # Router/supervisor: decide whether this message needs the data-analysis tools.

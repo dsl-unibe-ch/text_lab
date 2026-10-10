@@ -32,7 +32,19 @@ The application features a modular, secure architecture offering the following t
 
 ## Privacy & Security
 
-Because all models run on university hardware via the Open OnDemand platform, your sensitive research data **never leaves the university network**. The application utilizes zero-footprint, ephemeral session states to ensure maximum security on shared infrastructure.
+All models run on university hardware, in the user's own Slurm job: nothing is sent to external services such as OpenAI, Google or Anthropic. The one exception is optional and stays on university infrastructure: the Knowledge Graph can use the University of Bern's GPUStack service for topic extraction instead of the local model.
+
+Text Lab keeps temporary user data in a private workspace per job (owner-only permissions), inside the job's `$TMPDIR`, and deletes it when the session ends. On UBELIX, Slurm also removes `$TMPDIR` at the end of every job, so the data is gone even if the session is killed.
+
+| What | Where | Removed |
+|---|---|---|
+| Uploaded files and intermediate results (OCR, Chat and Visualize Data tables and charts, transcription audio, Grobid working copies) | Session workspace in the job's `$TMPDIR` | When the run finishes where the feature does so, and always when the session ends |
+| Results shown on the page | The browser session (Streamlit session state) | When the page is reloaded or closed, or the session ends |
+| Knowledge Graph output | The folder the user chooses | When the user deletes it |
+| Session logs (`output.log`, `streamlit.log`, `ollama.log`) | The session folder in the user's home directory (Open OnDemand) | When the user deletes the session folder |
+| Custom embedding models chosen in Topic Modeling | The user's Hugging Face cache (`~/.cache/huggingface`) | When the user deletes them; these are model files, not user data |
+
+Developers: the rules behind this, and the tests that enforce them, are described in the [developer guide](https://text-lab.dsl.unibe.ch/dev/data-handling/).
 
 ---
 

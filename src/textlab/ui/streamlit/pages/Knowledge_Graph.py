@@ -19,6 +19,8 @@ st.set_page_config(page_title="Knowledge Graph", page_icon=favicon,layout="wide"
 from textlab.ui.streamlit.auth import check_token
 
 from textlab.common import gpu_manager
+from textlab.common.config import get_settings
+from textlab.ui.streamlit.components.gpu import free_gpu_for
 
 # --- Import from new Core Engine ---
 from textlab.features.knowledge_graph.kg_engine import (
@@ -383,7 +385,7 @@ if grobid_available:
 
                             if st.button("🤖 Extract Topics", type="secondary", disabled=not backend_ready):
                                 if llm_backend == "Ollama (Local)":
-                                    gpu_manager.free_gpu_for(
+                                    free_gpu_for(
                                         gpu_manager.LLM,
                                         ollama_model=extraction_model,
                                     )
@@ -409,7 +411,7 @@ if grobid_available:
                                         )
                                     else:
                                         active_client = OpenAI(
-                                            base_url="https://gpustack.unibe.ch/v1", 
+                                            base_url=get_settings().require("gpustack_url"),
                                             api_key=st.session_state.gpustack_api_key
                                         )
 

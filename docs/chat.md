@@ -76,7 +76,7 @@ You may be uploading sensitive, unpublished or proprietary research data to Chat
 
 * **Documents are processed in memory.** Documents you attach for the conversation (PDF, text, and tables read as text) are processed entirely in the server's temporary working memory (RAM). They are not saved, copied or written to your university home directory.
     * *Technical transparency:* the app uses Streamlit's `uploaded_file.getvalue()` to read the file into RAM. PDFs are read with PyMuPDF (`fitz.open(stream=...)`), tables with pandas from a memory buffer (`pd.read_csv(BytesIO(...))`).
-* **Tables for data analysis are stored privately.** So that the analysis tools can read a table, Chat saves a copy of the first attached table, together with the plots created from it, in a folder in your own home directory: `~/.cache/text_lab/mcp_artifacts/`. Only your user account can open this folder. These files are **not deleted automatically**; delete the folder when you no longer need them.
+* **Tables for data analysis are stored privately and temporarily.** So that the analysis tools can read a table, Chat saves a copy of the first attached table, together with the plots created from it, in your session's private workspace on the compute node. Only your user account can open it, nothing is written to your home directory, and the workspace is **deleted automatically when your Text Lab session ends**.
 * **Ephemeral sessions.** Your conversation is kept only in your open browser tab (Streamlit's `st.session_state`). When you click *Start New Chat*, reload the page, close the browser, or your HPC job ends, the conversation is permanently deleted.
 * **No AI training.** The models run locally on the UBELIX compute nodes via Ollama. They only read your data to answer your current question (inference). **The models do not learn from your data**, and your data is never used to train or improve them.
 * **Network isolation.** All data stays within the University of Bern's secure HPC network. Nothing is ever sent to external services such as OpenAI, Google or Anthropic.
@@ -84,7 +84,7 @@ You may be uploading sensitive, unpublished or proprietary research data to Chat
 !!! note "Large file uploads and temporary storage"
     Chat accepts documents of up to **10 MB**, to keep them within what the model can read. The Text Lab server itself accepts much larger files (up to 10 GB) to support the Visualize Data and Knowledge Graph tools.
 
-    If you upload a very large file to Chat, the web framework (Streamlit) may temporarily store it in the operating system's temporary directory (`$TMPDIR`) to avoid running out of memory, *before* Chat rejects it for being too large. For the strictest data privacy, keep to the 10 MB limit.
+    If you upload a very large file to Chat, the web framework (Streamlit) may temporarily store it in the session's temporary directory (`$TMPDIR`, inside the private session workspace) to avoid running out of memory, *before* Chat rejects it for being too large. That directory is deleted when the session ends.
 
 ## Good to know
 

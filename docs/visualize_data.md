@@ -171,7 +171,7 @@ The code of the statistical tests is included in `report.html`.
 
 * **Processing on the cluster:** your data is analysed on the UBELIX compute nodes. It never leaves the University of Bern's network and is never sent to external services such as OpenAI, Google or Anthropic.
 * **No AI training:** the models only read your data to answer your current request. They do not learn from it, and it is never used to train or improve them.
-* **Temporary private storage:** for the analysis, your file is saved in a temporary folder in your home directory (`~/.cache/text_lab/mcp_artifacts/`) that only your user account can open, together with the charts it produces. The folder is **deleted automatically when the analysis finishes**. If an analysis is interrupted, for example because the session ended, the leftover folder is deleted the next time you open Visualize Data once it is older than 12 hours.
+* **Temporary private storage:** for the analysis, your file is saved in a temporary folder in your session's private workspace on the compute node, together with the charts it produces. Only your user account can open it, and nothing is written to your home directory. The folder is **deleted automatically when the analysis finishes**; if an analysis is interrupted, it is deleted when your Text Lab session ends.
 * **Results in your browser session:** the results stay on the page until you run a new analysis, upload a different file, reload the page or close the tab. Download them to keep them.
 * **AI-written code:** custom charts are created by code the AI writes. It runs on the cluster under your account and is stopped if it runs longer than a minute.
 

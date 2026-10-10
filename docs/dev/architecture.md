@@ -28,12 +28,13 @@ text_lab/
 ├── manifest.yml  form.yml  submit.yml.erb  view.html.erb  icon.png
 ├── template/                  # Open OnDemand job scripts (+ dev.env.example)
 ├── deploy/
+│   ├── site.env               # site configuration (reference copy)
 │   ├── container/             # Apptainer definition (text_lab.def)
 │   └── sbatch/                # batch job templates (planned)
 ├── scripts/                   # developer scripts (test_on_node.sbatch)
 ├── pyproject.toml             # tool configuration: ruff, pytest, import-linter
 ├── src/textlab/
-│   ├── common/                # backend code shared by several features
+│   ├── common/                # shared backend: config, storage, GPU, safety
 │   ├── features/              # backend, one package per feature
 │   │   ├── transcription/
 │   │   ├── meeting_notes/
@@ -66,11 +67,13 @@ These rules apply to all code in `src/textlab/`.
    accept a progress callback and a cancel event instead of drawing progress
    widgets. Each interface passes its own callback.
 4. **Settings come from one place.** Paths, hosts and other site-specific
-   values are read from the environment in one settings module, never
-   hardcoded in feature code.
-5. **Files are written through one workspace.** Temporary files go to a
-   per-job workspace that is created with private permissions and removed
-   when the session ends, so nothing a user uploads stays behind.
+   values come from the site configuration (`deploy/site.env`) and are read
+   through `textlab.common.config`, never hardcoded in feature code. See
+   [Deployment](deployment.md).
+5. **Files are written through one workspace.** Temporary files go to the
+   per-job workspace from `textlab.common.storage`, which is private and
+   removed when the session ends, so nothing a user uploads stays behind.
+   See [Data handling](data-handling.md).
 6. **Heavy work runs in worker subprocesses**, started with
    `python -m <module>`, so a crash or a GPU out-of-memory error does not
    take down the app.
@@ -79,8 +82,9 @@ These rules apply to all code in `src/textlab/`.
 8. **Pages stay thin.** A page holds layout, widgets, session state and calls
    to the backend; anything else belongs in the backend.
 
-Rules 3 to 5 depend on shared modules (`config`, `storage`, `progress`,
-`jobs`) that are added in a later step of the refactor.
+Rules 1, 4 and 5 are checked automatically: rule 1 by import-linter, rules 4
+and 5 by `tests/test_data_footprint.py`. Rules 3 and 6 get shared modules
+(`progress`, `jobs`) when the first feature is refactored.
 
 ## Feature packages
 
@@ -135,9 +139,6 @@ HTML safety, model and language configuration) is in `src/textlab/common/`.
 
 Known issues to resolve during the refactor:
 
-- `common/gpu_manager.py` imports Streamlit to show a spinner and a toast.
-  It is the only exception to rule 1, listed in `ignore_imports` in
-  `pyproject.toml`.
 - `common/gpu_manager.py` imports `features/ocr/vision_enrich.py`, so shared
   code depends on a feature.
 - `features/chat/chat_engine.py` holds Ollama helpers used by Meeting Notes,
@@ -145,6 +146,10 @@ Known issues to resolve during the refactor:
 - Worker scripts and the MCP server are started by file path, and
   `gpu_manager` recognizes leftover workers by file name, so these files
   keep their names until the shared job runner replaces this.
+- The home page and the Translate page still name the University of Bern
+  and UBELIX in their text (allow-listed in `tests/test_data_footprint.py`).
+- About 190 emojis remain in the pages; they are removed as each feature is
+  refactored, keeping functional symbols such as checkbox glyphs.
 
 Code that is moved but not refactored is excluded from ruff
 (`extend-exclude` in `pyproject.toml`); refactoring a feature removes its

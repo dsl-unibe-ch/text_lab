@@ -1,124 +1,168 @@
 #!/usr/bin/env bash
+#
+# Start a Text Lab session: Ollama and the Streamlit app inside the Apptainer
+# image. Open OnDemand runs this script in the session's job directory.
+#
+# Nothing here is specific to a cluster: site values (paths, images, model
+# stores, host names) come from the site configuration, deploy/site.env,
+# whose live copy is read from TEXT_LAB_SITE_ENV below.
 
 set -euo pipefail
 
-# Optional developer overrides, e.g. TEXT_LAB_SRC pointing at a development
-# tree. Open OnDemand copies template/ into the job directory, so a
-# template/dev.env in a sandbox app ends up next to this script. The file is
-# gitignored and never part of a production deployment; see
-# template/dev.env.example.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# ----------------------------------------------------------------------------
+# 1. Configuration
+# ----------------------------------------------------------------------------
+
+# Optional developer overrides for a sandbox app, e.g. TEXT_LAB_SRC pointing
+# at a working tree or TEXT_LAB_SITE_ENV at the repository's site.env. Open
+# OnDemand copies template/ into the job directory, so template/dev.env ends
+# up next to this script. It is gitignored and never part of a production
+# deployment; see template/dev.env.example.
 if [[ -f "$SCRIPT_DIR/dev.env" ]]; then
   echo "Loading developer overrides from $SCRIPT_DIR/dev.env"
   # shellcheck source=/dev/null
   source "$SCRIPT_DIR/dev.env"
 fi
 
-# Allow callers to override base directories via environment variables.
-HOST_TEXT_LAB_DIR="${TEXT_LAB_DIR:-/storage/research/dsl_shared/solutions/ondemand/text_lab}"
+# The site configuration. This default is the only site-specific value in
+# the files the HPC team deploys.
+TEXT_LAB_SITE_ENV="${TEXT_LAB_SITE_ENV:-/storage/research/dsl_shared/solutions/ondemand/text_lab/site.env}"
+if [[ ! -f "$TEXT_LAB_SITE_ENV" ]]; then
+  echo "Error: site configuration not found at $TEXT_LAB_SITE_ENV" >&2
+  exit 1
+fi
+# shellcheck source=/dev/null
+source "$TEXT_LAB_SITE_ENV"
 
-CONT_TEXT_LAB_DIR="/text_lab"
+missing=()
+for name in TEXT_LAB_SRC TL_CONTAINER TEXT_LAB_OOD_HOST \
+            HOST_OLLAMA_DIR HOST_WHISPER_DIR HOST_WHISPERX_DIR HOST_TORCH_DIR \
+            HOST_HF_DIR HOST_EASYOCR_DIR HOST_PADDLEOCR_DIR HOST_PADDLEX_DIR; do
+  [[ -n "${!name:-}" ]] || missing+=("$name")
+done
+if (( ${#missing[@]} )); then
+  echo "Error: $TEXT_LAB_SITE_ENV does not set: ${missing[*]}" >&2
+  exit 1
+fi
+if [[ ! -f "$TEXT_LAB_SRC/textlab/ui/streamlit/Home.py" ]]; then
+  echo "Error: TEXT_LAB_SRC=$TEXT_LAB_SRC does not hold the textlab package" >&2
+  exit 1
+fi
+if [[ ! -f "$TL_CONTAINER" ]]; then
+  echo "Error: image TL_CONTAINER=$TL_CONTAINER not found" >&2
+  exit 1
+fi
+# Resolve symbolic links (such as the "current" release) once, so a session
+# keeps the version it started with when a new release is switched in.
+TEXT_LAB_SRC="$(realpath "$TEXT_LAB_SRC")"
+TL_CONTAINER="$(realpath "$TL_CONTAINER")"
 
-# App source served by Streamlit (read in-container via the /storage bind):
-# the src/ directory of a checkout, which holds the textlab package. Set
-# TEXT_LAB_SRC in template/dev.env to serve a development tree instead.
-TEXT_LAB_SRC="${TEXT_LAB_SRC:-$HOST_TEXT_LAB_DIR/current/src}"
-
-#point to the apptainer containers
-# The published image must carry the paddle_vl_backend env (paddleocr 3.7 +
-# paddlex[ocr]) that the automatic OCR pipeline's VL worker needs, and the
-# tesseract binary the searchable-PDF export uses for word geometry. An image
-# whose paddle_backend ships paddleocr 3.3.3 has the PaddleOCRVL class but not
-# the paddlex[ocr] extra, so the pipeline dies with a DependencyError.
-# Export TL_CONTAINER to test a locally built .sif before publishing it here.
-TL_CONTAINER="${TL_CONTAINER:-$HOST_TEXT_LAB_DIR/container/text_lab_210526.sif}"
-
-#point to where the ollama models are stored on research storage
-HOST_OLLAMA_DIR="/storage/research/dsl_shared/solutions/ondemand/text_lab/container/models/ollama"
+# Mount points of the model stores inside the image. These belong to the
+# image (see deploy/container/text_lab.def), not to the site.
 CONT_OLLAMA_DIR="/opt/ollama"
-
-#point to where the whisper models are stored on research storage
-HOST_WHISPER_DIR="/storage/research/dsl_shared/solutions/ondemand/text_lab/container/models/whisper"
 CONT_WHISPER_DIR="/opt/whisper"
-
-# point to where whisperx cache is stored on research storage
-HOST_WHISPERX_DIR="/storage/research/dsl_shared/solutions/ondemand/text_lab/container/models/whisperx"
 CONT_WHISPERX_DIR="/opt/whisperx"
-
-#point to where torch models are stored on research storage
-HOST_TORCH_DIR="/storage/research/dsl_shared/solutions/ondemand/text_lab/container/models/torch"
 CONT_TORCH_DIR="/opt/torch"
-
-# point to where huggingface models are stored on research storage
-HOST_HF_DIR="/storage/research/dsl_shared/solutions/ondemand/text_lab/container/models/huggingface"
 CONT_HF_DIR="/opt/huggingface"
-
-# point to where OCR caches are stored on research storage
-HOST_EASYOCR_DIR="/storage/research/dsl_shared/solutions/ondemand/text_lab/container/models/easyocr"
 CONT_EASYOCR_DIR="/opt/easyocr"
-
-# PaddleX/PaddleOCR ignore env vars in some versions and default to ~/.paddlex/.paddleocr
-HOST_PADDLEOCR_DIR="/storage/research/dsl_shared/solutions/ondemand/text_lab/container/models/paddleocr"
-HOST_PADDLEX_DIR="/storage/research/dsl_shared/solutions/ondemand/text_lab/container/models/paddlex"
+# PaddleX/PaddleOCR ignore their environment variables in some versions and
+# default to ~/.paddlex and ~/.paddleocr, so the stores are mounted there.
 CONT_PADDLEOCR_DIR="$HOME/.paddleocr"
 CONT_PADDLEX_DIR="$HOME/.paddlex"
 PADDLE_PDX_CACHE_HOME="${PADDLE_PDX_CACHE_HOME:-$HOST_PADDLEX_DIR}"
 
-export OLLAMA_MODELS="$CONT_OLLAMA_DIR/models"
+# ----------------------------------------------------------------------------
+# 2. Workspace for temporary user files
+# ----------------------------------------------------------------------------
 
-# ---------------------------- Runtime parameters ------------------------------
-TEXT_LAB_PORT="${TEXT_LAB_PORT:-${SERVER_PORT:-8502}}"   
-OLM_OCR_PORT="${OLMOCR_PORT:-8503}"
-OLMOCR_GPU_MEMORY_UTILIZATION="${OLMOCR_GPU_MEMORY_UTILIZATION:-0.6}"
+# Uploads and intermediate results go into one private folder per job,
+# deleted when the session ends (see textlab.common.storage). It lives in the
+# job's $TMPDIR unless the site sets TEXT_LAB_WORKDIR_BASE.
+workdir_base="${TEXT_LAB_WORKDIR_BASE:-${TMPDIR:-/tmp}}"
+export TEXT_LAB_WORKDIR="$workdir_base/textlab-${USER}-${SLURM_JOB_ID:-$$}"
+mkdir -p -m 700 "$TEXT_LAB_WORKDIR"
+mkdir -p -m 700 "$TEXT_LAB_WORKDIR/tmp"
 
-#  RANDOMIZED OLLAMA PORT to avoid conflicts. 
-export OLLAMA_PORT=$(( (RANDOM % 10000) + 10000 ))
-export OLLAMA_HOST="127.0.0.1:$OLLAMA_PORT"
-echo "Ollama Port is: $OLLAMA_PORT"
+remove_workdir() {
+  rm -rf "$TEXT_LAB_WORKDIR"
+}
+# EXIT also runs when the job is cancelled or reaches its time limit: Slurm
+# sends SIGTERM first, which is turned into a normal exit here.
+trap remove_workdir EXIT
+trap 'exit 143' TERM
+trap 'exit 130' INT
 
+# ----------------------------------------------------------------------------
+# 3. Logs
+# ----------------------------------------------------------------------------
+
+# Logs stay with the session, in the user's own job directory next to
+# output.log, where the user can find them and send them with a problem
+# report (see the user guide).
+TEXT_LAB_LOG_DIR="${TEXT_LAB_LOG_DIR:-$SCRIPT_DIR}"
+STREAMLIT_LOG="$TEXT_LAB_LOG_DIR/streamlit.log"
+OLLAMA_LOG="$TEXT_LAB_LOG_DIR/ollama.log"
+
+# ----------------------------------------------------------------------------
+# 4. Runtime parameters
+# ----------------------------------------------------------------------------
+
+TEXT_LAB_PORT="${TEXT_LAB_PORT:-${SERVER_PORT:-8502}}"
 SERVER_BASEURLPATH="${SERVER_BASEURLPATH:-}"
 
-# Randomaize the GROBID port for knowledge graph
+# Random ports so several sessions on one node do not collide.
+export OLLAMA_PORT=$(( (RANDOM % 10000) + 10000 ))
+export OLLAMA_HOST="127.0.0.1:$OLLAMA_PORT"
 export GROBID_PORT=$(( (RANDOM % 1000) + 8000 ))
-echo "GROBID Port is: $GROBID_PORT"
 
-# --- Clean the Python environment ---
+# Keep the host's Python environment out of the image.
 unset PYTHONPATH PYTHONHOME
 export PYTHONNOUSERSITE=1
 
-export HOME="$HOME"
-export USER="$USER"
-
-pushd "${PWD}"
-
-if [ -z "${CUDA_VISIBLE_DEVICES:-}" ]; then
+if [[ -z "${CUDA_VISIBLE_DEVICES:-}" ]]; then
   export CUDA_VISIBLE_DEVICES=0
 fi
 
-
-
 echo "=========================================================="
-echo "Starting Text Lab Session for User: $USER"
-echo "Slurm Job ID: ${SLURM_JOB_ID:-unknown}"
-echo "Assigned Ollama Host/Port: $OLLAMA_HOST"
-echo "Assigned GPU(s): $CUDA_VISIBLE_DEVICES"
+echo "Starting Text Lab session for user: $USER"
+echo "Slurm job ID: ${SLURM_JOB_ID:-unknown}"
+echo "Site configuration: $TEXT_LAB_SITE_ENV"
 echo "Source tree: $TEXT_LAB_SRC"
 echo "Container: $TL_CONTAINER"
+echo "Workspace: $TEXT_LAB_WORKDIR"
+echo "Logs: $STREAMLIT_LOG, $OLLAMA_LOG"
+echo "Ollama host: $OLLAMA_HOST"
+echo "Grobid port: $GROBID_PORT"
+echo "Assigned GPU(s): $CUDA_VISIBLE_DEVICES"
 echo "=========================================================="
 
+# ----------------------------------------------------------------------------
+# 5. Start Ollama and the app
+# ----------------------------------------------------------------------------
+
+binds=(
+  --bind "$TEXT_LAB_WORKDIR"
+  --bind "$HOST_OLLAMA_DIR:$CONT_OLLAMA_DIR:rw"
+  --bind "$HOST_WHISPER_DIR:$CONT_WHISPER_DIR:rw"
+  --bind "$HOST_WHISPERX_DIR:$CONT_WHISPERX_DIR:rw"
+  --bind "$HOST_TORCH_DIR:$CONT_TORCH_DIR:rw"
+  --bind "$HOST_HF_DIR:$CONT_HF_DIR:rw"
+  --bind "$HOST_EASYOCR_DIR:$CONT_EASYOCR_DIR:rw"
+  --bind "$HOST_PADDLEOCR_DIR:$CONT_PADDLEOCR_DIR:rw"
+  --bind "$HOST_PADDLEX_DIR:$CONT_PADDLEX_DIR:rw"
+)
+if [[ -n "${TEXT_LAB_EXTRA_BINDS:-}" ]]; then
+  binds+=(--bind "$TEXT_LAB_EXTRA_BINDS")
+fi
+
+# Exported variables, including the app settings from the site
+# configuration and the session TOKEN from before.sh, pass into the image.
 apptainer exec \
   --nv \
-  --bind "$HOST_TEXT_LAB_DIR:$CONT_TEXT_LAB_DIR" \
-  --bind "$HOST_OLLAMA_DIR:$CONT_OLLAMA_DIR:rw" \
-  --bind /storage:/storage \
-  --bind "$HOST_WHISPER_DIR:$CONT_WHISPER_DIR:rw" \
-  --bind "$HOST_WHISPERX_DIR:$CONT_WHISPERX_DIR:rw" \
-  --bind "$HOST_TORCH_DIR:$CONT_TORCH_DIR:rw" \
-  --bind "$HOST_HF_DIR:$CONT_HF_DIR:rw" \
-  --bind "$HOST_EASYOCR_DIR:$CONT_EASYOCR_DIR:rw" \
-  --bind "$HOST_PADDLEOCR_DIR:$CONT_PADDLEOCR_DIR:rw" \
-  --bind "$HOST_PADDLEX_DIR:$CONT_PADDLEX_DIR:rw" \
-  --env HF_HOME=/opt/huggingface \
+  "${binds[@]}" \
+  --env HF_HOME="$CONT_HF_DIR" \
   --env PADDLEX_HOME="$CONT_PADDLEX_DIR" \
   --env PADDLEOCR_CACHE="$CONT_PADDLEOCR_DIR" \
   --env PADDLE_PDX_CACHE_HOME="$PADDLE_PDX_CACHE_HOME" \
@@ -127,15 +171,12 @@ apptainer exec \
   --env OLLAMA_MODELS="$CONT_OLLAMA_DIR/models" \
   --env OLLAMA_FLASH_ATTENTION="true" \
   --env OLLAMA_HOST="$OLLAMA_HOST" \
-  --env TEXTLAB_VISION_MODEL="${TEXTLAB_VISION_MODEL:-qwen3-vl:30b-a3b-instruct}" \
-  --env TEXTLAB_APPROVED_SURVEY_MODELS="${TEXTLAB_APPROVED_SURVEY_MODELS:-qwen3-vl:30b-a3b-instruct}" \
+  --env OLLAMA_TMPDIR="$TEXT_LAB_WORKDIR/tmp" \
+  --env TMPDIR="$TEXT_LAB_WORKDIR/tmp" \
   --env GROBID_PORT="$GROBID_PORT" \
   --env PYTHONPATH="$TEXT_LAB_SRC" \
   "$TL_CONTAINER" \
-  bash -c "export OLLAMA_TMPDIR=/tmp/ollama_${USER}_${SLURM_JOB_ID:-unknown} && \
-           export TMPDIR=/tmp/ollama_${USER}_${SLURM_JOB_ID:-unknown} && \
-           mkdir -p \$OLLAMA_TMPDIR && \
-           ollama serve > $CONT_TEXT_LAB_DIR/logs/ollama_server_${SLURM_JOB_ID:-unknown}.log 2>&1 & \
+  bash -c "ollama serve > '$OLLAMA_LOG' 2>&1 & \
            while ! curl -s http://$OLLAMA_HOST/api/tags > /dev/null; do sleep 1; done && \
            /opt/conda/envs/text_lab_main/bin/python -u -m streamlit run '$TEXT_LAB_SRC/textlab/ui/streamlit/Home.py' \
              --server.address 0.0.0.0 \
@@ -143,9 +184,7 @@ apptainer exec \
              --server.baseUrlPath '$SERVER_BASEURLPATH' \
              --server.headless true \
              --server.maxUploadSize 10000 \
-             --browser.serverAddress ondemand.hpc.unibe.ch \
+             --browser.serverAddress '$TEXT_LAB_OOD_HOST' \
              --browser.gatherUsageStats false \
              --logger.level info \
-             --client.showErrorDetails true > $CONT_TEXT_LAB_DIR/logs/streamlit_${SLURM_JOB_ID:-unknown}.log 2>&1"
-
-popd
+             --client.showErrorDetails true > '$STREAMLIT_LOG' 2>&1"

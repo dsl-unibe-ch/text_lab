@@ -75,6 +75,7 @@ from textlab.features.translation import (  # noqa: E402
     translate_xlsx,
 )
 from textlab.common import gpu_manager  # noqa: E402
+from textlab.ui.streamlit.components.gpu import free_gpu_for  # noqa: E402
 from textlab.features.translation.pdf_workflow import (  # noqa: E402
     translate_pdf_outputs,
 )
@@ -791,7 +792,7 @@ with text_tab:
                 )
 
         if do_load:
-            gpu_manager.free_gpu_for(
+            free_gpu_for(
                 gpu_manager.TRANSLATION, ollama_model=ollama_model,
             )
             with st.spinner(
@@ -856,7 +857,7 @@ with text_tab:
         st.info(notice)
 
     if do_translate:
-        gpu_manager.free_gpu_for(
+        free_gpu_for(
             gpu_manager.TRANSLATION, ollama_model=ollama_model,
         )
         st.session_state["translation_notices"] = []
@@ -1026,7 +1027,7 @@ with doc_tab:
 
     if run_doc and docs:
         st.session_state["doc_results"] = None
-        gpu_manager.free_gpu_for(
+        free_gpu_for(
             gpu_manager.TRANSLATION, ollama_model=ollama_model,
         )
         card = st.container(border=True)

@@ -15,7 +15,12 @@ from textlab.common.language_mappings import (
 )
 
 from textlab.common import gpu_manager
+from textlab.ui.streamlit.components.gpu import free_gpu_for
 from textlab.features.transcription.transcribe_engine import (
+    FLURIN_SWISS_MODEL,
+    SWHISPER_MODEL,
+    custom_whisper_model_path,
+    hf_token_path,
     load_transcript_items,
     transcription_text_from_csv,
     audio_bytes_from_path,
@@ -34,11 +39,7 @@ from textlab.features.transcription.transcribe_engine import (
     generate_elan_csv,
 )
 
-HF_TOKEN_PATH = "/storage/research/dsl_shared/solutions/whisperx/cache/whisperx/cache/hf/hf_token.txt"
-
-# CTranslate2-converted copy of Flurin17/whisper-large-v3-turbo-swiss-german.
-# Built once with `ct2-transformers-converter` so whisperx.load_model() can use it.
-FLURIN_SWISS_MODEL_PATH = "/storage/research/dsl_shared/solutions/whisperx/cache/whisper/flurin-swiss-german-turbo-ct2"
+HF_TOKEN_PATH = hf_token_path()
 alignment.DEFAULT_ALIGN_MODELS_HF["uk"] = "Yehor/w2v-xls-r-uk"
 
 def main():
@@ -162,10 +163,10 @@ def main():
             st.write("**Model Configuration**")
             # If Auto-detect, default to standard model. Only use Swiss model if explicitly chosen.
             if not is_auto_detect and language_name == "Swiss German":
-                default_model = "/storage/research/dsl_shared/solutions/whisperx/cache/whisper/swhisper-large-1.1"
+                default_model = custom_whisper_model_path(SWHISPER_MODEL)
                 st.info("ℹ️ Using Swiss German Whisper model")
             elif not is_auto_detect and language_name == "Swiss German (Flurin Turbo)":
-                default_model = FLURIN_SWISS_MODEL_PATH
+                default_model = custom_whisper_model_path(FLURIN_SWISS_MODEL)
                 st.info("ℹ️ Using Flurin Swiss German Whisper Turbo model (CT2)")
             else:
                 default_model = "large-v3-turbo"
@@ -205,7 +206,7 @@ def main():
                     max_speakers = None
 
         if st.button("Start Batch Transcription", type="primary"):
-            gpu_manager.free_gpu_for(gpu_manager.TRANSCRIBE)
+            free_gpu_for(gpu_manager.TRANSCRIBE)
             if batch_zip is None:
                 st.error("Please upload a ZIP file first.")
             elif not is_auto_detect and language_name == "Swiss German (Flurin Turbo)" and not os.path.isdir(whisper_model):
@@ -448,10 +449,10 @@ def main():
         with col_config1:
             st.write("**Model Configuration**")
             if language == "ch_de":
-                default_model = "/storage/research/dsl_shared/solutions/whisperx/cache/whisper/swhisper-large-1.1"
+                default_model = custom_whisper_model_path(SWHISPER_MODEL)
                 st.info("ℹ️ Using Swiss German Whisper model")
             elif language == "ch_de_flurin":
-                default_model = FLURIN_SWISS_MODEL_PATH
+                default_model = custom_whisper_model_path(FLURIN_SWISS_MODEL)
                 st.info("ℹ️ Using Flurin Swiss German Whisper Turbo model (CT2)")
             else:
                 default_model = "large-v3-turbo"
@@ -506,7 +507,7 @@ def main():
             )
 
         if st.button("Start Transcription", type="primary"):
-            gpu_manager.free_gpu_for(gpu_manager.TRANSCRIBE)
+            free_gpu_for(gpu_manager.TRANSCRIBE)
             if transcribe_audio is None:
                 st.error("Please upload an audio file first.")
             elif language == "ch_de_flurin" and not os.path.isdir(whisper_model):

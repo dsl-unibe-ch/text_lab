@@ -13,6 +13,7 @@ from streamlit.delta_generator import DeltaGenerator
 
 from textlab.ui.streamlit.auth import check_token
 from textlab.common import gpu_manager
+from textlab.ui.streamlit.components.gpu import free_gpu_for
 from textlab.features.topic_modeling.evaluation import evaluate_run
 from textlab.features.topic_modeling.topic_config import (
     DEFAULT_TIME_BINS,
@@ -1212,7 +1213,7 @@ def main() -> None:
     st.header("3. Execution", divider="gray")
 
     if st.button("Run Topic Extraction", type="primary", disabled=data is None):
-        gpu_manager.free_gpu_for(gpu_manager.TOPIC_MODELING)
+        free_gpu_for(gpu_manager.TOPIC_MODELING)
         try:
             st.session_state.topic_results = _run_analysis(data, config, run_stability)
             st.success("Topic Modeling execution complete.")
