@@ -1,0 +1,1857 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Documentation for the Text Lab NLP Service at University of Bern">
+      
+      
+      
+        <link rel="canonical" href="https://text-lab.dsl.unibe.ch/dev/deployment/">
+      
+      
+        <link rel="prev" href="../testing/">
+      
+      
+        <link rel="next" href="../data-handling/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/icon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Deployment - Text Lab Guide</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="red" data-md-color-accent="red">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#deployment" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Text Lab Guide" class="md-header__button md-logo" aria-label="Text Lab Guide" data-md-component="logo">
+      
+  <img src="../../assets/text_lab_logo.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Text Lab Guide
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Deployment
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="red" data-md-color-accent="red"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="red" data-md-color-accent="red"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/dsl-unibe-ch/text_lab" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    dsl-unibe-ch/text_lab
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../launch/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Launching Text Lab
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../transcription/" class="md-tabs__link">
+          
+  
+  
+  Features
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../" class="md-tabs__link">
+          
+  
+  
+  Developer Guide
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Text Lab Guide" class="md-nav__button md-logo" aria-label="Text Lab Guide" data-md-component="logo">
+      
+  <img src="../../assets/text_lab_logo.png" alt="logo">
+
+    </a>
+    Text Lab Guide
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/dsl-unibe-ch/text_lab" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    dsl-unibe-ch/text_lab
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../launch/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Launching Text Lab
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Features
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Features
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../transcription/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Transcription
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ocr/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OCR
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../translate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Translate
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../meeting_notes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Meeting Notes Generator
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../knowledge_graph/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Knowledge Graph
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../topic_modeling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Topic Modeling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../chat/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Chat
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../visualize_data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Visualize Data
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#what-lives-where" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What lives where
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-a-session-starts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How a session starts
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-needs-whom" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What needs whom
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-site-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The site configuration
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The site configuration">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#changing-a-setting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changing a setting
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#adding-a-setting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adding a setting
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#deploying-on-another-cluster" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deploying on another cluster
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#running-your-working-tree-in-a-sandbox-app" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Running your working tree in a sandbox app
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#model-stores" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Model stores
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Model stores">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#who-can-write" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Who can write
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#adding-or-updating-a-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adding or updating a model
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#logs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Logs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#releases" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Releases
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Releases">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#making-a-release" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Making a release
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rolling-back" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rolling back
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a-new-image" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A new image
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#first-release-of-this-layout-300" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        First release of this layout (3.0.0)
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../data-handling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Handling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#what-lives-where" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What lives where
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-a-session-starts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How a session starts
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-needs-whom" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What needs whom
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-site-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The site configuration
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The site configuration">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#changing-a-setting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changing a setting
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#adding-a-setting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adding a setting
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#deploying-on-another-cluster" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deploying on another cluster
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#running-your-working-tree-in-a-sandbox-app" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Running your working tree in a sandbox app
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#model-stores" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Model stores
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Model stores">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#who-can-write" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Who can write
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#adding-or-updating-a-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adding or updating a model
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#logs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Logs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#releases" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Releases
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Releases">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#making-a-release" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Making a release
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rolling-back" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rolling back
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a-new-image" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A new image
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#first-release-of-this-layout-300" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        First release of this layout (3.0.0)
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="deployment">Deployment</h1>
+<p>Text Lab is an Open OnDemand interactive app. A session is a Slurm job that
+runs <code>template/script.sh.erb</code>, which starts Ollama and the Streamlit app
+inside an Apptainer image.</p>
+<h2 id="what-lives-where">What lives where</h2>
+<table>
+<thead>
+<tr>
+<th>Part</th>
+<th>Where</th>
+<th>Who changes it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Open OnDemand files (<code>manifest.yml</code>, <code>form.yml</code>, <code>submit.yml.erb</code>, <code>view.html.erb</code>, <code>icon.png</code>, <code>template/</code>)</td>
+<td>Deployed by the HPC team from the repository</td>
+<td>Needs a redeployment by the HPC team</td>
+</tr>
+<tr>
+<td>Site configuration (<code>site.env</code>)</td>
+<td>Reference copy in <code>deploy/site.env</code>; live copy on shared storage</td>
+<td>The maintainers, at any time</td>
+</tr>
+<tr>
+<td>Application code (<code>src/</code>)</td>
+<td>A release folder on shared storage</td>
+<td>The maintainers, at any time</td>
+</tr>
+<tr>
+<td>Apptainer image (<code>.sif</code>)</td>
+<td>Built from <code>deploy/container/text_lab.def</code>, stored on shared storage</td>
+<td>The maintainers, at any time</td>
+</tr>
+<tr>
+<td>Models (Ollama, Whisper, Hugging Face, OCR)</td>
+<td>Model stores on shared storage</td>
+<td>The maintainers, at any time</td>
+</tr>
+</tbody>
+</table>
+<p>The deployed launch script contains a single site-specific value: the path of
+the live site configuration (<code>TEXT_LAB_SITE_ENV</code>). Everything else is read
+from that file, so changing code, the image, models or settings never needs
+the HPC team.</p>
+<p>On UBELIX, the shared folder is
+<code>/storage/research/dsl_shared/solutions/ondemand/text_lab</code>
+(<code>TEXT_LAB_BASE</code>):</p>
+<div class="highlight"><pre><span></span><code>text_lab/
+├── site.env              # live site configuration
+├── current -&gt; releases/vX.Y.Z
+├── releases/             # one checkout per released version
+├── container/            # images (.sif) and the model stores (models/)
+└── logs/                 # session logs of versions before 3.0.0
+</code></pre></div>
+<h2 id="how-a-session-starts">How a session starts</h2>
+<ol>
+<li>The user fills in the launch form (<code>form.yml</code>) and Open OnDemand submits
+   a Slurm job (<code>submit.yml.erb</code>).</li>
+<li>On the compute node, Open OnDemand copies <code>template/</code> into the session's
+   job folder in the user's home directory and runs <code>before.sh.erb</code> (port
+   and session token) and then <code>script.sh.erb</code>.</li>
+<li>The launch script loads <code>dev.env</code> if one is next to it (sandbox apps
+   only), then the site configuration, and checks that the release, the
+   image and the model stores it names exist.</li>
+<li>It resolves <code>current</code> to the release folder once, so the session keeps
+   the version it started with even if <code>current</code> changes meanwhile.</li>
+<li>It creates the private job workspace, with a trap that deletes it when
+   the job ends, and picks random ports for Ollama and Grobid.</li>
+<li>It starts the image with the model stores and the workspace bound, runs
+   <code>ollama serve</code> and, once Ollama answers, the Streamlit app
+   (<code>textlab/ui/streamlit/Home.py</code>) from the release folder.</li>
+<li><code>after.sh</code> waits for the app's port; the session card then shows
+   <strong>Connect</strong>. The app checks the session token on every page
+   (<code>auth.py</code>).</li>
+</ol>
+<p>The top of <code>output.log</code> in the job folder lists the site configuration,
+source tree, image, workspace and ports the session used.</p>
+<h2 id="what-needs-whom">What needs whom</h2>
+<table>
+<thead>
+<tr>
+<th>You want to</th>
+<th>You change</th>
+<th>HPC team needed?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Release new application code</td>
+<td>A new release folder, then <code>current</code></td>
+<td>No</td>
+</tr>
+<tr>
+<td>Roll back to an earlier version</td>
+<td><code>current</code></td>
+<td>No</td>
+</tr>
+<tr>
+<td>Use a new image</td>
+<td>Build it, copy it to <code>container/</code>, set <code>TL_CONTAINER</code> in <code>site.env</code></td>
+<td>No</td>
+</tr>
+<tr>
+<td>Add or update a model</td>
+<td>The model store (see <a href="#model-stores">Model stores</a>)</td>
+<td>No</td>
+</tr>
+<tr>
+<td>Change a setting (paths, endpoints, approved models)</td>
+<td><code>site.env</code></td>
+<td>No</td>
+</tr>
+<tr>
+<td>Change the launch form (GPU types, partitions, QoS, time limits)</td>
+<td><code>form.yml</code>, <code>submit.yml.erb</code></td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>Change how a session starts (binds, ports, Ollama options)</td>
+<td><code>template/</code></td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>Move the site configuration</td>
+<td><code>TEXT_LAB_SITE_ENV</code> in <code>template/script.sh.erb</code></td>
+<td>Yes</td>
+</tr>
+</tbody>
+</table>
+<p>Changes the HPC team deploys should be rare; prefer a setting in
+<code>site.env</code> that the launch script reads.</p>
+<h2 id="the-site-configuration">The site configuration</h2>
+<p><code>deploy/site.env</code> is a shell file sourced by the launch script. It sets:</p>
+<ul>
+<li><strong>Locations</strong> used by the launch script: the base folder on shared storage,
+  the release to serve (<code>TEXT_LAB_SRC</code>), the image (<code>TL_CONTAINER</code>), the
+  model stores, extra paths to bind into the image, the portal host name,
+  and optionally where the job workspace goes (<code>TEXT_LAB_WORKDIR_BASE</code>).</li>
+<li><strong>App settings</strong>, exported into the container and read by
+  <code>textlab.common.config</code>: the Hugging Face token file, the Swiss German
+  Whisper models, the Grobid image, the GPUStack endpoint and the Ollama
+  models used for OCR enrichment and surveys.</li>
+</ul>
+<p>Every assignment has the form <code>NAME="${NAME:-default}"</code>, so a value set
+earlier (by <code>template/dev.env</code>) wins. <code>tests/test_site_config.py</code> checks
+this, and that every setting the app reads is exported by the file.</p>
+<h3 id="changing-a-setting">Changing a setting</h3>
+<ol>
+<li>Edit <code>deploy/site.env</code> in your working tree.</li>
+<li>Test it in a sandbox app (see below), which uses the repository copy.</li>
+<li>Commit the change.</li>
+<li>Copy the file to its live location, <code>$TEXT_LAB_BASE/site.env</code>. New
+   sessions use it; running sessions are not affected.</li>
+</ol>
+<h3 id="adding-a-setting">Adding a setting</h3>
+<ol>
+<li>Add a <code>SettingSpec</code> and a field to <code>textlab.common.config</code>.</li>
+<li>Export it in <code>deploy/site.env</code> with a comment saying what it is for.</li>
+<li>Read it in the code with <code>get_settings()</code>, or <code>get_settings().require()</code>
+   where the feature cannot work without it.</li>
+</ol>
+<h3 id="deploying-on-another-cluster">Deploying on another cluster</h3>
+<ol>
+<li>Build the image from <code>deploy/container/text_lab.def</code> (or copy it) and
+   get a Grobid image if the Knowledge Graph is wanted.</li>
+<li>Create the shared folder with <code>container/</code>, <code>releases/</code> and the model
+   stores, and fill the stores (see <a href="#model-stores">Model stores</a>).</li>
+<li>Copy <code>deploy/site.env</code>, change the locations and settings, and put it
+   where the deployed launch script expects it (or change
+   <code>TEXT_LAB_SITE_ENV</code> at the top of <code>template/script.sh.erb</code> before
+   handing the app to the HPC team).</li>
+<li>Adjust <code>form.yml</code> (cluster name, partitions, QoS and GPU types) for the
+   cluster. If <code>$TMPDIR</code> is not set per job, or is too small, set
+   <code>TEXT_LAB_WORKDIR_BASE</code>.</li>
+<li>Make a release (see <a href="#releases">Releases</a>) and ask the HPC team to
+   deploy the Open OnDemand files.</li>
+</ol>
+<h2 id="running-your-working-tree-in-a-sandbox-app">Running your working tree in a sandbox app</h2>
+<p><code>template/dev.env</code> (gitignored) overrides values before the site
+configuration is read. Copy <code>template/dev.env.example</code> to <code>template/dev.env</code>
+in your sandbox checkout and set what you want to test:</p>
+<table>
+<thead>
+<tr>
+<th>To test</th>
+<th>Set in <code>dev.env</code></th>
+<th>Leave unset</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Your code with the live configuration</td>
+<td><code>TEXT_LAB_SRC</code> (your <code>src/</code>)</td>
+<td><code>TEXT_LAB_SITE_ENV</code></td>
+</tr>
+<tr>
+<td>Your code and a changed <code>site.env</code></td>
+<td><code>TEXT_LAB_SRC</code>, <code>TEXT_LAB_SITE_ENV</code> (the repository's <code>deploy/site.env</code>)</td>
+<td></td>
+</tr>
+<tr>
+<td>A new image with the released code</td>
+<td><code>TL_CONTAINER</code></td>
+<td><code>TEXT_LAB_SRC</code></td>
+</tr>
+<tr>
+<td>A new image with your code</td>
+<td><code>TEXT_LAB_SRC</code>, <code>TL_CONTAINER</code></td>
+<td></td>
+</tr>
+<tr>
+<td>Exactly what production runs (before a release goes live)</td>
+<td>Nothing: remove <code>dev.env</code></td>
+<td>Everything</td>
+</tr>
+</tbody>
+</table>
+<p>Open OnDemand copies <code>template/</code> into the session's job folder, and the
+launch script loads <code>dev.env</code> from there. Check the top of <code>output.log</code> to
+confirm which source tree, configuration and image the session used.</p>
+<p>The sandbox runs whatever is checked out in the working tree, so stay on the
+branch you are testing.</p>
+<h2 id="model-stores">Model stores</h2>
+<p>Models are not part of the image: they live in stores on shared storage,
+bound into the image at start (<code>HOST_*_DIR</code> in <code>site.env</code>). Some features
+read files from outside <code>TEXT_LAB_BASE</code>, also set in <code>site.env</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Store</th>
+<th>Holds</th>
+<th>Used by</th>
+<th>Where the code names the models</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>models/ollama</code></td>
+<td>Ollama models</td>
+<td>Chat, Visualize Data, Meeting Notes, Translation (LLM), OCR enrichments and GLM-OCR, surveys, Knowledge Graph (local)</td>
+<td><code>common/models.json</code>; <code>TEXTLAB_VISION_MODEL</code>, <code>TEXTLAB_APPROVED_SURVEY_MODELS</code>, <code>TEXTLAB_GLM_OCR_MODEL</code> in <code>site.env</code></td>
+</tr>
+<tr>
+<td><code>models/whisper</code></td>
+<td>Whisper checkpoints (<code>large-v3-turbo.pt</code>, ...)</td>
+<td>Transcription, Meeting Notes</td>
+<td><code>transcription/whisper_models.py</code></td>
+</tr>
+<tr>
+<td><code>models/whisperx</code>, <code>models/torch</code></td>
+<td>WhisperX and PyTorch caches</td>
+<td>Transcription</td>
+<td>WhisperX defaults</td>
+</tr>
+<tr>
+<td><code>models/huggingface</code></td>
+<td>Hugging Face cache: alignment models, diarization, translation models, olmOCR, Topic Modeling embeddings</td>
+<td>Transcription, Translation, OCR (olmOCR), Topic Modeling</td>
+<td><code>transcription/service.py</code>, <code>translation/engine.py</code>, <code>topic_modeling/models.py</code></td>
+</tr>
+<tr>
+<td><code>models/easyocr</code></td>
+<td>EasyOCR detection and recognition models</td>
+<td>OCR (EasyOCR)</td>
+<td><code>ocr/engines/easy_ocr.py</code></td>
+</tr>
+<tr>
+<td><code>models/paddleocr</code>, <code>models/paddlex</code></td>
+<td>PaddleOCR and PaddleX models, including PaddleOCR-VL</td>
+<td>OCR (automatic pipeline, PaddleOCR)</td>
+<td><code>ocr/</code></td>
+</tr>
+<tr>
+<td><code>TEXT_LAB_CUSTOM_WHISPER_DIR</code></td>
+<td>Swiss German Whisper models</td>
+<td>Transcription (Swiss German)</td>
+<td><code>transcription/whisper_models.py</code></td>
+</tr>
+<tr>
+<td><code>TEXT_LAB_HF_TOKEN_FILE</code></td>
+<td>Hugging Face token for the gated diarization model</td>
+<td>Transcription (speakers)</td>
+<td><code>site.env</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="who-can-write">Who can write</h3>
+<p>The launch script binds the stores read-write, so a library downloads a
+missing model into its store, but only for a user who may write there; for
+everyone else the download fails and the feature reports an error. Normal
+users can only read the stores. On UBELIX (checked in October 2026):</p>
+<ul>
+<li><code>ollama</code> and <code>whisper</code> are writable by the maintainers' group
+  (<code>rs_dsl_shared</code>);</li>
+<li>the other stores are writable only by the user who created them.</li>
+</ul>
+<p>The stores' default ACLs give new files no permissions for other users, so
+a model a maintainer downloads is unreadable for everyone else until its
+permissions are opened (step 3 below).</p>
+<h3 id="adding-or-updating-a-model">Adding or updating a model</h3>
+<ol>
+<li>Add the model to the code or configuration that offers it (for Ollama,
+   <code>common/models.json</code> or a setting in <code>site.env</code>).</li>
+<li>As a user who can write to the store, download it:<ul>
+<li>Ollama: start a Text Lab session and choose the model in Chat, which
+  pulls it; or run <code>ollama pull &lt;model&gt;</code> inside the image with
+  <code>OLLAMA_MODELS</code> pointing to the store.</li>
+<li>Hugging Face, Whisper, EasyOCR, PaddleOCR: use the feature once in a
+  session with the model selected; the library downloads it into the
+  bound store.</li>
+</ul>
+</li>
+<li>Make the new files readable by everyone, for example
+   <code>chmod -R a+rX "$TEXT_LAB_BASE/container/models/&lt;store&gt;"</code>.</li>
+<li>Release the code change as usual.</li>
+</ol>
+<p>A fresh installation fills its stores the same way, one feature at a time.
+A single command that downloads everything the code names is planned (see
+<code>cli.py</code>); until it exists, the table above is the list to work through.</p>
+<h2 id="logs">Logs</h2>
+<p>Each session writes <code>streamlit.log</code> and <code>ollama.log</code> next to Open OnDemand's
+<code>output.log</code>, in the session's job folder in the user's home directory. Users
+find the folder through the <strong>Session ID</strong> link on their session card and
+send the logs with a problem report (see the user guide,
+<a href="../../launch/#reporting-a-problem">Reporting a Problem</a>).</p>
+<h2 id="releases">Releases</h2>
+<p>The site configuration serves <code>$TEXT_LAB_BASE/current/src</code>. <code>current</code> is a
+symbolic link to a release folder, a checkout of a tagged version, so that a
+release or a rollback is a change of the link. Sessions resolve the path at
+start, so running sessions keep the version they started with.</p>
+<h3 id="making-a-release">Making a release</h3>
+<ol>
+<li>Merge the changes into <code>main</code> and check that CI passes. Merging
+   publishes the documentation site, including the user guide.</li>
+<li>Run the tests on a compute node (<code>scripts/test_on_node.sbatch</code>).</li>
+<li>Tag the commit (<code>vX.Y.Z</code>) and create a GitHub release with notes.</li>
+<li>
+<p>Check out the tag into a new release folder, readable by everyone:</p>
+<div class="highlight"><pre><span></span><code><span class="nb">cd</span><span class="w"> </span><span class="s2">"</span><span class="nv">$TEXT_LAB_BASE</span><span class="s2">/releases"</span>
+git<span class="w"> </span>clone<span class="w"> </span>--depth<span class="w"> </span><span class="m">1</span><span class="w"> </span>--branch<span class="w"> </span>vX.Y.Z<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>https://github.com/dsl-unibe-ch/text_lab.git<span class="w"> </span>vX.Y.Z
+chmod<span class="w"> </span>-R<span class="w"> </span>a+rX,go-w<span class="w"> </span>vX.Y.Z
+</code></pre></div>
+</li>
+<li>
+<p>If <code>deploy/site.env</code> changed, copy it to <code>$TEXT_LAB_BASE/site.env</code>.</p>
+</li>
+<li>Try the release in a sandbox app with <code>TEXT_LAB_SRC</code> set to the new
+   folder's <code>src/</code>.</li>
+<li>
+<p>Switch new sessions to it:</p>
+<div class="highlight"><pre><span></span><code>ln<span class="w"> </span>-sfn<span class="w"> </span>releases/vX.Y.Z<span class="w"> </span><span class="s2">"</span><span class="nv">$TEXT_LAB_BASE</span><span class="s2">/current"</span>
+</code></pre></div>
+</li>
+<li>
+<p>If the Open OnDemand files changed, ask the HPC team to deploy them from
+   the tag.</p>
+</li>
+</ol>
+<h3 id="rolling-back">Rolling back</h3>
+<p>Point <code>current</code> back at the previous release folder
+(<code>ln -sfn releases/vX.Y.W "$TEXT_LAB_BASE/current"</code>). New sessions use it
+at once; running sessions keep their version. Keep at least the previous
+release folder until the new one has run without problems. If the release
+also changed <code>site.env</code>, restore the previous copy too.</p>
+<p>If a release needed the HPC team (changed Open OnDemand files), rolling it
+back needs them as well: they redeploy the files of the previous tag.</p>
+<h3 id="a-new-image">A new image</h3>
+<ol>
+<li>Change <code>deploy/container/text_lab.def</code> and build the image on a compute
+   node.</li>
+<li>Copy it to <code>$TEXT_LAB_BASE/container/</code> under a new name (keep the old
+   image: running sessions use it).</li>
+<li>Run the tests with the new image (<code>TL_CONTAINER</code> in
+   <code>scripts/test_on_node.sbatch</code>) and try it in a sandbox app (<code>TL_CONTAINER</code>
+   in <code>dev.env</code>).</li>
+<li>Set <code>TL_CONTAINER</code> in <code>site.env</code>, commit, and copy <code>site.env</code> to its live
+   location. Rolling back means restoring the previous value.</li>
+</ol>
+<h2 id="first-release-of-this-layout-300">First release of this layout (3.0.0)</h2>
+<p>Versions before 3.0.0 have the path of their code
+(<code>$TEXT_LAB_BASE/src_main280526/src</code>) in the deployed launch script and
+read no site configuration. Version 3.0.0 is the first to read <code>site.env</code>
+and serve <code>current</code>, so the switch needs the HPC team once:</p>
+<ol>
+<li>Prepare the shared folder without touching the running deployment: the
+   release folder <code>releases/v3.0.0</code>, <code>current</code> pointing to it, and
+   <code>site.env</code>. The old launch script reads none of them.</li>
+<li>Rehearse in a sandbox app without <code>dev.env</code>: it then runs exactly what
+   production will run.</li>
+<li>Ask the HPC team to deploy the Open OnDemand files from tag <code>v3.0.0</code>.
+   Merge to <code>main</code> close to that date, since merging publishes the new user
+   guide.</li>
+<li>Start a session on the production app and check <code>output.log</code> and each
+   feature.</li>
+<li>To roll back, the HPC team redeploys the files of <code>v2.2.1</code>, which still
+   serve <code>src_main280526</code>; keep that folder until 3.0.0 has run without
+   problems for a while.</li>
+<li>Afterwards, remove <code>src_main280526</code> and the old versions' session logs
+   (<code>logs/</code>). <code>ollama_tmp/</code> and <code>run_olmocr.sh</code> in the shared folder are
+   used by no version in the repository; check with their owners before
+   removing them.</li>
+</ol>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

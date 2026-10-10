@@ -1,0 +1,1774 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Documentation for the Text Lab NLP Service at University of Bern">
+      
+      
+      
+        <link rel="canonical" href="https://text-lab.dsl.unibe.ch/visualize_data/">
+      
+      
+        <link rel="prev" href="../chat/">
+      
+      
+        <link rel="next" href="../dev/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/icon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Visualize Data - Text Lab Guide</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="red" data-md-color-accent="red">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#visualize-data" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Text Lab Guide" class="md-header__button md-logo" aria-label="Text Lab Guide" data-md-component="logo">
+      
+  <img src="../assets/text_lab_logo.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Text Lab Guide
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Visualize Data
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="red" data-md-color-accent="red"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="red" data-md-color-accent="red"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/dsl-unibe-ch/text_lab" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    dsl-unibe-ch/text_lab
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../launch/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Launching Text Lab
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../transcription/" class="md-tabs__link">
+          
+  
+  
+  Features
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../dev/" class="md-tabs__link">
+          
+  
+  
+  Developer Guide
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Text Lab Guide" class="md-nav__button md-logo" aria-label="Text Lab Guide" data-md-component="logo">
+      
+  <img src="../assets/text_lab_logo.png" alt="logo">
+
+    </a>
+    Text Lab Guide
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/dsl-unibe-ch/text_lab" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    dsl-unibe-ch/text_lab
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../launch/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Launching Text Lab
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Features
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Features
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../transcription/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Transcription
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ocr/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OCR
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../translate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Translate
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../meeting_notes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Meeting Notes Generator
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../knowledge_graph/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Knowledge Graph
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../topic_modeling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Topic Modeling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../chat/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Chat
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Visualize Data
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Visualize Data
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#quick-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quick start
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#preparing-your-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Preparing your data
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Preparing your data">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tips-for-good-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tips for good results
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#preview-and-column-selection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Preview and column selection
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#writing-a-good-request" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Writing a good request
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-it-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How it works
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#available-plots-and-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Available plots and tests
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Available plots and tests">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#plots" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Plots
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#statistical-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Statistical tests
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#understanding-the-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Understanding the results
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reproducible-code-in-python-and-r" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reproducible code in Python and R
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Reproducible code in Python and R">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#r-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        R code
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#downloading-the-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Downloading the results
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-privacy-and-security" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data privacy and security
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dev/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dev/architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dev/testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dev/deployment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dev/data-handling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Handling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#quick-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quick start
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#preparing-your-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Preparing your data
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Preparing your data">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tips-for-good-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tips for good results
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#preview-and-column-selection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Preview and column selection
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#writing-a-good-request" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Writing a good request
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-it-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How it works
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#available-plots-and-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Available plots and tests
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Available plots and tests">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#plots" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Plots
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#statistical-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Statistical tests
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#understanding-the-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Understanding the results
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reproducible-code-in-python-and-r" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reproducible code in Python and R
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Reproducible code in Python and R">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#r-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        R code
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#downloading-the-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Downloading the results
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-privacy-and-security" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data privacy and security
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="visualize-data">Visualize Data</h1>
+<p>Visualize Data turns a question about your data into plots and statistical tests. You upload a table, describe in plain language what you want to see, and a team of AI agents creates the charts, runs the tests and summarises the findings. Every result comes with the code that reproduces it, in Python and optionally in R.</p>
+<p>Typical uses are getting to know a new dataset, checking a hypothesis quickly, comparing groups, or producing a first version of a figure.</p>
+<p>All processing runs on the university cluster. Your data is never sent to an external service.</p>
+<h2 id="quick-start">Quick start</h2>
+<ol>
+<li><strong>Choose a model</strong> in the sidebar under <em>Select Analysis Model</em>.</li>
+<li><strong>Upload your data</strong> as a CSV, TSV, Excel or JSON file.</li>
+<li><strong>Select the columns</strong> to analyse. All columns are selected by default.</li>
+<li><strong>Describe what you want</strong> in the text box, or leave it empty for a general exploratory analysis.</li>
+<li>Tick <strong>Also generate equivalent R code</strong> if you work in R (optional).</li>
+<li>Click <strong>Generate Visualisations</strong> and follow the progress in the <em>Agent Activity Log</em>.</li>
+<li><strong>Explore the results</strong> and download them with the <strong>Download ... (.zip)</strong> button.</li>
+</ol>
+<p>Running again replaces the previous results on the page, and uploading a different file clears them, so download anything you want to keep first.</p>
+<h2 id="preparing-your-data">Preparing your data</h2>
+<ul>
+<li><strong>Formats:</strong> CSV (<code>.csv</code>), TSV (<code>.tsv</code>), Excel (<code>.xlsx</code>, <code>.xls</code>) and JSON (<code>.json</code>, as a list of records or as JSON Lines). For Excel files, the sheet that was active when the file was last saved is used.</li>
+<li><strong>Layout:</strong> one row per observation, one column per variable, and column names in the first row.</li>
+<li><strong>Size:</strong> up to <strong>300,000 rows</strong> are analysed; any further rows are ignored, and the summary says so.</li>
+<li><strong>Column types</strong> are detected automatically: numbers, categories, dates, and free text. A column whose entries average more than 50 characters is treated as free text, which is used for word clouds but not for statistics.</li>
+</ul>
+<h3 id="tips-for-good-results">Tips for good results</h3>
+<ul>
+<li><strong>Use clear column names.</strong> The AI chooses columns by name, so <code>income_chf</code> works better than <code>var17</code>.</li>
+<li><strong>Store numbers as numbers.</strong> Values such as <code>12 kg</code> or <code>1'200</code> are read as text. Put units in the column name instead.</li>
+<li><strong>Keep category spellings consistent.</strong> <code>Female</code>, <code>female</code> and <code>F</code> count as three different groups.</li>
+<li><strong>Empty cells are fine.</strong> Rows with missing values are left out of each plot or test that uses those columns.</li>
+</ul>
+<h2 id="preview-and-column-selection">Preview and column selection</h2>
+<p>After uploading, open <strong>Preview Data</strong> to check that the file was read correctly:</p>
+<ul>
+<li><strong>Raw Data</strong>: the first 10 rows.</li>
+<li><strong>Column Profile</strong>: for each column, its type, the share of filled cells, the number of different values, the range (numbers) or most frequent value (text). Based on the first 2,000 rows.</li>
+</ul>
+<p>Under <strong>Select columns to include in the analysis</strong>, keep only the columns you are interested in. Fewer columns give more focused results, especially for wide datasets. <em>Select All</em> and <em>Clear All</em> help; if no column is selected, all columns are used.</p>
+<h2 id="writing-a-good-request">Writing a good request</h2>
+<p>Describe what you want as specifically as you can: name the columns, the type of plot, and the test if you know it. If you leave the box empty, Text Lab performs a general exploratory analysis with a few interactive plots.</p>
+<table>
+<thead>
+<tr>
+<th>You want to...</th>
+<th>Example request</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Get an overview</td>
+<td><em>(leave the box empty)</em></td>
+</tr>
+<tr>
+<td>See a distribution</td>
+<td>"Histogram of age for each sex"</td>
+</tr>
+<tr>
+<td>Explore a relationship</td>
+<td>"Scatter plot of income against age, coloured by region, and test the correlation"</td>
+</tr>
+<tr>
+<td>Compare groups</td>
+<td>"Is radius_mean different between diagnosis M and B? Show a box plot and run a t-test."</td>
+</tr>
+<tr>
+<td>Compare ratings or Likert answers</td>
+<td>"Do the faculties differ in satisfaction? Use a non-parametric test."</td>
+</tr>
+<tr>
+<td>Relate two categories</td>
+<td>"Is smoking associated with diagnosis?"</td>
+</tr>
+<tr>
+<td>Find important variables</td>
+<td>"Which columns are most strongly correlated with diagnosis?"</td>
+</tr>
+<tr>
+<td>Model an outcome</td>
+<td>"Linear regression of price on size and number of rooms"</td>
+</tr>
+<tr>
+<td>Model a yes/no outcome</td>
+<td>"Which factors predict dropout? Use logistic regression with age, faculty and grade."</td>
+</tr>
+<tr>
+<td>Analyse text</td>
+<td>"Word cloud of the comments column"</td>
+</tr>
+<tr>
+<td>Get publication figures</td>
+<td>"Static, publication-ready box plot of score by group"</td>
+</tr>
+</tbody>
+</table>
+<div class="admonition tip">
+<p class="admonition-title">Interactive or static?</p>
+<p>Plots are <strong>interactive</strong> by default: you can hover, zoom and pan in the browser. Ask for <strong>static</strong> or <strong>publication-ready</strong> plots to get high-resolution images (PNG, 300 dpi) for papers and slides. You can ask for both in one request.</p>
+</div>
+<h2 id="how-it-works">How it works</h2>
+<p>A <strong>supervisor</strong> agent reads your request and a summary of your columns (names, types and example categories), and plans the work for up to three <strong>specialist</strong> agents:</p>
+<table>
+<thead>
+<tr>
+<th>Specialist</th>
+<th>Produces</th>
+<th>Used when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Interactive</strong></td>
+<td>Interactive charts (Plotly)</td>
+<td>By default for every plot</td>
+</tr>
+<tr>
+<td><strong>Static</strong></td>
+<td>High-resolution images (Matplotlib/Seaborn) and word clouds</td>
+<td>You ask for static or publication figures, a pair plot or a word cloud</td>
+</tr>
+<tr>
+<td><strong>Statistics</strong></td>
+<td>Tables with test results</td>
+<td>You ask for tests, correlations, associations or regression</td>
+</tr>
+</tbody>
+</table>
+<p>The specialists work at the same time. When they are done, the supervisor writes the summary.</p>
+<p>The <strong>Agent Activity Log</strong> shows what is happening, for example:</p>
+<ul>
+<li><em>Supervisor planned 3 task(s).</em>: which specialists are working on your request.</li>
+<li><em>Worker 'static' is running 4 tools: Static Histogram, Static Box Plot, ...</em>: what each specialist is producing. Agents with more tools take longer.</li>
+<li><em>... failed: ... Retrying...</em> and <em>is retrying</em>: a plot or test did not work on the first attempt, and the agent is correcting it. This is normal.</li>
+<li><em>Worker 'stats' is interpreting the results.</em>: the statistics specialist is explaining its numbers.</li>
+</ul>
+<p>An analysis usually takes one to a few minutes, and is stopped after 10 minutes. The first analysis after choosing a model takes longer, because the model is loaded into GPU memory. Click <strong>Cancel Analysis</strong> to stop a running analysis.</p>
+<h2 id="available-plots-and-tests">Available plots and tests</h2>
+<h3 id="plots">Plots</h3>
+<table>
+<thead>
+<tr>
+<th>Plot</th>
+<th>Interactive</th>
+<th>Static</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Histogram</strong></td>
+<td>Yes</td>
+<td>Yes, with a density curve</td>
+</tr>
+<tr>
+<td><strong>Scatter plot</strong></td>
+<td>Yes, optionally coloured by a column</td>
+<td>Yes, optionally coloured by a column</td>
+</tr>
+<tr>
+<td><strong>Box plot</strong></td>
+<td>Yes</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><strong>Line plot</strong></td>
+<td>Yes, connects the rows in data order</td>
+<td>Yes, mean per x value with a 95% confidence band</td>
+</tr>
+<tr>
+<td><strong>Bar chart</strong></td>
+<td>Yes: mean, sum, count or median per group</td>
+<td>Yes, with ±1 standard deviation error bars for mean and median</td>
+</tr>
+<tr>
+<td><strong>Scatter matrix / pair plot</strong></td>
+<td>Yes</td>
+<td>Yes; very large datasets are sampled to 5,000 rows</td>
+</tr>
+<tr>
+<td><strong>Correlation heatmap</strong></td>
+<td>Yes (Pearson or Spearman)</td>
+<td>Yes (Pearson or Spearman)</td>
+</tr>
+<tr>
+<td><strong>Word cloud</strong></td>
+<td>No</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><strong>Custom chart</strong></td>
+<td>Yes</td>
+<td>Yes</td>
+</tr>
+</tbody>
+</table>
+<p>A correlation heatmap can be limited to some columns, for example "a heatmap of all columns ending in _mean". When no standard plot fits your request, the agent writes its own plotting code (<em>Custom chart</em>).</p>
+<h3 id="statistical-tests">Statistical tests</h3>
+<p>Which test fits depends on the kind of columns you want to relate:</p>
+<table>
+<thead>
+<tr>
+<th>Your question involves...</th>
+<th>Test</th>
+<th>What you get</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Two <strong>numeric</strong> columns</td>
+<td><strong>Correlation</strong></td>
+<td>Strength and direction of the relationship, p-value and confidence interval. Pearson (default), Spearman or Kendall</td>
+</tr>
+<tr>
+<td>A <strong>numeric</strong> column and <strong>groups</strong></td>
+<td><strong>Group comparison</strong></td>
+<td>Whether the values differ between the groups, with an effect size and assumption checks (see below)</td>
+</tr>
+<tr>
+<td>Two <strong>categorical</strong> columns</td>
+<td><strong>Association test</strong></td>
+<td>The crosstab with row percentages, a chi-square test, and Cramér's V for the strength of the association. For a 2×2 table with small counts, Fisher's exact test is used instead</td>
+</tr>
+<tr>
+<td>A <strong>numeric outcome</strong> and predictors</td>
+<td><strong>Linear regression</strong></td>
+<td>Ordinary least squares with intercept: coefficients, p-values and R²</td>
+</tr>
+<tr>
+<td>A <strong>yes/no outcome</strong> and predictors</td>
+<td><strong>Logistic regression</strong></td>
+<td>Odds ratios with 95% confidence intervals, p-values and McFadden's pseudo R²</td>
+</tr>
+<tr>
+<td>One target and <strong>all</strong> numeric columns</td>
+<td><strong>Correlation ranking</strong></td>
+<td>Which columns are most strongly correlated with the target</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Group comparisons</strong> come in two versions:</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Parametric (default)</th>
+<th>Non-parametric</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Two groups</strong></td>
+<td>t-test: Student's t-test when both groups have the same size, otherwise Welch's t-test. Effect size: Cohen's d</td>
+<td>Mann-Whitney U test. Effect size: rank-biserial correlation</td>
+</tr>
+<tr>
+<td><strong>Three or more groups</strong></td>
+<td>One-way ANOVA with Tukey post-hoc tests. Effect size: partial eta squared</td>
+<td>Kruskal-Wallis test with pairwise Mann-Whitney tests (Holm-corrected). Effect size: eta squared (H)</td>
+</tr>
+<tr>
+<td><strong>Use for</strong></td>
+<td>Roughly normally distributed measurements</td>
+<td>Ratings, Likert scales and ranks, small groups, or skewed data</td>
+</tr>
+</tbody>
+</table>
+<p>Ask for a non-parametric test explicitly ("use a non-parametric test"), or let the AI choose: every group comparison reports <strong>assumption checks</strong>, a Shapiro-Wilk normality test per group and Levene's test for equal variances, and a note when they look violated. Post-hoc tests are shown for up to 10 groups.</p>
+<p><strong>Yes/no outcomes and categories:</strong></p>
+<ul>
+<li>An outcome with two values, such as <em>yes/no</em>, <em>M/B</em> or <em>1/2</em>, is coded as 1 and 0 automatically. The result says which value counts as 1: a typical positive label such as <em>yes</em> or <em>M</em>, otherwise the larger number or the alphabetically later value.</li>
+<li>Text predictors in a logistic regression are compared with their alphabetically first category (the <em>reference</em>).</li>
+</ul>
+<p>Rows with missing values in the columns of a test are left out of that test.</p>
+<h2 id="understanding-the-results">Understanding the results</h2>
+<ul>
+<li><strong>Analysis Summary</strong>: the supervisor's written summary of all results. The numbers in it come from the actual calculations, but the interpretation is written by the AI.</li>
+<li><strong>Statistical Analysis Results</strong>: one card per test with the result table and its code.</li>
+<li><strong>Generated Visualisations</strong>: each chart with its code under <em>View Source Code</em>. Interactive charts can be zoomed and panned, show values when you hover over them, and can be saved as an image with the camera icon in their toolbar.</li>
+</ul>
+<div class="admonition warning">
+<p class="admonition-title">Check the results</p>
+<p>The AI can choose an unsuitable plot or test, or misread a result. Read the result tables yourself and use the code to verify important findings. Group comparisons report assumption checks, but they do not choose the test for you, and the other tests do not check their assumptions (for example linearity in a regression).</p>
+</div>
+<h2 id="reproducible-code-in-python-and-r">Reproducible code in Python and R</h2>
+<p>Every plot and test comes with code that reproduces it on your own computer. Replace the file name <code>your_data.csv</code> in the code with the path to your file.</p>
+<h3 id="r-code">R code</h3>
+<p>Tick <strong>Also generate equivalent R code</strong> before you click <em>Generate Visualisations</em> to get R code next to the Python code. The code areas then show a <strong>Python</strong> and an <strong>R</strong> tab.</p>
+<ul>
+<li>Plots use <strong>ggplot2</strong>, statistical tests use base R. The first lines of each snippet list the packages it needs, with the command to install them. R 4.1 or newer is required.</li>
+<li><strong>Statistical results are the same</strong> in R and Python. The R code repeats the choices the Python code made, for example Student's or Welch's t-test, or how a yes/no outcome was coded. The only exception is the odds ratio of Fisher's exact test, which R estimates slightly differently (the p-value is the same).</li>
+<li><strong>Plots show the same data but look different</strong>, because default bin widths, colours and styles differ between the libraries. Sampled pair plots and word clouds can differ in detail.</li>
+<li>For interactive plots, the R code contains a commented line (<code>plotly::ggplotly(p)</code>) that turns the plot into an interactive one.</li>
+<li><strong>Custom charts have no R version</strong>, because they are made from code the AI wrote freely in Python. They show <em>R code is not available for plots made from custom Python code</em>.</li>
+</ul>
+<div class="admonition tip">
+<p class="admonition-title">Double-check your results in R</p>
+<p>Running the R code is a quick way to verify the numbers independently of the Python version.</p>
+</div>
+<h2 id="downloading-the-results">Downloading the results</h2>
+<p>The <strong>Download ... (.zip)</strong> button below the results gives you a ZIP archive with:</p>
+<ul>
+<li><code>report.html</code>: a complete report with the summary, the statistical results, all charts and their code (including R code if you asked for it). It opens in any web browser, also offline.</li>
+<li>Each interactive chart as an <code>.html</code> file that keeps its interactivity, and each static chart as a <code>.png</code> image.</li>
+<li>The Python code of each chart as a <code>.py</code> file, and the R code as an <code>.R</code> file if you asked for it.</li>
+</ul>
+<p>The code of the statistical tests is included in <code>report.html</code>.</p>
+<h2 id="data-privacy-and-security">Data privacy and security</h2>
+<ul>
+<li><strong>Processing on the cluster:</strong> your data is analysed on the UBELIX compute nodes. It never leaves the University of Bern's network and is never sent to external services such as OpenAI, Google or Anthropic.</li>
+<li><strong>No AI training:</strong> the models only read your data to answer your current request. They do not learn from it, and it is never used to train or improve them.</li>
+<li><strong>Temporary private storage:</strong> for the analysis, your file is saved in a temporary folder in your session's private workspace on the compute node, together with the charts it produces. Only your user account can open it, and nothing is written to your home directory. The folder is <strong>deleted automatically when the analysis finishes</strong>; if an analysis is interrupted, it is deleted when your Text Lab session ends.</li>
+<li><strong>Results in your browser session:</strong> the results stay on the page until you run a new analysis, upload a different file, reload the page or close the tab. Download them to keep them.</li>
+<li><strong>AI-written code:</strong> custom charts are created by code the AI writes. It runs on the cluster under your account and is stopped if it runs longer than a minute.</li>
+</ul>
+<h2 id="troubleshooting">Troubleshooting</h2>
+<p>Click a problem to see what to do.</p>
+<details class="question">
+<summary>'The analysis could not be started. The model produced a tool call Ollama could not parse'</summary>
+<p>Some models occasionally produce instructions that the system cannot read, especially with certain data. Choose another model in the sidebar and run the analysis again.</p>
+</details>
+<details class="question">
+<summary>'Analysis exceeded the 10-minute limit'</summary>
+<p>Ask for fewer plots or tests at once, select fewer columns, or split your request into several runs.</p>
+</details>
+<details class="question">
+<summary>'The model did not answer within 300 seconds'</summary>
+<p>The model server was busy or stuck. Run the analysis again, or try another model. If nothing responds any more, end your Text Lab session and start a new one.</p>
+</details>
+<details class="question">
+<summary>I got fewer plots than I asked for</summary>
+<p>List each plot you want explicitly, for example "1) a histogram of age, 2) a box plot of income by sex". Very long requests are more reliable when split into several runs.</p>
+</details>
+<details class="question">
+<summary>The AI used the wrong columns</summary>
+<p>Select only the relevant columns under <em>Select columns to include in the analysis</em>, and use the exact column names in your request.</p>
+</details>
+<details class="question">
+<summary>A test on a text column fails</summary>
+<p>Free-text columns (long texts such as comments) cannot be used for statistics; use them for word clouds. For two category columns (such as <em>sex</em> and <em>smoker</em>), ask for an association test instead of a correlation or t-test.</p>
+</details>
+<details class="question">
+<summary>The logistic regression reports 'separation' or extremely large odds ratios</summary>
+<p>One predictor (almost) perfectly predicts the outcome, so its effect cannot be estimated. Remove that predictor, or merge rare categories of it.</p>
+</details>
+<details class="question">
+<summary>'Some expected counts are below 5'</summary>
+<p>Some combinations of categories are too rare for a reliable chi-square test. Merge rare categories (for example combine small faculties into <em>Other</em>) and run the test again.</p>
+</details>
+<details class="question">
+<summary>The pair plot says '(sampled 5,000 rows)'</summary>
+<p>Pair plots of very large datasets are drawn from a random sample of 5,000 rows to keep them readable and fast. The statistics are always computed on all rows.</p>
+</details>
+<details class="question">
+<summary>The R tab says 'R code is not available'</summary>
+<p>The chart was made with custom code. Ask for one of the standard plot types (see <a href="#available-plots-and-tests">Available plots and tests</a>) to get R code.</p>
+</details>
+<details class="question">
+<summary>The R code fails with 'could not find function'</summary>
+<p>Install the packages listed at the top of the snippet with the <code>install.packages(...)</code> line shown there, and check that you use R 4.1 or newer.</p>
+</details>
+<details class="question">
+<summary>The R results differ from the Python results</summary>
+<p>Check that you use the same file. If your data has more than 300,000 rows, keep the <code>head(df, 300000)</code> line in the R code, because Text Lab only analysed those rows. If the numbers of a test still differ, contact the Data Science Lab with both results.</p>
+</details>
+<details class="question">
+<summary>The table looks wrong in <em>Preview Data</em></summary>
+<p>Check that the first row contains the column names, and that an Excel file was saved with the correct sheet active. Convert unusual formats to CSV.</p>
+</details>
+<p>For help analysing your data, contact the Data Science Lab (DSL).</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
