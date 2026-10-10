@@ -8,15 +8,14 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from top2vec import Top2Vec
 
-from . import small_corpus
-from .topic_config import TopicKeywords
+from textlab.features.topic_modeling import small_corpus
+from textlab.features.topic_modeling.models import TopicKeywords
 
 _TOP_N_KEYWORDS = 10
 
 
 def _is_reduced_model(topic_model: Top2Vec) -> bool:
-    """
-    Determine whether hierarchical topic reduction was applied to the model.
+    """Determine whether hierarchical topic reduction was applied to the model.
 
     Reduction is only performed when fewer topics are requested than Top2Vec
     found. Asking Top2Vec for reduced topics when no reduction took place
@@ -40,8 +39,7 @@ def train_top2vec_model(
     min_count: int = 10,
     target_topics: int | str = "auto",
 ) -> Top2Vec:
-    """
-    Train a Top2Vec model on the provided texts.
+    """Train a Top2Vec model on the provided texts.
 
     Args:
         texts: The input documents to model.
@@ -100,8 +98,7 @@ def train_top2vec_model(
 
 
 def extract_top2vec_topics(topic_model: Top2Vec) -> list[TopicKeywords]:
-    """
-    Extract the keywords and sizes of every Top2Vec topic.
+    """Extract the keywords and sizes of every Top2Vec topic.
 
     Reduced topics are used when hierarchical topic reduction was applied.
 
@@ -114,16 +111,20 @@ def extract_top2vec_topics(topic_model: Top2Vec) -> list[TopicKeywords]:
     is_reduced = _is_reduced_model(topic_model)
 
     topic_words, _, topic_nums = topic_model.get_topics(reduced=is_reduced)
-    topic_sizes, size_topic_nums = topic_model.get_topic_sizes(reduced=is_reduced)
+    topic_sizes, size_topic_nums = topic_model.get_topic_sizes(
+        reduced=is_reduced
+    )
     size_map = {
         int(topic_num): int(size)
-        for size, topic_num in zip(topic_sizes, size_topic_nums)
+        for size, topic_num in zip(topic_sizes, size_topic_nums, strict=False)
     }
 
     return [
         TopicKeywords(
             topic=int(t_num) + 1,
-            keywords=[str(word) for word in topic_words[idx][:_TOP_N_KEYWORDS]],
+            keywords=[
+                str(word) for word in topic_words[idx][:_TOP_N_KEYWORDS]
+            ],
             count=size_map.get(int(t_num), 0),
         )
         for idx, t_num in enumerate(topic_nums)
@@ -134,8 +135,7 @@ def generate_top2vec_document_topics_df(
     topic_model: Top2Vec,
     original_df: pd.DataFrame,
 ) -> pd.DataFrame:
-    """
-    Generate a DataFrame with the dominant Top2Vec topic for each document.
+    """Generate a DataFrame with the dominant Top2Vec topic for each document.
 
     Reduced topics are used when hierarchical topic reduction was applied.
 
@@ -182,8 +182,7 @@ def generate_top2vec_document_topics_df(
 
 
 def generate_top2vec_barchart_html(topic_model: Top2Vec) -> str:
-    """
-    Generate an HTML bar chart visualization for Top2Vec topics.
+    """Generate an HTML bar chart visualization for Top2Vec topics.
 
     Reduced topics are used when hierarchical topic reduction was applied.
 

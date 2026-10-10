@@ -38,7 +38,7 @@ Text Lab keeps temporary user data in a private workspace per job (owner-only pe
 
 | What | Where | Removed |
 |---|---|---|
-| Uploaded files and intermediate results (OCR, Chat and Visualize Data tables and charts, transcription audio, PDF pages translation sends to OCR, Grobid working copies) | Session workspace in the job's `$TMPDIR` | When the run finishes where the feature does so, and always when the session ends |
+| Uploaded files and intermediate results (OCR, Chat and Visualize Data tables and charts, transcription audio, PDF pages translation sends to OCR, the table Topic Modeling hands to its worker, Grobid working copies) | Session workspace in the job's `$TMPDIR` | When the run finishes where the feature does so, and always when the session ends |
 | Results shown on the page | The browser session (Streamlit session state) | When the page is reloaded or closed, or the session ends |
 | Knowledge Graph output | The folder the user chooses | When the user deletes it |
 | Session logs (`output.log`, `streamlit.log`, `ollama.log`) | The session folder in the user's home directory (Open OnDemand) | When the user deletes the session folder |

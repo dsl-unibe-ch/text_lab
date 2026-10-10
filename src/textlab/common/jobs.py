@@ -14,7 +14,8 @@ inside the workspace (see :mod:`textlab.common.storage`):
 - ``progress.json``: the latest :class:`~textlab.common.progress.Progress`,
   rewritten by the worker and polled by the parent.
 - ``result.json``: ``{"ok": true, "result": ...}`` or
-  ``{"ok": false, "error": ..., "traceback": ...}``, written by the worker.
+  ``{"ok": false, "error": ..., "type": ..., "message": ...,
+  "traceback": ...}``, written by the worker.
 
 The job folder is deleted when the run ends. The worker's standard output
 and error go to the app's log.
@@ -59,17 +60,31 @@ class WorkerError(RuntimeError):
 
     Attributes:
         details: The worker's traceback, or other diagnostic text.
+        error_type: The class name of the exception the worker raised, such
+            as ``"ValueError"``, or ``""`` if it stopped without one.
+        error_message: That exception's own message.
     """
 
-    def __init__(self, message: str, details: str = ""):
+    def __init__(
+        self,
+        message: str,
+        details: str = "",
+        *,
+        error_type: str = "",
+        error_message: str = "",
+    ):
         """Store the message and the diagnostic details.
 
         Args:
             message: Short description of the failure.
             details: The worker's traceback, or other diagnostic text.
+            error_type: The class name of the worker's exception.
+            error_message: The worker's exception message.
         """
         super().__init__(message)
         self.details = details
+        self.error_type = error_type
+        self.error_message = error_message
 
 
 def run_worker(
@@ -153,6 +168,8 @@ def worker_main(handler: WorkerHandler) -> None:
         payload = {
             "ok": False,
             "error": f"{type(exc).__name__}: {exc}",
+            "type": type(exc).__name__,
+            "message": str(exc),
             "traceback": traceback.format_exc(),
         }
         exit_code = 1
@@ -218,6 +235,8 @@ def _read_result(job_dir: Path, exit_code: int) -> Any:
     raise WorkerError(
         payload.get("error", "The worker failed."),
         payload.get("traceback", ""),
+        error_type=payload.get("type", ""),
+        error_message=payload.get("message", ""),
     )
 
 

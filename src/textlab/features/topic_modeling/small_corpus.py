@@ -28,7 +28,7 @@ _TOO_SMALL_SIGNATURES = (
 
 
 def is_corpus_too_small(exc: BaseException) -> bool:
-    """Is *exc* one of the ways the clustering stack reports too few documents?"""
+    """Return True if *exc* is how the clustering reports too few documents."""
     message = str(exc).lower()
     return any(signature in message for signature in _TOO_SMALL_SIGNATURES)
 
@@ -40,9 +40,13 @@ def too_small_error(n_documents: int, algorithm: str) -> ValueError:
     the ``__cause__``, which is what puts the real reason in the log.
     """
     return ValueError(
-        f"{algorithm} could not find any topics in these {n_documents} document(s). "
-        f"It discovers topics as clusters of similar documents, so it needs a larger "
-        f"and more varied collection than this. Please switch your algorithm to "
-        f"**Latent Dirichlet Allocation (LDA)**, which is better suited for small "
+        f"{algorithm} could not find any topics in these {n_documents} "
+        "document(s). "
+        "It discovers topics as clusters of similar documents, so it needs a "
+        "larger "
+        "and more varied collection than this. Please switch your algorithm "
+        "to "
+        "**Latent Dirichlet Allocation (LDA)**, which is better suited for "
+        "small "
         f"datasets."
     )

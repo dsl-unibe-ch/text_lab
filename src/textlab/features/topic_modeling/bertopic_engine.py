@@ -16,8 +16,8 @@ from sklearn.decomposition import PCA, TruncatedSVD
 from sklearn.feature_extraction.text import CountVectorizer
 from umap import UMAP
 
-from . import small_corpus
-from .topic_config import TopicKeywords
+from textlab.features.topic_modeling import small_corpus
+from textlab.features.topic_modeling.models import TopicKeywords
 
 LOGGER = logging.getLogger(__name__)
 
@@ -39,8 +39,7 @@ _PRUNING_SIGNATURES = (
 
 
 def display_topic_id(topic_id: int) -> int | str:
-    """
-    Map a BERTopic topic ID to the identifier shown to users.
+    """Map a BERTopic topic ID to the identifier shown to users.
 
     BERTopic numbers topics from 0 and marks outliers as -1. The page numbers
     topics from 1 for every algorithm, so BERTopic IDs are shifted by one.
@@ -55,8 +54,7 @@ def display_topic_id(topic_id: int) -> int | str:
 
 
 def _topic_title(topic_id: int) -> str:
-    """
-    Build the short title ("Topic N" or "Outlier") for a BERTopic topic ID.
+    """Build the short title ("Topic N" or "Outlier") for a BERTopic topic ID.
 
     Args:
         topic_id: The topic ID assigned by BERTopic.
@@ -68,8 +66,7 @@ def _topic_title(topic_id: int) -> str:
 
 
 def _renumber_topic_references(text: str) -> str:
-    """
-    Replace BERTopic's 0-based "Topic N" references in a chart string.
+    """Replace BERTopic's 0-based "Topic N" references in a chart string.
 
     Args:
         text: A label or hover text produced by a BERTopic visualization.
@@ -84,8 +81,7 @@ def _renumber_topic_references(text: str) -> str:
 
 
 def _apply_display_labels(topic_model: BERTopic) -> None:
-    """
-    Set custom topic labels that use the 1-based display numbering.
+    """Set custom topic labels that use the 1-based display numbering.
 
     Visualizations called with ``custom_labels=True`` then show the same topic
     numbers as the result tables, e.g. "Topic 3: tax, budget, spending".
@@ -101,7 +97,9 @@ def _apply_display_labels(topic_model: BERTopic) -> None:
 
         words = [
             word
-            for word, _ in (topic_model.get_topic(topic_id) or [])[:_LABEL_KEYWORDS]
+            for word, _ in (topic_model.get_topic(topic_id) or [])[
+                :_LABEL_KEYWORDS
+            ]
             if word
         ]
         label = f"{_topic_title(topic_id)}: {', '.join(words)}"
@@ -113,8 +111,7 @@ def _apply_display_labels(topic_model: BERTopic) -> None:
 
 
 def _renumber_intertopic_map(fig: Any) -> None:
-    """
-    Renumber the topic IDs that the intertopic distance map hard-codes.
+    """Renumber the topic IDs that the intertopic distance map hard-codes.
 
     The hover header reads the raw topic ID from ``customdata[0]`` and the
     slider steps are labelled "Topic N"; neither honours custom labels.
@@ -138,8 +135,7 @@ def _renumber_intertopic_map(fig: Any) -> None:
 
 
 def _renumber_hover_text(fig: Any) -> None:
-    """
-    Renumber the "Topic N" references in the hover text of every trace.
+    """Renumber the "Topic N" references in the hover text of every trace.
 
     Args:
         fig: A plotly figure produced by a BERTopic visualization.
@@ -148,12 +144,13 @@ def _renumber_hover_text(fig: Any) -> None:
         hovertext = getattr(trace, "hovertext", None)
         if hovertext is None or isinstance(hovertext, str):
             continue
-        trace.hovertext = [_renumber_topic_references(str(text)) for text in hovertext]
+        trace.hovertext = [
+            _renumber_topic_references(str(text)) for text in hovertext
+        ]
 
 
 def _is_vocabulary_pruning_error(exc: BaseException) -> bool:
-    """
-    Check whether *exc* means ``min_df`` removed the whole vocabulary.
+    """Check whether *exc* means ``min_df`` removed the whole vocabulary.
 
     Args:
         exc: The exception raised while extracting topic keywords.
@@ -166,8 +163,7 @@ def _is_vocabulary_pruning_error(exc: BaseException) -> bool:
 
 
 def _vocabulary_pruning_error(min_df: int) -> ValueError:
-    """
-    Build the user-facing error for a vocabulary pruned away by ``min_df``.
+    """Build the user-facing error for a vocabulary pruned away by ``min_df``.
 
     Args:
         min_df: The minimum topic frequency that was requested.
@@ -177,17 +173,18 @@ def _vocabulary_pruning_error(min_df: int) -> ValueError:
     """
     return ValueError(
         f"No topic keywords could be extracted with a Minimum Topic Frequency "
-        f"(min_df) of {min_df}. BERTopic applies this threshold to topics, not "
+        f"(min_df) of {min_df}. BERTopic applies this threshold to topics, "
+        "not "
         f"documents: a word must appear in at least {min_df} topic(s) to be "
-        f"kept, so the value must not exceed the number of topics found. Lower "
+        "kept, so the value must not exceed the number of topics found. "
+        "Lower "
         f"it (1 is a safe default) or remove some custom stopwords, then run "
         f"again."
     )
 
 
 def _notice_html(message: str) -> str:
-    """
-    Helper function to generate a styled HTML notice block for visualization messages.
+    """Return a styled HTML notice block for visualization messages.
 
     Args:
         message: The message content to display inside the notice.
@@ -221,9 +218,9 @@ def train_bertopic_model(
     embedding_model: Any = None,
     precomputed_embeddings: np.ndarray | None = None,
 ) -> tuple[BERTopic, list[int], np.ndarray | None]:
-    """
-    Train a BERTopic model with configurable dimensionality reduction and
-    clustering settings.
+    """Train a BERTopic model.
+
+    Dimensionality reduction and clustering are configurable.
 
     Args:
         texts: The input documents to model.
@@ -276,12 +273,14 @@ def train_bertopic_model(
         raise ValueError("No texts were provided to BERTopic.")
     if ngram_range[0] > ngram_range[1]:
         raise ValueError(
-            "Invalid ngram_range: lower bound cannot be greater than upper bound."
+            "Invalid ngram_range: lower bound cannot be greater than upper "
+            "bound."
         )
     if dim_reduction_algo not in _SUPPORTED_DIM_ALGOS:
         raise ValueError(
             f"Unsupported dimensionality-reduction algorithm: "
-            f"'{dim_reduction_algo}'. Expected one of {sorted(_SUPPORTED_DIM_ALGOS)}."
+            f"'{dim_reduction_algo}'. Expected one of "
+            f"{sorted(_SUPPORTED_DIM_ALGOS)}."
         )
     if clustering_algo not in _SUPPORTED_CLUSTERING_ALGOS:
         raise ValueError(
@@ -289,12 +288,9 @@ def train_bertopic_model(
             f"Expected one of {sorted(_SUPPORTED_CLUSTERING_ALGOS)}."
         )
 
-    # Fall back to BERTopic's language shortcut only when no explicit model is provided.
-    embedding_language = (
-        "english"
-        if language == "English"
-        else "multilingual"
-    )
+    # Fall back to BERTopic's language shortcut only when no explicit model is
+    # provided.
+    embedding_language = "english" if language == "English" else "multilingual"
 
     tokenizer = None
     if language == "Chinese":
@@ -310,7 +306,8 @@ def train_bertopic_model(
             tokenizer = tokenize_zh
         except ImportError:
             LOGGER.warning(
-                "'jieba' is missing. Default tokenization will be used for Chinese."
+                "'jieba' is missing. Default tokenization will be used for "
+                "Chinese."
             )
 
     vectorizer_model = CountVectorizer(
@@ -436,8 +433,7 @@ def train_bertopic_model(
 
 
 def extract_bertopic_topics(topic_model: BERTopic) -> list[TopicKeywords]:
-    """
-    Extract the keywords and sizes of every BERTopic topic.
+    """Extract the keywords and sizes of every BERTopic topic.
 
     The outlier topic (-1) is skipped. BERTopic pads topics that have fewer
     than ten distinct words with empty strings; those are dropped so that
@@ -472,11 +468,11 @@ def extract_bertopic_topics(topic_model: BERTopic) -> list[TopicKeywords]:
 def generate_bertopic_document_topics_df(
     topics: list[int],
     probabilities: np.ndarray | None,
-    original_df: pd.DataFrame
+    original_df: pd.DataFrame,
 ) -> pd.DataFrame:
-    """
-    Attach BERTopic topic assignments (and confidence when available) to the
-    original DataFrame. ``Dominant_Topic`` and ``Topic_Confidence`` are placed
+    """Attach BERTopic topic assignments to the original DataFrame.
+
+    ``Dominant_Topic`` and ``Topic_Confidence`` (when available) are placed
     as the first two columns.
     """
     if len(topics) != len(original_df):
@@ -488,9 +484,14 @@ def generate_bertopic_document_topics_df(
     formatted_topics = [display_topic_id(int(t)) for t in topics]
 
     result_df = original_df.copy()
-    # Drop any pre-existing columns with our reserved names to avoid collisions.
+    # Drop any pre-existing columns with our reserved names to avoid
+    # collisions.
     result_df = result_df.drop(
-        columns=[c for c in ("Dominant_Topic", "Topic_Confidence") if c in result_df.columns],
+        columns=[
+            c
+            for c in ("Dominant_Topic", "Topic_Confidence")
+            if c in result_df.columns
+        ],
         errors="ignore",
     )
     result_df["Dominant_Topic"] = formatted_topics
@@ -500,17 +501,22 @@ def generate_bertopic_document_topics_df(
             confidence = np.max(probabilities, axis=1)
         else:
             confidence = probabilities
-        result_df["Topic_Confidence"] = [round(float(p), 4) for p in confidence]
+        result_df["Topic_Confidence"] = [
+            round(float(p), 4) for p in confidence
+        ]
     else:
         result_df["Topic_Confidence"] = None
 
-    other_cols = [c for c in result_df.columns if c not in ("Dominant_Topic", "Topic_Confidence")]
+    other_cols = [
+        c
+        for c in result_df.columns
+        if c not in ("Dominant_Topic", "Topic_Confidence")
+    ]
     return result_df[["Dominant_Topic", "Topic_Confidence", *other_cols]]
 
 
 def generate_bertopic_visualizations(topic_model: BERTopic) -> dict[str, str]:
-    """
-    Generate BERTopic visualizations as HTML strings.
+    """Generate BERTopic visualizations as HTML strings.
 
     This function attempts to create three BERTopic visualizations:
     intertopic distance map, topic word-score bar chart, and topic
@@ -535,8 +541,10 @@ def generate_bertopic_visualizations(topic_model: BERTopic) -> dict[str, str]:
 
     if len(valid_topics) < 2:
         error_html = _notice_html(
-            "The visual maps require at least <strong>2 distinct topics</strong>. "
-            f"The model only identified {len(valid_topics)} valid topic(s) in this dataset."
+            "The visual maps require at least <strong>2 distinct "
+            "topics</strong>. "
+            f"The model only identified {len(valid_topics)} valid topic(s) in "
+            "this dataset."
         )
         return {
             "distance_map": error_html,
@@ -593,8 +601,7 @@ def generate_topics_over_time_html(
     timestamps: list[Any],
     nr_bins: int | None = None,
 ) -> str:
-    """
-    Generate an HTML visualization of topics over time using a BERTopic model.
+    """Return an HTML chart of topics over time from a BERTopic model.
 
     Args:
         topic_model: A fitted BERTopic model.

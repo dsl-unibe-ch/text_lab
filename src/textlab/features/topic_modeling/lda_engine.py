@@ -6,7 +6,7 @@ import pandas as pd
 import pyLDAvis
 import pyLDAvis.gensim_models
 
-from .topic_config import TopicKeywords
+from textlab.features.topic_modeling.models import TopicKeywords
 
 _TOP_N_KEYWORDS = 10
 
@@ -19,8 +19,7 @@ def train_lda_model(
     passes: int,
     random_state: int | None = 42,
 ) -> tuple[gensim.models.LdaModel, BagOfWords, corpora.Dictionary]:
-    """
-    Train an LDA model from preprocessed tokenized texts.
+    """Train an LDA model from preprocessed tokenized texts.
 
     This function validates the input documents, builds a dictionary,
     filters extreme tokens, creates a bag-of-words corpus, and fits a
@@ -47,7 +46,9 @@ def train_lda_model(
             preprocessing.
     """
     if not processed_texts:
-        raise ValueError("No processed texts were provided to the LDA trainer.")
+        raise ValueError(
+            "No processed texts were provided to the LDA trainer."
+        )
 
     non_empty_docs = [doc for doc in processed_texts if doc]
     if len(non_empty_docs) < 5:
@@ -68,13 +69,16 @@ def train_lda_model(
     if len(id2word) == 0:
         raise ValueError(
             "The LDA dictionary is empty after filtering extremes. "
-            "Try reducing stopword removal, disabling bigrams, or using more diverse text."
+            "Try reducing stopword removal, disabling bigrams, or using more "
+            "diverse text."
         )
 
     corpus = [id2word.doc2bow(text) for text in processed_texts]
 
     if not any(len(bow) > 0 for bow in corpus):
-        raise ValueError("All bag-of-words documents are empty after preprocessing.")
+        raise ValueError(
+            "All bag-of-words documents are empty after preprocessing."
+        )
 
     lda_model = gensim.models.LdaModel(
         corpus=corpus,
@@ -94,8 +98,7 @@ def extract_lda_topics(
     lda_model: gensim.models.LdaModel,
     num_topics: int,
 ) -> list[TopicKeywords]:
-    """
-    Extract the top keywords of every LDA topic.
+    """Extract the top keywords of every LDA topic.
 
     Args:
         lda_model: A trained gensim LDA model.
@@ -108,7 +111,10 @@ def extract_lda_topics(
     return [
         TopicKeywords(
             topic=i + 1,
-            keywords=[word for word, _ in lda_model.show_topic(i, topn=_TOP_N_KEYWORDS)],
+            keywords=[
+                word
+                for word, _ in lda_model.show_topic(i, topn=_TOP_N_KEYWORDS)
+            ],
         )
         for i in range(num_topics)
     ]
@@ -119,8 +125,7 @@ def generate_lda_document_topics_df(
     corpus: BagOfWords,
     original_df: pd.DataFrame,
 ) -> pd.DataFrame:
-    """
-    Generate a DataFrame with the dominant LDA topic for each document.
+    """Generate a DataFrame with the dominant LDA topic for each document.
 
     This function assigns the most probable topic and its confidence score
     to each document in the original DataFrame.
@@ -177,8 +182,7 @@ def generate_lda_html(
     corpus: BagOfWords,
     id2word: corpora.Dictionary,
 ) -> str:
-    """
-    Generate an HTML visualization for an LDA model using pyLDAvis.
+    """Generate an HTML visualization for an LDA model using pyLDAvis.
 
     Topics are kept in model order (``sort_topics=False``) so that topic N in
     the dashboard is topic N in the keyword and document tables. pyLDAvis

@@ -1,17 +1,17 @@
-"""Backend for the Topic Modeling feature.
+"""Backend for the Topic Modeling feature: topics of a text collection.
 
-Topic extraction from text collections with BERTopic, LDA and Top2Vec,
-including evaluation.
+Interfaces use :mod:`.service`, which runs the analysis in a worker process
+(:mod:`.worker`). The modules behind it:
 
-Moved from ``src/core`` with only import and path updates. The modules are
-reorganized when the feature is refactored (see ``docs/dev/architecture.md``):
+- ``models``: settings, results and choices.
+- ``data``: reading uploads and timestamps.
+- ``embeddings``: sentence-transformer embeddings for BERTopic.
+- ``text``: stopwords and tokenizing.
+- ``pipeline``: runs the chosen algorithm (``bertopic_engine``,
+  ``top2vec_engine``, ``lda_engine``) and the stability runs.
+- ``evaluation``: diversity, coherence, perplexity and stability.
+- ``small_corpus``: recognizing a collection too small to cluster.
+- ``reports``: the topic table, the run report and the result ZIP.
 
-- ``topic_pipeline``: runs the selected algorithm and collects its outputs.
-- ``bertopic_engine``: BERTopic training, topics and visualizations.
-- ``lda_engine``: LDA with gensim and pyLDAvis.
-- ``top2vec_engine``: Top2Vec training and topics.
-- ``evaluation``: diversity, coherence, perplexity and stability metrics.
-- ``small_corpus``: recognizing errors caused by a corpus that is too small.
-- ``topic_config``: configuration and result types.
-- ``topic_utils``: data loading, preprocessing and reports.
+See ``README.md`` in this folder for the pipeline and the files written.
 """

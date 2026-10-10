@@ -56,6 +56,7 @@ _WORKER_SCRIPTS = {
     "textlab.features.ocr.paddle_vl_worker": OCR,
     "textlab.features.ocr.engines.paddle_ocr_worker": OCR,
     "textlab.features.transcription.worker": TRANSCRIBE,
+    "textlab.features.topic_modeling.worker": TOPIC_MODELING,
 }
 
 _RELEASERS: Dict[str, Dict[str, Callable[[], object]]] = {}

@@ -1,18 +1,17 @@
 """Topic-modeling guard rails.
 
-Kept to :mod:`textlab.features.topic_modeling.small_corpus`,
-:mod:`textlab.features.topic_modeling.topic_utils` and
-:mod:`textlab.features.topic_modeling.evaluation`, none of which imports a modeling
-engine: pulling in either engine costs about half a minute.
+Kept to modules that import no modeling engine (``small_corpus``, ``data``,
+``text``, ``embeddings``, ``reports``, ``evaluation``): pulling in either
+engine costs about half a minute.
 """
 
 import io
 import zipfile
 
-
 import pytest
 
-from textlab.features.topic_modeling import small_corpus
+from textlab.features.topic_modeling import data, reports, small_corpus
+from textlab.features.topic_modeling import embeddings as embedding_utils
 
 # Verbatim from the three failures observed on real uploads. They come from
 # three different libraries and two different exception types, and not one of
@@ -22,7 +21,10 @@ UMAP_SPECTRAL = (
     "Use scipy.linalg.eigh(A.toarray()) or reduce k."
 )
 HDBSCAN_NO_CLUSTER = "need at least one array to concatenate"
-ALL_OUTLIERS = "Found array with 0 sample(s) (shape=(0, 384)) while a minimum of 1 is required."
+ALL_OUTLIERS = (
+    "Found array with 0 sample(s) (shape=(0, 384)) while a minimum of 1 is "
+    "required."
+)
 
 
 @pytest.mark.parametrize(
@@ -41,7 +43,10 @@ def test_a_corpus_too_small_is_recognised(exc):
     "exc",
     [
         ValueError("No texts were provided to BERTopic."),
-        ValueError("Invalid ngram_range: lower bound cannot be greater than upper bound."),
+        ValueError(
+            "Invalid ngram_range: lower bound cannot be greater than upper "
+            "bound."
+        ),
         TypeError("unsupported operand type(s) for +: 'int' and 'str'"),
         KeyError("Topic"),
     ],
@@ -63,17 +68,17 @@ def test_the_message_says_what_to_do_instead():
     assert "BERTopic" in str(small_corpus.too_small_error(9, "BERTopic"))
 
 
-def _topic_utils():
-    """Import lazily so the small-corpus tests run without spaCy and NLTK."""
+def _text():
+    """Import lazily so the other tests run without spaCy and NLTK."""
     pytest.importorskip("spacy")
     pytest.importorskip("nltk")
-    from textlab.features.topic_modeling import topic_utils
+    from textlab.features.topic_modeling import text
 
-    return topic_utils
+    return text
 
 
 def _prepare_timestamps():
-    return _topic_utils().prepare_timestamps
+    return data.prepare_timestamps
 
 
 def test_integer_years_are_read_as_years():
@@ -91,7 +96,9 @@ def test_integer_years_are_read_as_years():
 def test_float_years_with_gaps_are_read_as_years():
     """A year column with empty cells is loaded as floats (2019.0, NaN)."""
     pd = pytest.importorskip("pandas")
-    df = pd.DataFrame({"Text": ["a", "b", "c"], "Year": [2019.0, None, 2021.0]})
+    df = pd.DataFrame(
+        {"Text": ["a", "b", "c"], "Year": [2019.0, None, 2021.0]}
+    )
 
     _, timestamps, dropped = _prepare_timestamps()(df, "Year")
 
@@ -99,7 +106,9 @@ def test_float_years_with_gaps_are_read_as_years():
     assert dropped == 1
 
 
-@pytest.mark.parametrize("values", [[1.5e9, 1.6e9], [20190531, 20200101], [2019.5, 2020.0]])
+@pytest.mark.parametrize(
+    "values", [[1.5e9, 1.6e9], [20190531, 20200101], [2019.5, 2020.0]]
+)
 def test_numbers_that_are_not_years_are_rejected(values):
     pd = pytest.importorskip("pandas")
     df = pd.DataFrame({"Text": ["a", "b"], "When": values})
@@ -110,11 +119,16 @@ def test_numbers_that_are_not_years_are_rejected(values):
 
 def test_date_strings_are_still_parsed():
     pd = pytest.importorskip("pandas")
-    df = pd.DataFrame({"Text": ["a", "b", "c"], "Date": ["2020-03-01", "oops", "2019-12-31"]})
+    df = pd.DataFrame(
+        {"Text": ["a", "b", "c"], "Date": ["2020-03-01", "oops", "2019-12-31"]}
+    )
 
     _, timestamps, dropped = _prepare_timestamps()(df, "Date")
 
-    assert [str(ts.date()) for ts in timestamps] == ["2019-12-31", "2020-03-01"]
+    assert [str(ts.date()) for ts in timestamps] == [
+        "2019-12-31",
+        "2020-03-01",
+    ]
     assert dropped == 1
 
 
@@ -128,7 +142,7 @@ def test_date_strings_are_still_parsed():
     ids=["semicolon", "tab", "comma"],
 )
 def test_csv_delimiter_is_detected(content):
-    df = _topic_utils().read_uploaded_table("data.csv", content.encode("utf-8"))
+    df = data.read_uploaded_table("data.csv", content.encode("utf-8"))
 
     assert df.columns.tolist() == ["Text", "Year"]
     assert df["Text"].tolist() == ["first doc", "second doc"]
@@ -137,7 +151,7 @@ def test_csv_delimiter_is_detected(content):
 def test_quoted_text_with_semicolons_keeps_comma_delimiter():
     content = 'Text,Year\n"one; two; three",2019\n"four; five",2020\n'
 
-    df = _topic_utils().read_uploaded_table("data.csv", content.encode("utf-8"))
+    df = data.read_uploaded_table("data.csv", content.encode("utf-8"))
 
     assert df.columns.tolist() == ["Text", "Year"]
     assert df["Text"].tolist() == ["one; two; three", "four; five"]
@@ -147,7 +161,7 @@ def test_windows_encoded_csv_keeps_accents():
     """Excel on Windows saves CSV as cp1252, which is not valid UTF-8."""
     content = "Text;Ort\nÜber die Brücke;Zürich\n".encode("cp1252")
 
-    df = _topic_utils().read_uploaded_table("data.csv", content)
+    df = data.read_uploaded_table("data.csv", content)
 
     assert df.loc[0, "Text"] == "Über die Brücke"
     assert df.loc[0, "Ort"] == "Zürich"
@@ -155,17 +169,17 @@ def test_windows_encoded_csv_keeps_accents():
 
 def test_legacy_xls_is_rejected_with_guidance():
     with pytest.raises(ValueError, match=".xlsx"):
-        _topic_utils().read_uploaded_table("data.xls", b"irrelevant")
+        data.read_uploaded_table("data.xls", b"irrelevant")
 
 
 def test_zip_text_files_are_decoded_without_losing_characters():
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
-        archive.writestr("utf8.txt", "Café crème".encode("utf-8"))
+        archive.writestr("utf8.txt", "Café crème".encode())
         archive.writestr("windows.txt", "Café crème".encode("cp1252"))
         archive.writestr("empty.txt", b"   ")
 
-    df = _topic_utils().load_zip_texts(buffer.getvalue())
+    df = data.load_zip_texts(buffer.getvalue())
 
     assert sorted(df["Filename"]) == ["utf8.txt", "windows.txt"]
     assert set(df["Text"]) == {"Café crème"}
@@ -175,36 +189,35 @@ def test_zip_text_files_are_decoded_without_losing_characters():
 def test_long_text_is_split_without_losing_content(max_chars):
     text = "alpha beta gamma delta epsilon zetaetaeta"
 
-    chunks = _topic_utils().split_long_text(text, max_chars)
+    chunks = _text().split_long_text(text, max_chars)
 
     assert "".join(chunks) == text
     assert all(len(chunk) <= max_chars for chunk in chunks)
 
 
 def test_long_text_is_split_at_spaces():
-    chunks = _topic_utils().split_long_text("aaa bbb ccc", 6)
+    chunks = _text().split_long_text("aaa bbb ccc", 6)
 
     assert chunks == ["aaa", " bbb", " ccc"]
 
 
 def test_time_bins_only_apply_when_there_are_more_timestamps():
-    resolve_time_bins = _topic_utils().resolve_time_bins
+    resolve_time_bins = data.resolve_time_bins
 
     assert resolve_time_bins([2019, 2020, 2020, 2021], 20) is None
     assert resolve_time_bins(list(range(50)), 20) == 20
 
 
 def test_topic_table_joins_keywords():
-    from textlab.features.topic_modeling.topic_config import TopicKeywords
+    from textlab.features.topic_modeling.models import TopicKeywords
 
     topics = [
         TopicKeywords(topic=1, keywords=["tax", "budget"], count=12),
         TopicKeywords(topic=2, keywords=["rail"], count=3),
     ]
-    utils = _topic_utils()
 
-    with_counts = utils.build_topic_table(topics)
-    without_counts = utils.build_topic_table(topics, with_counts=False)
+    with_counts = reports.build_topic_table(topics)
+    without_counts = reports.build_topic_table(topics, with_counts=False)
 
     assert with_counts.columns.tolist() == ["Topic", "Count", "Keywords"]
     assert with_counts["Keywords"].tolist() == ["tax, budget", "rail"]
@@ -212,14 +225,14 @@ def test_topic_table_joins_keywords():
 
 
 def test_empty_topic_table_keeps_its_columns():
-    table = _topic_utils().build_topic_table([])
+    table = reports.build_topic_table([])
 
     assert table.empty
     assert table.columns.tolist() == ["Topic", "Count", "Keywords"]
 
 
 def _evaluation():
-    _topic_utils()
+    _text()
     pytest.importorskip("gensim")
     from textlab.features.topic_modeling import evaluation
 
@@ -233,7 +246,9 @@ def test_identical_runs_are_perfectly_stable():
 
 
 def test_disjoint_runs_have_zero_stability():
-    stability = _evaluation().calculate_jaccard_stability([["a", "b"]], [["c", "d"]])
+    stability = _evaluation().calculate_jaccard_stability(
+        [["a", "b"]], [["c", "d"]]
+    )
 
     assert stability == 0.0
 
@@ -281,7 +296,7 @@ class _FakeEmbeddingModel:
 
 
 def test_long_document_is_split_into_token_chunks():
-    chunks = _topic_utils().split_into_token_chunks(
+    chunks = embedding_utils.split_into_token_chunks(
         "a b c d e f g h i j", _WordTokenizer(), 4
     )
 
@@ -290,12 +305,13 @@ def test_long_document_is_split_into_token_chunks():
 
 def test_short_documents_are_embedded_as_before():
     np = pytest.importorskip("numpy")
-    utils = _topic_utils()
     texts = ["a b", "c d e"]
 
-    plain = utils.embed_documents(_FakeEmbeddingModel(), texts)
+    plain = embedding_utils.embed_documents(_FakeEmbeddingModel(), texts)
     model = _FakeEmbeddingModel()
-    chunked = utils.embed_documents(model, texts, chunk_long_documents=True)
+    chunked = embedding_utils.embed_documents(
+        model, texts, chunk_long_documents=True
+    )
 
     assert np.allclose(plain, chunked)
     assert model.encoded == [texts]
@@ -305,7 +321,7 @@ def test_long_documents_are_embedded_in_chunks_that_fit():
     model = _FakeEmbeddingModel()
     long_text = "w1 w2 w3 w4 w5 w6 w7 w8 w9"
 
-    embeddings = _topic_utils().embed_documents(
+    embeddings = embedding_utils.embed_documents(
         model, ["a b", long_text], chunk_long_documents=True
     )
 
@@ -318,7 +334,7 @@ def test_chunk_average_is_weighted_by_length_and_keeps_scale():
     np = pytest.importorskip("numpy")
     chunk_embeddings = np.array([[1.0, 0.0], [0.0, 1.0], [3.0, 4.0]])
 
-    averages = _topic_utils().average_chunk_embeddings(
+    averages = embedding_utils.average_chunk_embeddings(
         chunk_embeddings,
         owners=np.array([0, 0, 1]),
         weights=np.array([3.0, 1.0, 2.0]),

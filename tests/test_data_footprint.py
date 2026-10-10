@@ -19,7 +19,7 @@ PACKAGE = Path(__file__).resolve().parents[1] / "src" / "textlab"
 
 #: Files allowed to use the home directory, with the reason.
 HOME_ALLOWED = {
-    "features/topic_modeling/topic_utils.py": (
+    "features/topic_modeling/embeddings.py": (
         "custom embedding models the user picks are downloaded to their own "
         "Hugging Face cache; these are model files, not user data"
     ),

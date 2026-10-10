@@ -60,8 +60,10 @@ progress and result through a job folder in the caller's area, removed when
 the run ends; the transcription feature stages uploads the same way
 (`staged_uploads`, `staged_zip`), translation writes the PDF pages it
 sends to OCR to `translation/ocr-*`, OCR keeps each run in `ocr/job-*`,
-`ocr/batch-*` or, for manual engine selection, `ocr/manual-*`, and Survey
-writes the blank form's images and rebuilt exports to `survey/*`.
+`ocr/batch-*` or, for manual engine selection, `ocr/manual-*`, Survey
+writes the blank form's images and rebuilt exports to `survey/*`, and Topic
+Modeling writes the table it hands to its worker, and the result ZIP, to
+`topic_modeling/run-*`.
 Temporary folders are removed even when a tool left read-only files in them
 (`storage.remove_tree`). Without `TEXT_LAB_WORKDIR` (tests, scripts run by
 hand), the workspace is a private folder under the system temporary

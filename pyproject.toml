@@ -56,22 +56,11 @@ extend-exclude = [
     "src/textlab/ui/streamlit/auth.py",
     "src/textlab/ui/streamlit/pages/Chat.py",
     "src/textlab/ui/streamlit/pages/Knowledge_Graph.py",
-    "src/textlab/ui/streamlit/pages/Topic_Modeling.py",
     "src/textlab/ui/streamlit/pages/Visualize_Data.py",
     # Chat
     "src/textlab/features/chat/chat_engine.py",
     # Knowledge graph
     "src/textlab/features/knowledge_graph/kg_engine.py",
-    # Topic modeling
-    "src/textlab/features/topic_modeling/bertopic_engine.py",
-    "src/textlab/features/topic_modeling/evaluation.py",
-    "src/textlab/features/topic_modeling/lda_engine.py",
-    "src/textlab/features/topic_modeling/small_corpus.py",
-    "src/textlab/features/topic_modeling/top2vec_engine.py",
-    "src/textlab/features/topic_modeling/topic_config.py",
-    "src/textlab/features/topic_modeling/topic_pipeline.py",
-    "src/textlab/features/topic_modeling/topic_utils.py",
-    "src/textlab/features/topic_modeling/tests",
     # Visualization
     "src/textlab/features/visualization/mcp_server.py",
     "src/textlab/features/visualization/plot_data.py",

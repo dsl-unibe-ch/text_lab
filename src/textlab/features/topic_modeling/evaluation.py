@@ -1,5 +1,7 @@
-"""Evaluation metrics for topic models: diversity, coherence, perplexity and
-stability."""
+"""Evaluation metrics for topic models.
+
+Diversity, coherence, perplexity and stability.
+"""
 
 import logging
 from typing import Any
@@ -8,15 +10,21 @@ import numpy as np
 from gensim.corpora import Dictionary
 from gensim.models.coherencemodel import CoherenceModel
 
-from .topic_config import Algorithm, TopicModelingConfig, TopicModelingRunResult
-from .topic_utils import preprocess_texts_for_lda, tokenize_texts_for_coherence
+from textlab.features.topic_modeling.models import (
+    Algorithm,
+    TopicModelingConfig,
+    TopicModelingRunResult,
+)
+from textlab.features.topic_modeling.text import (
+    preprocess_texts_for_lda,
+    tokenize_texts_for_coherence,
+)
 
 LOGGER = logging.getLogger(__name__)
 
 
 def _rounded_or_none(value: float) -> float | None:
-    """
-    Round a metric value for display, discarding non-finite results.
+    """Round a metric value for display, discarding non-finite results.
 
     Args:
         value: The raw metric value.
@@ -37,15 +45,14 @@ def evaluate_topic_quality(
     tokenized_texts: list[list[str]] | None = None,
     use_lemmatization: bool = True,
 ) -> dict[str, float | None]:
-    """
-    Calculate Topic Diversity and Gensim Coherence metrics (C_v, C_npmi, U_mass).
+    """Calculate topic diversity and Gensim coherence (C_v, C_npmi, U_mass).
 
     A metric that cannot be computed (no keywords, no keyword found in the
     reference corpus, or a Gensim failure) is reported as ``None`` rather
     than a number, so that it is never mistaken for a real score.
 
     Args:
-        topic_keywords: A list of topics, where each topic is a list of top words.
+        topic_keywords: The topics, each a list of top words.
         raw_texts: The raw string documents from the dataset.
         language: The primary language of the texts.
         custom_stopwords_str: Comma-separated custom stopwords to ignore.
@@ -75,11 +82,14 @@ def evaluate_topic_quality(
     if not topic_keywords or not raw_texts:
         return metrics
 
-    # 1. Calculate Topic Diversity (Percentage of unique words across all topics)
+    # 1. Calculate Topic Diversity (Percentage of unique words across all
+    # topics)
     all_words = [word for topic in topic_keywords for word in topic]
     unique_words = set(all_words)
     if all_words:
-        metrics["Topic Diversity"] = round(len(unique_words) / len(all_words), 4)
+        metrics["Topic Diversity"] = round(
+            len(unique_words) / len(all_words), 4
+        )
 
     # 2. Tokenize texts (or reuse a pre-computed tokenization) for Gensim.
     if tokenized_texts is None:
@@ -126,7 +136,9 @@ def evaluate_topic_quality(
                 coherence=measure,
                 **reference,
             )
-            metrics[metric_name] = _rounded_or_none(coherence_model.get_coherence())
+            metrics[metric_name] = _rounded_or_none(
+                coherence_model.get_coherence()
+            )
         except Exception:
             LOGGER.exception("Could not compute %s.", metric_name)
 
@@ -138,8 +150,7 @@ def evaluate_run(
     raw_texts: list[str],
     config: TopicModelingConfig,
 ) -> dict[str, float | None]:
-    """
-    Calculate all evaluation metrics that apply to a finished run.
+    """Calculate all evaluation metrics that apply to a finished run.
 
     Args:
         run_result: The output of the topic modeling pipeline.
@@ -160,7 +171,9 @@ def evaluate_run(
     )
 
     if "lda_model" in run_result and "corpus" in run_result:
-        perplexity = calculate_lda_perplexity(run_result["lda_model"], run_result["corpus"])
+        perplexity = calculate_lda_perplexity(
+            run_result["lda_model"], run_result["corpus"]
+        )
         if perplexity is not None:
             metrics["LDA Perplexity"] = perplexity
 
@@ -171,22 +184,23 @@ def calculate_lda_perplexity(
     lda_model: Any,
     corpus: list[list[tuple[int, int]]],
 ) -> float | None:
-    """
-    Calculate the perplexity of a trained Gensim LDA model.
+    """Calculate the perplexity of a trained Gensim LDA model.
 
-    Perplexity is a statistical measure of how well a probability model predicts
-    a sample. Lower perplexity indicates better generalization performance.
+    Perplexity measures how well the model predicts the documents it was
+    trained on; lower is better. It is not measured on held-out documents,
+    so it does not show how well the model generalizes.
 
     Args:
         lda_model: A trained gensim.models.LdaModel instance.
         corpus: The bag-of-words corpus used to train or evaluate the model.
 
     Returns:
-        The calculated perplexity score as a float, rounded to 4 decimal places,
-        or ``None`` if the calculation failed or returned a non-finite value.
+        The perplexity, rounded to 4 decimal places, or ``None`` if the
+        calculation failed or returned a non-finite value.
     """
     try:
-        # Gensim returns the bound (log perplexity). We exponentiate it for the standard metric.
+        # Gensim returns the bound (log perplexity). We exponentiate it for the
+        # standard metric.
         log_perplexity = lda_model.log_perplexity(corpus)
         perplexity = float(np.exp2(-log_perplexity))
         if not np.isfinite(perplexity):
@@ -198,11 +212,9 @@ def calculate_lda_perplexity(
 
 
 def calculate_jaccard_stability(
-    run_1_topics: list[list[str]],
-    run_2_topics: list[list[str]]
+    run_1_topics: list[list[str]], run_2_topics: list[list[str]]
 ) -> float:
-    """
-    Calculate the Topic Stability between two independent model runs.
+    """Calculate the Topic Stability between two independent model runs.
 
     This function uses Jaccard Similarity to compare topic keywords. It finds
     the best-matching topic in Run 2 for every topic in Run 1 and averages
@@ -210,8 +222,8 @@ def calculate_jaccard_stability(
     topics; 0.0 means completely different.
 
     Args:
-        run_1_topics: A list of topics from the first run (each topic is a list of words).
-        run_2_topics: A list of topics from the second run (each topic is a list of words).
+        run_1_topics: The topics of the first run, each a list of words.
+        run_2_topics: The topics of the second run, each a list of words.
 
     Returns:
         The average Jaccard stability score across all topics as a float,

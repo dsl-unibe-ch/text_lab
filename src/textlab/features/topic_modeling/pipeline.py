@@ -7,37 +7,43 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from .bertopic_engine import (
+from textlab.features.topic_modeling.bertopic_engine import (
     extract_bertopic_topics,
     generate_bertopic_document_topics_df,
     generate_bertopic_visualizations,
     generate_topics_over_time_html,
     train_bertopic_model,
 )
-from .evaluation import calculate_jaccard_stability
-from .lda_engine import (
+from textlab.features.topic_modeling.data import (
+    resolve_time_bins,
+    validate_minimum_documents,
+)
+from textlab.features.topic_modeling.evaluation import (
+    calculate_jaccard_stability,
+)
+from textlab.features.topic_modeling.lda_engine import (
     extract_lda_topics,
     generate_lda_document_topics_df,
     generate_lda_html,
     train_lda_model,
 )
-from .top2vec_engine import (
+from textlab.features.topic_modeling.models import (
+    STABILITY_RUNS,
+    Algorithm,
+    TopicModelingConfig,
+    TopicModelingRunResult,
+)
+from textlab.features.topic_modeling.reports import build_topic_table
+from textlab.features.topic_modeling.text import (
+    get_stopword_set,
+    preprocess_texts_for_lda,
+)
+from textlab.features.topic_modeling.top2vec_engine import (
     extract_top2vec_topics,
     generate_top2vec_barchart_html,
     generate_top2vec_document_topics_df,
     train_top2vec_model,
 )
-from .topic_config import Algorithm, TopicModelingConfig, TopicModelingRunResult
-from .topic_utils import (
-    build_topic_table,
-    get_stopword_set,
-    preprocess_texts_for_lda,
-    resolve_time_bins,
-    validate_minimum_documents,
-)
-
-#: Total number of runs compared by the topic stability evaluation.
-STABILITY_RUNS = 3
 
 
 def run_topic_modeling_pipeline(
@@ -48,8 +54,7 @@ def run_topic_modeling_pipeline(
     precomputed_embeddings: np.ndarray | None = None,
     include_dashboards: bool = True,
 ) -> TopicModelingRunResult:
-    """
-    Execute the selected topic modeling pipeline.
+    """Execute the selected topic modeling pipeline.
 
     Args:
         df: The prepared input DataFrame.
@@ -96,8 +101,7 @@ def evaluate_topic_stability(
     embedding_model: Any = None,
     precomputed_embeddings: np.ndarray | None = None,
 ) -> float:
-    """
-    Measure how reproducible the topics are across independent runs.
+    """Measure how reproducible the topics are across independent runs.
 
     The model is trained ``STABILITY_RUNS - 1`` more times with unlocked
     random seeds. Every pair of runs (including the base run) is compared
@@ -134,8 +138,7 @@ def evaluate_topic_stability(
 
 
 def _unseeded_copy(config: TopicModelingConfig) -> TopicModelingConfig:
-    """
-    Copy a configuration with every random seed unlocked.
+    """Copy a configuration with every random seed unlocked.
 
     Args:
         config: The configuration to copy.
@@ -157,8 +160,7 @@ def _run_lda_pipeline(
     config: TopicModelingConfig,
     include_dashboards: bool,
 ) -> TopicModelingRunResult:
-    """
-    Execute the LDA topic modeling pipeline.
+    """Execute the LDA topic modeling pipeline.
 
     Args:
         df: The prepared input DataFrame.
@@ -206,8 +208,7 @@ def _run_top2vec_pipeline(
     config: TopicModelingConfig,
     include_dashboards: bool,
 ) -> TopicModelingRunResult:
-    """
-    Execute the Top2Vec topic modeling pipeline.
+    """Execute the Top2Vec topic modeling pipeline.
 
     Args:
         df: The prepared input DataFrame.
@@ -230,8 +231,8 @@ def _run_top2vec_pipeline(
     topics = extract_top2vec_topics(topic_model)
     dashboard_assets: dict[str, str] = {}
     if include_dashboards:
-        dashboard_assets["top2vec_barchart.html"] = generate_top2vec_barchart_html(
-            topic_model
+        dashboard_assets["top2vec_barchart.html"] = (
+            generate_top2vec_barchart_html(topic_model)
         )
 
     return {
@@ -251,8 +252,7 @@ def _run_bertopic_pipeline(
     precomputed_embeddings: np.ndarray | None = None,
     include_dashboards: bool = True,
 ) -> TopicModelingRunResult:
-    """
-    Execute the BERTopic topic modeling pipeline.
+    """Execute the BERTopic topic modeling pipeline.
 
     Args:
         df: The prepared input DataFrame.
@@ -296,16 +296,20 @@ def _run_bertopic_pipeline(
             "similarity_heatmap.html": visualizations.get("heatmap", ""),
         }
         if config.enable_dtm and timestamps is not None:
-            dashboard_assets["topics_over_time.html"] = generate_topics_over_time_html(
-                topic_model,
-                raw_texts,
-                timestamps,
-                nr_bins=resolve_time_bins(timestamps, config.time_bins),
+            dashboard_assets["topics_over_time.html"] = (
+                generate_topics_over_time_html(
+                    topic_model,
+                    raw_texts,
+                    timestamps,
+                    nr_bins=resolve_time_bins(timestamps, config.time_bins),
+                )
             )
 
     return {
         "topic_df": build_topic_table(topics),
-        "docs_df": generate_bertopic_document_topics_df(topic_ids, probabilities, df),
+        "docs_df": generate_bertopic_document_topics_df(
+            topic_ids, probabilities, df
+        ),
         "dashboard_assets": dashboard_assets,
         "topic_keywords": [topic.keywords for topic in topics],
     }

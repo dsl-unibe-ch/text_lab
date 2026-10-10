@@ -159,6 +159,13 @@ A batch job would call `transcribe_files()` directly, and a web frontend
 would call `run_transcription()` with its own progress callback; neither
 needs the Streamlit page.
 
+An exception in a worker reaches the caller as `common.jobs.WorkerError`,
+with the worker's traceback in `details` and the exception's class name and
+message in `error_type` and `error_message`. A service can turn errors users
+can act on back into a plain exception: Topic Modeling re-raises a worker's
+`ValueError` (a collection too small to cluster, an unreadable timestamp
+column) with its message, and the page shows it without a traceback.
+
 ### When a feature runs in the app process: translation
 
 Not every feature uses a worker process. Translation keeps its model loaded
@@ -210,7 +217,7 @@ feature follows the rules above.
 | OCR | `features/ocr/` | `OCR.py` | Refactored |
 | Survey | `features/survey/` | part of `OCR.py` (partly hidden) | Refactored |
 | Translation | `features/translation/` | `Translate.py` | Refactored |
-| Topic Modeling | `features/topic_modeling/` | `Topic_Modeling.py` | Moved |
+| Topic Modeling | `features/topic_modeling/` | `Topic_Modeling.py` | Refactored |
 | Visualization | `features/visualization/` | `Visualize_Data.py` | Moved |
 | Chat | `features/chat/` | `Chat.py` | Moved |
 | Knowledge Graph | `features/knowledge_graph/` | `Knowledge_Graph.py` | Moved |

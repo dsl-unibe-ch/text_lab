@@ -47,11 +47,14 @@ def test_a_failure_carries_the_worker_traceback():
     with pytest.raises(jobs.WorkerError, match=expected) as error:
         run({"mode": "fail"})
     assert "Traceback" in error.value.details
+    assert error.value.error_type == "ValueError"
+    assert error.value.error_message == "bad input"
 
 
 def test_a_crash_without_result_is_reported():
-    with pytest.raises(jobs.WorkerError, match="exit code 3"):
+    with pytest.raises(jobs.WorkerError, match="exit code 3") as error:
         run({"mode": "crash"})
+    assert error.value.error_type == ""
 
 
 def test_cancel_stops_the_worker(workspace):

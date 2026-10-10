@@ -1,48 +1,36 @@
-"""Streamlit page for topic modeling with BERTopic, Top2Vec and LDA."""
+"""Streamlit page for topic modeling with BERTopic, Top2Vec and LDA.
+
+The page collects the data and settings; the analysis runs in a worker
+process through :mod:`textlab.features.topic_modeling.service`.
+"""
 
 import logging
 import traceback
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
-import numpy as np
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 from streamlit.delta_generator import DeltaGenerator
 
-from textlab.ui.streamlit.auth import check_token
 from textlab.common import gpu_manager
-from textlab.ui.streamlit.components.gpu import free_gpu_for
-from textlab.features.topic_modeling.evaluation import evaluate_run
-from textlab.features.topic_modeling.topic_config import (
+from textlab.features.topic_modeling import service
+from textlab.features.topic_modeling.service import (
+    DEFAULT_EMBEDDING_MODEL_ENGLISH,
+    DEFAULT_EMBEDDING_MODEL_MULTILINGUAL,
     DEFAULT_TIME_BINS,
+    STABILITY_RUNS,
+    SUPPORTED_LANGUAGES,
+    TABLE_EXTENSIONS,
     TOP2VEC_BACKEND_LABELS,
     Algorithm,
     TopicModelingConfig,
 )
-from textlab.features.topic_modeling.topic_pipeline import (
-    STABILITY_RUNS,
-    evaluate_topic_stability,
-    run_topic_modeling_pipeline,
-)
-from textlab.features.topic_modeling.topic_utils import (
-    DEFAULT_EMBEDDING_MODEL_ENGLISH,
-    DEFAULT_EMBEDDING_MODEL_MULTILINGUAL,
-    SUPPORTED_LANGUAGES,
-    TABLE_EXTENSIONS,
-    build_results_zip,
-    count_docs_exceeding_context,
-    drop_empty_text_rows,
-    embed_documents,
-    generate_metadata_report,
-    get_embedding_model_name,
-    load_sentence_transformer,
-    load_zip_texts,
-    prepare_timestamps,
-    read_uploaded_table,
-    resolve_bertopic_embedding_model_id,
-)
+from textlab.ui.streamlit.auth import check_token
+from textlab.ui.streamlit.components.gpu import free_gpu_for
+from textlab.ui.streamlit.components.progress import StatusBox
 
 LOGGER = logging.getLogger(__name__)
 
@@ -55,9 +43,6 @@ _BASE_METRIC_KEYS = (
     "Coherence (C_npmi)",
     "Coherence (U_mass)",
 )
-
-# Share of documents above the embedding context window that triggers a notice.
-_TRUNCATION_WARNING_RATIO = 0.10
 
 _METRICS_EXPLANATION = """
 **Topic Diversity** — the proportion of unique words across
@@ -115,13 +100,14 @@ class _DataSelection:
     time_bins: int = DEFAULT_TIME_BINS
 
 
-SettingsRenderer = Callable[[DeltaGenerator, DeltaGenerator, str], dict[str, Any]]
+SettingsRenderer = Callable[
+    [DeltaGenerator, DeltaGenerator, str], dict[str, Any]
+]
 
 
 @st.cache_data(show_spinner=False, max_entries=2)
 def _load_table(filename: str, data: bytes) -> pd.DataFrame:
-    """
-    Parse an uploaded table once per file, dropping fully empty rows.
+    """Parse an uploaded table once per file, dropping fully empty rows.
 
     Args:
         filename: The uploaded file name, used to pick the parser.
@@ -130,13 +116,12 @@ def _load_table(filename: str, data: bytes) -> pd.DataFrame:
     Returns:
         The loaded DataFrame.
     """
-    return read_uploaded_table(filename, data).dropna(how="all")
+    return service.load_table(filename, data)
 
 
 @st.cache_data(show_spinner=False, max_entries=2)
 def _load_archive(data: bytes) -> pd.DataFrame:
-    """
-    Extract the text files of an uploaded ZIP archive once per file.
+    """Extract the text files of an uploaded ZIP archive once per file.
 
     Args:
         data: The raw archive content.
@@ -144,12 +129,11 @@ def _load_archive(data: bytes) -> pd.DataFrame:
     Returns:
         A DataFrame with the columns ``Filename`` and ``Text``.
     """
-    return load_zip_texts(data)
+    return service.load_archive(data)
 
 
 def _format_metric(value: float | None, as_percent: bool = False) -> str:
-    """
-    Format an evaluation metric for display.
+    """Format an evaluation metric for display.
 
     Args:
         value: The metric value, or None if it could not be computed.
@@ -164,8 +148,7 @@ def _format_metric(value: float | None, as_percent: bool = False) -> str:
 
 
 def _render_data_source_section() -> _DataSelection | None:
-    """
-    Render the data source section and load the uploaded data.
+    """Render the data source section and load the uploaded data.
 
     Returns:
         The loaded data and selected columns, or None if nothing is uploaded.
@@ -193,16 +176,8 @@ def _render_data_source_section() -> _DataSelection | None:
     try:
         if is_tabular:
             df = _load_table(uploaded_file.name, uploaded_file.getvalue())
-            if df.empty or len(df.columns) == 0:
-                raise ValueError(
-                    "The uploaded file does not contain any usable rows or columns."
-                )
         else:
             df = _load_archive(uploaded_file.getvalue())
-            if df.empty:
-                raise ValueError(
-                    "The ZIP archive does not contain any non-empty .txt files."
-                )
     except Exception as exc:
         st.error(f"Error loading file: {exc}")
         st.stop()
@@ -211,12 +186,15 @@ def _render_data_source_section() -> _DataSelection | None:
         return _render_column_selection(uploaded_file.name, df)
 
     st.success(f"Successfully loaded {len(df)} documents from archive.")
-    return _DataSelection(filename=uploaded_file.name, df=df, text_column="Text")
+    return _DataSelection(
+        filename=uploaded_file.name, df=df, text_column="Text"
+    )
 
 
-def _render_column_selection(filename: str, df: pd.DataFrame) -> _DataSelection:
-    """
-    Let the user pick the text column and, optionally, a timestamp column.
+def _render_column_selection(
+    filename: str, df: pd.DataFrame
+) -> _DataSelection:
+    """Let the user pick the text column and, optionally, a timestamp column.
 
     Args:
         filename: The uploaded file name.
@@ -231,7 +209,10 @@ def _render_column_selection(filename: str, df: pd.DataFrame) -> _DataSelection:
         text_column = st.selectbox(
             "Target Text Column",
             options=df.columns.tolist(),
-            help="Select the column containing the raw text you wish to analyze.",
+            help=(
+                "Select the column containing the raw text you wish to "
+                "analyze."
+            ),
         )
 
     date_column = None
@@ -245,9 +226,13 @@ def _render_column_selection(filename: str, df: pd.DataFrame) -> _DataSelection:
             ),
         )
         if enable_dtm:
-            date_options = [column for column in df.columns if column != text_column]
+            date_options = [
+                column for column in df.columns if column != text_column
+            ]
             if date_options:
-                date_column = st.selectbox("Timestamp Column", options=date_options)
+                date_column = st.selectbox(
+                    "Timestamp Column", options=date_options
+                )
                 time_bins = int(
                     st.number_input(
                         "Number of Time Bins",
@@ -256,8 +241,10 @@ def _render_column_selection(filename: str, df: pd.DataFrame) -> _DataSelection:
                         value=DEFAULT_TIME_BINS,
                         step=1,
                         help=(
-                            "Timestamps are grouped into this many equal-width "
-                            "intervals. If there are fewer distinct timestamps, "
+                            "Timestamps are grouped into this many "
+                            "equal-width "
+                            "intervals. If there are fewer distinct "
+                            "timestamps, "
                             "each one is kept as its own point."
                         ),
                     )
@@ -275,8 +262,7 @@ def _render_column_selection(filename: str, df: pd.DataFrame) -> _DataSelection:
 
 
 def _render_custom_stopwords() -> str:
-    """
-    Render the custom stopword input shared by BERTopic and LDA.
+    """Render the custom stopword input shared by BERTopic and LDA.
 
     Returns:
         The comma-separated stopwords entered by the user.
@@ -295,8 +281,7 @@ def _render_auto_topic_count(
     max_topics: int = 100,
     show_auto_notice: bool = False,
 ) -> int | str:
-    """
-    Render the "auto-detect" checkbox with a manual topic-count fallback.
+    """Render the "auto-detect" checkbox with a manual topic-count fallback.
 
     Args:
         max_topics: The upper bound of the manual topic-count slider.
@@ -322,8 +307,7 @@ def _render_auto_topic_count(
 
 
 def _render_bertopic_clustering() -> dict[str, Any]:
-    """
-    Render the BERTopic clustering engine and topic-count settings.
+    """Render the BERTopic clustering engine and topic-count settings.
 
     Returns:
         The ``clustering_algo``, ``clustering_params`` and ``num_topics``
@@ -371,8 +355,7 @@ def _render_bertopic_clustering() -> dict[str, Any]:
 
 
 def _render_embedding_model_choice(language: str) -> dict[str, Any]:
-    """
-    Render the BERTopic embedding model selection.
+    """Render the BERTopic embedding model selection.
 
     Args:
         language: The selected primary language.
@@ -394,8 +377,10 @@ def _render_embedding_model_choice(language: str) -> dict[str, Any]:
             "Which sentence-transformer should embed documents?",
             [
                 f"Default for language ({default_model})",
-                f"English only – {DEFAULT_EMBEDDING_MODEL_ENGLISH} (256 tokens)",
-                f"Multilingual – {DEFAULT_EMBEDDING_MODEL_MULTILINGUAL} (128 tokens)",
+                f"English only – {DEFAULT_EMBEDDING_MODEL_ENGLISH} (256 "
+                "tokens)",
+                f"Multilingual – {DEFAULT_EMBEDDING_MODEL_MULTILINGUAL} (128 "
+                "tokens)",
                 "Custom HuggingFace model",
             ],
             help=(
@@ -426,8 +411,10 @@ def _render_embedding_model_choice(language: str) -> dict[str, Any]:
                 "Allow custom code from this model repository",
                 value=False,
                 help=(
-                    "Some long-context models (e.g. Jina, Nomic) ship their own "
-                    "Python code. Enable this only for repositories you trust: "
+                    "Some long-context models (e.g. Jina, Nomic) ship their "
+                    "own "
+                    "Python code. Enable this only for repositories you "
+                    "trust: "
                     "the code runs on the compute node under your account."
                 ),
             )
@@ -452,8 +439,7 @@ def _render_embedding_model_choice(language: str) -> dict[str, Any]:
 
 
 def _render_vocabulary_settings() -> dict[str, Any]:
-    """
-    Render the BERTopic keyword extraction settings.
+    """Render the BERTopic keyword extraction settings.
 
     Returns:
         The ``ngram_range``, ``min_df`` and ``reduce_frequent`` configuration
@@ -493,8 +479,7 @@ def _render_vocabulary_settings() -> dict[str, Any]:
 
 
 def _render_dim_reduction_settings() -> dict[str, Any]:
-    """
-    Render the BERTopic dimensionality reduction settings.
+    """Render the BERTopic dimensionality reduction settings.
 
     Returns:
         The ``dim_reduction_algo`` and ``dim_params`` configuration fields.
@@ -520,7 +505,9 @@ def _render_dim_reduction_settings() -> dict[str, Any]:
         dim_reduction_algo = dim_mapping[dim_reduction_raw]
 
         if dim_reduction_algo != "None":
-            dim_params["n_components"] = st.slider("Target Dimensions", 2, 50, 5)
+            dim_params["n_components"] = st.slider(
+                "Target Dimensions", 2, 50, 5
+            )
 
             if dim_reduction_algo == "UMAP":
                 dim_params["n_neighbors"] = st.slider(
@@ -541,7 +528,9 @@ def _render_dim_reduction_settings() -> dict[str, Any]:
                     step=0.01,
                 )
 
-            lock_seed = st.checkbox("Lock Seed for Reproducibility", value=True)
+            lock_seed = st.checkbox(
+                "Lock Seed for Reproducibility", value=True
+            )
             dim_params["random_state"] = 42 if lock_seed else None
 
     return {"dim_reduction_algo": dim_reduction_algo, "dim_params": dim_params}
@@ -551,8 +540,7 @@ def _render_outlier_settings(
     clustering_algo: str,
     min_cluster_size: int,
 ) -> tuple[int | None, bool]:
-    """
-    Render the HDBSCAN outlier settings.
+    """Render the HDBSCAN outlier settings.
 
     Args:
         clustering_algo: The selected clustering engine.
@@ -587,8 +575,7 @@ def _render_bertopic_settings(
     col_adv: DeltaGenerator,
     language: str,
 ) -> dict[str, Any]:
-    """
-    Render all BERTopic settings.
+    """Render all BERTopic settings.
 
     Args:
         col_basic: The column for core settings.
@@ -625,8 +612,7 @@ def _render_top2vec_settings(
     col_adv: DeltaGenerator,
     language: str,
 ) -> dict[str, Any]:
-    """
-    Render all Top2Vec settings.
+    """Render all Top2Vec settings.
 
     Args:
         col_basic: The column for core settings.
@@ -651,7 +637,10 @@ def _render_top2vec_settings(
         }
         backend_label = st.radio(
             "Embedding Backend",
-            [TOP2VEC_BACKEND_LABELS["transformer"], TOP2VEC_BACKEND_LABELS["doc2vec"]],
+            [
+                TOP2VEC_BACKEND_LABELS["transformer"],
+                TOP2VEC_BACKEND_LABELS["doc2vec"],
+            ],
             help=(
                 "Transformers are faster and understand general language. "
                 "Doc2Vec trains specifically on your data."
@@ -689,8 +678,7 @@ def _render_lda_settings(
     col_adv: DeltaGenerator,
     language: str,
 ) -> dict[str, Any]:
-    """
-    Render all LDA settings.
+    """Render all LDA settings.
 
     Args:
         col_basic: The column for core settings.
@@ -738,17 +726,14 @@ _SETTINGS_RENDERERS: dict[Algorithm, SettingsRenderer] = {
 
 def _render_model_configuration(
     data: _DataSelection | None,
-) -> tuple[TopicModelingConfig, bool]:
-    """
-    Render the model configuration section and collect user selections.
+) -> TopicModelingConfig:
+    """Render the model configuration section and collect user selections.
 
     Args:
         data: The uploaded data selection, or None if nothing is uploaded.
 
     Returns:
-        A tuple containing:
-            - TopicModelingConfig instance with the selected options.
-            - Boolean indicating if Topic Stability execution is requested.
+        The selected options, including whether to evaluate topic stability.
     """
     st.header("2. Model Configuration", divider="gray")
 
@@ -764,7 +749,10 @@ def _render_model_configuration(
 
     date_column = data.date_column if data is not None else None
     if date_column and algorithm != Algorithm.BERTOPIC:
-        st.info("Topics-over-time analysis is only applied for BERTopic in this page.")
+        st.info(
+            "Topics-over-time analysis is only applied for BERTopic in this "
+            "page."
+        )
 
     col_basic, col_adv = st.columns(2)
 
@@ -773,7 +761,10 @@ def _render_model_configuration(
         language = st.selectbox(
             "Primary Language",
             SUPPORTED_LANGUAGES,
-            help="Determines the underlying embedding model used for the analysis.",
+            help=(
+                "Determines the underlying embedding model used for the "
+                "analysis."
+            ),
         )
 
     with col_adv:
@@ -791,217 +782,54 @@ def _render_model_configuration(
 
     settings = _SETTINGS_RENDERERS[algorithm](col_basic, col_adv, language)
 
-    config = TopicModelingConfig(
+    return TopicModelingConfig(
         algorithm=algorithm,
         language=language,
         text_column=data.text_column if data is not None else "",
         enable_dtm=date_column is not None,
         date_column=date_column,
         time_bins=data.time_bins if data is not None else DEFAULT_TIME_BINS,
+        evaluate_stability=run_stability,
         **settings,
     )
-    return config, run_stability
 
 
-def _report_long_documents(
-    embedding_model: Any,
-    model_id: str,
-    raw_texts: list[str],
-    chunk_long_documents: bool,
-) -> None:
-    """
-    Tell the user how documents above the context window will be handled.
-
-    Nothing is shown when few documents are affected.
-
-    Args:
-        embedding_model: The loaded SentenceTransformer.
-        model_id: The model ID shown in the message.
-        raw_texts: The documents to check.
-        chunk_long_documents: Whether long documents are embedded in chunks.
-    """
-    over_count, total_count, max_seq_length = count_docs_exceeding_context(
-        embedding_model, raw_texts
-    )
-    if not total_count or over_count / total_count <= _TRUNCATION_WARNING_RATIO:
-        return
-
-    summary = (
-        f"**{over_count} of {total_count} documents "
-        f"({over_count / total_count:.0%}) exceed the "
-        f"{max_seq_length}-token context window of `{model_id}`.**"
-    )
-    larger_models = (
-        "`jinaai/jina-embeddings-v2-base-en` (8192 tokens), "
-        "`BAAI/bge-m3` (8192 tokens) or "
-        "`nomic-ai/nomic-embed-text-v1.5` (8192 tokens)"
-    )
-
-    if chunk_long_documents:
-        st.info(
-            f"{summary} They will be split into chunks that fit the window "
-            "and the chunk embeddings averaged, so encoding takes longer. "
-            "A model with a larger context window needs fewer chunks, for "
-            f"example {larger_models}."
-        )
-        return
-
-    st.warning(
-        f"{summary} Only the leading portion of each of those documents "
-        "will be used to generate the topic embedding, which may bias topic "
-        "assignments toward document openings.\n\n"
-        "To capture the full content of long documents, either:\n\n"
-        "- enable *Embed long documents in chunks* in the *Embedding Model* "
-        "section, which embeds each document piece by piece and averages "
-        "the results, or\n"
-        "- pick a sentence-transformer with a larger context window from the "
-        f"same section, for example {larger_models}. Custom models are "
-        "downloaded to your own home cache (`~/.cache/huggingface`)."
-    )
-
-
-def _encode_documents(
-    config: TopicModelingConfig,
-    raw_texts: list[str],
-) -> tuple[Any, np.ndarray]:
-    """
-    Load the BERTopic embedding model and embed the documents once.
-
-    The embeddings are reused by the optional stability runs.
-
-    Args:
-        config: The topic modeling configuration.
-        raw_texts: The documents to embed.
-
-    Returns:
-        A tuple ``(embedding_model, embeddings)``.
-
-    Raises:
-        ValueError: If the embedding model cannot be loaded.
-    """
-    model_id = resolve_bertopic_embedding_model_id(config)
-    try:
-        with st.spinner(f"Loading embedding model '{model_id}'..."):
-            embedding_model = load_sentence_transformer(
-                model_id,
-                trust_remote_code=config.trust_remote_code,
-            )
-    except Exception as exc:
-        message = f"Failed to load embedding model '{model_id}': {exc}"
-        if "trust_remote_code" in str(exc) and not config.trust_remote_code:
-            message += (
-                "\n\nThis model ships its own code. If you trust the "
-                "repository, enable 'Allow custom code from this model "
-                "repository' in the Embedding Model section and run again."
-            )
-        raise ValueError(message) from exc
-
-    _report_long_documents(
-        embedding_model, model_id, raw_texts, config.chunk_long_documents
-    )
-
-    with st.spinner("Encoding documents with the embedding model..."):
-        embeddings = embed_documents(
-            embedding_model,
-            raw_texts,
-            chunk_long_documents=config.chunk_long_documents,
-        )
-    return embedding_model, embeddings
-
-
-def _run_analysis(
-    data: _DataSelection,
-    config: TopicModelingConfig,
-    run_stability: bool,
-) -> dict[str, Any]:
-    """
-    Train the selected model, evaluate it and package the results.
+def _run(data: _DataSelection, config: TopicModelingConfig) -> None:
+    """Run the analysis, keep the result in session state and show notices.
 
     Args:
         data: The uploaded data selection.
         config: The topic modeling configuration.
-        run_stability: Whether to run the topic stability evaluation.
-
-    Returns:
-        The results stored in the session state for rendering.
     """
-    prepared_df = drop_empty_text_rows(data.df, config.text_column)
-
-    timestamps = None
-    if config.date_column and config.algorithm == Algorithm.BERTOPIC:
-        prepared_df, timestamps, dropped = prepare_timestamps(
-            prepared_df,
-            config.date_column,
-        )
-        if dropped:
-            st.warning(
-                f"{dropped} rows were skipped because "
-                f"'{config.date_column}' could not be parsed as a date/time."
-            )
-
-    raw_texts = prepared_df[config.text_column].astype(str).tolist()
-
-    embedding_model = None
-    embeddings = None
-    if config.algorithm == Algorithm.BERTOPIC:
-        embedding_model, embeddings = _encode_documents(config, raw_texts)
-
-    spinner_msg = (
-        f"Running topic extraction (Run 1/{STABILITY_RUNS})..."
-        if run_stability
-        else "Running topic extraction..."
-    )
-    with st.spinner(spinner_msg):
-        run_result = run_topic_modeling_pipeline(
-            prepared_df,
-            config,
-            timestamps=timestamps,
-            embedding_model=embedding_model,
-            precomputed_embeddings=embeddings,
-        )
-
-    with st.spinner("Calculating Topic Coherence and Diversity..."):
-        evaluation_metrics = evaluate_run(run_result, raw_texts, config)
-
-    if run_stability:
-        with st.spinner(
-            f"Running stability iterations 2-{STABILITY_RUNS} (unlocked seeds) "
-            "and comparing topics..."
-        ):
-            evaluation_metrics["Topic Stability"] = evaluate_topic_stability(
-                prepared_df,
+    try:
+        with StatusBox(
+            "Running topic extraction...",
+            complete_label="Topic Modeling execution complete.",
+            error_label="Topic modeling failed.",
+        ) as status:
+            result = service.run_topic_modeling(
+                data.df,
                 config,
-                run_result["topic_keywords"],
-                embedding_model=embedding_model,
-                precomputed_embeddings=embeddings,
+                source_name=data.filename,
+                on_progress=status,
             )
+    except ValueError as exc:
+        st.error(str(exc))
+        st.stop()
+    except Exception as exc:
+        st.error("Topic modeling failed. See technical details below:")
+        st.code(getattr(exc, "details", "") or traceback.format_exc())
+        LOGGER.exception("Topic modeling failed.")
+        st.stop()
 
-    metadata_report = generate_metadata_report(
-        filename=data.filename,
-        config=config,
-        embedding_model_name=get_embedding_model_name(config),
-        evaluation_metrics=evaluation_metrics,
-    )
-    zip_bytes = build_results_zip(
-        metadata_report=metadata_report,
-        docs_df=run_result["docs_df"],
-        topic_df=run_result["topic_df"],
-        dashboard_assets=run_result["dashboard_assets"],
-    )
-
-    return {
-        "topic_df": run_result["topic_df"],
-        "dashboard_assets": run_result["dashboard_assets"],
-        "evaluation_metrics": evaluation_metrics,
-        "algorithm": config.algorithm,
-        "enable_dtm": config.enable_dtm,
-        "zip_bytes": zip_bytes,
-    }
+    st.session_state.topic_results = result
+    for notice in result.notices:
+        show = st.warning if notice.level == "warning" else st.info
+        show(notice.message)
 
 
 def _render_evaluation_metrics(metrics: dict[str, float | None]) -> None:
-    """
-    Render the evaluation metric cards and their explanation.
+    """Render the evaluation metric cards and their explanation.
 
     Args:
         metrics: The evaluation metrics of the run.
@@ -1016,7 +844,9 @@ def _render_evaluation_metrics(metrics: dict[str, float | None]) -> None:
     col1.metric(
         "Topic Diversity",
         _format_metric(metrics.get("Topic Diversity"), as_percent=True),
-        help="Percentage of unique words across all topics (Higher is better).",
+        help=(
+            "Percentage of unique words across all topics (Higher is better)."
+        ),
     )
     col2.metric(
         "Coherence (C_v)",
@@ -1052,7 +882,7 @@ def _render_evaluation_metrics(metrics: dict[str, float | None]) -> None:
     extra_keys = [key for key in metrics if key not in _BASE_METRIC_KEYS]
     if extra_keys:
         extra_cols = st.columns(len(extra_keys))
-        for col, key in zip(extra_cols, extra_keys):
+        for col, key in zip(extra_cols, extra_keys, strict=False):
             if "Stability" in key:
                 col.metric(
                     key,
@@ -1082,8 +912,7 @@ def _render_html_asset(
     height: int = 600,
     scrolling: bool = False,
 ) -> None:
-    """
-    Embed one HTML dashboard asset.
+    """Embed one HTML dashboard asset.
 
     Args:
         assets: The dashboard assets of the run.
@@ -1100,21 +929,22 @@ def _render_html_asset(
     )
 
 
-def _render_dashboards(res: dict[str, Any]) -> None:
-    """
-    Render the interactive dashboards of the run.
+def _render_dashboards(res: service.TopicModelingResult) -> None:
+    """Render the interactive dashboards of the run.
 
     Args:
         res: The results stored in the session state.
     """
-    assets = res["dashboard_assets"]
+    assets = res.dashboard_assets
 
-    if res["algorithm"] == Algorithm.LDA:
+    if res.algorithm == Algorithm.LDA:
         st.subheader("Interactive Topic Dashboard")
-        _render_html_asset(assets, "lda_dashboard.html", width=1300, height=800)
+        _render_html_asset(
+            assets, "lda_dashboard.html", width=1300, height=800
+        )
         return
 
-    if res["algorithm"] == Algorithm.TOP2VEC:
+    if res.algorithm == Algorithm.TOP2VEC:
         st.subheader("Interactive Topic Dashboard")
         _render_html_asset(
             assets, "top2vec_barchart.html", height=800, scrolling=True
@@ -1140,39 +970,42 @@ def _render_dashboards(res: dict[str, Any]) -> None:
 
     with tab3:
         st.caption(
-            "Shows how semantically similar the generated topics are to each other."
+            "Shows how semantically similar the generated topics are to each "
+            "other."
         )
         _render_html_asset(assets, "similarity_heatmap.html")
 
     with tab4:
-        if res["enable_dtm"] and "topics_over_time.html" in assets:
+        if res.enable_dtm and "topics_over_time.html" in assets:
             st.caption(
-                "Visualizes topic frequency evolution over the provided timestamps."
+                "Visualizes topic frequency evolution over the provided "
+                "timestamps."
             )
             _render_html_asset(assets, "topics_over_time.html")
         else:
-            st.info("Dynamic Topic Modeling was not enabled during configuration.")
+            st.info(
+                "Dynamic Topic Modeling was not enabled during configuration."
+            )
 
 
-def _render_results(res: dict[str, Any]) -> None:
-    """
-    Render the results section from session state.
+def _render_results(res: service.TopicModelingResult) -> None:
+    """Render the results section from session state.
 
     Args:
         res: The results stored in the session state.
     """
     st.header("Results Analysis", divider="gray")
 
-    if res["evaluation_metrics"]:
-        _render_evaluation_metrics(res["evaluation_metrics"])
+    if res.evaluation_metrics:
+        _render_evaluation_metrics(res.evaluation_metrics)
 
     st.subheader("Topic Dictionary")
-    if res["algorithm"] in (Algorithm.BERTOPIC, Algorithm.TOP2VEC):
+    if res.algorithm in (Algorithm.BERTOPIC, Algorithm.TOP2VEC):
         st.caption(
             "Note: Density-based algorithms automatically classify outlier "
             "documents into an 'Outlier' category."
         )
-    st.dataframe(res["topic_df"], use_container_width=True, hide_index=True)
+    st.dataframe(res.topic_df, use_container_width=True, hide_index=True)
 
     _render_dashboards(res)
 
@@ -1184,7 +1017,7 @@ def _render_results(res: dict[str, Any]) -> None:
     )
     st.download_button(
         label="Download Extraction Package (.zip)",
-        data=res["zip_bytes"],
+        data=res.zip_bytes,
         file_name="Topic_Modeling_Artifacts.zip",
         mime="application/zip",
         type="primary",
@@ -1192,9 +1025,7 @@ def _render_results(res: dict[str, Any]) -> None:
 
 
 def main() -> None:
-    """
-    Render and run the Topic Modeling Streamlit page.
-    """
+    """Render and run the Topic Modeling Streamlit page."""
     st.set_page_config(page_title="Topic Modeling", layout="wide")
     check_token()
 
@@ -1208,25 +1039,15 @@ def main() -> None:
     )
 
     data = _render_data_source_section()
-    config, run_stability = _render_model_configuration(data)
+    config = _render_model_configuration(data)
 
     st.header("3. Execution", divider="gray")
 
-    if st.button("Run Topic Extraction", type="primary", disabled=data is None):
+    if st.button(
+        "Run Topic Extraction", type="primary", disabled=data is None
+    ):
         free_gpu_for(gpu_manager.TOPIC_MODELING)
-        try:
-            st.session_state.topic_results = _run_analysis(data, config, run_stability)
-            st.success("Topic Modeling execution complete.")
-
-        except ValueError as exc:
-            st.error(str(exc))
-            st.stop()
-
-        except Exception:
-            st.error("Topic modeling failed. See technical details below:")
-            st.code(traceback.format_exc())
-            LOGGER.exception("Topic modeling failed.")
-            st.stop()
+        _run(data, config)
 
     if st.session_state.topic_results is not None:
         _render_results(st.session_state.topic_results)
