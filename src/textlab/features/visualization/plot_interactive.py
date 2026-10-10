@@ -1,5 +1,5 @@
-"""
-Interactive Plotting Module for the AI Visualization Engine.
+"""Interactive Plotting Module for the AI Visualization Engine.
+
 Generates web-ready interactive Plotly charts (.json).
 """
 
@@ -23,11 +23,12 @@ from textlab.features.visualization.viz_utils import (
 
 
 def plot_histogram_impl(
-    data_file_path: str, column: str, title: str, color_column: str | None = None
+    data_file_path: str,
+    column: str,
+    title: str,
+    color_column: str | None = None,
 ) -> str:
-    """
-    Generates and saves an interactive Plotly histogram.
-    """
+    """Generates and saves an interactive Plotly histogram."""
     try:
         df = load_data_safely(data_file_path)
         if column not in df.columns:
@@ -37,14 +38,16 @@ def plot_histogram_impl(
             color_column = None
 
         fig = px.histogram(
-            df, 
-            x=column, 
-            color=color_column, 
-            title=title, 
-            template="plotly_white"
+            df,
+            x=column,
+            color=color_column,
+            title=title,
+            template="plotly_white",
         )
 
-        plot_path = get_plot_path(data_file_path, f"hist_{column}", ext=".json")
+        plot_path = get_plot_path(
+            data_file_path, f"hist_{column}", ext=".json"
+        )
         fig.write_json(plot_path)
 
         color_arg = f", color='{color_column}'" if color_column else ""
@@ -55,8 +58,13 @@ def plot_histogram_impl(
         code = generate_code_snippet(code_logic, data_file_path)
 
         r_snippet = r_code.build(
-            r_code.histogram, data_file_path, column, title, color_column,
-            pd.api.types.is_numeric_dtype(df[column]), interactive=True,
+            r_code.histogram,
+            data_file_path,
+            column,
+            title,
+            color_column,
+            pd.api.types.is_numeric_dtype(df[column]),
+            interactive=True,
         )
         return format_plot_output(plot_path, code, r_snippet)
     except Exception as e:
@@ -70,9 +78,7 @@ def plot_scatterplot_impl(
     title: str,
     color_column: str | None = None,
 ) -> str:
-    """
-    Generates and saves an interactive Plotly scatter plot.
-    """
+    """Generates and saves an interactive Plotly scatter plot."""
     try:
         df = load_data_safely(data_file_path)
         if x_column not in df.columns or y_column not in df.columns:
@@ -103,8 +109,14 @@ def plot_scatterplot_impl(
         code = generate_code_snippet(code_logic, data_file_path)
 
         r_snippet = r_code.build(
-            r_code.scatter, data_file_path, x_column, y_column, title, color_column,
-            bool(color_column) and pd.api.types.is_numeric_dtype(df[color_column]),
+            r_code.scatter,
+            data_file_path,
+            x_column,
+            y_column,
+            title,
+            color_column,
+            bool(color_column)
+            and pd.api.types.is_numeric_dtype(df[color_column]),
             interactive=True,
         )
         return format_plot_output(plot_path, code, r_snippet)
@@ -119,9 +131,7 @@ def plot_boxplot_impl(
     title: str,
     color_column: str | None = None,
 ) -> str:
-    """
-    Generates and saves an interactive Plotly box plot.
-    """
+    """Generates and saves an interactive Plotly box plot."""
     try:
         df = load_data_safely(data_file_path)
         if x_column not in df.columns or y_column not in df.columns:
@@ -152,7 +162,12 @@ def plot_boxplot_impl(
         code = generate_code_snippet(code_logic, data_file_path)
 
         r_snippet = r_code.build(
-            r_code.boxplot, data_file_path, x_column, y_column, title, color_column,
+            r_code.boxplot,
+            data_file_path,
+            x_column,
+            y_column,
+            title,
+            color_column,
             interactive=True,
         )
         return format_plot_output(plot_path, code, r_snippet)
@@ -167,9 +182,7 @@ def plot_lineplot_impl(
     title: str,
     color_column: str | None = None,
 ) -> str:
-    """
-    Generates and saves an interactive Plotly line plot.
-    """
+    """Generates and saves an interactive Plotly line plot."""
     try:
         df = load_data_safely(data_file_path)
         if x_column not in df.columns or y_column not in df.columns:
@@ -200,7 +213,12 @@ def plot_lineplot_impl(
         code = generate_code_snippet(code_logic, data_file_path)
 
         r_snippet = r_code.build(
-            r_code.lineplot, data_file_path, x_column, y_column, title, color_column,
+            r_code.lineplot,
+            data_file_path,
+            x_column,
+            y_column,
+            title,
+            color_column,
             interactive=True,
         )
         return format_plot_output(plot_path, code, r_snippet)
@@ -216,11 +234,16 @@ def plot_barchart_impl(
     color_column: str | None = None,
     aggregation: str = "mean",
 ) -> str:
-    """
-    Generates and saves an interactive Plotly bar chart.
+    """Generates and saves an interactive Plotly bar chart.
 
     Args:
-        aggregation: How to aggregate y values per x category ('mean', 'sum', 'count', 'median').
+        data_file_path: The dataset file.
+        x_column: The column on the x axis.
+        y_column: The column on the y axis.
+        title: The chart title.
+        color_column: Optional column to colour the bars by.
+        aggregation: How to aggregate y values per x category ('mean', 'sum',
+            'count', 'median').
     """
     try:
         df = load_data_safely(data_file_path)
@@ -230,7 +253,8 @@ def plot_barchart_impl(
         # Colouring by the x or y column adds nothing and would duplicate a
         # grouping key, so it is dropped.
         if color_column and (
-            color_column not in df.columns or color_column in (x_column, y_column)
+            color_column not in df.columns
+            or color_column in (x_column, y_column)
         ):
             color_column = None
 
@@ -246,13 +270,17 @@ def plot_barchart_impl(
             agg_df = df.groupby(group_cols).size().reset_index(name="count")
             plot_y = "count"
             agg_code = (
-                f"agg_df = df.groupby({group_cols!r}).size().reset_index(name='count')"
+                "agg_df = "
+                f"df.groupby({group_cols!r}).size().reset_index(name='count')"
             )
         else:
-            agg_df = getattr(df.groupby(group_cols)[y_column], aggregation)().reset_index()
+            agg_df = getattr(
+                df.groupby(group_cols)[y_column], aggregation
+            )().reset_index()
             plot_y = y_column
             agg_code = (
-                f"agg_df = df.groupby({group_cols!r})['{y_column}'].{aggregation}()"
+                "agg_df = "
+                f"df.groupby({group_cols!r})['{y_column}'].{aggregation}()"
                 ".reset_index()"
             )
 
@@ -276,12 +304,19 @@ def plot_barchart_impl(
         code_logic = (
             f"{agg_code}\n"
             f"fig = px.bar(agg_df, x='{x_column}', y='{plot_y}'{color_arg},\n"
-            f"    barmode='{barmode}', title='{title}', template='plotly_white')"
+            f"    barmode='{barmode}', title='{title}', "
+            "template='plotly_white')"
         )
         code = generate_code_snippet(code_logic, data_file_path)
         r_snippet = r_code.build(
-            r_code.barchart_interactive, data_file_path, x_column, y_column, title,
-            color_column, aggregation, count_rows=y_column in group_cols,
+            r_code.barchart_interactive,
+            data_file_path,
+            x_column,
+            y_column,
+            title,
+            color_column,
+            aggregation,
+            count_rows=y_column in group_cols,
         )
         return format_plot_output(plot_path, code, r_snippet)
     except Exception as e:
@@ -294,12 +329,14 @@ def plot_scatter_matrix_impl(
     title: str,
     color_column: str | None = None,
 ) -> str:
-    """
-    Generates and saves an interactive Plotly scatter matrix (pair plot equivalent).
+    """Generate and save an interactive Plotly scatter matrix (pair plot).
 
     Args:
+        data_file_path: The dataset file.
         columns: Comma-separated list of numeric column names to include.
-        color_column: Optional categorical column to colour points by (e.g. 'diagnosis').
+        title: The chart title.
+        color_column: Optional categorical column to colour points by (e.g.
+            'diagnosis').
     """
     try:
         df = load_data_safely(data_file_path)
@@ -322,7 +359,9 @@ def plot_scatter_matrix_impl(
         fig.update_traces(diagonal_visible=False, showupperhalf=False)
 
         plot_path = get_plot_path(
-            data_file_path, f"scatter_matrix_{'_'.join(col_list[:3])}", ext=".json"
+            data_file_path,
+            f"scatter_matrix_{'_'.join(col_list[:3])}",
+            ext=".json",
         )
         fig.write_json(plot_path)
 
@@ -335,7 +374,11 @@ def plot_scatter_matrix_impl(
         )
         code = generate_code_snippet(code_logic, data_file_path)
         r_snippet = r_code.build(
-            r_code.pair_plot, data_file_path, col_list, title, color_column,
+            r_code.pair_plot,
+            data_file_path,
+            col_list,
+            title,
+            color_column,
             interactive=True,
         )
         return format_plot_output(plot_path, code, r_snippet)
@@ -349,33 +392,43 @@ def plot_correlation_heatmap_impl(
     method: str = "pearson",
     column_filter: str | None = None,
 ) -> str:
-    """
-    Generates an interactive Plotly correlation heatmap.
+    """Generates an interactive Plotly correlation heatmap.
 
     Args:
+        data_file_path: The dataset file.
+        title: The chart title.
+        method: The correlation method, such as 'pearson' or 'spearman'.
         column_filter: Optional comma-separated column names or suffix patterns
-            (e.g. "_mean" to select only columns ending in _mean). When omitted,
-            all numeric columns are used.
+            (e.g. "_mean" to select only columns ending in _mean). When
+            omitted, all numeric columns are used.
     """
     try:
         df = load_data_safely(data_file_path)
         numeric_df = df.select_dtypes(include="number")
 
         if column_filter:
-            filters = [f.strip() for f in column_filter.split(",") if f.strip()]
+            filters = [
+                f.strip() for f in column_filter.split(",") if f.strip()
+            ]
             selected = [
-                c for c in numeric_df.columns
+                c
+                for c in numeric_df.columns
                 if c in filters or any(c.endswith(f) for f in filters)
             ]
             if len(selected) < 2:
                 return (
-                    f"Error: column_filter '{column_filter}' matched fewer than 2 columns. "
-                    f"Available numeric columns: {', '.join(numeric_df.columns)}"
+                    f"Error: column_filter '{column_filter}' matched fewer "
+                    "than 2 columns. "
+                    "Available numeric columns: "
+                    f"{', '.join(numeric_df.columns)}"
                 )
             numeric_df = numeric_df[selected]
 
         if numeric_df.shape[1] < 2:
-            return "Error: Need at least 2 numeric columns to generate a correlation heatmap."
+            return (
+                "Error: Need at least 2 numeric columns to generate a "
+                "correlation heatmap."
+            )
 
         corr_matrix = numeric_df.corr(method=method).round(2)
 
@@ -390,16 +443,24 @@ def plot_correlation_heatmap_impl(
         )
         fig.update_layout(template="plotly_white")
 
-        safe_filter = column_filter.replace(",", "_").replace(" ", "") if column_filter else "all"
-        plot_path = get_plot_path(data_file_path, f"corr_heatmap_{safe_filter}_{method}", ext=".json")
+        safe_filter = (
+            column_filter.replace(",", "_").replace(" ", "")
+            if column_filter
+            else "all"
+        )
+        plot_path = get_plot_path(
+            data_file_path, f"corr_heatmap_{safe_filter}_{method}", ext=".json"
+        )
         fig.write_json(plot_path)
 
         filter_code = ""
         if column_filter:
             filter_code = (
-                f"filters = {repr([f.strip() for f in column_filter.split(',') if f.strip()])}\n"
+                "filters = "
+                f"{repr([f.strip() for f in column_filter.split(',') if f.strip()])}\n"  # noqa: E501
                 f"numeric_df = df.select_dtypes(include='number')\n"
-                f"numeric_df = numeric_df[[c for c in numeric_df.columns if c in filters or any(c.endswith(f) for f in filters)]]\n"
+                "numeric_df = numeric_df[[c for c in numeric_df.columns if c "
+                "in filters or any(c.endswith(f) for f in filters)]]\n"
             )
         else:
             filter_code = "numeric_df = df.select_dtypes(include='number')\n"
@@ -408,13 +469,18 @@ def plot_correlation_heatmap_impl(
             f"{filter_code}"
             f"corr_matrix = numeric_df.corr(method='{method}').round(2)\n"
             f"fig = px.imshow(corr_matrix, text_auto=True, aspect='auto',\n"
-            f"    color_continuous_scale='RdBu_r', zmin=-1, zmax=1, title='{title}')\n"
+            "    color_continuous_scale='RdBu_r', zmin=-1, zmax=1, "
+            f"title='{title}')\n"
             "fig.update_layout(template='plotly_white')"
         )
         code = generate_code_snippet(code_logic, data_file_path)
         r_snippet = r_code.build(
-            r_code.correlation_heatmap, data_file_path, title, method,
-            split_comma_list(column_filter), interactive=True,
+            r_code.correlation_heatmap,
+            data_file_path,
+            title,
+            method,
+            split_comma_list(column_filter),
+            interactive=True,
         )
         return format_plot_output(plot_path, code, r_snippet)
     except Exception as e:
@@ -424,40 +490,44 @@ def plot_correlation_heatmap_impl(
 def generate_custom_plotly_impl(
     data_file_path: str, python_code: str, plot_filename_keyword: str
 ) -> str:
-    """
-    Executes custom Python code to generate complex interactive Plotly charts.
-    """
+    """Run model-written Python code that draws an interactive Plotly chart."""
     columns: list[str] = []
     clean_code = ""
     try:
         df = load_data_safely(data_file_path)
         columns = [str(c) for c in df.columns]
 
-        # Local scope for `exec`.
-        # Pass as a single dict (used as both globals and locals) so that nested
-        # scopes like list comprehensions can also resolve `df`, `pd`, etc.
-        # Using exec(code, {}, locals) would make injected names invisible inside
-        # comprehensions and function defs due to Python 3's exec scoping rules.
+        # Local scope for `exec`. Pass as a single dict (used as both globals
+        # and locals) so that nested scopes like list comprehensions can also
+        # resolve `df`, `pd`, etc. Using exec(code, {}, locals) would make
+        # injected names invisible inside comprehensions and function defs due
+        # to Python 3's exec scoping rules.
         local_scope = {
             "pd": pd,
             "px": px,
             "go": go,
             "np": np,
-            # A copy, because load_data_safely returns a cached DataFrame shared
-            # with every later tool call in this server process. Generated code
-            # such as df.dropna(inplace=True) must not change the data for them.
+            # A copy, because load_data_safely returns a cached DataFrame
+            # shared with every later tool call in this server process.
+            # Generated code such as df.dropna(inplace=True) must not change
+            # the data for them.
             "df": df.copy(),
-            # data_file_path is intentionally NOT exposed: the model should use df
-            # directly and must not call pd.read_csv() or reference file paths.
+            # data_file_path is intentionally NOT exposed: the model should use
+            # df directly and must not call pd.read_csv() or reference file
+            # paths.
         }
 
-        # Strip markdown formatting and any fig.show() / plt.show() calls before exec.
-        clean_code = python_code.replace("```python", "").replace("```", "").strip()
+        # Strip markdown formatting and any fig.show() / plt.show() calls
+        # before exec.
+        clean_code = (
+            python_code.replace("```python", "").replace("```", "").strip()
+        )
         clean_code = _strip_show_calls(clean_code)
 
         run_generated_code(clean_code, local_scope, CUSTOM_CODE_TIMEOUT)
 
-        # The system prompt enforces that the LLM must assign the output to 'fig'
+        # The system prompt enforces that the LLM must assign the output to
+        # 'fig'
         if "fig" not in local_scope:
             return (
                 "Error: Your code must assign the Plotly object to a variable "
@@ -477,7 +547,10 @@ def generate_custom_plotly_impl(
     except SystemExit:
         # exit()/sys.exit() in generated code would otherwise shut down the MCP
         # server that every worker of the analysis shares.
-        return "Error: Your code must not call exit() or sys.exit(). Remove that call."
+        return (
+            "Error: Your code must not call exit() or sys.exit(). Remove that "
+            "call."
+        )
     except Exception as e:
         detail = describe_code_error(e, clean_code, columns)
         return f"Error executing custom plotly code: {detail}"

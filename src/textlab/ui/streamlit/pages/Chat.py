@@ -1,431 +1,425 @@
-import streamlit as st
-import ollama
-import importlib.util
-import os
-import asyncio
+"""Chat page: a private chat with local models about the user's files.
+
+Messages are answered through :mod:`textlab.features.chat.service`; with a
+table attached, data questions go to the Visualization feature's agents,
+which run in the background while the page polls them.
+"""
+
 import datetime
-import tempfile
-import threading
+import os
 import time
-import uuid
+
+import streamlit as st
 from ollama import ResponseError
 from PIL import Image
-import plotly.io as pio
+
+from textlab.common import gpu_manager
+from textlab.common.gpu_manager import get_gpu_name
+from textlab.common.model_config import (
+    get_available_models,
+    is_high_memory_gpu,
+)
+from textlab.common.ollama import check_ollama_server
+from textlab.features.chat import service
+from textlab.ui.streamlit.auth import check_token
+from textlab.ui.streamlit.components.gpu import free_gpu_for
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 app_dir = os.path.dirname(current_dir)
 favicon_path = os.path.join(app_dir, "assets", "text_lab_logo.png")
-
 favicon = Image.open(favicon_path)
 
 st.set_page_config(
     page_title="Ollama Chat Interface",
     page_icon=favicon,
     layout="centered",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
-
-from textlab.ui.streamlit.auth import check_token
-from textlab.common import gpu_manager
-from textlab.ui.streamlit.components.gpu import free_gpu_for
-from textlab.common.storage import get_workspace
-from textlab.common.gpu_manager import get_gpu_name
-from textlab.common.ollama import (
-    MAX_CONTEXT_TOKENS,
-    check_ollama_server,
-    chunk_text,
-    estimate_tokens,
-    extract_model_name,
-    is_model_loaded,
-)
-from textlab.features.chat.chat_engine import (
-    process_uploaded_files,
-    get_response_generator,
-    format_chat_history,
-    format_chat_history_html,
-    _has_analysis_plots,
-    get_chunk_answer,
-    get_synthesis_generator,
-    decide_tool_use,
-)
-
-from textlab.common.model_config import (
-    get_available_models,
-    is_high_memory_gpu,
-)
-
-# --- Data-analysis tool integration (reuses the Visualisation MAS, unchanged) ---
-from textlab.features.visualization.viz_agent import run_analysis
-from textlab.features.visualization.viz_config import get_tool_label
-from textlab.features.visualization.viz_utils import save_data_file
-from textlab.features.visualization.plot_data import (
-    get_all_columns_summary_impl,
-)
-
-# The MCP server runs as its own process, started from its file.
-MCP_SERVER_SCRIPT = importlib.util.find_spec(
-    "textlab.features.visualization.mcp_server"
-).origin
-ANALYSIS_TIMEOUT_SECONDS = 600
-TABULAR_EXTENSIONS = (".csv", ".tsv", ".xls", ".xlsx", ".json")
-
-# Uploaded data and generated charts live in this job's private workspace,
-# which is removed when the job ends. See textlab.common.storage.
-ARTIFACTS_DIR = str(get_workspace().dir("chat"))
 
 check_token()
 
+#: Most files a message can carry.
+MAX_FILES = 4
 
-def _get_session_data_dir() -> str:
-    """Return a persistent per-session temp dir for uploaded data files."""
-    data_dir = st.session_state.get("chat_data_dir")
-    if not data_dir or not os.path.isdir(data_dir):
-        data_dir = tempfile.mkdtemp(prefix="chat-", dir=ARTIFACTS_DIR)
-        st.session_state["chat_data_dir"] = data_dir
-    return data_dir
+#: Session-state keys of the attached table and a running analysis.
+DATA_KEYS = (
+    "chat_data_file_id",
+    "chat_data_path",
+    "chat_data_name",
+    "chat_data_schema",
+    "chat_tool_run",
+)
+
+STYLE = """
+<style>
+    .main { max-width: 800px; margin: 0 auto; }
+    [data-testid="stChatMessage"] {
+        border: 1px solid #3f3f3f; padding: 1rem; border-radius: 0.5rem;
+        margin: 0.5rem 0;
+    }
+    [data-testid="stChatMessage"]:has(div:has-text("User:")) {
+        background: #313131;
+    }
+    [data-testid="stChatMessage"]:has(div:has-text("Assistant:")) {
+        background: #1e1e1e;
+    }
+    .block-container { padding-top: 1rem; }
+</style>
+"""
 
 
-def _ensure_data_file(uploaded_files) -> tuple[str | None, str | None, str | None]:
+def _conversation_folder() -> str:
+    """Return this conversation's folder for the attached table."""
+    folder = st.session_state.get("chat_data_dir")
+    if not folder or not os.path.isdir(folder):
+        folder = service.conversation_folder()
+        st.session_state["chat_data_dir"] = folder
+    return folder
+
+
+def _ensure_data_file(uploaded_files):
+    """Save the first attached table, so the analysis agents can read it.
+
+    Returns:
+        The saved file's path, its name and a summary of its columns, or
+        ``(None, None, None)`` without a table.
     """
-    Persist the first uploaded tabular file to disk so the analysis tools can read it.
-
-    Returns (data_file_path, file_name, schema_text) or (None, None, None) when no
-    tabular file is present.
-    """
-    if not uploaded_files:
-        return None, None, None
-
     tabular = next(
-        (f for f in uploaded_files if f.name.lower().endswith(TABULAR_EXTENSIONS)),
-        None,
+        (f for f in uploaded_files or [] if service.is_table(f.name)), None
     )
     if tabular is None:
         return None, None, None
 
     file_id = (tabular.name, tabular.size)
-    if st.session_state.get("chat_data_file_id") == file_id and st.session_state.get("chat_data_path"):
+    if st.session_state.get(
+        "chat_data_file_id"
+    ) == file_id and st.session_state.get("chat_data_path"):
         return (
             st.session_state["chat_data_path"],
             st.session_state["chat_data_name"],
             st.session_state.get("chat_data_schema", ""),
         )
 
-    run_dir = _get_session_data_dir()
-    data_file_path = save_data_file(tabular.getvalue(), tabular.name, run_dir)
-    try:
-        schema_text = get_all_columns_summary_impl(data_file_path)
-    except Exception as e:
-        schema_text = f"[Could not summarise dataset: {e}]"
-
+    path, schema = service.prepare_data_file(
+        tabular.name, tabular.getvalue(), _conversation_folder()
+    )
     st.session_state["chat_data_file_id"] = file_id
-    st.session_state["chat_data_path"] = data_file_path
+    st.session_state["chat_data_path"] = path
     st.session_state["chat_data_name"] = tabular.name
-    st.session_state["chat_data_schema"] = schema_text
-    return data_file_path, tabular.name, schema_text
-
-
-def _read_plot_artifacts(plots: list[dict]) -> list[dict]:
-    """Read plot files produced by the MAS into serialisable artifacts for the chat."""
-    artifacts: list[dict] = []
-    for item in plots:
-        path = item.get("path", "")
-        if not path or not os.path.exists(path):
-            continue
-        filename = os.path.basename(path)
-        with open(path, "rb") as f:
-            file_bytes = f.read()
-        artifact = {
-            "filename": filename,
-            "bytes": file_bytes,
-            "code": item.get("code", ""),
-            "tool_name": item.get("tool_name", ""),
-            "fig_json": None,
-        }
-        if filename.endswith(".json"):
-            try:
-                artifact["fig_json"] = file_bytes.decode("utf-8")
-            except Exception:
-                continue
-        artifacts.append(artifact)
-    return artifacts
+    st.session_state["chat_data_schema"] = schema
+    return path, tabular.name, schema
 
 
 def _render_analysis_payload(payload: dict, run_id: str) -> None:
-    """Render an assistant analysis turn: plots, then statistical results."""
-    artifacts = payload.get("artifacts", [])
-    stats_results = payload.get("stats", [])
-
-    if artifacts:
-        for idx, artifact in enumerate(artifacts):
-            tool_label = get_tool_label(artifact.get("tool_name", ""))
-            if tool_label:
-                st.markdown(f"**{tool_label}**")
-            if artifact.get("fig_json"):
-                fig = pio.from_json(artifact["fig_json"])
-                st.plotly_chart(fig, use_container_width=True, key=f"chatplot_{run_id}_{idx}")
-            else:
-                st.image(artifact["bytes"], caption=artifact["filename"])
-            if artifact.get("code"):
-                with st.expander(f"View Source Code: {tool_label or artifact['filename']}"):
-                    st.code(artifact["code"], language="python")
-
-    if stats_results:
-        for s_idx, item in enumerate(stats_results):
-            with st.expander(item.get("title", "Statistical Result"), expanded=False):
-                st.markdown(item.get("result", ""))
-                if item.get("code"):
-                    st.code(item["code"], language="python")
-
-
-def _start_chat_analysis_thread(
-    instruction: str,
-    data_file_path: str,
-    model_name: str,
-) -> None:
-    """Run the visualisation MAS in a daemon thread so the chat UI stays responsive."""
-    cancel_event = threading.Event()
-    live_logs: list[tuple[str, str]] = []
-    thread_result: dict = {"status": "running", "result": None, "artifacts": [], "error": None}
-    run_id = f"chat-{uuid.uuid4().hex[:8]}"
-
-    def _worker() -> None:
-        try:
-            # The agent adds the compact dataset summary to the supervisor prompt.
-            messages = [{"role": "user", "content": f"User Request: {instruction}"}]
-
-            def _log_cb(log_type: str, msg: str) -> None:
-                live_logs.append((log_type, msg))
-
-            live_logs.append(("info", "Starting Supervisor Agent..."))
-            analysis_result = asyncio.run(
-                asyncio.wait_for(
-                    run_analysis(
-                        messages,
-                        data_file_path,
-                        model_name,
-                        MCP_SERVER_SCRIPT,
-                        log_callback=_log_cb,
-                        cancel_event=cancel_event,
-                    ),
-                    timeout=ANALYSIS_TIMEOUT_SECONDS,
-                )
+    """Show an assistant analysis turn: charts, then statistical results."""
+    for idx, artifact in enumerate(payload.get("artifacts", [])):
+        label = service.tool_label(artifact.get("tool_name", ""))
+        if label:
+            st.markdown(f"**{label}**")
+        figure = service.render_figure(artifact)
+        if figure is not None:
+            st.plotly_chart(
+                figure,
+                use_container_width=True,
+                key=f"chatplot_{run_id}_{idx}",
             )
-            thread_result["result"] = analysis_result
-            thread_result["artifacts"] = _read_plot_artifacts(analysis_result.get("plots", []))
-            thread_result["status"] = "cancelled" if cancel_event.is_set() else "done"
-        except asyncio.TimeoutError:
-            thread_result["status"] = "timeout"
-        except Exception as e:
-            thread_result["error"] = str(e)
-            thread_result["status"] = "error"
+        else:
+            st.image(artifact["bytes"], caption=artifact["filename"])
+        if artifact.get("code"):
+            with st.expander(
+                f"View Source Code: {label or artifact['filename']}"
+            ):
+                st.code(artifact["code"], language="python")
 
-    st.session_state["chat_tool_cancel"] = cancel_event
-    st.session_state["chat_tool_logs"] = live_logs
-    st.session_state["chat_tool_result"] = thread_result
-    st.session_state["chat_tool_run_id"] = run_id
-    st.session_state["chat_tool_instruction"] = instruction
-    st.session_state["chat_tool_title"] = "Analysing your data..."
-    st.session_state["chat_tool_state"] = "running"
-
-    threading.Thread(target=_worker, daemon=True).start()
+    for item in payload.get("stats", []):
+        with st.expander(
+            item.get("title", "Statistical Result"), expanded=False
+        ):
+            st.markdown(item.get("result", ""))
+            if item.get("code"):
+                st.code(item["code"], language="python")
 
 
-def _render_tool_run_section() -> bool:
+def _render_tool_run_section() -> None:
+    """Poll the running analysis, show its activity, and finish the turn.
+
+    When the run ends, the assistant's answer is added to the conversation.
     """
-    Poll the running analysis thread, render its live activity log, and on completion
-    append the assistant turn to history. Returns True while still running.
-    """
-    thread_result: dict = st.session_state.get("chat_tool_result", {})
-    live_logs: list = st.session_state.get("chat_tool_logs", [])
-    status: str = thread_result.get("status", "running")
-    is_complete = status != "running"
+    run = st.session_state["chat_tool_run"]
+    is_complete = not run.running
 
-    status_title = st.session_state.get("chat_tool_title", "Analysing your data...")
     with st.chat_message("assistant"):
         with st.status(
-            status_title, expanded=(not is_complete),
-            state="running" if not is_complete else "complete",
+            "Analysing your data...",
+            expanded=not is_complete,
+            state="complete" if is_complete else "running",
         ):
-            for log_type, msg in list(live_logs):
+            logs = list(run.logs)
+            for log_type, msg in logs:
                 if log_type == "error":
                     st.error(msg)
                 elif log_type == "warning":
                     st.warning(msg)
                 else:
                     st.write(msg)
-            if not live_logs:
+            if not logs:
                 st.caption("Starting agents...")
 
-    if status == "running":
+    if run.running:
         time.sleep(1)
         st.rerun()
-        return True
+        return
 
-    run_id = st.session_state.get("chat_tool_run_id", "chat-unknown")
-    if status == "done":
-        result = thread_result.get("result", {}) or {}
-        summary = result.get("summary", "") or "Analysis complete."
-        payload = {
-            "artifacts": thread_result.get("artifacts", []),
-            "stats": result.get("stats", []),
-            "run_id": run_id,
-        }
-        st.session_state["messages"].append(
-            {"role": "assistant", "content": summary, "analysis": payload}
+    messages = st.session_state["messages"]
+    if run.status == "done":
+        messages.append(
+            {
+                "role": "assistant",
+                "content": run.result.summary or "Analysis complete.",
+                "analysis": run.result.to_payload(),
+            }
         )
-    elif status == "timeout":
-        st.session_state["messages"].append(
-            {"role": "assistant", "content": (
-                f"The analysis exceeded the {ANALYSIS_TIMEOUT_SECONDS // 60}-minute limit. "
-                "Try a simpler request or a smaller dataset."
-            )}
+    elif run.status == "timeout":
+        minutes = service.ANALYSIS_TIMEOUT_SECONDS // 60
+        messages.append(
+            {
+                "role": "assistant",
+                "content": (
+                    f"The analysis exceeded the {minutes}-minute limit. Try "
+                    "a simpler request or a smaller dataset."
+                ),
+            }
         )
-    elif status == "cancelled":
-        st.session_state["messages"].append(
+    elif run.status == "cancelled":
+        messages.append(
             {"role": "assistant", "content": "Analysis was cancelled."}
         )
-    elif status == "error":
-        st.session_state["messages"].append(
-            {"role": "assistant", "content": f"An error occurred while processing your request: {thread_result.get('error', '')}"}
+    else:
+        messages.append(
+            {
+                "role": "assistant",
+                "content": (
+                    "An error occurred while processing your request: "
+                    f"{run.error or ''}"
+                ),
+            }
         )
 
-    st.session_state["chat_tool_state"] = "idle"
+    del st.session_state["chat_tool_run"]
     st.rerun()
-    return False
 
 
-def _ollama_messages(msgs: list) -> list:
-    """Strip messages down to role/content for the Ollama API (drops UI-only keys)."""
-    return [{"role": m["role"], "content": m["content"]} for m in msgs]
+def _render_sidebar(available_models, gpu_badge):
+    """Draw the model choice, attachments and conversation controls.
+
+    Returns:
+        The selected model and the attached files.
+    """
+    st.sidebar.title("Model Selection")
+    st.sidebar.info(gpu_badge)
+
+    if st.session_state.get("selected_model") not in available_models:
+        st.session_state["selected_model"] = available_models[0]
+    st.session_state["selected_model"] = st.sidebar.selectbox(
+        "Select a model:",
+        options=available_models,
+        index=available_models.index(st.session_state["selected_model"]),
+    )
+
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("Upload Context")
+    uploaded_files = st.sidebar.file_uploader(
+        f"Attach files (Max {MAX_FILES})",
+        type=["pdf", "txt", "csv", "tsv", "xls", "xlsx", "json"],
+        accept_multiple_files=True,
+    )
+    if uploaded_files and len(uploaded_files) > MAX_FILES:
+        st.sidebar.error(
+            f"Maximum {MAX_FILES} files allowed. Please remove some."
+        )
+        uploaded_files = uploaded_files[:MAX_FILES]
+    return st.session_state["selected_model"], uploaded_files
+
+
+def _start_new_chat():
+    """Forget the conversation and remove its attached table and charts."""
+    st.session_state["messages"] = []
+    folder = st.session_state.pop("chat_data_dir", None)
+    if folder:
+        service.discard_conversation_folder(folder)
+    for key in DATA_KEYS:
+        st.session_state.pop(key, None)
+
+
+def _ensure_model(model_name):
+    """Pull the selected model if the Ollama server does not have it."""
+    if service.model_installed(model_name):
+        return
+    st.write("\n\n")
+    st.info(f"Model '{model_name}' not found locally. Pulling it now...")
+    try:
+        service.pull_model(model_name)
+        st.success(f"Successfully pulled '{model_name}'.")
+    except Exception as e:
+        st.error(f"Error pulling model '{model_name}': {e}")
+
+
+def _answer(model_name, user_text, uploaded_files):
+    """Answer a message with the chat model, streaming the reply."""
+    context_text = ""
+    if uploaded_files:
+        with st.spinner("Processing files..."):
+            context_text, warnings = service.read_documents(
+                [(f.name, f.getvalue()) for f in uploaded_files]
+            )
+            for warning in warnings:
+                st.warning(warning)
+
+    if context_text:
+        display_text = (
+            f"**[Uploaded {len(uploaded_files)} file(s)]**\n\n{user_text}"
+        )
+    else:
+        display_text = user_text
+
+    history = list(st.session_state["messages"])
+    st.session_state["messages"].append(
+        {"role": "user", "content": display_text}
+    )
+    with st.chat_message("user"):
+        st.markdown(display_text)
+
+    if service.is_model_loaded(model_name):
+        spinner_text = "Thinking..."
+    else:
+        spinner_text = (
+            f"Loading **{model_name}** into GPU memory... This first run may "
+            "take 1-2 minutes."
+        )
+
+    progress = st.empty()
+    try:
+        with st.spinner(spinner_text):
+            stream = service.answer(
+                model_name,
+                history,
+                user_text,
+                context_text,
+                on_progress=lambda update: progress.info(update.message),
+            )
+            # The stream is lazy: take the first piece under the spinner, so
+            # it shows until the model is loaded and starts answering.
+            first_chunk = next(stream, "")
+
+        def _reply():
+            if first_chunk:
+                yield first_chunk
+            yield from stream
+
+        with st.chat_message("assistant"):
+            assistant_reply = st.write_stream(_reply())
+        st.session_state["messages"].append(
+            {"role": "assistant", "content": assistant_reply}
+        )
+    except ResponseError as e:
+        status = getattr(e, "status_code", "?")
+        st.error(f"Ollama ResponseError (status={status})")
+        st.code(str(e))
+    finally:
+        progress.empty()
+
+
+def _render_downloads():
+    """Offer the conversation as Markdown and, with charts, as HTML."""
+    messages = st.session_state["messages"]
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    st.sidebar.markdown("---")
+    st.sidebar.download_button(
+        label="Download Conversation (.md)",
+        data=service.format_chat_history(messages),
+        file_name=f"text_lab_chat_{timestamp}.md",
+        mime="text/markdown",
+    )
+    if service.has_analysis_plots(messages):
+        st.sidebar.download_button(
+            label="Download with Plots (.html)",
+            data=service.format_chat_history_html(messages),
+            file_name=f"text_lab_chat_{timestamp}.html",
+            mime="text/html",
+            help=(
+                "Includes interactive charts. Markdown export can't show "
+                "interactive plots."
+            ),
+        )
 
 
 def main():
+    """Draw the page and answer the user's message."""
     if "messages" not in st.session_state:
         st.session_state["messages"] = []
-    st.markdown(
-        """
-        <style>
-            .main { max-width: 800px; margin: 0 auto; }
-            [data-testid="stChatMessage"] { border: 1px solid #3f3f3f; padding: 1rem; border-radius: 0.5rem; margin: 0.5rem 0; }
-            [data-testid="stChatMessage"]:has(div:has-text("User:")) { background: #313131; }
-            [data-testid="stChatMessage"]:has(div:has-text("Assistant:")) { background: #1e1e1e; }
-            .block-container { padding-top: 1rem; }
-        </style>
-        """,
-        unsafe_allow_html=True
-    )
+    st.markdown(STYLE, unsafe_allow_html=True)
 
-    # UI check for server status
     if not check_ollama_server():
         st.error("Could not connect to Ollama server.")
         st.info("Please check the log file: text_lab/ollama_server.log")
         st.stop()
 
-    # --- GPU Detection & Model Filtering ---
     current_gpu = get_gpu_name()
-    available_models_in_ui = get_available_models(current_gpu)
-
+    available_models = get_available_models(current_gpu)
     if is_high_memory_gpu(current_gpu):
         gpu_badge = f"**High-Performance Mode** detected ({current_gpu})"
     else:
-        gpu_badge = f" **Standard Mode** detected ({current_gpu}). Large models are hidden."
-
-    if not available_models_in_ui:
-        st.error("No models are configured. Please check src/config/models.json.")
+        gpu_badge = (
+            f" **Standard Mode** detected ({current_gpu}). Large models are "
+            "hidden."
+        )
+    if not available_models:
+        st.error(
+            "No models are configured. Please check src/config/models.json."
+        )
         st.stop()
 
-    # Sidebar
-    st.sidebar.title("Model Selection")
-    st.sidebar.info(gpu_badge)
+    model_name, uploaded_files = _render_sidebar(available_models, gpu_badge)
 
-    if "selected_model" not in st.session_state:
-        st.session_state["selected_model"] = available_models_in_ui[0]
-    if st.session_state["selected_model"] not in available_models_in_ui:
-        st.session_state["selected_model"] = available_models_in_ui[0]
-
-    st.session_state["selected_model"] = st.sidebar.selectbox(
-        "Select a model:",
-        options=available_models_in_ui,
-        index=available_models_in_ui.index(st.session_state["selected_model"])
+    # Save an attached table so the data-analysis agents can read it.
+    data_file_path, data_file_name, data_schema = _ensure_data_file(
+        uploaded_files
     )
-
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("📂 Upload Context")
-    
-    # --- File Uploader Widget ---
-    uploaded_files = st.sidebar.file_uploader(
-        "Attach files (Max 4)", 
-        type=["pdf", "txt", "csv", "tsv", "xls", "xlsx", "json"], 
-        accept_multiple_files=True
-    )
-    
-    # Enforce file count limit
-    if uploaded_files and len(uploaded_files) > 4:
-        st.sidebar.error("Maximum 4 files allowed. Please remove some.")
-        uploaded_files = uploaded_files[:4]
-
-    # Persist any tabular upload so the data-analysis tools can read it from disk.
-    data_file_path, data_file_name, data_schema = _ensure_data_file(uploaded_files)
     if data_file_path:
         st.sidebar.success(
-            f"📊 Data tools enabled for **{data_file_name}**. "
-            "Ask for plots or statistics and I'll analyse it."
+            f"Data tools enabled for **{data_file_name}**. Ask for plots or "
+            "statistics and I'll analyse it."
         )
 
     st.sidebar.markdown("---")
-    if st.sidebar.button("🗑️ Start New Chat"):
-        st.session_state["messages"] = []
-        for key in (
-            "chat_data_file_id", "chat_data_path", "chat_data_name", "chat_data_schema",
-            "chat_tool_state", "chat_tool_result", "chat_tool_logs", "chat_tool_run_id",
-            "chat_tool_instruction", "chat_tool_cancel", "chat_tool_title",
-        ):
-            st.session_state.pop(key, None)
+    if st.sidebar.button("Start New Chat"):
+        _start_new_chat()
         st.rerun()
-
 
     st.sidebar.markdown(
         """
         ---
-        ⚠️ **Disclaimer**
-        The selected AI models may produce inaccurate, misleading, or inappropriate responses.
+        **Disclaimer**
+        The selected AI models may produce inaccurate, misleading, or
+        inappropriate responses.
         """,
-        unsafe_allow_html=True
+        unsafe_allow_html=True,
     )
 
-    model_name = st.session_state["selected_model"]
-
-    # Pull logic...
-    try:
-        models_dict = ollama.list()
-        models_list = models_dict.get("models", []) if isinstance(models_dict, dict) else getattr(models_dict, 'models', [])
-        local_model_names = [extract_model_name(m) for m in models_list]
-    except Exception as e:
-        st.error(f"Error listing locally available models: {str(e)}")
-        local_model_names = []
-
-    if model_name not in local_model_names:
-        st.write("\n\n")
-        st.info(f"Model '{model_name}' not found locally. Pulling it now...")
-        try:
-            ollama.pull(model=model_name)
-            st.success(f"Successfully pulled '{model_name}'.")
-        except Exception as e:
-            st.error(f"Error pulling model '{model_name}': {str(e)}")
+    _ensure_model(model_name)
 
     st.title("Ollama Chat Interface")
-
-    if "messages" not in st.session_state:
-        st.session_state["messages"] = []
 
     for msg in st.session_state["messages"]:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
             if msg.get("analysis"):
-                _render_analysis_payload(msg["analysis"], msg["analysis"].get("run_id", "hist"))
+                _render_analysis_payload(
+                    msg["analysis"], msg["analysis"].get("run_id", "hist")
+                )
 
-    # If an analysis is running, poll it and skip normal input until it finishes.
-    if st.session_state.get("chat_tool_state") == "running":
+    # While an analysis runs, poll it instead of taking new input.
+    if "chat_tool_run" in st.session_state:
         _render_tool_run_section()
         return
 
@@ -436,131 +430,33 @@ def main():
         free_gpu_for(gpu_manager.LLM, ollama_model=model_name)
 
     if user_text and data_file_path:
-        # Router/supervisor: decide whether this message needs the data-analysis tools.
         with st.spinner("Deciding how to answer..."):
-            use_tools, instruction = decide_tool_use(
+            use_tools, instruction = service.decide_tool_use(
                 model_name,
                 user_text,
                 data_schema or "",
-                chat_history=_ollama_messages(st.session_state["messages"]),
+                chat_history=service.plain_messages(
+                    st.session_state["messages"]
+                ),
             )
-
         if use_tools:
             with st.chat_message("user"):
                 st.markdown(user_text)
-            st.session_state["messages"].append({"role": "user", "content": user_text})
-            _start_chat_analysis_thread(instruction or user_text, data_file_path, model_name)
+            st.session_state["messages"].append(
+                {"role": "user", "content": user_text}
+            )
+            st.session_state["chat_tool_run"] = service.start_data_analysis(
+                instruction or user_text, data_file_path, model_name
+            )
             st.rerun()
             return
-        # Otherwise fall through to the normal chat path below.
 
     if user_text:
-        # 1. Process files if they exist
-        context_text = ""
-        if uploaded_files:
-            with st.spinner("Processing files..."):
-                context_text, warnings = process_uploaded_files(uploaded_files)
-                for warning in warnings:
-                    st.warning(warning)
-        
-        # 2. Construct final message content
-        if context_text:
-            full_prompt = f"{context_text}\n\nUser Question: {user_text}"
-            display_text = f"**[Uploaded {len(uploaded_files)} file(s)]**\n\n{user_text}"
-        else:
-            full_prompt = user_text
-            display_text = user_text
+        _answer(model_name, user_text, uploaded_files)
 
-        # 3. Add user message to history
-        st.session_state["messages"].append({"role": "user", "content": display_text})
-        with st.chat_message("user"):
-            st.markdown(display_text)
+    if st.session_state["messages"]:
+        _render_downloads()
 
-        # 4. Generate response
-        last_msg_obj = st.session_state["messages"][-1]
-        original_content = last_msg_obj["content"]
 
-        # --- DYNAMIC SPINNER LOGIC ---
-        if is_model_loaded(model_name):
-            spinner_text = "Thinking..."
-        else:
-            spinner_text = f"🚀 Loading **{model_name}** into GPU memory... This first run may take 1-2 minutes."
-
-        needs_chunking = bool(context_text) and estimate_tokens(context_text) > MAX_CONTEXT_TOKENS
-
-        try:
-            if needs_chunking:
-                chunks = chunk_text(context_text)
-                partial_answers = []
-                progress_placeholder = st.empty()
-
-                for i, chunk_content in enumerate(chunks, 1):
-                    progress_placeholder.info(
-                        f"📄 Analyzing document part {i} of {len(chunks)} "
-                        f"(~{estimate_tokens(context_text):,} tokens total)..."
-                    )
-                    answer = get_chunk_answer(
-                        model_name, chunk_content, i, len(chunks),
-                        user_text, _ollama_messages(st.session_state["messages"][:-1])
-                    )
-                    partial_answers.append(answer)
-
-                progress_placeholder.info(f"🔗 Synthesizing responses from {len(chunks)} chunks...")
-                with st.chat_message("assistant"):
-                    synthesis_stream = get_synthesis_generator(
-                        model_name, partial_answers,
-                        user_text, _ollama_messages(st.session_state["messages"][:-1])
-                    )
-                    assistant_reply = st.write_stream(synthesis_stream)
-                progress_placeholder.empty()
-                st.session_state["messages"].append({"role": "assistant", "content": assistant_reply})
-            else:
-                last_msg_obj["content"] = full_prompt
-                stream = get_response_generator(
-                    model_name, _ollama_messages(st.session_state["messages"]),
-                )
-                # The generator is lazy: pull the first chunk under the spinner
-                # so "Loading model..." / "Thinking..." stays visible until the
-                # model is loaded and starts answering.
-                with st.spinner(spinner_text):
-                    first_chunk = next(stream, "")
-
-                def _reply():
-                    if first_chunk:
-                        yield first_chunk
-                    yield from stream
-
-                with st.chat_message("assistant"):
-                    assistant_reply = st.write_stream(_reply())
-                st.session_state["messages"].append({"role": "assistant", "content": assistant_reply})
-        except ResponseError as e:
-            status = getattr(e, "status_code", "?")
-            st.error(f"Ollama ResponseError (status={status})")
-            st.code(str(e))
-        finally:
-            # Always restore display text so chat history shows the friendly version
-            last_msg_obj["content"] = original_content
-
-    if len(st.session_state["messages"]) > 0:
-        chat_export = format_chat_history(st.session_state["messages"])
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        has_plots = _has_analysis_plots(st.session_state["messages"])
-
-        st.sidebar.markdown("---")
-        st.sidebar.download_button(
-            label="📥 Download Conversation (.md)",
-            data=chat_export,
-            file_name=f"text_lab_chat_{timestamp}.md",
-            mime="text/markdown"
-        )
-        if has_plots:
-            chat_export_html = format_chat_history_html(st.session_state["messages"])
-            st.sidebar.download_button(
-                label="🌐 Download with Plots (.html)",
-                data=chat_export_html,
-                file_name=f"text_lab_chat_{timestamp}.html",
-                mime="text/html",
-                help="Includes interactive charts. Markdown export can't show interactive plots.",
-            )
 if __name__ == "__main__":
     main()

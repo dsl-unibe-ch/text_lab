@@ -1,19 +1,16 @@
-"""Backend for the Visualization feature.
+"""Backend for the Visualization feature: charts and statistics by agents.
 
-Data visualization and statistics driven by an LLM agent through an internal
-MCP server.
+Interfaces use :mod:`.service`; runs go through :mod:`.runs`. The modules
+behind it:
 
-Moved from ``src/core`` with only import and path updates. The modules are
-reorganized when the feature is refactored (see ``docs/dev/architecture.md``):
+- ``viz_agent``: the supervisor and specialist agents.
+- ``viz_config``: prompts, the tools of each agent and limits.
+- ``mcp_server``: the tools, served over MCP by a process of their own
+  (``python -m textlab.features.visualization.mcp_server``).
+- ``plot_data``, ``plot_interactive``, ``plot_static``, ``stats_analysis``:
+  the tools' implementations; ``r_code``: their R equivalents.
+- ``models``, ``preview``, ``reports``, ``viz_utils``: requests and
+  results, previews, downloads, data loading.
 
-- ``viz_agent``: the agent that plans and runs an analysis.
-- ``mcp_server``: MCP server exposing the plotting and statistics tools; runs
-  as its own process.
-- ``plot_data``: data exploration tools.
-- ``plot_interactive``: interactive Plotly charts.
-- ``plot_static``: static Matplotlib and Seaborn charts.
-- ``stats_analysis``: statistical tests.
-- ``r_code``: R equivalents of the tools.
-- ``viz_config``: configuration, prompts and types.
-- ``viz_utils``: data loading and file helpers.
+See ``README.md`` in this folder for the pipeline and the files written.
 """

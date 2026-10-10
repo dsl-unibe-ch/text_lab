@@ -54,24 +54,9 @@ extend-exclude = [
     # Streamlit app
     "src/textlab/ui/streamlit/Home.py",
     "src/textlab/ui/streamlit/auth.py",
-    "src/textlab/ui/streamlit/pages/Chat.py",
     "src/textlab/ui/streamlit/pages/Knowledge_Graph.py",
-    "src/textlab/ui/streamlit/pages/Visualize_Data.py",
-    # Chat
-    "src/textlab/features/chat/chat_engine.py",
     # Knowledge graph
     "src/textlab/features/knowledge_graph/kg_engine.py",
-    # Visualization
-    "src/textlab/features/visualization/mcp_server.py",
-    "src/textlab/features/visualization/plot_data.py",
-    "src/textlab/features/visualization/plot_interactive.py",
-    "src/textlab/features/visualization/plot_static.py",
-    "src/textlab/features/visualization/r_code.py",
-    "src/textlab/features/visualization/stats_analysis.py",
-    "src/textlab/features/visualization/viz_agent.py",
-    "src/textlab/features/visualization/viz_config.py",
-    "src/textlab/features/visualization/viz_utils.py",
-    "src/textlab/features/visualization/tests",
 ]
 
 [tool.ruff.lint]
@@ -100,6 +85,11 @@ convention = "google"
 # A homography is H and a scaling matrix S, as in OpenCV's documentation.
 "src/textlab/features/survey/survey_batch.py" = ["N806"]
 "src/textlab/features/survey/survey_template.py" = ["N803", "N806"]
+# The tools' docstrings are the descriptions the models read; they are kept
+# exactly as written.
+"src/textlab/features/visualization/mcp_server.py" = ["D205", "E501"]
+# A regression's design matrix is X, as in statsmodels' documentation.
+"src/textlab/features/visualization/stats_analysis.py" = ["N806"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["textlab"]

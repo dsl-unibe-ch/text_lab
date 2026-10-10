@@ -353,6 +353,21 @@ def installed_model_names(client: Any = ollama) -> set[str] | None:
         return None
 
 
+def model_installed(model: str, client: Any = ollama) -> bool:
+    """Return True if a server has downloaded a model.
+
+    Args:
+        model: The model name; ``latest`` is assumed without a tag.
+        client: The ``ollama`` module or an ``ollama.Client``.
+
+    Returns:
+        Whether the model is listed; ``False`` also when the server cannot
+        be asked, so callers pull the model, which reports the real error.
+    """
+    installed = installed_model_names(client)
+    return installed is not None and canonical_model_name(model) in installed
+
+
 def _field(value: Any, name: str) -> Any:
     """Return a field of a response object or dictionary, or ``None``."""
     if isinstance(value, Mapping):

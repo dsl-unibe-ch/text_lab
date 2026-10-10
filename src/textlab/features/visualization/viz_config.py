@@ -1,5 +1,5 @@
-"""
-Configuration, prompts, and type definitions for the AI Visualization Engine.
+"""Configuration, prompts and types of the visualization agents.
+
 Defines the Multi-Agent System (MAS) roles, tool scoping, and system prompts.
 """
 
@@ -8,23 +8,27 @@ from typing import Literal, TypedDict
 
 
 class PlotArtifact(TypedDict):
-    """Represents a single generated plot artifact returned by the MCP server."""
+    """A generated plot, as returned by the MCP server."""
+
     path: str
     code: str
-    r_code: str     # R equivalent of ``code``; empty unless R code was requested
+    r_code: str  # R equivalent of ``code``; empty unless R code was requested
     tool_name: str
 
 
 class StatsArtifact(TypedDict):
-    """Represents a single statistical analysis result returned by the stats agent."""
-    title: str      # short human-readable label, e.g. "T-test: radius_mean by diagnosis"
-    result: str     # the markdown table / summary text returned by the stats tool
-    code: str       # the reproducible Python code snippet embedded in the result
-    r_code: str     # R equivalent of ``code``; empty unless R code was requested
+    """A statistical result, as returned by the stats agent."""
+
+    # Short human-readable label, e.g. "T-test: radius_mean by diagnosis".
+    title: str
+    result: str  # the markdown table / summary text returned by the stats tool
+    code: str  # the reproducible Python code snippet embedded in the result
+    r_code: str  # R equivalent of ``code``; empty unless R code was requested
 
 
 class VizAnalysisResult(TypedDict):
-    """Represents the complete final output of the visualization agentic loop."""
+    """The complete output of the visualization agents."""
+
     summary: str
     plots: list[PlotArtifact]
     stats: list[StatsArtifact]
@@ -35,7 +39,7 @@ MAX_ROWS: int = 300_000
 
 
 def _env_int(name: str) -> int | None:
-    """Return a positive integer from the environment, or None if unset/invalid."""
+    """Return a positive integer from the environment, or None if unset."""
     try:
         value = int(os.environ.get(name, "0"))
     except ValueError:
@@ -115,7 +119,7 @@ AGENT_TOOLS = {
         "run_linear_regression",
         "run_logistic_regression",
         "rank_target_correlations",
-    ]
+    ],
 }
 
 
@@ -148,7 +152,7 @@ PLANNING RULES:
    - "a correlation heatmap and the strongest correlations" -> fill "interactive" AND "stats".
 5. "reply" is only used when the request needs no plots and no statistics (e.g. a question about which columns exist): then leave the three specialist fields empty and answer the user in "reply" (Markdown). Otherwise leave "reply" empty.
 6. NEVER include file paths, directory names, or storage locations in any text.
-"""
+"""  # noqa: E501
 
 SUMMARY_PROMPT: str = """
 You are the Lead Data Scientist. Specialist agents have finished the user's data analysis request; their results are given below.
@@ -159,7 +163,7 @@ Write a concise, cohesive Markdown summary for the user:
 3. If some steps could not be completed, say so briefly.
 4. Only use numbers that appear in the results. NEVER invent statistics.
 5. Do not mention the agents or tools. NEVER include file paths, directory names, or storage locations — all files are temporary.
-"""
+"""  # noqa: E501
 
 INTERACTIVE_PROMPT: str = """
 You are the Interactive Visualization Expert. Your job is to generate web-ready Plotly charts based on the Supervisor's instructions.
@@ -176,7 +180,7 @@ Rules:
 7. CRITICAL: Explicitly handle data types (e.g., pd.to_datetime) if needed.
 8. Make ALL the plot tool calls the task needs in a single response. Once they succeed your work is finished.
 9. If a tool returns an error, read the error message, correct your parameters, and try again. Do not regenerate plots that already succeeded.
-"""
+"""  # noqa: E501
 
 STATIC_PROMPT: str = """
 You are the Static Visualization Expert. Your job is to generate Matplotlib/Seaborn charts and Word Clouds based on the Supervisor's instructions.
@@ -201,7 +205,7 @@ Rules:
 10. CRITICAL: Explicitly handle data types (e.g., pd.to_datetime) if needed.
 11. Make ALL the plot tool calls the task needs in a single response. Once they succeed your work is finished.
 12. If a tool returns an error, read the error message, correct your parameters, and try again. Do not regenerate plots that already succeeded.
-"""
+"""  # noqa: E501
 
 STATS_PROMPT: str = """
 You are the Statistical Analysis Expert. Your job is to run rigorous statistical tests on the dataset using your tools.
@@ -222,7 +226,7 @@ CRITICAL RULES — follow these exactly:
 5. After the tools return, you will be asked for a short plain-English interpretation of the key numbers (p-values, effect sizes, odds ratios, R²).
 6. Do not generate plots. Focus purely on numbers and statistical significance.
 7. If a tool returns an error, correct the column names or parameters, or switch to the tool the error suggests, and try again.
-"""
+"""  # noqa: E501
 
 # =========================================================================
 # TOOL DISPLAY LABELS

@@ -1,5 +1,5 @@
-"""
-Utility functions for the AI Visualization Engine.
+"""Utility functions for the AI Visualization Engine.
+
 Handles file I/O, memory-safe data loading, and path generation.
 """
 
@@ -10,15 +10,15 @@ import re
 import signal
 import sys
 import threading
+from collections.abc import Iterator
 from functools import lru_cache
-from typing import Iterator
 
 import pandas as pd
 
 from textlab.features.visualization.viz_config import MAX_ROWS
 
-# Tracks whether the most recent load_data_safely call truncated the file at MAX_ROWS.
-# Read by tools so they can surface a warning to the agent / UI.
+# Tracks whether the most recent load_data_safely call truncated the file at
+# MAX_ROWS. Read by tools so they can surface a warning to the agent / UI.
 LAST_LOAD_TRUNCATED: dict[str, bool] = {}
 
 # Plot names are built from column lists and can get very long (e.g. a heatmap
@@ -27,7 +27,7 @@ MAX_PLOT_NAME_CHARS: int = 100
 
 
 def shorten_text(value: object, limit: int) -> str:
-    """Return ``value`` as a single-line string of at most ``limit`` characters.
+    """Return ``value`` as one line of at most ``limit`` characters.
 
     Whitespace (including newlines) is collapsed so long free text never ends
     up verbatim in a model prompt; truncated values end with ``"..."``.
@@ -36,8 +36,10 @@ def shorten_text(value: object, limit: int) -> str:
     return flat if len(flat) <= limit else flat[: max(limit - 3, 0)] + "..."
 
 
-def _read_csv_with_fallback(file_path: str, sep: str = ",", nrows: int | None = None) -> pd.DataFrame:
-    """Try UTF-8 first (most common), fall back to latin1 to avoid silent mangling."""
+def _read_csv_with_fallback(
+    file_path: str, sep: str = ",", nrows: int | None = None
+) -> pd.DataFrame:
+    """Read a CSV as UTF-8, or as Latin-1 if it is not valid UTF-8."""
     try:
         return pd.read_csv(file_path, sep=sep, nrows=nrows, encoding="utf-8")
     except UnicodeDecodeError:
@@ -45,16 +47,18 @@ def _read_csv_with_fallback(file_path: str, sep: str = ",", nrows: int | None = 
 
 
 def _read_excel_safely(file_path: str, max_rows: int) -> pd.DataFrame:
-    """
-    Read an Excel file using openpyxl in read-only streaming mode for .xlsx files,
-    which avoids loading the entire workbook into memory at once.
-    Falls back to standard pd.read_excel for .xls files (xlrd doesn't support streaming).
+    """Read the first rows of an Excel file without loading all of it.
+
+    ``.xlsx`` files are read with openpyxl in read-only streaming mode, which
+    avoids loading the entire workbook into memory at once. Falls back to
+    standard pd.read_excel for .xls files (xlrd doesn't support streaming).
     """
     if file_path.lower().endswith(".xls"):
         return pd.read_excel(file_path, nrows=max_rows)
 
     try:
         import openpyxl
+
         wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
         ws = wb.active
         row_iter = ws.iter_rows(values_only=True)
@@ -74,8 +78,7 @@ def _read_excel_safely(file_path: str, max_rows: int) -> pd.DataFrame:
 
 
 def save_data_file(file_bytes: bytes, file_name: str, run_dir: str) -> str:
-    """
-    Save the uploaded file bytes to a temporary workspace directory.
+    """Save the uploaded file bytes to a temporary workspace directory.
 
     Args:
         file_bytes: The raw bytes of the uploaded file.
@@ -87,17 +90,20 @@ def save_data_file(file_bytes: bytes, file_name: str, run_dir: str) -> str:
     """
     file_extension = os.path.splitext(file_name)[1].lower()
     data_file_path = os.path.join(run_dir, f"uploaded_data{file_extension}")
-    
+
     with open(data_file_path, "wb") as f:
         f.write(file_bytes)
-        
+
     return data_file_path
 
 
-def get_fast_data_preview(file_path: str, file_name: str, nrows: int = 5) -> pd.DataFrame | None:
-    """
-    Read only the first few rows of a dataset directly from disk to save memory.
-    This is used by the UI to quickly preview the data before passing it to the AI.
+def get_fast_data_preview(
+    file_path: str, file_name: str, nrows: int = 5
+) -> pd.DataFrame | None:
+    """Read only the first rows of a dataset from disk, to save memory.
+
+    This is used by the UI to quickly preview the data before passing it to the
+    AI.
 
     Args:
         file_path: The path to the saved data file.
@@ -122,13 +128,15 @@ def get_fast_data_preview(file_path: str, file_name: str, nrows: int = 5) -> pd.
                 return pd.read_json(file_path).head(nrows)
         return None
     except Exception as e:
-        print(f"Error reading data preview for {file_name}: {e}", file=sys.stderr)
+        print(
+            f"Error reading data preview for {file_name}: {e}", file=sys.stderr
+        )
         return None
 
 
 @lru_cache(maxsize=8)
 def _load_data_cached(file_path: str, mtime: float, size: int) -> pd.DataFrame:
-    """Cache-keyed loader. mtime+size invalidate the cache when the file changes."""
+    """Load a dataset, cached; mtime and size invalidate the cache."""
     lower_name = file_path.lower()
     if lower_name.endswith(".csv"):
         df = _read_csv_with_fallback(file_path, nrows=MAX_ROWS + 1)
@@ -142,7 +150,9 @@ def _load_data_cached(file_path: str, mtime: float, size: int) -> pd.DataFrame:
         except (ValueError, TypeError):
             df = pd.read_json(file_path)
     else:
-        raise ValueError(f"Unsupported file type: {os.path.basename(file_path)}")
+        raise ValueError(
+            f"Unsupported file type: {os.path.basename(file_path)}"
+        )
 
     truncated = len(df) > MAX_ROWS
     LAST_LOAD_TRUNCATED[file_path] = truncated
@@ -152,10 +162,10 @@ def _load_data_cached(file_path: str, mtime: float, size: int) -> pd.DataFrame:
 
 
 def load_data_safely(file_path: str) -> pd.DataFrame:
-    """
-    Load data from disk with safety limits to prevent Out-Of-Memory (OOM) crashes.
-    Cached by (path, mtime, size) so repeated tool calls in the same MCP session
-    don't re-parse the file.
+    """Load data from disk with limits that prevent out-of-memory crashes.
+
+    Cached by (path, mtime, size) so repeated tool calls in the same MCP
+    session don't re-parse the file.
 
     Raises:
         FileNotFoundError: If the file does not exist at the given path.
@@ -171,17 +181,17 @@ def load_data_safely(file_path: str) -> pd.DataFrame:
     except (FileNotFoundError, ValueError):
         raise
     except Exception as e:
-        raise RuntimeError(f"Failed to load data safely: {str(e)}")
+        raise RuntimeError(f"Failed to load data safely: {str(e)}") from e
 
 
 def was_last_load_truncated(file_path: str) -> bool:
-    """Returns True if the last load_data_safely call for this path hit MAX_ROWS."""
+    """Return True if the last load of this path stopped at MAX_ROWS."""
     return LAST_LOAD_TRUNCATED.get(file_path, False)
 
 
 @contextlib.contextmanager
 def time_limit(seconds: float) -> Iterator[None]:
-    """Raise ``TimeoutError`` inside the block if it runs longer than ``seconds``.
+    """Raise ``TimeoutError`` in the block if it runs over ``seconds``.
 
     Used around model-written code: an endless loop would otherwise block the
     MCP server, which all workers of an analysis share. Implemented with
@@ -201,7 +211,9 @@ def time_limit(seconds: float) -> Iterator[None]:
         return
 
     def _on_timeout(signum, frame):
-        raise TimeoutError(f"Code did not finish within {seconds:.0f} seconds.")
+        raise TimeoutError(
+            f"Code did not finish within {seconds:.0f} seconds."
+        )
 
     previous_handler = signal.signal(signal.SIGALRM, _on_timeout)
     signal.setitimer(signal.ITIMER_REAL, seconds)
@@ -241,7 +253,10 @@ def _generated_code_line(exc: BaseException) -> int | None:
     For errors raised inside library calls the innermost generated-code frame
     is used, i.e. the line of the model's code that made the failing call.
     """
-    if isinstance(exc, SyntaxError) and exc.filename == GENERATED_CODE_FILENAME:
+    if (
+        isinstance(exc, SyntaxError)
+        and exc.filename == GENERATED_CODE_FILENAME
+    ):
         return exc.lineno
     line_no = None
     tb = exc.__traceback__
@@ -252,8 +267,10 @@ def _generated_code_line(exc: BaseException) -> int | None:
     return line_no
 
 
-def describe_code_error(exc: BaseException, code: str, columns: list[str]) -> str:
-    """Explain a failure of model-written code so the model can fix it in one retry.
+def describe_code_error(
+    exc: BaseException, code: str, columns: list[str]
+) -> str:
+    """Explain a failure of model-written code, so the model can fix it.
 
     The bare exception text is often too terse to act on (a pandas
     ``KeyError`` is just the quoted key). This adds the exception type, the
@@ -282,9 +299,10 @@ def describe_code_error(exc: BaseException, code: str, columns: list[str]) -> st
     return "\n".join(lines)
 
 
-def get_plot_path(data_file_path: str, plot_name: str, ext: str = ".json") -> str:
-    """
-    Generate a safe, unique file path for saving a generated plot.
+def get_plot_path(
+    data_file_path: str, plot_name: str, ext: str = ".json"
+) -> str:
+    """Generate a safe, unique file path for saving a generated plot.
 
     The name is sanitised to word characters and hyphens; names longer than
     ``MAX_PLOT_NAME_CHARS`` are shortened and suffixed with a hash. If a file
@@ -293,7 +311,8 @@ def get_plot_path(data_file_path: str, plot_name: str, ext: str = ".json") -> st
     plots are never overwritten.
 
     Args:
-        data_file_path: The path to the source data file (used to locate the run directory).
+        data_file_path: The path to the source data file (used to locate the
+            run directory).
         plot_name: The descriptive name of the plot.
         ext: The file extension for the plot (e.g., '.json', '.png').
 
@@ -304,8 +323,11 @@ def get_plot_path(data_file_path: str, plot_name: str, ext: str = ".json") -> st
     plot_dir = os.path.join(run_dir, "plots")
     os.makedirs(plot_dir, exist_ok=True)
 
-    # Sanitize the plot name: Keep only alphanumeric characters, underscores, and hyphens
-    safe_plot_name = re.sub(r"[^\w\-]", "", plot_name.replace(" ", "_")).rstrip("_")
+    # Sanitize the plot name: Keep only alphanumeric characters, underscores,
+    # and hyphens
+    safe_plot_name = re.sub(
+        r"[^\w\-]", "", plot_name.replace(" ", "_")
+    ).rstrip("_")
     if not safe_plot_name:
         safe_plot_name = "plot"
     if len(safe_plot_name) > MAX_PLOT_NAME_CHARS:
@@ -317,7 +339,8 @@ def get_plot_path(data_file_path: str, plot_name: str, ext: str = ".json") -> st
     base = os.path.join(plot_dir, safe_plot_name)
     plot_path = f"{base}{ext}"
     counter = 2
-    # The MCP server runs tools one at a time, so check-then-write is safe here.
+    # The MCP server runs tools one at a time, so check-then-write is safe
+    # here.
     while os.path.exists(plot_path):
         plot_path = f"{base}_{counter}{ext}"
         counter += 1
@@ -325,12 +348,12 @@ def get_plot_path(data_file_path: str, plot_name: str, ext: str = ".json") -> st
 
 
 def split_comma_list(value: str | None) -> list[str]:
-    """Split a comma-separated tool argument into its non-empty, stripped parts."""
+    """Split a comma-separated tool argument into non-empty, stripped parts."""
     return [part.strip() for part in (value or "").split(",") if part.strip()]
 
 
 def format_plot_output(plot_path: str, code: str, r_snippet: str = "") -> str:
-    """Build a plot tool's result: ``"path|||python code"``, plus ``"|||R code"``.
+    """Build a plot tool's result: ``"path|||python code"`` [``"|||R code"``].
 
     The R part is only present when the run asked for R code (see r_code.py).
     """
@@ -339,29 +362,32 @@ def format_plot_output(plot_path: str, code: str, r_snippet: str = "") -> str:
 
 
 def _strip_show_calls(code: str) -> str:
-    """
-    Remove standalone display/save calls from model-generated code before exec.
+    """Remove display and save calls from model-written code before exec.
 
     Strips:
-      - fig.show() / plt.show()   — clear the active figure on non-interactive backends
+      - fig.show() / plt.show()   — clear the active figure on non-interactive
+        backends
       - plt.savefig(...)           — model may save to an arbitrary/wrong path;
-                                     the tool always saves explicitly afterwards
+        the tool always saves explicitly afterwards
     """
     # Remove show() calls
     code = re.sub(r"^\s*(fig|plt)\.show\(\)\s*$", "", code, flags=re.MULTILINE)
     # Remove plt.savefig(...) — matches single-line calls (balanced or not)
-    code = re.sub(r"^\s*plt\.savefig\([^\n]*\)\s*$", "", code, flags=re.MULTILINE)
+    code = re.sub(
+        r"^\s*plt\.savefig\([^\n]*\)\s*$", "", code, flags=re.MULTILINE
+    )
     return code.rstrip()
 
 
-def generate_code_snippet(plot_code: str, data_file_path: str | None = None) -> str:
-    """
-    Format the raw plot generation code into a complete, runnable script string.
+def generate_code_snippet(
+    plot_code: str, data_file_path: str | None = None
+) -> str:
+    """Format plot code into a complete, runnable script.
 
     Args:
         plot_code: The core logic used to generate the plot.
-        data_file_path: Optional source file path; its extension is used to choose
-            the appropriate pandas reader in the generated snippet.
+        data_file_path: Optional source file path; its extension is used to
+            choose the appropriate pandas reader in the generated snippet.
 
     Returns:
         A formatted Python script string including imports and data loading.

@@ -1,11 +1,9 @@
-"""Backend for the Chat feature.
+"""Backend for the Chat feature: a private chat about the user's files.
 
-Private chat with local LLMs over the user's own documents and data files.
+Interfaces use :mod:`.service`. The modules behind it: ``documents``
+(reading attachments), ``generation`` (streamed answers), ``router`` (chat
+or data analysis) and ``exports`` (Markdown and HTML). Data questions are
+answered by the Visualization feature's agents.
 
-Moved from ``src/core`` with only import and path updates. The modules are
-reorganized when the feature is refactored (see ``docs/dev/architecture.md``):
-
-- ``chat_engine``: document reading, chat generation, the data-analysis
-  router and chat history formatting. Its Ollama helpers moved to
-  ``textlab.common.ollama``.
+See ``README.md`` in this folder for the pipeline and the files written.
 """

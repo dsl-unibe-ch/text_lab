@@ -1,132 +1,64 @@
-import asyncio
-import base64
-import html as html_lib
-import io
-import importlib.util
-import os
-import pathlib
-import shutil
-import tempfile
-import threading
-import time
-import uuid
-import zipfile
-from datetime import datetime
-from io import BytesIO
+"""Visualize Data page: charts and statistics of a table, made by LLM agents.
 
-import ollama
-import pandas as pd
+The page collects the table, the request and the model; the agents run in
+the background through :mod:`textlab.features.visualization.service`, and
+the page polls the run and shows its activity and results.
+"""
+
+import os
+import time
+
 import plotly.io as pio
 import streamlit as st
 from PIL import Image
 
-current_dir = os.path.dirname(os.path.abspath(__file__))
-app_dir = os.path.dirname(current_dir)
-
-from textlab.ui.streamlit.auth import check_token
 from textlab.common import gpu_manager
-from textlab.ui.streamlit.components.gpu import free_gpu_for
-from textlab.common.storage import get_workspace
 from textlab.common.gpu_manager import get_gpu_name
-from textlab.common.ollama import check_ollama_server
-from textlab.features.visualization.viz_agent import run_analysis
-from textlab.features.visualization.viz_config import (
-    DEFAULT_PROMPT,
-    MAX_ROWS,
-    get_tool_label,
-)
-from textlab.features.visualization.viz_utils import (
-    get_fast_data_preview,
-    save_data_file,
-)
 from textlab.common.model_config import (
     get_available_models,
     is_high_memory_gpu,
 )
+from textlab.common.ollama import check_ollama_server
+from textlab.features.visualization import service
+from textlab.ui.streamlit.auth import check_token
+from textlab.ui.streamlit.components.gpu import free_gpu_for
 
-# --- Page Configuration ---
+current_dir = os.path.dirname(os.path.abspath(__file__))
+app_dir = os.path.dirname(current_dir)
 favicon_path = os.path.join(app_dir, "assets", "text_lab_logo.png")
 try:
     favicon = Image.open(favicon_path)
-    st.set_page_config(page_title="Visualise Data", page_icon=favicon, layout="wide")
+    st.set_page_config(
+        page_title="Visualise Data", page_icon=favicon, layout="wide"
+    )
 except FileNotFoundError:
     st.set_page_config(page_title="Visualise Data", layout="wide")
 
-# The MCP server runs as its own process, started from its file.
-MCP_SERVER_SCRIPT = importlib.util.find_spec(
-    "textlab.features.visualization.mcp_server"
-).origin
+#: Rows shown in the raw-data preview.
+PREVIEW_ROWS = 10
 
-# Max seconds before the analysis is cancelled and an error is shown.
-ANALYSIS_TIMEOUT_SECONDS = 600
+CAPABILITIES = """
+This tool uses a **Multi-Agent System** to analyze your data. A Supervisor AI \
+reads your prompt and delegates tasks to three specialist agents:
 
-# Uploaded data and generated charts live in this job's private workspace,
-# which is removed when the job ends. See textlab.common.storage.
-ARTIFACTS_DIR = str(get_workspace().dir("visualization"))
+* **Interactive Agent (Default):** Generates web-ready, interactive Plotly \
+charts (Scatter, Bar, Line, Box, Scatter Matrix, Correlation Heatmap, etc.). \
+Best for exploring data on this page.
+* **Static Agent:** Generates publication-ready Matplotlib/Seaborn charts, \
+Pair Plots, and Word Clouds. Triggered when you explicitly ask for "static", \
+"publication figures", "pair plot", or "word cloud".
+* **Statistical Agent:** Runs statistical tests: correlations, group \
+comparisons (t-test, ANOVA, Mann-Whitney, Kruskal-Wallis), associations \
+between categorical columns (chi-square, Fisher), and linear and logistic \
+regression. Each result includes reproducible Python code.
+* **R Code (optional):** Tick "Also generate equivalent R code" to get R \
+code (ggplot2 plots, base R statistics) next to the Python code of every \
+result. Plots made from custom Python code have no R version.
 
-
-def _cleanup_orphaned_artifacts(max_age_hours: int = 12) -> None:
-    """
-    Remove any tmp* directories under ARTIFACTS_DIR older than max_age_hours.
-    These can accumulate when Streamlit crashes mid-analysis before the
-    TemporaryDirectory context manager can run its cleanup.
-    Called once per browser session via session_state guard.
-    """
-    cutoff = time.time() - max_age_hours * 3600
-    artifacts = pathlib.Path(ARTIFACTS_DIR)
-    for entry in artifacts.iterdir():
-        if entry.is_dir() and entry.name.startswith("tmp"):
-            try:
-                if entry.stat().st_mtime < cutoff:
-                    shutil.rmtree(entry, ignore_errors=True)
-            except Exception:
-                pass
-
-
-def _build_column_profile(df: pd.DataFrame) -> pd.DataFrame:
-    """Build a per-column summary DataFrame for the data profile tab."""
-    total = len(df)
-    rows = []
-    for col in df.columns:
-        series = df[col]
-        non_null = int(series.notna().sum())
-        null_pct = (total - non_null) / total * 100 if total > 0 else 0.0
-        is_numeric = pd.api.types.is_numeric_dtype(series)
-
-        # JSON columns can contain lists/dicts (unhashable). Coerce to str for stats.
-        first_val = series.dropna().iloc[0] if non_null > 0 else None
-        is_nested = isinstance(first_val, (list, dict))
-        safe_series = series.dropna().astype(str) if is_nested else series.dropna()
-
-        try:
-            unique = int(safe_series.nunique())
-        except TypeError:
-            unique = -1
-
-        if is_numeric and not is_nested:
-            s = series.dropna()
-            range_str = f"{s.min():.4g} / {s.mean():.4g} / {s.max():.4g}" if len(s) > 0 else "—"
-            top_str = ""
-        else:
-            try:
-                top_vals = safe_series.value_counts()
-                top_str = str(top_vals.index[0])[:50] if len(top_vals) > 0 else "—"
-            except TypeError:
-                top_str = "nested"
-            range_str = "nested" if is_nested else ""
-
-        rows.append({
-            "Column": col,
-            "Type": "nested (list/dict)" if is_nested else str(series.dtype),
-            "Non-Null %": f"{100 - null_pct:.1f}%",
-            "Unique": unique if unique >= 0 else "—",
-            "Range (min / mean / max)": range_str,
-            "Top Value": top_str,
-        })
-    return pd.DataFrame(rows)
-
-
-R_NOT_AVAILABLE = "R code is not available for plots made from custom Python code."
+**Prompting Tip:** Be specific about what you want!
+*(e.g., "Run a t-test on column X grouped by Y, then plot an interactive bar \
+chart of the means.")*
+"""
 
 
 def _render_code(python_code: str, r_snippet: str, show_r: bool) -> None:
@@ -147,161 +79,13 @@ def _render_code(python_code: str, r_snippet: str, show_r: bool) -> None:
         if r_snippet:
             st.code(r_snippet, language="r")
         else:
-            st.caption(R_NOT_AVAILABLE)
-
-
-def _build_html_report(
-    summary: str,
-    final_artifacts: list[dict],
-    stats_results: list[dict],
-    submission_info: dict,
-    run_id: str,
-) -> str:
-    """
-    Build a fully self-contained HTML analysis report.
-    Plotly charts are embedded as interactive divs (CDN JS, no inline bundle).
-    Static images are embedded as base64 data URIs.
-    Stats tables and code blocks are rendered as HTML.
-    """
-    try:
-        import markdown as _md_lib
-        def _md(text: str) -> str:
-            return _md_lib.markdown(text, extensions=["tables", "fenced_code"])
-    except ImportError:
-        def _md(text: str) -> str:
-            return f"<pre style='white-space:pre-wrap'>{html_lib.escape(text)}</pre>"
-
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-    file_name = submission_info.get("file_name", "—")
-    model = submission_info.get("model", "—")
-    prompt = submission_info.get("user_prompt") or "(default exploratory analysis)"
-    columns = submission_info.get("selected_columns") or []
-    columns_str = ", ".join(columns) if columns else "All columns"
-
-    css = """
-    body{font-family:system-ui,-apple-system,sans-serif;max-width:1200px;margin:40px auto;padding:0 24px;color:#1a1a1a;line-height:1.6}
-    h1{color:#0f2346;border-bottom:3px solid #0f2346;padding-bottom:12px}
-    h2{color:#1a3a6b;margin-top:40px}
-    h3{color:#2a4a7f;margin-top:0}
-    .meta{display:grid;grid-template-columns:max-content 1fr;gap:6px 20px;background:#f5f8ff;padding:16px 20px;border-radius:8px;border-left:4px solid #4a7fd4;margin:20px 0;font-size:.95em}
-    .mk{font-weight:600;color:#4a6fa5}
-    .mv{word-break:break-word}
-    .summary-box{background:#fafafa;border:1px solid #e0e0e0;border-radius:8px;padding:20px 24px;margin:16px 0}
-    .stat-card{border:1px solid #dde4f0;border-radius:8px;padding:16px 20px;margin:16px 0;background:#fff}
-    pre,code{background:#f4f4f4;border-radius:4px;font-family:'SFMono-Regular',Consolas,monospace;font-size:.85em}
-    pre{padding:12px 16px;overflow-x:auto;border:1px solid #e0e0e0}
-    table{border-collapse:collapse;width:100%;margin:12px 0;font-size:.9em}
-    th{background:#e8eef8;color:#1a3a6b;font-weight:600;text-align:left;padding:8px 12px;border:1px solid #c8d4e8}
-    td{padding:7px 12px;border:1px solid #dde4f0}
-    tr:nth-child(even) td{background:#f8faff}
-    .chart-card{margin:24px 0;border:1px solid #e0e8f0;border-radius:8px;overflow:hidden}
-    .chart-title{background:#e8eef8;padding:10px 16px;font-weight:600;color:#1a3a6b}
-    .chart-body{padding:16px}
-    img{max-width:100%;height:auto;display:block;margin:0 auto}
-    details summary{cursor:pointer;font-weight:600;color:#4a6fa5;padding:6px 0;user-select:none}
-    .footer{margin-top:48px;padding-top:16px;border-top:1px solid #e0e0e0;font-size:.8em;color:#888;text-align:center}
-    """
-
-    meta_html = f"""
-    <div class="meta">
-      <span class="mk">File</span><span class="mv">{html_lib.escape(file_name)}</span>
-      <span class="mk">Model</span><span class="mv">{html_lib.escape(model)}</span>
-      <span class="mk">Prompt</span><span class="mv">{html_lib.escape(prompt)}</span>
-      <span class="mk">Columns analysed</span><span class="mv">{html_lib.escape(columns_str)}</span>
-      <span class="mk">Generated</span><span class="mv">{timestamp}</span>
-      <span class="mk">Run ID</span><span class="mv">{html_lib.escape(run_id)}</span>
-    </div>"""
-
-    summary_html = f'<div class="summary-box">{_md(summary)}</div>' if summary else ""
-
-    show_r = bool(submission_info.get("include_r_code"))
-
-    def _r_block(r_snippet: str) -> str:
-        if not show_r:
-            return ""
-        if not r_snippet:
-            return f"<p><em>{html_lib.escape(R_NOT_AVAILABLE)}</em></p>"
-        return (
-            f"<details><summary>View R code</summary>"
-            f"<pre><code>{html_lib.escape(r_snippet)}</code></pre></details>"
-        )
-
-    stats_parts = []
-    for item in stats_results:
-        title = html_lib.escape(item.get("title", ""))
-        code = item.get("code", "")
-        code_block = (
-            f"<details><summary>View reproducible code</summary>"
-            f"<pre><code>{html_lib.escape(code)}</code></pre></details>"
-            if code else ""
-        ) + _r_block(item.get("r_code", ""))
-        stats_parts.append(
-            f'<div class="stat-card"><h3>{title}</h3>'
-            f'{_md(item.get("result", ""))}{code_block}</div>'
-        )
-    stats_section = (
-        f'<h2>Statistical Analysis</h2>{"".join(stats_parts)}' if stats_parts else ""
-    )
-
-    chart_parts = []
-    plotly_js_embedded = False
-    for artifact in final_artifacts:
-        filename = artifact["filename"]
-        fig = artifact.get("fig")
-        code = artifact.get("code", "")
-        tool_label = get_tool_label(artifact.get("tool_name", "")) or filename
-        code_block = (
-            f"<details><summary>View source code</summary>"
-            f"<pre><code>{html_lib.escape(code)}</code></pre></details>"
-            if code else ""
-        ) + _r_block(artifact.get("r_code", ""))
-        if filename.endswith(".json") and fig is not None:
-            # Embed the full Plotly JS bundle with the first chart so the report
-            # is completely self-contained and never requests external resources.
-            include_js = not plotly_js_embedded
-            chart_div = fig.to_html(full_html=False, include_plotlyjs=include_js)
-            plotly_js_embedded = True
-        else:
-            img_b64 = base64.b64encode(artifact["bytes"]).decode()
-            ext = filename.rsplit(".", 1)[-1].lower()
-            mime = f"image/{ext}" if ext != "jpg" else "image/jpeg"
-            chart_div = f'<img src="data:{mime};base64,{img_b64}" alt="{html_lib.escape(filename)}">'
-        chart_parts.append(
-            f'<div class="chart-card">'
-            f'<div class="chart-title">{html_lib.escape(tool_label)}</div>'
-            f'<div class="chart-body">{chart_div}{code_block}</div>'
-            f'</div>'
-        )
-    charts_section = (
-        f'<h2>Visualisations</h2>{"".join(chart_parts)}' if chart_parts else ""
-    )
-
-    return f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Analysis Report — {html_lib.escape(run_id)}</title>
-  <style>{css}</style>
-</head>
-<body>
-  <h1>Analysis Report</h1>
-  {meta_html}
-  <h2>Summary</h2>
-  {summary_html}
-  {stats_section}
-  {charts_section}
-  <div class="footer">
-    Generated by Text Lab AI Visualiser &nbsp;·&nbsp;
-    Run {html_lib.escape(run_id)} &nbsp;·&nbsp; {timestamp}
-  </div>
-</body>
-</html>"""
+            st.caption(service.R_NOT_AVAILABLE)
 
 
 def render_sidebar() -> str:
+    """Draw the model choice; return the selected model."""
     st.sidebar.title("Model Selection")
-    
+
     current_gpu = get_gpu_name()
     available_models = get_available_models(current_gpu)
 
@@ -311,263 +95,89 @@ def render_sidebar() -> str:
         gpu_badge = f"Standard Mode ({current_gpu})"
 
     if not available_models:
-        st.sidebar.error("No models are configured. Please check src/config/models.json.")
+        st.sidebar.error(
+            "No models are configured. Please check src/config/models.json."
+        )
         st.stop()
 
     st.sidebar.markdown(f"**{gpu_badge}**")
 
     selected_model = st.sidebar.selectbox(
-        "Select Analysis Model:",
-        options=available_models,
-        index=0
+        "Select Analysis Model:", options=available_models, index=0
     )
-    
     return str(selected_model)
 
 
 def render_results(
-    summary: str, 
-    final_artifacts: list[dict], 
-    stats_results: list[dict],
-    run_id: str,
-    submission_info: dict,
+    result: service.AnalysisResult, request: service.AnalysisRequest
 ) -> None:
-    show_r = bool(submission_info.get("include_r_code"))
+    """Show the summary, statistics, charts and the download of a run."""
+    show_r = request.include_r_code
     st.success("Analysis Complete.")
     st.subheader("Analysis Summary")
-    st.markdown(summary)
+    st.markdown(result.summary)
 
-    if stats_results:
+    if result.stats:
         st.subheader("Statistical Analysis Results")
-        for item in stats_results:
+        for item in result.stats:
             with st.expander(item["title"], expanded=True):
                 st.markdown(item["result"])
                 if item["code"]:
                     _render_code(item["code"], item.get("r_code", ""), show_r)
         st.divider()
 
-    if final_artifacts:
+    if result.artifacts:
         st.subheader("Generated Visualisations")
 
-        for idx, artifact in enumerate(final_artifacts):
-            filename = artifact["filename"]
-            file_bytes = artifact["bytes"]
-            code = artifact["code"]
-            fig = artifact.get("fig")
-            tool_label = get_tool_label(artifact.get("tool_name", ""))
-            
+        for idx, artifact in enumerate(result.artifacts):
+            label = service.tool_label(artifact.tool_name)
             with st.container():
-                if tool_label:
-                    st.markdown(f"**{tool_label}**")
-                if filename.endswith(".json") and fig is not None:
-                    st.plotly_chart(fig, use_container_width=True, key=f"plotly_{run_id}_{idx}")
+                if label:
+                    st.markdown(f"**{label}**")
+                if artifact.figure_json is not None:
+                    st.plotly_chart(
+                        pio.from_json(artifact.figure_json),
+                        use_container_width=True,
+                        key=f"plotly_{result.run_id}_{idx}",
+                    )
                 else:
-                    st.image(file_bytes, caption=filename)
-                    
-                with st.expander(f"View Source Code: {tool_label or filename}"):
-                    _render_code(code, artifact.get("r_code", ""), show_r)
-                
+                    st.image(artifact.data, caption=artifact.filename)
+
+                with st.expander(
+                    f"View Source Code: {label or artifact.filename}"
+                ):
+                    _render_code(artifact.code, artifact.r_code, show_r)
+
                 st.divider()
 
-    if final_artifacts or stats_results:
-        zip_buffer = BytesIO()
-        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-            for artifact in final_artifacts:
-                filename = artifact["filename"]
-                file_bytes = artifact["bytes"]
-                code = artifact["code"]
-                fig = artifact.get("fig")
-                
-                if filename.endswith(".json") and fig is not None:
-                    html_filename = filename.replace(".json", ".html")
-                    zf.writestr(html_filename, fig.to_html(include_plotlyjs=True))
-                else:
-                    zf.writestr(filename, file_bytes)
-                    
-                code_filename = filename.replace(".json", ".py").replace(".png", ".py")
-                zf.writestr(code_filename, code)
-                if show_r and artifact.get("r_code"):
-                    zf.writestr(code_filename[:-3] + ".R", artifact["r_code"])
-
-            report_html = _build_html_report(
-                summary, final_artifacts, stats_results, submission_info, run_id
-            )
-            zf.writestr("report.html", report_html)
-
-        zip_buffer.seek(0)
-        has_plots = bool(final_artifacts)
-        has_stats = bool(stats_results)
-        if has_plots and has_stats:
+    if result.artifacts or result.stats:
+        if result.artifacts and result.stats:
             zip_label = "Download Report, Dashboards & Code (.zip)"
-        elif has_plots:
+        elif result.artifacts:
             zip_label = "Download Dashboards & Code (.zip)"
         else:
             zip_label = "Download Report (.zip)"
 
         st.download_button(
             label=zip_label,
-            data=zip_buffer,
-            file_name=f"{run_id}_analysis.zip",
+            data=service.results_zip(result, request),
+            file_name=f"{result.run_id}_analysis.zip",
             mime="application/zip",
         )
 
 
-def _start_analysis_thread(
-    file_bytes: bytes,
-    file_name: str,
-    file_id: tuple[str, int],
-    user_prompt: str,
-    selected_model: str,
-    selected_columns: list[str],
-    include_r_code: bool = False,
-) -> None:
-    """
-    Capture all inputs, initialise shared session_state structures, then start the
-    analysis in a daemon thread so the Streamlit UI remains responsive.
+def _render_log_box(logs: list, is_complete: bool = False) -> None:
+    """Show the agents' activity log.
 
-    With ``include_r_code`` every result also carries an R equivalent of its
-    Python code.
-    """
-    cancel_event: threading.Event = threading.Event()
-    live_logs: list[tuple[str, str]] = []
-    thread_result: dict = {
-        "status": "running",
-        "result": None,
-        "final_artifacts": [],
-        "error": None,
-    }
-    run_id = f"ds-{uuid.uuid4().hex[:8]}"
-
-    st.session_state["viz_submission"] = {
-        "file_name": file_name,
-        "selected_columns": selected_columns,
-        "user_prompt": user_prompt.strip(),
-        "model": selected_model,
-        "include_r_code": include_r_code,
-    }
-
-    def _worker() -> None:
-        try:
-            list_resp = ollama.list()
-            models_list = (
-                list_resp.get("models", [])
-                if isinstance(list_resp, dict)
-                else getattr(list_resp, "models", [])
-            )
-            local_models = set()
-            for m in (models_list or []):
-                name = m.get("model", m.get("name", "")) if isinstance(m, dict) else getattr(m, "model", getattr(m, "name", ""))
-                if name:
-                    local_models.add(name)
-            if selected_model not in local_models:
-                live_logs.append(("info", f"Pulling model '{selected_model}'..."))
-                ollama.pull(selected_model)
-        except Exception as e:
-            thread_result["error"] = f"Failed to pull model '{selected_model}': {e}"
-            thread_result["status"] = "error"
-            return
-
-        try:
-            with tempfile.TemporaryDirectory(dir=ARTIFACTS_DIR) as run_dir:
-                data_file_path = save_data_file(file_bytes, file_name, run_dir)
-
-                df = get_fast_data_preview(data_file_path, file_name)
-                if df is None:
-                    thread_result["error"] = "Failed to generate a data preview."
-                    thread_result["status"] = "error"
-                    return
-
-                final_user_prompt = user_prompt.strip() or DEFAULT_PROMPT
-
-                content = f"User Request: {final_user_prompt}"
-                valid_selected = [c for c in selected_columns if c in df.columns]
-                if valid_selected:
-                    content += (
-                        "\n\nColumn Selection: Focus ONLY on these columns chosen by the "
-                        f"user: {', '.join(valid_selected)}"
-                    )
-                # The agent adds the compact dataset summary to the supervisor prompt.
-                messages = [{"role": "user", "content": content}]
-
-                live_logs.append(("info", "Starting Supervisor Agent..."))
-
-                def _log_cb(log_type: str, msg: str) -> None:
-                    live_logs.append((log_type, msg))
-
-                try:
-                    analysis_result = asyncio.run(
-                        asyncio.wait_for(
-                            run_analysis(
-                                messages,
-                                data_file_path,
-                                selected_model,
-                                MCP_SERVER_SCRIPT,
-                                log_callback=_log_cb,
-                                cancel_event=cancel_event,
-                                include_r_code=include_r_code,
-                            ),
-                            timeout=ANALYSIS_TIMEOUT_SECONDS,
-                        )
-                    )
-                except asyncio.TimeoutError:
-                    thread_result["status"] = "timeout"
-                    return
-
-                final_artifacts: list[dict] = []
-                for item in analysis_result["plots"]:
-                    path = item["path"]
-                    if os.path.exists(path):
-                        filename = os.path.basename(path)
-                        with open(path, "rb") as f:
-                            img_bytes = f.read()
-                        artifact: dict = {
-                            "filename": filename,
-                            "bytes": img_bytes,
-                            "code": item["code"],
-                            "r_code": item.get("r_code", ""),
-                            "fig": None,
-                            "tool_name": item.get("tool_name", ""),
-                        }
-                        if filename.endswith(".json"):
-                            try:
-                                artifact["fig"] = pio.from_json(img_bytes.decode("utf-8"))
-                            except Exception:
-                                live_logs.append(("warning", f"Failed to parse plot {filename}"))
-                                continue
-                        final_artifacts.append(artifact)
-                    else:
-                        live_logs.append(("warning", f"Could not find plot at: {path}"))
-
-                thread_result["result"] = analysis_result
-                thread_result["final_artifacts"] = final_artifacts
-                thread_result["status"] = "cancelled" if cancel_event.is_set() else "done"
-
-        except Exception as e:
-            thread_result["error"] = str(e)
-            thread_result["status"] = "error"
-
-    thread = threading.Thread(target=_worker, daemon=True)
-
-    st.session_state["viz_cancel_event"] = cancel_event
-    st.session_state["viz_live_logs"] = live_logs
-    st.session_state["viz_thread_result"] = thread_result
-    st.session_state["viz_run_id"] = run_id
-    st.session_state["viz_file_id"] = file_id
-    st.session_state["viz_run_state"] = "running"
-
-    thread.start()
-
-
-def _render_log_box(live_logs: list, is_complete: bool = False) -> None:
-    """
-    Renders the log section. Kept expanded during analysis, but collapses
-    automatically when complete so it doesn't push results off-screen.
+    Kept expanded during the analysis, and collapsed when it is complete so
+    it does not push the results off-screen.
     """
     log_state = "complete" if is_complete else "running"
-    
-    with st.status("Agent Activity Log", expanded=(not is_complete), state=log_state):
-        if live_logs:
-            for log_type, msg in live_logs:
+    with st.status(
+        "Agent Activity Log", expanded=not is_complete, state=log_state
+    ):
+        if logs:
+            for log_type, msg in logs:
                 if log_type == "error":
                     st.error(msg)
                 elif log_type == "warning":
@@ -579,66 +189,134 @@ def _render_log_box(live_logs: list, is_complete: bool = False) -> None:
 
 
 def _render_log_section() -> None:
+    """Show the live log and the cancel button, and poll the run.
+
+    When the run finishes, its result or error is kept in session state and
+    the page is redrawn.
     """
-    Render the live log, cancel button, and polling logic.
-    Called from main() BELOW the form area while analysis is running.
-    Handles all terminal-state transitions when the thread finishes.
-    """
-    thread_result: dict = st.session_state.get("viz_thread_result", {})
-    live_logs: list = st.session_state.get("viz_live_logs", [])
-    run_state: str = st.session_state.get("viz_run_state", "running")
-    status: str = thread_result.get("status", "running")
+    run: service.AnalysisRun = st.session_state["viz_run"]
 
     st.divider()
 
     cancel_col, _ = st.columns([1, 5])
     with cancel_col:
-        if run_state == "cancelling":
+        if st.session_state.get("viz_cancelling"):
             st.warning("Cancelling...")
-        else:
-            if st.button("Cancel Analysis", type="secondary", use_container_width=True):
-                st.session_state["viz_cancel_event"].set()
-                st.session_state["viz_run_state"] = "cancelling"
-                st.rerun()
+        elif st.button(
+            "Cancel Analysis", type="secondary", use_container_width=True
+        ):
+            run.cancel()
+            st.session_state["viz_cancelling"] = True
+            st.rerun()
 
-    current_logs = list(live_logs)
-    _render_log_box(current_logs, is_complete=False)
+    _render_log_box(list(run.logs), is_complete=False)
 
-    if status == "running":
+    if run.running:
         time.sleep(1)
         st.rerun()
         return
 
-    if status == "done":
-        analysis_result = thread_result["result"]
-        run_id = st.session_state.get("viz_run_id", "ds-unknown")
+    if run.status == service.DONE:
         st.session_state["viz_results"] = {
-            "summary": analysis_result.get("summary", ""),
-            "final_artifacts": thread_result.get("final_artifacts", []),
-            "stats_results": analysis_result.get("stats", []),
-            "run_id": run_id,
+            "result": run.result,
             "file_id": st.session_state.get("viz_file_id"),
         }
-    elif status == "timeout":
+    elif run.status == service.TIMEOUT:
         st.error(
-            f"Analysis exceeded the {ANALYSIS_TIMEOUT_SECONDS // 60}-minute limit. "
-            "Try a simpler prompt or a smaller dataset."
+            f"Analysis exceeded the {service.ANALYSIS_TIMEOUT_SECONDS // 60}"
+            "-minute limit. Try a simpler prompt or a smaller dataset."
         )
-    elif status == "cancelled":
+    elif run.status == service.CANCELLED:
         st.warning("Analysis was cancelled.")
-    elif status == "error":
-        st.error(f"An unexpected error occurred: {thread_result.get('error', '')}")
+    elif run.status == service.ERROR:
+        st.error(f"An unexpected error occurred: {run.error or ''}")
 
-    st.session_state["viz_run_state"] = "idle"
+    st.session_state["viz_live_logs"] = list(run.logs)
+    del st.session_state["viz_run"]
+    st.session_state.pop("viz_cancelling", None)
     st.rerun()
 
 
-def main() -> None:
-    check_token()
+def _render_preview(uploaded_file):
+    """Show the file's size, a preview and the column profile.
 
-    if "artifacts_cleaned" not in st.session_state:
-        _cleanup_orphaned_artifacts()
-        st.session_state["artifacts_cleaned"] = True
+    Returns:
+        The first rows of the table, or ``None`` if it cannot be read.
+    """
+    file_size_mb = uploaded_file.size / (1024 * 1024)
+    profile_df = service.read_preview(
+        uploaded_file.name, uploaded_file.getvalue()
+    )
+    preview_df = (
+        profile_df.head(PREVIEW_ROWS) if profile_df is not None else None
+    )
+    n_cols = len(preview_df.columns) if preview_df is not None else "?"
+
+    st.caption(
+        f"**{uploaded_file.name}** | {file_size_mb:.1f} MB | {n_cols} columns"
+    )
+    if file_size_mb > 100:
+        st.warning(
+            f"Large file detected ({file_size_mb:.0f} MB). "
+            f"Data will be capped at {service.MAX_ROWS:,} rows for memory "
+            "safety."
+        )
+
+    if preview_df is not None:
+        with st.expander("Preview Data", expanded=False):
+            tab_raw, tab_profile = st.tabs(
+                ["Raw Data (first 10 rows)", "Column Profile"]
+            )
+            with tab_raw:
+                st.dataframe(preview_df, use_container_width=True)
+            with tab_profile:
+                st.caption(
+                    f"Summary based on first {len(profile_df):,} rows. "
+                    "Numeric columns show min / mean / max; text columns "
+                    "show the most frequent value."
+                )
+                st.dataframe(
+                    service.column_profile(profile_df),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+    return preview_df
+
+
+def _render_column_selection(preview_df, file_id, is_running):
+    """Let the user pick the columns to analyze; return them."""
+    all_columns = list(preview_df.columns)
+
+    if st.session_state.get("viz_columns_file_id") != file_id:
+        st.session_state["viz_col_multiselect"] = all_columns
+        st.session_state["viz_columns_file_id"] = file_id
+
+    st.markdown("**Select columns to include in the analysis:**")
+    btn_col1, btn_col2, _ = st.columns([1, 1, 8])
+    with btn_col1:
+        if st.button("Select All", key="viz_sel_all_btn", disabled=is_running):
+            st.session_state["viz_col_multiselect"] = all_columns
+            st.rerun()
+    with btn_col2:
+        if st.button("Clear All", key="viz_sel_none_btn", disabled=is_running):
+            st.session_state["viz_col_multiselect"] = []
+            st.rerun()
+
+    selected_columns = st.multiselect(
+        "Columns",
+        options=all_columns,
+        key="viz_col_multiselect",
+        label_visibility="collapsed",
+        disabled=is_running,
+    )
+    if not selected_columns:
+        st.caption("No columns selected -- all columns will be used.")
+    return selected_columns
+
+
+def main() -> None:
+    """Draw the page."""
+    check_token()
 
     if not check_ollama_server():
         st.error("Could not connect to Ollama server.")
@@ -651,124 +329,36 @@ def main() -> None:
     st.info(f"Using Model: **{selected_model}**")
 
     with st.expander("View Available AI Capabilities"):
-        st.markdown("""
-        This tool uses a **Multi-Agent System** to analyze your data. A Supervisor AI reads your prompt and delegates tasks to three specialist agents:
+        st.markdown(CAPABILITIES)
 
-        * **Interactive Agent (Default):** Generates web-ready, interactive Plotly charts (Scatter, Bar, Line, Box, Scatter Matrix, Correlation Heatmap, etc.). Best for exploring data on this page.
-        * **Static Agent:** Generates publication-ready Matplotlib/Seaborn charts, Pair Plots, and Word Clouds. Triggered when you explicitly ask for "static", "publication figures", "pair plot", or "word cloud".
-        * **Statistical Agent:** Runs statistical tests: correlations, group comparisons (t-test, ANOVA, Mann-Whitney, Kruskal-Wallis), associations between categorical columns (chi-square, Fisher), and linear and logistic regression. Each result includes reproducible Python code.
-        * **R Code (optional):** Tick "Also generate equivalent R code" to get R code (ggplot2 plots, base R statistics) next to the Python code of every result. Plots made from custom Python code have no R version.
+    is_running = "viz_run" in st.session_state
 
-        **Prompting Tip:** Be specific about what you want!
-        *(e.g., "Run a t-test on column X grouped by Y, then plot an interactive bar chart of the means.")*
-        """)
-
-    run_state = st.session_state.get("viz_run_state", "idle")
-    is_running = run_state in ("running", "cancelling")
-
-    # =========================================================
-    # INPUT FORM — remains visible but disabled during execution
-    # =========================================================
-    uploaded_file = None
-    _preview_df = None
-    _profile_df = None
-    file_id: tuple[str, int] | None = None
-
+    # Input form: stays visible, but disabled while an analysis runs.
     uploaded_file = st.file_uploader(
         "Upload your data file (CSV, TSV, Excel, JSON)",
-        type=["csv", "tsv", "xls", "xlsx", "json"],
+        type=list(service.INPUT_TYPES),
         disabled=is_running,
     )
 
+    preview_df = None
+    file_id = None
     if uploaded_file:
-        file_size_mb = uploaded_file.size / (1024 * 1024)
         file_id = (uploaded_file.name, uploaded_file.size)
-
-        try:
-            file_bytes_for_preview = uploaded_file.getvalue()
-            name_lower = uploaded_file.name.lower()
-            _PROFILE_NROWS = 2000
-            if name_lower.endswith(".csv"):
-                _profile_df = pd.read_csv(io.BytesIO(file_bytes_for_preview), nrows=_PROFILE_NROWS)
-            elif name_lower.endswith(".tsv"):
-                _profile_df = pd.read_csv(io.BytesIO(file_bytes_for_preview), sep="\t", nrows=_PROFILE_NROWS)
-            elif name_lower.endswith((".xls", ".xlsx")):
-                _profile_df = pd.read_excel(io.BytesIO(file_bytes_for_preview), nrows=_PROFILE_NROWS)
-            elif name_lower.endswith(".json"):
-                try:
-                    _profile_df = pd.read_json(io.BytesIO(file_bytes_for_preview), lines=True, nrows=_PROFILE_NROWS)
-                except Exception:
-                    _profile_df = pd.read_json(io.BytesIO(file_bytes_for_preview)).head(_PROFILE_NROWS)
-            else:
-                _profile_df = None
-            _preview_df = _profile_df.head(10) if _profile_df is not None else None
-            n_cols = len(_preview_df.columns) if _preview_df is not None else "?"
-        except Exception:
-            n_cols = "?"
-
-        st.caption(f"**{uploaded_file.name}** | {file_size_mb:.1f} MB | {n_cols} columns")
-        if file_size_mb > 100:
-            st.warning(
-                f"Large file detected ({file_size_mb:.0f} MB). "
-                f"Data will be capped at {MAX_ROWS:,} rows for memory safety."
-            )
-
-        if "viz_results" in st.session_state:
-            stored_id = st.session_state["viz_results"].get("file_id")
-            if stored_id != file_id:
-                del st.session_state["viz_results"]
-                if "viz_live_logs" in st.session_state:
-                    del st.session_state["viz_live_logs"]
-
-        if _preview_df is not None:
-            with st.expander("Preview Data", expanded=False):
-                tab_raw, tab_profile = st.tabs(["Raw Data (first 10 rows)", "Column Profile"])
-                with tab_raw:
-                    st.dataframe(_preview_df, use_container_width=True)
-                with tab_profile:
-                    profile_source = _profile_df if _profile_df is not None else _preview_df
-                    st.caption(
-                        f"Summary based on first {len(profile_source):,} rows. "
-                        "Numeric columns show min / mean / max; text columns show the most frequent value."
-                    )
-                    st.dataframe(
-                        _build_column_profile(profile_source),
-                        use_container_width=True,
-                        hide_index=True,
-                    )
+        stored = st.session_state.get("viz_results")
+        if stored is not None and stored.get("file_id") != file_id:
+            del st.session_state["viz_results"]
+            st.session_state.pop("viz_live_logs", None)
+        preview_df = _render_preview(uploaded_file)
 
     selected_columns: list[str] = []
-    if _preview_df is not None:
-        all_columns = list(_preview_df.columns)
-
-        if st.session_state.get("viz_columns_file_id") != file_id:
-            st.session_state["viz_col_multiselect"] = all_columns
-            st.session_state["viz_columns_file_id"] = file_id
-
-        st.markdown("**Select columns to include in the analysis:**")
-        btn_col1, btn_col2, _ = st.columns([1, 1, 8])
-        with btn_col1:
-            if st.button("Select All", key="viz_sel_all_btn", disabled=is_running):
-                st.session_state["viz_col_multiselect"] = all_columns
-                st.rerun()
-        with btn_col2:
-            if st.button("Clear All", key="viz_sel_none_btn", disabled=is_running):
-                st.session_state["viz_col_multiselect"] = []
-                st.rerun()
-
-        selected_columns = st.multiselect(
-            "Columns",
-            options=all_columns,
-            key="viz_col_multiselect",
-            label_visibility="collapsed",
-            disabled=is_running,
+    if preview_df is not None:
+        selected_columns = _render_column_selection(
+            preview_df, file_id, is_running
         )
-        if not selected_columns:
-            st.caption("No columns selected -- all columns will be used.")
 
     user_prompt = st.text_area(
         "Describe what you want to do (optional)",
-        placeholder=DEFAULT_PROMPT,
+        placeholder=service.DEFAULT_PROMPT,
         key="viz_prompt",
         disabled=is_running,
     )
@@ -778,46 +368,49 @@ def main() -> None:
         key="viz_include_r",
         disabled=is_running,
         help=(
-            "Adds R code (ggplot2 plots, base R statistics) next to the Python code "
-            "of each result, so the analysis can be reproduced and checked in R. "
-            "Plots made from custom Python code have no R version."
+            "Adds R code (ggplot2 plots, base R statistics) next to the "
+            "Python code of each result, so the analysis can be reproduced "
+            "and checked in R. Plots made from custom Python code have no R "
+            "version."
         ),
     )
 
     if is_running:
         st.button("Generating...", type="primary", disabled=True)
-    else:
-        if st.button("Generate Visualisations", type="primary", disabled=(not uploaded_file)):
-            free_gpu_for(gpu_manager.LLM, ollama_model=selected_model)
-            _start_analysis_thread(
-                file_bytes=uploaded_file.getvalue(),
-                file_name=uploaded_file.name,
-                file_id=(uploaded_file.name, uploaded_file.size),
-                user_prompt=user_prompt,
-                selected_model=selected_model,
-                selected_columns=selected_columns,
-                include_r_code=include_r_code,
-            )
-            st.rerun()
+    elif st.button(
+        "Generate Visualisations", type="primary", disabled=not uploaded_file
+    ):
+        free_gpu_for(gpu_manager.LLM, ollama_model=selected_model)
+        request = service.AnalysisRequest(
+            model=selected_model,
+            prompt=user_prompt.strip(),
+            columns=tuple(selected_columns),
+            include_r_code=include_r_code,
+            file_name=uploaded_file.name,
+        )
+        st.session_state["viz_request"] = request
+        st.session_state["viz_file_id"] = file_id
+        st.session_state.pop("viz_live_logs", None)
+        st.session_state["viz_run"] = service.start_analysis(
+            request, data=uploaded_file.getvalue()
+        )
+        st.rerun()
 
-    # =========================================================
-    # RUNNING STATE — log and cancel controls placed under the form
-    # =========================================================
     if is_running:
+        # The log and cancel button sit under the form; results follow
+        # when the run is done.
         _render_log_section()
-        return  # End execution here so results aren't rendered until done
+        return
 
-    # =========================================================
-    # RESULTS — persisted results shown below the form
-    # =========================================================
     if "viz_results" in st.session_state:
-        # Render the completed log, cleanly collapsed by default
         if "viz_live_logs" in st.session_state:
-            _render_log_box(st.session_state["viz_live_logs"], is_complete=True)
-
-        r = st.session_state["viz_results"]
-        render_results(r["summary"], r["final_artifacts"], r["stats_results"], r["run_id"],
-                       st.session_state.get("viz_submission", {}))
+            _render_log_box(
+                st.session_state["viz_live_logs"], is_complete=True
+            )
+        render_results(
+            st.session_state["viz_results"]["result"],
+            st.session_state["viz_request"],
+        )
 
 
 if __name__ == "__main__":

@@ -4,7 +4,6 @@ No model, GPU or MCP subprocess is used: ``chat_no_think`` is replaced by a
 scripted fake and the MCP session by an in-memory stub (``fake_server``).
 """
 
-
 import asyncio
 import contextlib
 import json
@@ -27,7 +26,8 @@ def _reply(text="", calls=None):
     message = {"role": "assistant", "content": text}
     if calls:
         message["tool_calls"] = [
-            {"function": {"name": name, "arguments": args}} for name, args in calls
+            {"function": {"name": name, "arguments": args}}
+            for name, args in calls
         ]
     return {"message": message}
 
@@ -43,12 +43,24 @@ class ScriptedChat:
         self.responses = list(responses)
         self.calls = []
 
-    def __call__(self, model, messages, tools=None, options=None, timeout=None,
-                 json_schema=None):
-        self.calls.append({
-            "messages": list(messages), "tools": tools, "options": options,
-            "timeout": timeout, "json_schema": json_schema,
-        })
+    def __call__(
+        self,
+        model,
+        messages,
+        tools=None,
+        options=None,
+        timeout=None,
+        json_schema=None,
+    ):
+        self.calls.append(
+            {
+                "messages": list(messages),
+                "tools": tools,
+                "options": options,
+                "timeout": timeout,
+                "json_schema": json_schema,
+            }
+        )
         response = self.responses.pop(0)
         if isinstance(response, Exception):
             raise response
@@ -56,7 +68,7 @@ class ScriptedChat:
 
 
 class FakeSession:
-    """In-memory MCP session exposing every agent tool with a data_file_path arg."""
+    """In-memory MCP session with every agent tool, taking data_file_path."""
 
     def __init__(self, outputs):
         self.outputs = {name: list(values) for name, values in outputs.items()}
@@ -74,9 +86,12 @@ class FakeSession:
             "required": ["data_file_path", "column"],
         }
         names = [n for tools in viz_agent.AGENT_TOOLS.values() for n in tools]
-        return SimpleNamespace(tools=[
-            SimpleNamespace(name=n, description=n, inputSchema=schema) for n in names
-        ])
+        return SimpleNamespace(
+            tools=[
+                SimpleNamespace(name=n, description=n, inputSchema=schema)
+                for n in names
+            ]
+        )
 
     async def call_tool(self, name, arguments, read_timeout_seconds=None):
         self.calls.append((name, dict(arguments)))
@@ -90,17 +105,19 @@ class FakeSession:
 @pytest.fixture(autouse=True)
 def fake_schema(monkeypatch):
     """Serve the dataset summary without reading a data file."""
-    monkeypatch.setattr(viz_agent, "get_all_columns_summary_impl", lambda path: SCHEMA)
+    monkeypatch.setattr(
+        viz_agent, "get_all_columns_summary_impl", lambda path: SCHEMA
+    )
 
 
 @pytest.fixture(autouse=True)
 def fake_server(monkeypatch):
-    """Replace the MCP server start-up; records each start and its R-code flag."""
+    """Replace the MCP server start-up; record each start and R-code flag."""
     starts = []
 
     @contextlib.asynccontextmanager
-    async def fake_session(mcp_server_script, include_r_code=False):
-        starts.append((mcp_server_script, include_r_code))
+    async def fake_session(server_module, include_r_code=False):
+        starts.append((server_module, include_r_code))
         yield FakeSession({})
 
     monkeypatch.setattr(viz_agent, "_mcp_session", fake_session)
@@ -114,18 +131,20 @@ def logs():
 
 def _run_loop(role, session, logs, instruction="Plot the age column"):
     plots, stats = [], []
-    report = asyncio.run(viz_agent._run_worker_agent(
-        session=session,
-        agent_role=role,
-        task_instruction=instruction,
-        data_file_path=DATA_PATH,
-        schema=SCHEMA,
-        model_name="fake",
-        global_plots=plots,
-        global_stats=stats,
-        log=lambda level, msg: logs.append((level, msg)),
-        cancel_event=None,
-    ))
+    report = asyncio.run(
+        viz_agent._run_worker_agent(
+            session=session,
+            agent_role=role,
+            task_instruction=instruction,
+            data_file_path=DATA_PATH,
+            schema=SCHEMA,
+            model_name="fake",
+            global_plots=plots,
+            global_stats=stats,
+            log=lambda level, msg: logs.append((level, msg)),
+            cancel_event=None,
+        )
+    )
     return report, plots, stats
 
 
@@ -142,38 +161,79 @@ def test_tool_schemas_hide_data_file_path():
 
 
 def test_plot_worker_stops_after_first_successful_round(monkeypatch, logs):
-    chat = ScriptedChat([
-        _reply(calls=[("plot_interactive_histogram", {"column": "age", "title": "Age"})]),
-    ])
+    chat = ScriptedChat(
+        [
+            _reply(
+                calls=[
+                    (
+                        "plot_interactive_histogram",
+                        {"column": "age", "title": "Age"},
+                    )
+                ]
+            ),
+        ]
+    )
     monkeypatch.setattr(viz_agent, "chat_no_think", chat)
-    session = FakeSession({"plot_interactive_histogram": ["/tmp/run/plots/h.json|||code"]})
+    session = FakeSession(
+        {"plot_interactive_histogram": ["/tmp/run/plots/h.json|||code"]}
+    )
 
     report, plots, _ = _run_loop("interactive", session, logs)
 
     assert len(chat.calls) == 1
     assert report["completed"] is True
     assert report["plots"] == ["Interactive Histogram: Age"]
-    assert plots == [{
-        "path": "/tmp/run/plots/h.json", "code": "code", "r_code": "",
-        "tool_name": "plot_interactive_histogram",
-    }]
+    assert plots == [
+        {
+            "path": "/tmp/run/plots/h.json",
+            "code": "code",
+            "r_code": "",
+            "tool_name": "plot_interactive_histogram",
+        }
+    ]
     assert session.calls[0][1]["data_file_path"] == DATA_PATH
     assert session.timeouts[0].total_seconds() == viz_agent.TOOL_CALL_TIMEOUT
     for tool in chat.calls[0]["tools"]:
-        assert "data_file_path" not in tool["function"]["parameters"]["properties"]
-    assert chat.calls[0]["options"]["temperature"] == viz_agent.AGENT_OPTIONS["temperature"]
+        assert (
+            "data_file_path"
+            not in tool["function"]["parameters"]["properties"]
+        )
+    assert (
+        chat.calls[0]["options"]["temperature"]
+        == viz_agent.AGENT_OPTIONS["temperature"]
+    )
 
 
 def test_plot_error_is_logged_with_its_message_and_retried(monkeypatch, logs):
-    chat = ScriptedChat([
-        _reply(calls=[("generate_custom_plotly", {"python_code": "x", "title": "T"})]),
-        _reply(calls=[("generate_custom_plotly", {"python_code": "fig=1", "title": "T"})]),
-    ])
+    chat = ScriptedChat(
+        [
+            _reply(
+                calls=[
+                    (
+                        "generate_custom_plotly",
+                        {"python_code": "x", "title": "T"},
+                    )
+                ]
+            ),
+            _reply(
+                calls=[
+                    (
+                        "generate_custom_plotly",
+                        {"python_code": "fig=1", "title": "T"},
+                    )
+                ]
+            ),
+        ]
+    )
     monkeypatch.setattr(viz_agent, "chat_no_think", chat)
-    session = FakeSession({"generate_custom_plotly": [
-        "Error executing custom plotly code: name 'x' is not defined",
-        "/tmp/run/plots/c.json|||code",
-    ]})
+    session = FakeSession(
+        {
+            "generate_custom_plotly": [
+                "Error executing custom plotly code: name 'x' is not defined",
+                "/tmp/run/plots/c.json|||code",
+            ]
+        }
+    )
 
     report, plots, _ = _run_loop("interactive", session, logs)
 
@@ -185,10 +245,12 @@ def test_plot_error_is_logged_with_its_message_and_retried(monkeypatch, logs):
 
 
 def test_unknown_tool_is_rejected_without_calling_mcp(monkeypatch, logs):
-    chat = ScriptedChat([
-        _reply(calls=[("run_correlation", {"x_column": "age"})]),
-        _reply("I cannot do that."),
-    ])
+    chat = ScriptedChat(
+        [
+            _reply(calls=[("run_correlation", {"x_column": "age"})]),
+            _reply("I cannot do that."),
+        ]
+    )
     monkeypatch.setattr(viz_agent, "chat_no_think", chat)
     session = FakeSession({})
 
@@ -198,13 +260,26 @@ def test_unknown_tool_is_rejected_without_calling_mcp(monkeypatch, logs):
     assert report["text"] == "I cannot do that."
 
 
-def test_stats_worker_gets_one_tool_free_interpretation_turn(monkeypatch, logs):
-    chat = ScriptedChat([
-        _reply(calls=[("run_correlation", {"x_column": "age", "y_column": "income"})]),
-        _reply("Age and income are strongly correlated."),
-    ])
+def test_stats_worker_gets_one_tool_free_interpretation_turn(
+    monkeypatch, logs
+):
+    chat = ScriptedChat(
+        [
+            _reply(
+                calls=[
+                    (
+                        "run_correlation",
+                        {"x_column": "age", "y_column": "income"},
+                    )
+                ]
+            ),
+            _reply("Age and income are strongly correlated."),
+        ]
+    )
     monkeypatch.setattr(viz_agent, "chat_no_think", chat)
-    session = FakeSession({"run_correlation": ["| r | 0.9 |\n```python\nprint(1)\n```"]})
+    session = FakeSession(
+        {"run_correlation": ["| r | 0.9 |\n```python\nprint(1)\n```"]}
+    )
 
     report, _, stats = _run_loop("stats", session, logs)
 
@@ -212,18 +287,25 @@ def test_stats_worker_gets_one_tool_free_interpretation_turn(monkeypatch, logs):
     assert chat.calls[1]["tools"] is None
     assert report["completed"] is True
     assert report["text"] == "Age and income are strongly correlated."
-    assert stats == [{
-        "title": "Correlation Analysis", "result": "| r | 0.9 |",
-        "code": "print(1)", "r_code": "",
-    }]
+    assert stats == [
+        {
+            "title": "Correlation Analysis",
+            "result": "| r | 0.9 |",
+            "code": "print(1)",
+            "r_code": "",
+        }
+    ]
 
 
 PARSE_ERROR = RuntimeError(
-    "XML syntax error on line 16: element <parameter> closed by </function> (status code: 500)"
+    "XML syntax error on line 16: element <parameter> closed by </function> "
+    "(status code: 500)"
 )
 
 
-def test_unparseable_tool_call_stops_the_worker_without_retrying(monkeypatch, logs):
+def test_unparseable_tool_call_stops_the_worker_without_retrying(
+    monkeypatch, logs
+):
     chat = ScriptedChat([PARSE_ERROR])
     monkeypatch.setattr(viz_agent, "chat_no_think", chat)
 
@@ -233,16 +315,23 @@ def test_unparseable_tool_call_stops_the_worker_without_retrying(monkeypatch, lo
     assert chat.calls[0]["timeout"] == viz_agent.AGENT_REQUEST_TIMEOUT
     assert report["completed"] is False
     assert "try another model" in report["errors"][0]
-    assert any(level == "error" and "try another model" in msg for level, msg in logs)
+    assert any(
+        level == "error" and "try another model" in msg for level, msg in logs
+    )
 
 
 def test_supervisor_failure_gives_a_clear_summary(monkeypatch):
     chat = ScriptedChat([PARSE_ERROR])
     monkeypatch.setattr(viz_agent, "chat_no_think", chat)
 
-    result = asyncio.run(viz_agent.run_analysis(
-        [{"role": "user", "content": "Plot age"}], DATA_PATH, "fake", "server.py"
-    ))
+    result = asyncio.run(
+        viz_agent.run_analysis(
+            [{"role": "user", "content": "Plot age"}],
+            DATA_PATH,
+            "fake",
+            "server.py",
+        )
+    )
 
     assert len(chat.calls) == 1
     assert result["summary"].startswith("The analysis could not be started.")
@@ -252,25 +341,45 @@ def test_supervisor_failure_gives_a_clear_summary(monkeypatch):
 
 def test_long_tool_output_is_clipped_for_the_model_only(monkeypatch, logs):
     long_table = "| row |\n" * 2000
-    chat = ScriptedChat([
-        _reply(calls=[("run_correlation", {"x_column": "age", "y_column": "income"})]),
-        _reply("Interpretation."),
-    ])
+    chat = ScriptedChat(
+        [
+            _reply(
+                calls=[
+                    (
+                        "run_correlation",
+                        {"x_column": "age", "y_column": "income"},
+                    )
+                ]
+            ),
+            _reply("Interpretation."),
+        ]
+    )
     monkeypatch.setattr(viz_agent, "chat_no_think", chat)
     session = FakeSession({"run_correlation": [long_table]})
 
     _, _, stats = _run_loop("stats", session, logs)
 
-    tool_messages = [m for m in chat.calls[1]["messages"] if m.get("role") == "tool"]
-    assert len(tool_messages[0]["content"]) <= viz_agent.MAX_TOOL_OUTPUT_CHARS + 20
+    tool_messages = [
+        m for m in chat.calls[1]["messages"] if m.get("role") == "tool"
+    ]
+    assert (
+        len(tool_messages[0]["content"])
+        <= viz_agent.MAX_TOOL_OUTPUT_CHARS + 20
+    )
     assert stats[0]["result"] == long_table.strip()
 
 
 def test_misspelled_tool_name_is_mapped_to_the_allowed_tool(monkeypatch, logs):
-    chat = ScriptedChat([
-        _reply(calls=[("run_rank_target_correlations", {"target_col": "income"})]),
-        _reply("Age is the strongest predictor."),
-    ])
+    chat = ScriptedChat(
+        [
+            _reply(
+                calls=[
+                    ("run_rank_target_correlations", {"target_col": "income"})
+                ]
+            ),
+            _reply("Age is the strongest predictor."),
+        ]
+    )
     monkeypatch.setattr(viz_agent, "chat_no_think", chat)
     session = FakeSession({"rank_target_correlations": ["| age | 0.9 |"]})
 
@@ -279,19 +388,27 @@ def test_misspelled_tool_name_is_mapped_to_the_allowed_tool(monkeypatch, logs):
     assert session.calls[0][0] == "rank_target_correlations"
     assert report["completed"] is True
     assert len(stats) == 1
-    assert ("info", "Worker 'stats' called 'run_rank_target_correlations'; "
-            "using 'rank_target_correlations'.") in logs
+    assert (
+        "info",
+        "Worker 'stats' called 'run_rank_target_correlations'; "
+        "using 'rank_target_correlations'.",
+    ) in logs
 
 
-def test_repeated_identical_failure_stops_early_with_partial_results(monkeypatch, logs):
+def test_repeated_identical_failure_stops_early_with_partial_results(
+    monkeypatch, logs
+):
     good = ("plot_interactive_histogram", {"column": "age", "title": "Age"})
     bad = ("plot_interactive_boxplot", {"column": "nope", "title": "Box"})
     chat = ScriptedChat([_reply(calls=[good, bad]), _reply(calls=[bad])])
     monkeypatch.setattr(viz_agent, "chat_no_think", chat)
-    session = FakeSession({
-        "plot_interactive_histogram": ["/tmp/run/plots/h.json|||code"],
-        "plot_interactive_boxplot": ["Error: Columns 'nope' not found."] * 2,
-    })
+    session = FakeSession(
+        {
+            "plot_interactive_histogram": ["/tmp/run/plots/h.json|||code"],
+            "plot_interactive_boxplot": ["Error: Columns 'nope' not found."]
+            * 2,
+        }
+    )
 
     report, plots, _ = _run_loop("interactive", session, logs)
 
@@ -300,24 +417,32 @@ def test_repeated_identical_failure_stops_early_with_partial_results(monkeypatch
     assert report["plots"] == ["Interactive Histogram: Age"]
     assert len(plots) == 1
     assert "not found" in report["errors"][0]
-    assert ("error", "Worker 'interactive' repeated the same failing call; stopping.") in logs
+    assert (
+        "error",
+        "Worker 'interactive' repeated the same failing call; stopping.",
+    ) in logs
 
 
 def test_iteration_limit_returns_partial_results(monkeypatch, logs):
     good = ("plot_interactive_histogram", {"column": "age", "title": "Age"})
     rounds = viz_agent.WORKER_MAX_ITERATIONS
     bad_calls = [
-        ("plot_interactive_boxplot", {"column": f"col{i}", "title": "Box"}) for i in range(rounds)
+        ("plot_interactive_boxplot", {"column": f"col{i}", "title": "Box"})
+        for i in range(rounds)
     ]
     responses = [_reply(calls=[good, bad_calls[0]])] + [
         _reply(calls=[call]) for call in bad_calls[1:]
     ]
     monkeypatch.setattr(viz_agent, "chat_no_think", ScriptedChat(responses))
-    session = FakeSession({
-        "plot_interactive_histogram": ["/tmp/run/plots/h.json|||code"],
-        # A different error each round, so the repeat guard never triggers.
-        "plot_interactive_boxplot": [f"Error: Column 'col{i}' not found." for i in range(rounds)],
-    })
+    session = FakeSession(
+        {
+            "plot_interactive_histogram": ["/tmp/run/plots/h.json|||code"],
+            # A different error each round, so the repeat guard never triggers.
+            "plot_interactive_boxplot": [
+                f"Error: Column 'col{i}' not found." for i in range(rounds)
+            ],
+        }
+    )
 
     report, plots, _ = _run_loop("interactive", session, logs)
 
@@ -325,15 +450,25 @@ def test_iteration_limit_returns_partial_results(monkeypatch, logs):
     assert report["plots"] == ["Interactive Histogram: Age"]
     assert len(plots) == 1
     assert f"col{rounds - 1}" in report["errors"][0]
-    assert ("warning", "Worker 'interactive' reached the iteration limit; "
-            "returning partial results.") in logs
+    assert (
+        "warning",
+        "Worker 'interactive' reached the iteration limit; "
+        "returning partial results.",
+    ) in logs
 
 
 def _plan(interactive="", static="", stats="", reply=""):
     """Build a supervisor response carrying a JSON plan."""
-    return _reply(json.dumps({
-        "interactive": interactive, "static": static, "stats": stats, "reply": reply,
-    }))
+    return _reply(
+        json.dumps(
+            {
+                "interactive": interactive,
+                "static": static,
+                "stats": stats,
+                "reply": reply,
+            }
+        )
+    )
 
 
 def _fake_worker(report_by_role, stats_by_role=None):
@@ -343,41 +478,73 @@ def _fake_worker(report_by_role, stats_by_role=None):
         report = viz_agent._new_report(agent_role, task_instruction)
         report.update(report_by_role[agent_role])
         return report
+
     return fake
 
 
 def test_plot_only_run_uses_template_summary(monkeypatch):
-    chat = ScriptedChat([
-        _plan(interactive="Histogram of age", stats="None"),
-    ])
+    chat = ScriptedChat(
+        [
+            _plan(interactive="Histogram of age", stats="None"),
+        ]
+    )
     monkeypatch.setattr(viz_agent, "chat_no_think", chat)
-    monkeypatch.setattr(viz_agent, "_run_worker_agent", _fake_worker({
-        "interactive": {"plots": ["Interactive Histogram: Age"], "completed": True},
-    }))
+    monkeypatch.setattr(
+        viz_agent,
+        "_run_worker_agent",
+        _fake_worker(
+            {
+                "interactive": {
+                    "plots": ["Interactive Histogram: Age"],
+                    "completed": True,
+                },
+            }
+        ),
+    )
 
-    result = asyncio.run(viz_agent.run_analysis(
-        [{"role": "user", "content": "Plot age"}], DATA_PATH, "fake", "server.py"
-    ))
+    result = asyncio.run(
+        viz_agent.run_analysis(
+            [{"role": "user", "content": "Plot age"}],
+            DATA_PATH,
+            "fake",
+            "server.py",
+        )
+    )
 
     assert len(chat.calls) == 1  # planning only, no summary call
     assert "- Interactive Histogram: Age" in result["summary"]
 
 
 def test_stats_run_writes_summary_without_tools(monkeypatch):
-    chat = ScriptedChat([
-        _plan(stats="Correlate"),
-        _reply("Age and income correlate (r = 0.9)."),
-    ])
+    chat = ScriptedChat(
+        [
+            _plan(stats="Correlate"),
+            _reply("Age and income correlate (r = 0.9)."),
+        ]
+    )
     monkeypatch.setattr(viz_agent, "chat_no_think", chat)
-    stats_item = {"title": "Correlation Analysis", "result": "| r | 0.9 |", "code": ""}
-    monkeypatch.setattr(viz_agent, "_run_worker_agent", _fake_worker(
-        {"stats": {"stats": ["| r | 0.9 |"], "completed": True}},
-        {"stats": [stats_item]},
-    ))
+    stats_item = {
+        "title": "Correlation Analysis",
+        "result": "| r | 0.9 |",
+        "code": "",
+    }
+    monkeypatch.setattr(
+        viz_agent,
+        "_run_worker_agent",
+        _fake_worker(
+            {"stats": {"stats": ["| r | 0.9 |"], "completed": True}},
+            {"stats": [stats_item]},
+        ),
+    )
 
-    result = asyncio.run(viz_agent.run_analysis(
-        [{"role": "user", "content": "Is age related to income?"}], DATA_PATH, "fake", "server.py"
-    ))
+    result = asyncio.run(
+        viz_agent.run_analysis(
+            [{"role": "user", "content": "Is age related to income?"}],
+            DATA_PATH,
+            "fake",
+            "server.py",
+        )
+    )
 
     assert len(chat.calls) == 2
     assert chat.calls[1]["tools"] is None
@@ -387,18 +554,25 @@ def test_stats_run_writes_summary_without_tools(monkeypatch):
 
 
 def test_one_plan_call_can_fill_every_specialist(monkeypatch):
-    chat = ScriptedChat([
-        _plan(
-            interactive="Histogram of age",
-            static="Histogram of age for print",
-            stats="Correlate age and income",
-        ),
-    ])
+    chat = ScriptedChat(
+        [
+            _plan(
+                interactive="Histogram of age",
+                static="Histogram of age for print",
+                stats="Correlate age and income",
+            ),
+        ]
+    )
     monkeypatch.setattr(viz_agent, "chat_no_think", chat)
 
-    tasks, _ = asyncio.run(viz_agent._plan_tasks(
-        [{"role": "user", "content": "Plots and stats"}], SCHEMA, "fake", lambda *_: None
-    ))
+    tasks, _ = asyncio.run(
+        viz_agent._plan_tasks(
+            [{"role": "user", "content": "Plots and stats"}],
+            SCHEMA,
+            "fake",
+            lambda *_: None,
+        )
+    )
 
     assert tasks == [
         ("interactive", "Histogram of age"),
@@ -410,12 +584,19 @@ def test_one_plan_call_can_fill_every_specialist(monkeypatch):
 
 
 def test_supervisor_can_answer_directly(monkeypatch):
-    chat = ScriptedChat([_plan(reply="The dataset has columns age and income.")])
+    chat = ScriptedChat(
+        [_plan(reply="The dataset has columns age and income.")]
+    )
     monkeypatch.setattr(viz_agent, "chat_no_think", chat)
 
-    result = asyncio.run(viz_agent.run_analysis(
-        [{"role": "user", "content": "Which columns are there?"}], DATA_PATH, "fake", "server.py"
-    ))
+    result = asyncio.run(
+        viz_agent.run_analysis(
+            [{"role": "user", "content": "Which columns are there?"}],
+            DATA_PATH,
+            "fake",
+            "server.py",
+        )
+    )
 
     assert result["summary"] == "The dataset has columns age and income."
     assert result["plots"] == [] and result["stats"] == []
@@ -426,40 +607,63 @@ def test_invalid_plan_json_falls_back_to_the_reply_text(monkeypatch):
     monkeypatch.setattr(viz_agent, "chat_no_think", chat)
     logs = []
 
-    tasks, reply = asyncio.run(viz_agent._plan_tasks(
-        [{"role": "user", "content": "Plot age"}], SCHEMA, "fake",
-        lambda level, msg: logs.append((level, msg)),
-    ))
+    tasks, reply = asyncio.run(
+        viz_agent._plan_tasks(
+            [{"role": "user", "content": "Plot age"}],
+            SCHEMA,
+            "fake",
+            lambda level, msg: logs.append((level, msg)),
+        )
+    )
 
     assert tasks == [] and reply == "Sorry, I cannot plan this."
     assert any("did not return a valid plan" in msg for _, msg in logs)
 
 
-@pytest.mark.parametrize("wrap", [
-    "{plan}<|eot|>",                      # leaked end-of-turn token
-    "```json\n{plan}\n```",               # Markdown code fence
-    "Here is the plan:\n{plan}\nDone.",   # surrounding prose
-])
+@pytest.mark.parametrize(
+    "wrap",
+    [
+        "{plan}<|eot|>",  # leaked end-of-turn token
+        "```json\n{plan}\n```",  # Markdown code fence
+        "Here is the plan:\n{plan}\nDone.",  # surrounding prose
+    ],
+)
 def test_plan_json_is_found_despite_surrounding_noise(monkeypatch, wrap):
-    plan = json.dumps({"interactive": "Histogram of age", "static": "",
-                       "stats": "", "reply": ""})
+    plan = json.dumps(
+        {
+            "interactive": "Histogram of age",
+            "static": "",
+            "stats": "",
+            "reply": "",
+        }
+    )
     chat = ScriptedChat([_reply(wrap.format(plan=plan))])
     monkeypatch.setattr(viz_agent, "chat_no_think", chat)
 
-    tasks, _ = asyncio.run(viz_agent._plan_tasks(
-        [{"role": "user", "content": "Plot age"}], SCHEMA, "fake", lambda *_: None
-    ))
+    tasks, _ = asyncio.run(
+        viz_agent._plan_tasks(
+            [{"role": "user", "content": "Plot age"}],
+            SCHEMA,
+            "fake",
+            lambda *_: None,
+        )
+    )
 
     assert tasks == [("interactive", "Histogram of age")]
 
 
 def test_leaked_control_tokens_are_removed_from_model_text():
-    message = {"role": "assistant", "content": "Summary text.<|im_end|>\n<|endoftext|>"}
+    message = {
+        "role": "assistant",
+        "content": "Summary text.<|im_end|>\n<|endoftext|>",
+    }
     assert viz_agent._model_text(message) == "Summary text."
 
 
 def test_all_workers_share_one_mcp_server(monkeypatch, fake_server):
-    chat = ScriptedChat([_plan(interactive="Histogram", static="Histogram for print")])
+    chat = ScriptedChat(
+        [_plan(interactive="Histogram", static="Histogram for print")]
+    )
     monkeypatch.setattr(viz_agent, "chat_no_think", chat)
     sessions = []
 
@@ -471,9 +675,14 @@ def test_all_workers_share_one_mcp_server(monkeypatch, fake_server):
 
     monkeypatch.setattr(viz_agent, "_run_worker_agent", fake_worker)
 
-    result = asyncio.run(viz_agent.run_analysis(
-        [{"role": "user", "content": "Plot"}], DATA_PATH, "fake", "server.py"
-    ))
+    result = asyncio.run(
+        viz_agent.run_analysis(
+            [{"role": "user", "content": "Plot"}],
+            DATA_PATH,
+            "fake",
+            "server.py",
+        )
+    )
 
     assert fake_server == [("server.py", False)]
     assert len(sessions) == 2 and sessions[0] is sessions[1]
@@ -490,52 +699,86 @@ def test_server_start_failure_gives_failed_reports_not_a_crash(monkeypatch):
     monkeypatch.setattr(viz_agent, "chat_no_think", chat)
     monkeypatch.setattr(viz_agent, "_mcp_session", broken_session)
 
-    result = asyncio.run(viz_agent.run_analysis(
-        [{"role": "user", "content": "Plot"}], DATA_PATH, "fake", "server.py"
-    ))
+    result = asyncio.run(
+        viz_agent.run_analysis(
+            [{"role": "user", "content": "Plot"}],
+            DATA_PATH,
+            "fake",
+            "server.py",
+        )
+    )
 
     assert "The analysis tools could not be started." in result["summary"]
-    assert any(level == "error" and "mcp_server.py not found" in msg
-               for level, msg in result["logs"])
+    assert any(
+        level == "error" and "mcp_server.py not found" in msg
+        for level, msg in result["logs"]
+    )
 
 
 def test_activity_log_shows_tools_per_round(monkeypatch, logs):
     bad = ("plot_interactive_boxplot", {"column": "nope", "title": "Box"})
-    good_hist = ("plot_interactive_histogram", {"column": "age", "title": "Age"})
+    good_hist = (
+        "plot_interactive_histogram",
+        {"column": "age", "title": "Age"},
+    )
     good_box = ("plot_interactive_boxplot", {"column": "age", "title": "Box"})
-    chat = ScriptedChat([_reply(calls=[good_hist, bad]), _reply(calls=[good_box])])
+    chat = ScriptedChat(
+        [_reply(calls=[good_hist, bad]), _reply(calls=[good_box])]
+    )
     monkeypatch.setattr(viz_agent, "chat_no_think", chat)
-    session = FakeSession({
-        "plot_interactive_histogram": ["/tmp/run/plots/h.json|||code"],
-        "plot_interactive_boxplot": [
-            "Error: Column 'nope' not found.", "/tmp/run/plots/b.json|||c",
-        ],
-    })
+    session = FakeSession(
+        {
+            "plot_interactive_histogram": ["/tmp/run/plots/h.json|||code"],
+            "plot_interactive_boxplot": [
+                "Error: Column 'nope' not found.",
+                "/tmp/run/plots/b.json|||c",
+            ],
+        }
+    )
 
     _run_loop("interactive", session, logs)
 
-    assert ("info", "Worker 'interactive' is running 2 tools: "
-            "Interactive Histogram, Interactive Box Plot.") in logs
-    assert ("info", "Worker 'interactive' is retrying 1 tool: Interactive Box Plot.") in logs
+    assert (
+        "info",
+        "Worker 'interactive' is running 2 tools: "
+        "Interactive Histogram, Interactive Box Plot.",
+    ) in logs
+    assert (
+        "info",
+        "Worker 'interactive' is retrying 1 tool: Interactive Box Plot.",
+    ) in logs
 
 
 def test_distinct_plots_are_kept_and_exact_repeats_merged():
     plots = []
-    viz_agent._record_plot(plots, "plot_interactive_histogram", "/p/hist_age.json|||code A")
-    viz_agent._record_plot(plots, "plot_interactive_histogram", "/p/hist_age_2.json|||code B")
-    viz_agent._record_plot(plots, "plot_interactive_histogram", "/p/hist_age_3.json|||code A")
+    viz_agent._record_plot(
+        plots, "plot_interactive_histogram", "/p/hist_age.json|||code A"
+    )
+    viz_agent._record_plot(
+        plots, "plot_interactive_histogram", "/p/hist_age_2.json|||code B"
+    )
+    viz_agent._record_plot(
+        plots, "plot_interactive_histogram", "/p/hist_age_3.json|||code A"
+    )
 
     assert [p["code"] for p in plots] == ["code A", "code B"]
-    assert plots[0]["path"] == "/p/hist_age_3.json"  # latest file of the repeat
+    assert (
+        plots[0]["path"] == "/p/hist_age_3.json"
+    )  # latest file of the repeat
 
 
 def test_supervisor_plans_from_the_dataset_summary(monkeypatch):
     chat = ScriptedChat([_plan(interactive="Histogram of age")])
     monkeypatch.setattr(viz_agent, "chat_no_think", chat)
 
-    asyncio.run(viz_agent._plan_tasks(
-        [{"role": "user", "content": "User Request: Plot age"}], SCHEMA, "fake", lambda *_: None
-    ))
+    asyncio.run(
+        viz_agent._plan_tasks(
+            [{"role": "user", "content": "User Request: Plot age"}],
+            SCHEMA,
+            "fake",
+            lambda *_: None,
+        )
+    )
 
     system_prompt = chat.calls[0]["messages"][0]["content"]
     assert system_prompt.endswith(f"Dataset summary:\n{SCHEMA}\n")
@@ -546,7 +789,10 @@ def test_column_parameters_list_the_dataset_columns():
         "type": "object",
         "properties": {
             "x_column": {"type": "string"},
-            "color_column": {"anyOf": [{"type": "string"}, {"type": "null"}], "default": None},
+            "color_column": {
+                "anyOf": [{"type": "string"}, {"type": "null"}],
+                "default": None,
+            },
             "hue_column": {"type": "string", "default": ""},
             "predictor_cols": {"type": "array", "items": {"type": "string"}},
             "title": {"type": "string"},
@@ -564,13 +810,28 @@ def test_column_parameters_list_the_dataset_columns():
     assert "enum" not in props["title"]
 
 
-def test_worker_tools_carry_column_enums_and_fix_near_misses(monkeypatch, logs):
-    monkeypatch.setattr(viz_agent, "_dataset_columns", lambda path: ["age", "income"])
-    chat = ScriptedChat([
-        _reply(calls=[("plot_interactive_histogram", {"column": " Age", "title": "Age"})]),
-    ])
+def test_worker_tools_carry_column_enums_and_fix_near_misses(
+    monkeypatch, logs
+):
+    monkeypatch.setattr(
+        viz_agent, "_dataset_columns", lambda path: ["age", "income"]
+    )
+    chat = ScriptedChat(
+        [
+            _reply(
+                calls=[
+                    (
+                        "plot_interactive_histogram",
+                        {"column": " Age", "title": "Age"},
+                    )
+                ]
+            ),
+        ]
+    )
     monkeypatch.setattr(viz_agent, "chat_no_think", chat)
-    session = FakeSession({"plot_interactive_histogram": ["/tmp/run/plots/h.json|||code"]})
+    session = FakeSession(
+        {"plot_interactive_histogram": ["/tmp/run/plots/h.json|||code"]}
+    )
 
     _run_loop("interactive", session, logs)
 
@@ -578,7 +839,10 @@ def test_worker_tools_carry_column_enums_and_fix_near_misses(monkeypatch, logs):
     assert params["column"]["enum"] == ["age", "income"]
     assert "enum" not in params["title"]
     assert session.calls[0][1]["column"] == "age"
-    assert ("info", "Worker 'interactive' used column ' Age'; using 'age'.") in logs
+    assert (
+        "info",
+        "Worker 'interactive' used column ' Age'; using 'age'.",
+    ) in logs
 
 
 def test_wide_datasets_get_no_column_enums(monkeypatch, logs):
@@ -602,13 +866,26 @@ def test_ambiguous_or_unknown_columns_are_left_for_the_tool_to_report():
 
 
 def test_plot_r_code_is_kept_but_never_shown_to_the_model(monkeypatch, logs):
-    chat = ScriptedChat([
-        _reply(calls=[("plot_interactive_histogram", {"column": "age", "title": "Age"})]),
-    ])
+    chat = ScriptedChat(
+        [
+            _reply(
+                calls=[
+                    (
+                        "plot_interactive_histogram",
+                        {"column": "age", "title": "Age"},
+                    )
+                ]
+            ),
+        ]
+    )
     monkeypatch.setattr(viz_agent, "chat_no_think", chat)
-    session = FakeSession({
-        "plot_interactive_histogram": ["/tmp/run/plots/h.json|||py code|||library(ggplot2)"],
-    })
+    session = FakeSession(
+        {
+            "plot_interactive_histogram": [
+                "/tmp/run/plots/h.json|||py code|||library(ggplot2)"
+            ],
+        }
+    )
 
     _, plots, _ = _run_loop("interactive", session, logs)
 
@@ -616,12 +893,26 @@ def test_plot_r_code_is_kept_but_never_shown_to_the_model(monkeypatch, logs):
     assert plots[0]["r_code"] == "library(ggplot2)"
 
 
-def test_stats_r_block_is_stored_and_removed_from_the_model_view(monkeypatch, logs):
-    output = "| r | 0.9 |\n\n```python\nprint(1)\n```\n\n```r\nprint(cor.test(a, b))\n```"
-    chat = ScriptedChat([
-        _reply(calls=[("run_correlation", {"x_column": "age", "y_column": "income"})]),
-        _reply("Interpretation."),
-    ])
+def test_stats_r_block_is_stored_and_removed_from_the_model_view(
+    monkeypatch, logs
+):
+    output = (
+        "| r | 0.9 |\n\n```python\nprint(1)\n```\n\n```r\nprint(cor.test(a, "
+        "b))\n```"
+    )
+    chat = ScriptedChat(
+        [
+            _reply(
+                calls=[
+                    (
+                        "run_correlation",
+                        {"x_column": "age", "y_column": "income"},
+                    )
+                ]
+            ),
+            _reply("Interpretation."),
+        ]
+    )
     monkeypatch.setattr(viz_agent, "chat_no_think", chat)
     session = FakeSession({"run_correlation": [output]})
 
@@ -629,13 +920,17 @@ def test_stats_r_block_is_stored_and_removed_from_the_model_view(monkeypatch, lo
 
     assert stats[0]["code"] == "print(1)"
     assert stats[0]["r_code"] == "print(cor.test(a, b))"
-    tool_messages = [m for m in chat.calls[1]["messages"] if m.get("role") == "tool"]
+    tool_messages = [
+        m for m in chat.calls[1]["messages"] if m.get("role") == "tool"
+    ]
     assert "```r" not in tool_messages[0]["content"]
     assert "```python" in tool_messages[0]["content"]
 
 
 @pytest.mark.parametrize("include_r_code", [True, False])
-def test_r_code_flag_reaches_the_mcp_server_environment(monkeypatch, include_r_code):
+def test_r_code_flag_reaches_the_mcp_server_environment(
+    monkeypatch, include_r_code
+):
     captured = {}
 
     @contextlib.asynccontextmanager
@@ -656,18 +951,36 @@ def test_r_code_flag_reaches_the_mcp_server_environment(monkeypatch, include_r_c
     env = captured["params"].env
     assert (env.get(viz_agent.r_code.R_CODE_ENV) == "1") is include_r_code
     assert "PATH" in env  # the default environment is kept
+    assert "PYTHONPATH" in env  # textlab is importable by the server
+    assert captured["params"].args == ["-m", "server.py"]
 
 
-def test_run_analysis_passes_the_r_code_option_to_the_server(monkeypatch, fake_server):
+def test_run_analysis_passes_the_r_code_option_to_the_server(
+    monkeypatch, fake_server
+):
     chat = ScriptedChat([_plan(interactive="Histogram")])
     monkeypatch.setattr(viz_agent, "chat_no_think", chat)
-    monkeypatch.setattr(viz_agent, "_run_worker_agent", _fake_worker({
-        "interactive": {"plots": ["Interactive Histogram"], "completed": True},
-    }))
+    monkeypatch.setattr(
+        viz_agent,
+        "_run_worker_agent",
+        _fake_worker(
+            {
+                "interactive": {
+                    "plots": ["Interactive Histogram"],
+                    "completed": True,
+                },
+            }
+        ),
+    )
 
-    asyncio.run(viz_agent.run_analysis(
-        [{"role": "user", "content": "Plot"}], DATA_PATH, "fake", "server.py",
-        include_r_code=True,
-    ))
+    asyncio.run(
+        viz_agent.run_analysis(
+            [{"role": "user", "content": "Plot"}],
+            DATA_PATH,
+            "fake",
+            "server.py",
+            include_r_code=True,
+        )
+    )
 
     assert fake_server == [("server.py", True)]

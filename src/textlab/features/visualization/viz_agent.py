@@ -1,14 +1,13 @@
-"""
-Agentic Multi-Agent System (MAS) for the AI Visualization Engine.
+"""Agentic Multi-Agent System (MAS) for the AI Visualization Engine.
 
 Implements a plan-execute-summarise Supervisor-Worker pattern that keeps the
 number of sequential LLM calls low for small models:
 
 1. Plan: the supervisor model returns one JSON plan (structured output).
 2. Execute: delegated workers run concurrently with narrow tool sets, sharing
-   one MCP server process for the whole analysis. A worker only loops to retry failed tool calls:
-   plot workers stop as soon as their plots succeed, and stats workers get one
-   tool-free turn to interpret their results.
+   one MCP server process for the whole analysis. A worker only loops to retry
+   failed tool calls: plot workers stop as soon as their plots succeed, and
+   stats workers get one tool-free turn to interpret their results.
 3. Summarise: one tool-free supervisor call writes the final report. When no
    statistics were produced the report is built from a template instead.
 """
@@ -22,12 +21,14 @@ import re
 import sys
 import threading
 import traceback
+from collections.abc import AsyncIterator, Callable
 from datetime import timedelta
-from typing import Any, AsyncIterator, Callable, TypedDict
+from typing import Any, TypedDict
 
 from mcp import ClientSession, StdioServerParameters, types
 from mcp.client.stdio import get_default_environment, stdio_client
 
+from textlab.common.jobs import worker_environment
 from textlab.common.ollama import chat_no_think, message_text
 from textlab.features.visualization import r_code
 from textlab.features.visualization.plot_data import (
@@ -54,6 +55,9 @@ from textlab.features.visualization.viz_utils import (
     was_last_load_truncated,
 )
 
+#: The MCP server with the plotting and statistics tools.
+MCP_SERVER_MODULE = "textlab.features.visualization.mcp_server"
+
 WORKER_PROMPTS = {
     "interactive": INTERACTIVE_PROMPT,
     "static": STATIC_PROMPT,
@@ -78,10 +82,18 @@ MAX_TOOL_ERROR_CHARS = 1000
 # Tool parameters whose value is one column name, or a list of column names.
 # Their schemas list the dataset's real columns as allowed values (``enum``),
 # so models pick existing names instead of guessing (e.g. 'Radius_mean').
-COLUMN_PARAMS = frozenset({
-    "column", "x_column", "y_column", "color_column", "hue_column",
-    "text_column", "target_col", "group_col",
-})
+COLUMN_PARAMS = frozenset(
+    {
+        "column",
+        "x_column",
+        "y_column",
+        "color_column",
+        "hue_column",
+        "text_column",
+        "target_col",
+        "group_col",
+    }
+)
 COLUMN_LIST_PARAMS = frozenset({"predictor_cols"})
 # Above this many columns the enums are left out to keep tool schemas short.
 MAX_ENUM_COLUMNS = 150
@@ -112,7 +124,9 @@ PLAN_SCHEMA = {
 }
 
 # Placeholder values small models write into fields that should stay empty.
-EMPTY_INSTRUCTIONS = frozenset({"", "none", "null", "n/a", "na", "-", "not needed"})
+EMPTY_INSTRUCTIONS = frozenset(
+    {"", "none", "null", "n/a", "na", "-", "not needed"}
+)
 
 
 class WorkerReport(TypedDict):
@@ -120,11 +134,11 @@ class WorkerReport(TypedDict):
 
     role: str
     instruction: str
-    text: str           # free-text reply or interpretation from the worker model
-    plots: list[str]    # labels of plots generated successfully
-    stats: list[str]    # statistical result tables (without code)
-    errors: list[str]   # errors still unresolved when the worker stopped
-    completed: bool     # False when the worker hit its iteration limit or crashed
+    text: str  # free-text reply or interpretation from the worker model
+    plots: list[str]  # labels of plots generated successfully
+    stats: list[str]  # statistical result tables (without code)
+    errors: list[str]  # errors still unresolved when the worker stopped
+    completed: bool  # False when the worker hit its iteration limit or crashed
 
 
 LogFn = Callable[[str, str], None]
@@ -134,18 +148,23 @@ LogFn = Callable[[str, str], None]
 # HELPERS
 # =========================================================================
 
+
 def _unwrap_exception_group(exc: BaseException) -> str:
-    """Recursively unwrap ExceptionGroup / BaseExceptionGroup to reveal the
-    actual root cause.  The MCP ``stdio_client`` uses ``anyio.TaskGroup``
+    """Unwrap ExceptionGroups recursively to reveal the actual root cause.
+
+    The MCP ``stdio_client`` uses ``anyio.TaskGroup``
     internally, and when the subprocess fails, the real error gets buried
     inside an ``ExceptionGroup`` whose ``str()`` only shows
-    *"unhandled errors in a TaskGroup (1 sub-exception)"*."""
+    *"unhandled errors in a TaskGroup (1 sub-exception)"*.
+    """
     parts: list[str] = []
     if hasattr(exc, "exceptions"):
         for sub in exc.exceptions:
             parts.append(_unwrap_exception_group(sub))
     else:
-        tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+        tb = "".join(
+            traceback.format_exception(type(exc), exc, exc.__traceback__)
+        )
         parts.append(f"{type(exc).__name__}: {exc}\n{tb}")
     return "\n".join(parts) if parts else f"{type(exc).__name__}: {exc}"
 
@@ -157,9 +176,13 @@ def _snippet(text: str, limit: int = LOG_SNIPPET_CHARS) -> str:
 
 
 def _clip(text: str, limit: int) -> str:
-    """Truncate multi-line text to ``limit`` characters, keeping line breaks."""
+    """Truncate text to ``limit`` characters, keeping line breaks."""
     text = text.strip()
-    return text if len(text) <= limit else text[:limit].rstrip() + "\n...[truncated]"
+    return (
+        text
+        if len(text) <= limit
+        else text[:limit].rstrip() + "\n...[truncated]"
+    )
 
 
 # Chat-template control tokens (e.g. "<|eot|>", "<|im_end|>") that some models
@@ -216,7 +239,7 @@ def _tool_message(tool_name: str, content: str) -> dict[str, Any]:
 
 
 def _parse_tool_call(tool_call: dict[str, Any]) -> tuple[str, dict[str, Any]]:
-    """Return ``(name, arguments)`` from a tool call, tolerating JSON-string args."""
+    """Return ``(name, arguments)`` of a tool call; args may be JSON text."""
     function = tool_call.get("function", {})
     args = function.get("arguments")
     if isinstance(args, str):
@@ -238,22 +261,31 @@ def _resolve_tool_name(name: str, allowed: list[str]) -> str | None:
     the worker's iterations on a spelling mistake.
 
     Returns:
-        The allowed tool name, or None when there is no sufficiently close match.
+        The allowed tool name, or None when there is no sufficiently close
+        match.
     """
     if name in allowed:
         return name
-    matches = difflib.get_close_matches(name, allowed, n=1, cutoff=TOOL_NAME_CUTOFF)
+    matches = difflib.get_close_matches(
+        name, allowed, n=1, cutoff=TOOL_NAME_CUTOFF
+    )
     return matches[0] if matches else None
 
 
 def _strip_injected_args(schema: dict[str, Any] | None) -> dict[str, Any]:
-    """Return a copy of a tool's JSON schema without agent-injected arguments."""
-    clean = copy.deepcopy(schema) if schema else {"type": "object", "properties": {}}
+    """Return a copy of a tool's schema without agent-injected arguments."""
+    clean = (
+        copy.deepcopy(schema)
+        if schema
+        else {"type": "object", "properties": {}}
+    )
     properties = clean.get("properties", {})
     for name in INJECTED_ARGS:
         properties.pop(name, None)
     if "required" in clean:
-        clean["required"] = [r for r in clean["required"] if r not in INJECTED_ARGS]
+        clean["required"] = [
+            r for r in clean["required"] if r not in INJECTED_ARGS
+        ]
     return clean
 
 
@@ -261,7 +293,8 @@ def _set_string_enum(prop: dict[str, Any], allowed: list[str]) -> None:
     """Attach ``allowed`` as the enum of a string property.
 
     Handles both plain ``{"type": "string"}`` properties and optional ones,
-    which FastMCP writes as ``{"anyOf": [{"type": "string"}, {"type": "null"}]}``.
+    which FastMCP writes as ``{"anyOf": [{"type": "string"}, {"type":
+    "null"}]}``.
     """
     for branch in prop.get("anyOf") or [prop]:
         if branch.get("type") == "string":
@@ -277,14 +310,18 @@ def _add_column_enums(schema: dict[str, Any], columns: list[str]) -> None:
     required = set(schema.get("required", []))
     for name, prop in schema.get("properties", {}).items():
         if name in COLUMN_PARAMS:
-            allowed = list(columns) if name in required else list(columns) + [""]
+            allowed = (
+                list(columns) if name in required else list(columns) + [""]
+            )
             _set_string_enum(prop, allowed)
-        elif name in COLUMN_LIST_PARAMS and isinstance(prop.get("items"), dict):
+        elif name in COLUMN_LIST_PARAMS and isinstance(
+            prop.get("items"), dict
+        ):
             _set_string_enum(prop["items"], list(columns))
 
 
 def _match_column(value: str, columns: list[str]) -> str | None:
-    """Return the column ``value`` refers to, tolerating case and whitespace slips.
+    """Return the column ``value`` refers to, despite case or space slips.
 
     Only an exact match or a single unambiguous case-insensitive match is
     accepted; anything else returns None and the tool reports the error.
@@ -324,7 +361,7 @@ def _fix_column_args(
 
 
 def _dataset_columns(data_file_path: str) -> list[str]:
-    """Return the dataset's column names, or an empty list if it cannot be read."""
+    """Return the dataset's column names, or ``[]`` if it cannot be read."""
     try:
         return [str(c) for c in load_data_safely(data_file_path).columns]
     except Exception:
@@ -344,13 +381,13 @@ def _split_r_block(tool_output: str) -> tuple[str, str]:
     match = _R_BLOCK_RE.search(tool_output)
     if not match:
         return tool_output, ""
-    without_r = tool_output[:match.start()] + tool_output[match.end():]
+    without_r = tool_output[: match.start()] + tool_output[match.end() :]
     return without_r.rstrip(), match.group(1).strip()
 
 
 def _extract_stats_code(tool_output: str) -> tuple[str, str, str]:
-    """
-    Splits a stats tool output into (result_text, python_code, r_code).
+    """Splits a stats tool output into (result_text, python_code, r_code).
+
     Stats tools embed a ```python ... ``` block, and when R code was requested
     a ```r ... ``` block, after the result. Missing parts are returned as "".
     """
@@ -358,7 +395,7 @@ def _extract_stats_code(tool_output: str) -> tuple[str, str, str]:
     match = re.search(r"```python\n(.*?)```", tool_output, re.DOTALL)
     if match:
         code = match.group(1).strip()
-        result_text = tool_output[:match.start()].strip()
+        result_text = tool_output[: match.start()].strip()
     else:
         code = ""
         result_text = tool_output.strip()
@@ -375,12 +412,17 @@ def _describe_model_error(exc: Exception) -> str:
     detail = _snippet(str(exc))
     if "tool call" in detail.lower() or "xml syntax" in detail.lower():
         return (
-            f"The model produced a tool call Ollama could not parse ({detail}). "
+            "The model produced a tool call Ollama could not parse "
+            f"({detail}). "
             "This is a known issue with some models; please try another model."
         )
-    if "timed out" in detail.lower() or "timeout" in type(exc).__name__.lower():
+    if (
+        "timed out" in detail.lower()
+        or "timeout" in type(exc).__name__.lower()
+    ):
         return (
-            f"The model did not answer within {AGENT_REQUEST_TIMEOUT:.0f} seconds. "
+            f"The model did not answer within {AGENT_REQUEST_TIMEOUT:.0f} "
+            "seconds. "
             "Please try again or choose another model."
         )
     return f"Model call failed: {detail}"
@@ -413,12 +455,13 @@ async def _chat(
 # MCP TOOL ACCESS
 # =========================================================================
 
+
 async def _get_mcp_tools(
     session: ClientSession,
     allowed_names: list[str] | None = None,
     columns: list[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """List the MCP server's tools in Ollama format, filtered to ``allowed_names``.
+    """List the MCP server's tools in Ollama format, only ``allowed_names``.
 
     Agent-injected arguments (see ``INJECTED_ARGS``) are removed from each
     schema because the agent always supplies them itself. When ``columns`` is
@@ -470,7 +513,9 @@ async def _call_tool(
         read_timeout_seconds=timedelta(seconds=TOOL_CALL_TIMEOUT),
     )
     output = "\n".join(
-        part.text for part in result.content if isinstance(part, types.TextContent)
+        part.text
+        for part in result.content
+        if isinstance(part, types.TextContent)
     )
     failed = bool(result.isError) or output.strip().startswith("Error")
     return not failed, output
@@ -479,7 +524,7 @@ async def _call_tool(
 def _record_plot(
     global_plots: list[PlotArtifact], tool_name: str, output: str
 ) -> bool:
-    """Store a plot artifact from a ``"path|||code"`` or ``"path|||code|||r"`` output.
+    """Store a plot from a ``"path|||code"`` or ``"path|||code|||r"`` output.
 
     Returns False if the output is malformed. Plot files never overwrite each
     other, so distinct plots are all kept. Only an exact repeat (same tool and
@@ -496,7 +541,10 @@ def _record_plot(
         "tool_name": tool_name,
     }
     for index, existing in enumerate(global_plots):
-        if (existing["tool_name"], existing["code"]) == (tool_name, artifact["code"]):
+        if (existing["tool_name"], existing["code"]) == (
+            tool_name,
+            artifact["code"],
+        ):
             global_plots[index] = artifact
             return True
     global_plots.append(artifact)
@@ -507,9 +555,10 @@ def _record_plot(
 # WORKERS
 # =========================================================================
 
+
 @contextlib.asynccontextmanager
 async def _mcp_session(
-    mcp_server_script: str, include_r_code: bool = False
+    server_module: str, include_r_code: bool = False
 ) -> AsyncIterator[ClientSession]:
     """Start one MCP server subprocess and yield an initialised client session.
 
@@ -521,18 +570,21 @@ async def _mcp_session(
     calls one at a time, which costs little because they are short compared
     to model calls.
 
-    ``sys.executable`` guarantees the server runs in the same Python
-    environment as the app, whatever ``python3`` resolves to on ``PATH``.
+    The server runs as ``python -m`` with ``sys.executable``, so it uses the
+    same Python environment as the app, whatever ``python3`` resolves to on
+    ``PATH``; ``PYTHONPATH`` makes ``textlab`` importable
+    (``common.jobs.worker_environment``).
 
     With ``include_r_code`` the server's tools also return R equivalents of
     their Python snippets (see ``r_code.py``).
     """
     env = get_default_environment()
+    env["PYTHONPATH"] = worker_environment()["PYTHONPATH"]
     if include_r_code:
         env[r_code.R_CODE_ENV] = "1"
     server_params = StdioServerParameters(
         command=sys.executable,
-        args=[mcp_server_script],
+        args=["-m", server_module],
         env=env,
     )
     async with stdio_client(server_params) as (read, write):
@@ -569,14 +621,17 @@ async def _run_worker_agent(
     allowed_tools = AGENT_TOOLS.get(agent_role, [])
     # Cached in-process by load_data_safely, so this does not re-read the file.
     columns = await asyncio.to_thread(_dataset_columns, data_file_path)
-    tools = await _get_mcp_tools(session, allowed_names=allowed_tools, columns=columns)
+    tools = await _get_mcp_tools(
+        session, allowed_names=allowed_tools, columns=columns
+    )
 
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": WORKER_PROMPTS[agent_role]},
         {
             "role": "user",
             "content": (
-                f"Dataset schema (already loaded — use your tools to analyze it):\n{schema}\n\n"
+                "Dataset schema (already loaded — use your tools to analyze "
+                f"it):\n{schema}\n\n"
                 f"Task: {task_instruction}"
             ),
         },
@@ -606,7 +661,12 @@ async def _run_worker_agent(
             log("info", f"Worker '{agent_role}' finished task successfully.")
             return report
 
-        log("info", _describe_round(agent_role, tool_calls, allowed_tools, round_index))
+        log(
+            "info",
+            _describe_round(
+                agent_role, tool_calls, allowed_tools, round_index
+            ),
+        )
 
         round_errors: list[str] = []
         round_stats: list[str] = []
@@ -623,7 +683,8 @@ async def _run_worker_agent(
                 )
                 log(
                     "warning",
-                    f"Worker '{agent_role}' requested unknown tool '{requested_name}'. "
+                    f"Worker '{agent_role}' requested unknown tool "
+                    f"'{requested_name}'. "
                     "Retrying...",
                 )
                 round_errors.append(error)
@@ -632,22 +693,29 @@ async def _run_worker_agent(
             if tool_name != requested_name:
                 log(
                     "info",
-                    f"Worker '{agent_role}' called '{requested_name}'; using '{tool_name}'.",
+                    f"Worker '{agent_role}' called '{requested_name}'; using "
+                    f"'{tool_name}'.",
                 )
 
             for requested, corrected in _fix_column_args(tool_args, columns):
                 log(
                     "info",
-                    f"Worker '{agent_role}' used column '{requested}'; using '{corrected}'.",
+                    f"Worker '{agent_role}' used column '{requested}'; using "
+                    f"'{corrected}'.",
                 )
             for name in INJECTED_ARGS:
                 tool_args.pop(name, None)
             tool_args["data_file_path"] = data_file_path
 
             try:
-                succeeded, output = await _call_tool(session, tool_name, tool_args)
+                succeeded, output = await _call_tool(
+                    session, tool_name, tool_args
+                )
             except Exception as exc:
-                succeeded, output = False, f"Error: tool '{tool_name}' crashed: {exc}"
+                succeeded, output = (
+                    False,
+                    f"Error: tool '{tool_name}' crashed: {exc}",
+                )
 
             if succeeded and tool_name in PLOT_TOOLS:
                 succeeded = _record_plot(global_plots, tool_name, output)
@@ -660,52 +728,73 @@ async def _run_worker_agent(
                     f"Worker '{agent_role}' tool '{tool_name}' failed: "
                     f"{_snippet(output)} Retrying...",
                 )
-                round_errors.append(f"{get_tool_label(tool_name)}: {output.strip()}")
-                messages.append(_tool_message(
-                    tool_name,
-                    f"Execution Error: {_clip(output, MAX_TOOL_ERROR_CHARS)}\n"
-                    "Please correct your code or parameters and try again.",
-                ))
+                round_errors.append(
+                    f"{get_tool_label(tool_name)}: {output.strip()}"
+                )
+                messages.append(
+                    _tool_message(
+                        tool_name,
+                        "Execution Error: "
+                        f"{_clip(output, MAX_TOOL_ERROR_CHARS)}\n"
+                        "Please correct your code or parameters and try "
+                        "again.",
+                    )
+                )
                 continue
 
             if tool_name in PLOT_TOOLS:
                 title = str(tool_args.get("title") or "").strip()
                 label = get_tool_label(tool_name)
                 round_plots.append(f"{label}: {title}" if title else label)
-                # Generic message — never expose internal file paths to the model.
-                messages.append(_tool_message(
-                    tool_name,
-                    "Plot generated successfully. It will be displayed to the user. "
-                    "Do not generate it again.",
-                ))
+                # Generic message — never expose internal file paths to the
+                # model.
+                messages.append(
+                    _tool_message(
+                        tool_name,
+                        "Plot generated successfully. It will be displayed to "
+                        "the user. "
+                        "Do not generate it again.",
+                    )
+                )
             else:
                 if tool_name in STATS_TOOLS:
-                    result_text, code_snippet, r_snippet = _extract_stats_code(output)
+                    result_text, code_snippet, r_snippet = _extract_stats_code(
+                        output
+                    )
                     # A retry round may repeat a test that already succeeded.
                     if all(s["result"] != result_text for s in global_stats):
-                        global_stats.append({
-                            "title": get_tool_label(tool_name),
-                            "result": result_text,
-                            "code": code_snippet,
-                            "r_code": r_snippet,
-                        })
+                        global_stats.append(
+                            {
+                                "title": get_tool_label(tool_name),
+                                "result": result_text,
+                                "code": code_snippet,
+                                "r_code": r_snippet,
+                            }
+                        )
                     round_stats.append(result_text)
                 model_output, _ = _split_r_block(output)
-                messages.append(_tool_message(
-                    tool_name, _clip(model_output, MAX_TOOL_OUTPUT_CHARS)
-                ))
+                messages.append(
+                    _tool_message(
+                        tool_name, _clip(model_output, MAX_TOOL_OUTPUT_CHARS)
+                    )
+                )
 
         report["plots"].extend(round_plots)
-        report["stats"].extend(r for r in round_stats if r not in report["stats"])
+        report["stats"].extend(
+            r for r in round_stats if r not in report["stats"]
+        )
         previous_errors, report["errors"] = report["errors"], round_errors
 
         if round_errors:
             # The model ignored the error feedback and repeated the exact same
             # failing calls; further rounds would only repeat them again.
-            if round_errors == previous_errors and not (round_plots or round_stats):
+            if round_errors == previous_errors and not (
+                round_plots or round_stats
+            ):
                 log(
                     "error",
-                    f"Worker '{agent_role}' repeated the same failing call; stopping.",
+                    f"Worker '{agent_role}' repeated the same failing call; "
+                    "stopping.",
                 )
                 return report
             continue
@@ -717,7 +806,9 @@ async def _run_worker_agent(
 
         if agent_role == "stats" and round_stats:
             log("info", f"Worker '{agent_role}' is interpreting the results.")
-            report["text"] = await _interpret_stats(model_name, messages, agent_role, log)
+            report["text"] = await _interpret_stats(
+                model_name, messages, agent_role, log
+            )
             report["completed"] = True
             log("info", f"Worker '{agent_role}' finished task successfully.")
             return report
@@ -725,10 +816,15 @@ async def _run_worker_agent(
     if report["plots"] or report["stats"]:
         log(
             "warning",
-            f"Worker '{agent_role}' reached the iteration limit; returning partial results.",
+            f"Worker '{agent_role}' reached the iteration limit; returning "
+            "partial results.",
         )
     else:
-        log("error", f"Worker '{agent_role}' reached the iteration limit without any results.")
+        log(
+            "error",
+            f"Worker '{agent_role}' reached the iteration limit without any "
+            "results.",
+        )
     return report
 
 
@@ -747,17 +843,24 @@ def _describe_round(
     labels: list[str] = []
     for tool_call in tool_calls:
         requested_name, _ = _parse_tool_call(tool_call)
-        tool_name = _resolve_tool_name(requested_name, allowed_tools) or requested_name
+        tool_name = (
+            _resolve_tool_name(requested_name, allowed_tools) or requested_name
+        )
         labels.append(get_tool_label(tool_name))
 
     count = len(labels)
     noun = "tool" if count == 1 else "tools"
     action = "is running" if round_index == 0 else "is retrying"
-    return f"Worker '{agent_role}' {action} {count} {noun}: {', '.join(labels)}."
+    return (
+        f"Worker '{agent_role}' {action} {count} {noun}: {', '.join(labels)}."
+    )
 
 
 async def _interpret_stats(
-    model_name: str, messages: list[dict[str, Any]], agent_role: str, log: LogFn
+    model_name: str,
+    messages: list[dict[str, Any]],
+    agent_role: str,
+    log: LogFn,
 ) -> str:
     """Ask the stats worker for a tool-free interpretation of its results.
 
@@ -768,7 +871,10 @@ async def _interpret_stats(
     try:
         response = await _chat(model_name, messages)
     except Exception as exc:
-        log("warning", f"Worker '{agent_role}' could not interpret its results: {exc}")
+        log(
+            "warning",
+            f"Worker '{agent_role}' could not interpret its results: {exc}",
+        )
         return ""
     return _model_text(response["message"])
 
@@ -776,6 +882,7 @@ async def _interpret_stats(
 # =========================================================================
 # SUPERVISOR
 # =========================================================================
+
 
 async def _plan_tasks(
     messages: list[dict[str, Any]], schema: str, model_name: str, log: LogFn
@@ -789,17 +896,26 @@ async def _plan_tasks(
 
     Returns:
         ``(tasks, direct_reply)`` where ``tasks`` is a de-duplicated list of
-        ``(agent_role, task_instruction)`` pairs in role order. ``direct_reply``
-        holds the supervisor's answer when no specialist is needed.
+        ``(agent_role, task_instruction)`` pairs in role order.
+        ``direct_reply`` holds the supervisor's answer when no specialist is
+        needed.
     """
     system_prompt = f"{SUPERVISOR_PROMPT}\nDataset summary:\n{schema}\n"
-    supervisor_messages = [{"role": "system", "content": system_prompt}] + messages
-    response = await _chat(model_name, supervisor_messages, json_schema=PLAN_SCHEMA)
+    supervisor_messages = [
+        {"role": "system", "content": system_prompt}
+    ] + messages
+    response = await _chat(
+        model_name, supervisor_messages, json_schema=PLAN_SCHEMA
+    )
     content = _model_text(response["message"])
 
     plan = _extract_json_object(content)
     if plan is None:
-        log("warning", "Supervisor did not return a valid plan; showing its reply instead.")
+        log(
+            "warning",
+            "Supervisor did not return a valid plan; showing its reply "
+            "instead.",
+        )
         return [], content
 
     tasks: list[tuple[str, str]] = []
@@ -851,7 +967,7 @@ async def _run_workers(
     )
 
     reports: list[WorkerReport] = []
-    for (role, instruction), output in zip(tasks, outputs):
+    for (role, instruction), output in zip(tasks, outputs, strict=False):
         if isinstance(output, asyncio.CancelledError):
             raise output
         if isinstance(output, BaseException):
@@ -865,7 +981,7 @@ async def _run_workers(
 
 async def _run_workers_on_shared_server(
     tasks: list[tuple[str, str]],
-    mcp_server_script: str,
+    server_module: str,
     data_file_path: str,
     schema: str,
     model_name: str,
@@ -884,15 +1000,27 @@ async def _run_workers_on_shared_server(
     """
     reports: list[WorkerReport] | None = None
     try:
-        async with _mcp_session(mcp_server_script, include_r_code) as session:
+        async with _mcp_session(server_module, include_r_code) as session:
             reports = await _run_workers(
-                tasks, session, data_file_path, schema, model_name,
-                global_plots, global_stats, log, cancel_event,
+                tasks,
+                session,
+                data_file_path,
+                schema,
+                model_name,
+                global_plots,
+                global_stats,
+                log,
+                cancel_event,
             )
     except BaseException as exc:
-        if isinstance(exc, (asyncio.CancelledError, KeyboardInterrupt, SystemExit)):
+        if isinstance(
+            exc, asyncio.CancelledError | KeyboardInterrupt | SystemExit
+        ):
             raise
-        log("error", f"MCP server session failed:\n{_unwrap_exception_group(exc)}")
+        log(
+            "error",
+            f"MCP server session failed:\n{_unwrap_exception_group(exc)}",
+        )
 
     if reports is None:
         reports = []
@@ -920,14 +1048,18 @@ def _format_report(report: WorkerReport) -> str:
 
 
 def _template_summary(reports: list[WorkerReport], truncated: bool) -> str:
-    """Build the final summary without an LLM call (used when there are no stats)."""
+    """Build the final summary without an LLM call (without stats)."""
     plots = [label for report in reports for label in report["plots"]]
-    notes = [report["text"].strip() for report in reports if report["text"].strip()]
+    notes = [
+        report["text"].strip() for report in reports if report["text"].strip()
+    ]
     errors = [error for report in reports for error in report["errors"]]
 
     parts: list[str] = []
     if plots:
-        parts.append("The following visualisations were generated and are shown below:")
+        parts.append(
+            "The following visualisations were generated and are shown below:"
+        )
         parts.append("\n".join(f"- {label}" for label in plots))
     if notes:
         parts.append("\n\n".join(notes))
@@ -936,11 +1068,14 @@ def _template_summary(reports: list[WorkerReport], truncated: bool) -> str:
         parts.append("\n".join(f"- {_snippet(error)}" for error in errors))
     if not parts:
         parts.append(
-            "No results were produced. Try rephrasing the request or naming the "
+            "No results were produced. Try rephrasing the request or naming "
+            "the "
             "columns to analyse."
         )
     if truncated:
-        parts.append(f"Note: the dataset was truncated to the first {MAX_ROWS:,} rows.")
+        parts.append(
+            f"Note: the dataset was truncated to the first {MAX_ROWS:,} rows."
+        )
     return "\n\n".join(parts)
 
 
@@ -965,11 +1100,17 @@ async def _summarise(
     )
     results = "\n\n".join(_format_report(report) for report in reports)
     if truncated:
-        results += f"\n\nNote: the dataset was truncated to the first {MAX_ROWS:,} rows."
+        results += (
+            f"\n\nNote: the dataset was truncated to the first {MAX_ROWS:,} "
+            "rows."
+        )
 
     summary_messages = [
         {"role": "system", "content": SUMMARY_PROMPT},
-        {"role": "user", "content": f"{request}\n\n## Specialist results\n\n{results}"},
+        {
+            "role": "user",
+            "content": f"{request}\n\n## Specialist results\n\n{results}",
+        },
     ]
     try:
         response = await _chat(model_name, summary_messages)
@@ -984,7 +1125,7 @@ async def run_analysis(
     messages: list[dict[str, Any]],
     data_file_path: str,
     model_name: str,
-    mcp_server_script: str,
+    server_module: str = MCP_SERVER_MODULE,
     log_callback: LogFn | None = None,
     cancel_event: threading.Event | None = None,
     include_r_code: bool = False,
@@ -995,7 +1136,8 @@ async def run_analysis(
         messages: The user turn(s) describing the request and a data preview.
         data_file_path: Path to the uploaded dataset.
         model_name: The Ollama model used by the supervisor and all workers.
-        mcp_server_script: Path to the MCP server script, started once per run.
+        server_module: The MCP server's module, started once per run with
+            ``python -m``.
         log_callback: Optional callback receiving ``(level, message)`` logs.
         cancel_event: Optional event; when set, workers stop between rounds.
         include_r_code: Also produce R equivalents of the Python snippets
@@ -1017,15 +1159,22 @@ async def run_analysis(
     try:
         # Computed once, before planning: the supervisor plans from it and the
         # concurrent workers reuse it instead of each re-reading the data.
-        schema = await asyncio.to_thread(get_all_columns_summary_impl, data_file_path)
+        schema = await asyncio.to_thread(
+            get_all_columns_summary_impl, data_file_path
+        )
         truncated = was_last_load_truncated(data_file_path)
 
         try:
-            tasks, direct_reply = await _plan_tasks(messages, schema, model_name, _log)
+            tasks, direct_reply = await _plan_tasks(
+                messages, schema, model_name, _log
+            )
         except Exception as exc:
             reason = _describe_model_error(exc)
             _log("error", f"Supervisor stopped: {reason}")
-            tasks, direct_reply = [], f"The analysis could not be started. {reason}"
+            tasks, direct_reply = (
+                [],
+                f"The analysis could not be started. {reason}",
+            )
 
         if not tasks:
             summary = direct_reply
@@ -1034,16 +1183,32 @@ async def run_analysis(
         else:
             _log("info", f"Supervisor planned {len(tasks)} task(s).")
             reports = await _run_workers_on_shared_server(
-                tasks, mcp_server_script, data_file_path, schema, model_name,
-                plot_results, stats_results, _log, cancel_event, include_r_code,
+                tasks,
+                server_module,
+                data_file_path,
+                schema,
+                model_name,
+                plot_results,
+                stats_results,
+                _log,
+                cancel_event,
+                include_r_code,
             )
-            summary = await _summarise(messages, reports, model_name, truncated, _log)
+            summary = await _summarise(
+                messages, reports, model_name, truncated, _log
+            )
             _log("info", "Supervisor synthesized the final summary.")
     except Exception as exc:
-        _log("error", f"Fatal error in MAS session: {exc}\n{traceback.format_exc()}")
+        _log(
+            "error",
+            f"Fatal error in MAS session: {exc}\n{traceback.format_exc()}",
+        )
 
     if not summary:
-        summary = "Analysis complete. Please review the generated visualizations below."
+        summary = (
+            "Analysis complete. Please review the generated visualizations "
+            "below."
+        )
 
     final_logs: list[tuple[Any, str]] = [
         (level if level in ("info", "warning", "error") else "info", msg)

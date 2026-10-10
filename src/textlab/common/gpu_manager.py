@@ -48,8 +48,8 @@ TOPIC_MODELING = "topic_modeling"
 #: beyond their Ollama model.
 LLM = "llm"
 
-#: Helper processes that hold GPU memory, by owner: script names, or module
-#: names for workers started with ``python -m`` (see textlab.common.jobs).
+#: Helper processes that hold GPU memory, by owner: the module names of
+#: workers started with ``python -m`` (see textlab.common.jobs).
 #: Matched against the command line, only for the last-resort cleanup of
 #: leftovers (e.g. a run interrupted before its ``finally`` block ran).
 _WORKER_SCRIPTS = {

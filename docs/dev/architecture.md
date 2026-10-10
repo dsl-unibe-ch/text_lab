@@ -178,6 +178,13 @@ options and an `on_progress` callback, and the page imports nothing else
 from the feature. Use a worker when a feature's models are only needed for
 one run; keep it in-process when keeping a model loaded is the point.
 
+Visualization is a third case: its analysis runs in a background thread
+of the app (`visualization.runs.AnalysisRun`), which the page polls,
+because the heavy work is already elsewhere. The models run in the Ollama
+server, and the plotting and statistics tools in an MCP server process
+started with `python -m` for each run. Chat reuses the same runs for data
+questions.
+
 ### Workers in another environment: OCR
 
 Some engines need dependencies that conflict with the app's, so the image
@@ -218,8 +225,8 @@ feature follows the rules above.
 | Survey | `features/survey/` | part of `OCR.py` (partly hidden) | Refactored |
 | Translation | `features/translation/` | `Translate.py` | Refactored |
 | Topic Modeling | `features/topic_modeling/` | `Topic_Modeling.py` | Refactored |
-| Visualization | `features/visualization/` | `Visualize_Data.py` | Moved |
-| Chat | `features/chat/` | `Chat.py` | Moved |
+| Visualization | `features/visualization/` | `Visualize_Data.py` | Refactored |
+| Chat | `features/chat/` | `Chat.py` | Refactored |
 | Knowledge Graph | `features/knowledge_graph/` | `Knowledge_Graph.py` | Moved |
 
 Backend paths are relative to `src/textlab/`, pages to
@@ -229,14 +236,11 @@ and language configuration) is in `src/textlab/common/`.
 
 Known issues to resolve during the refactor:
 
-- The MCP server of Visualization is still started by file path, and
-  `gpu_manager` recognizes leftover workers by file or module name; it moves
-  to `common.jobs` when Visualization is refactored.
 - The home page still names the University of Bern and UBELIX in its text
   (allow-listed in `tests/test_data_footprint.py`).
-- About 75 emojis remain in the Chat and Knowledge Graph pages and the
-  login check (`auth.py`); they are removed as each feature is refactored,
-  keeping functional symbols such as checkbox glyphs.
+- About 60 emojis remain in the Knowledge Graph page and the login check
+  (`auth.py`); they are removed when those are refactored, keeping
+  functional symbols such as checkbox glyphs.
 
 Code that is moved but not refactored is excluded from ruff
 (`extend-exclude` in `pyproject.toml`); refactoring a feature removes its

@@ -12,11 +12,7 @@ from typing import Any
 
 import ollama
 
-from textlab.common.ollama import (
-    canonical_model_name,
-    installed_model_names,
-    message_text,
-)
+from textlab.common.ollama import message_text, model_installed
 from textlab.common.progress import Progress, ProgressCallback
 from textlab.features.ocr.engines.base import (
     EngineError,
@@ -51,8 +47,7 @@ def ensure_model(
     Raises:
         EngineError: If the download fails.
     """
-    installed = installed_model_names(client)
-    if installed is not None and canonical_model_name(model) in installed:
+    if model_installed(model, client):
         return
     on_progress(Progress(f"Pulling model '{model}'..."))
     try:

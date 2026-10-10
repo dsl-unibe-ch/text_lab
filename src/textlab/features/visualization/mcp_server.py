@@ -1,21 +1,8 @@
-"""
-Model Context Protocol (MCP) Server for the AI Visualization Engine.
+"""Model Context Protocol (MCP) Server for the AI Visualization Engine.
 Registers both interactive (Plotly) and static (Matplotlib) tools.
 """
 
 import logging
-import os
-import sys
-
-# Ensure the 'src' directory is in the Python path ---
-# Because this script is launched as an isolated subprocess by the MCP stdio client,
-# we must explicitly tell Python where the root 'src' directory is located.
-current_dir = os.path.dirname(os.path.abspath(__file__))
-src_dir = os.path.abspath(
-    os.path.join(current_dir, "..", "..", "..")
-)
-if src_dir not in sys.path:
-    sys.path.insert(0, src_dir)
 
 from mcp.server.fastmcp import FastMCP
 
@@ -25,12 +12,26 @@ from textlab.features.visualization.plot_data import (
 )
 from textlab.features.visualization.plot_interactive import (
     generate_custom_plotly_impl,
+)
+from textlab.features.visualization.plot_interactive import (
     plot_barchart_impl as interactive_barchart,
+)
+from textlab.features.visualization.plot_interactive import (
     plot_boxplot_impl as interactive_boxplot,
+)
+from textlab.features.visualization.plot_interactive import (
     plot_correlation_heatmap_impl as interactive_correlation_heatmap,
+)
+from textlab.features.visualization.plot_interactive import (
     plot_histogram_impl as interactive_histogram,
+)
+from textlab.features.visualization.plot_interactive import (
     plot_lineplot_impl as interactive_lineplot,
+)
+from textlab.features.visualization.plot_interactive import (
     plot_scatter_matrix_impl as interactive_scatter_matrix,
+)
+from textlab.features.visualization.plot_interactive import (
     plot_scatterplot_impl as interactive_scatterplot,
 )
 from textlab.features.visualization.plot_static import (
@@ -44,7 +45,6 @@ from textlab.features.visualization.plot_static import (
     plot_static_scatterplot_impl,
     plot_static_wordcloud_impl,
 )
-
 from textlab.features.visualization.stats_analysis import (
     rank_target_correlations_impl,
     run_association_test_impl,
@@ -63,9 +63,13 @@ mcp = FastMCP("Data Visualization MCP Server")
 
 # --- INTERACTIVE TOOLS (Plotly) ---
 
+
 @mcp.tool()
 def plot_interactive_histogram(
-    data_file_path: str, column: str, title: str, color_column: str | None = None
+    data_file_path: str,
+    column: str,
+    title: str,
+    color_column: str | None = None,
 ) -> str:
     """Generates a web-ready interactive Plotly histogram."""
     return interactive_histogram(data_file_path, column, title, color_column)
@@ -73,26 +77,44 @@ def plot_interactive_histogram(
 
 @mcp.tool()
 def plot_interactive_scatterplot(
-    data_file_path: str, x_column: str, y_column: str, title: str, color_column: str | None = None
+    data_file_path: str,
+    x_column: str,
+    y_column: str,
+    title: str,
+    color_column: str | None = None,
 ) -> str:
     """Generates a web-ready interactive Plotly scatter plot."""
-    return interactive_scatterplot(data_file_path, x_column, y_column, title, color_column)
+    return interactive_scatterplot(
+        data_file_path, x_column, y_column, title, color_column
+    )
 
 
 @mcp.tool()
 def plot_interactive_boxplot(
-    data_file_path: str, x_column: str, y_column: str, title: str, color_column: str | None = None
+    data_file_path: str,
+    x_column: str,
+    y_column: str,
+    title: str,
+    color_column: str | None = None,
 ) -> str:
     """Generates a web-ready interactive Plotly box plot."""
-    return interactive_boxplot(data_file_path, x_column, y_column, title, color_column)
+    return interactive_boxplot(
+        data_file_path, x_column, y_column, title, color_column
+    )
 
 
 @mcp.tool()
 def plot_interactive_lineplot(
-    data_file_path: str, x_column: str, y_column: str, title: str, color_column: str | None = None
+    data_file_path: str,
+    x_column: str,
+    y_column: str,
+    title: str,
+    color_column: str | None = None,
 ) -> str:
     """Generates a web-ready interactive Plotly line plot."""
-    return interactive_lineplot(data_file_path, x_column, y_column, title, color_column)
+    return interactive_lineplot(
+        data_file_path, x_column, y_column, title, color_column
+    )
 
 
 @mcp.tool()
@@ -102,14 +124,15 @@ def plot_interactive_correlation_heatmap(
     method: str = "pearson",
     column_filter: str = "",
 ) -> str:
-    """
-    Generates an interactive Plotly correlation heatmap.
+    """Generates an interactive Plotly correlation heatmap.
     Use this to visualize relationships between numeric features.
     method must be 'pearson' or 'spearman'.
     column_filter: optional comma-separated column names or suffix patterns (e.g. '_mean')
         to restrict the heatmap to a subset of columns. Leave empty for all numeric columns.
     """
-    return interactive_correlation_heatmap(data_file_path, title, method, column_filter or None)
+    return interactive_correlation_heatmap(
+        data_file_path, title, method, column_filter or None
+    )
 
 
 @mcp.tool()
@@ -121,14 +144,15 @@ def plot_interactive_barchart(
     color_column: str | None = None,
     aggregation: str = "mean",
 ) -> str:
-    """
-    Generates an interactive Plotly grouped bar chart.
+    """Generates an interactive Plotly grouped bar chart.
     x_column: categorical column for the x-axis groups.
     y_column: numeric column to aggregate.
     aggregation: how to aggregate y per group — 'mean' (default), 'sum', 'count', or 'median'.
     color_column: optional column to split bars by colour.
     """
-    return interactive_barchart(data_file_path, x_column, y_column, title, color_column, aggregation)
+    return interactive_barchart(
+        data_file_path, x_column, y_column, title, color_column, aggregation
+    )
 
 
 @mcp.tool()
@@ -138,12 +162,13 @@ def plot_interactive_scatter_matrix(
     title: str,
     color_column: str | None = None,
 ) -> str:
-    """
-    Generates an interactive Plotly scatter matrix (pair plot equivalent).
+    """Generates an interactive Plotly scatter matrix (pair plot equivalent).
     columns: comma-separated list of numeric column names (e.g. 'radius_mean,texture_mean,area_mean').
     color_column: optional categorical column to colour points by (e.g. 'diagnosis').
     """
-    return interactive_scatter_matrix(data_file_path, columns, title, color_column)
+    return interactive_scatter_matrix(
+        data_file_path, columns, title, color_column
+    )
 
 
 @mcp.tool()
@@ -151,13 +176,14 @@ def generate_custom_plotly(
     data_file_path: str, python_code: str, plot_filename_keyword: str
 ) -> str:
     """Executes custom Python code (px, pd) to generate complex Plotly charts."""
-    return generate_custom_plotly_impl(data_file_path, python_code, plot_filename_keyword)
+    return generate_custom_plotly_impl(
+        data_file_path, python_code, plot_filename_keyword
+    )
 
 
 @mcp.tool()
 def get_all_columns_summary(data_file_path: str) -> str:
-    """
-    Returns a compact schema of ALL columns in one call: column names grouped by type
+    """Returns a compact schema of ALL columns in one call: column names grouped by type
     (numeric, categorical, datetime). Categorical columns also show their unique values.
     Call this FIRST to understand the dataset structure, then call plot or stats tools.
     """
@@ -166,14 +192,14 @@ def get_all_columns_summary(data_file_path: str) -> str:
 
 @mcp.tool()
 def get_column_summary(data_file_path: str, column: str) -> str:
-    """
-    Analyzes a specific column in the dataset and returns a statistical summary.
+    """Analyzes a specific column in the dataset and returns a statistical summary.
     Use this for a deep dive into one column after using get_all_columns_summary.
     """
     return get_column_summary_impl(data_file_path, column)
 
 
 # --- STATIC TOOLS (Matplotlib/Seaborn) ---
+
 
 @mcp.tool()
 def plot_static_histogram(
@@ -185,26 +211,49 @@ def plot_static_histogram(
 
 @mcp.tool()
 def plot_static_scatterplot(
-    data_file_path: str, x_column: str, y_column: str, title: str, x_label: str, y_label: str, hue_column: str | None = None
+    data_file_path: str,
+    x_column: str,
+    y_column: str,
+    title: str,
+    x_label: str,
+    y_label: str,
+    hue_column: str | None = None,
 ) -> str:
     """Generates a static Matplotlib/Seaborn scatter plot (for papers/publications)."""
-    return plot_static_scatterplot_impl(data_file_path, x_column, y_column, title, x_label, y_label, hue_column)
+    return plot_static_scatterplot_impl(
+        data_file_path, x_column, y_column, title, x_label, y_label, hue_column
+    )
 
 
 @mcp.tool()
 def plot_static_boxplot(
-    data_file_path: str, x_column: str, y_column: str, title: str, x_label: str, y_label: str
+    data_file_path: str,
+    x_column: str,
+    y_column: str,
+    title: str,
+    x_label: str,
+    y_label: str,
 ) -> str:
     """Generates a static Matplotlib/Seaborn box plot (for papers/publications)."""
-    return plot_static_boxplot_impl(data_file_path, x_column, y_column, title, x_label, y_label)
+    return plot_static_boxplot_impl(
+        data_file_path, x_column, y_column, title, x_label, y_label
+    )
 
 
 @mcp.tool()
 def plot_static_lineplot(
-    data_file_path: str, x_column: str, y_column: str, title: str, x_label: str, y_label: str, hue_column: str | None = None
+    data_file_path: str,
+    x_column: str,
+    y_column: str,
+    title: str,
+    x_label: str,
+    y_label: str,
+    hue_column: str | None = None,
 ) -> str:
     """Generates a static Matplotlib/Seaborn line plot (for papers/publications)."""
-    return plot_static_lineplot_impl(data_file_path, x_column, y_column, title, x_label, y_label, hue_column)
+    return plot_static_lineplot_impl(
+        data_file_path, x_column, y_column, title, x_label, y_label, hue_column
+    )
 
 
 @mcp.tool()
@@ -218,14 +267,22 @@ def plot_static_barchart(
     hue_column: str | None = None,
     aggregation: str = "mean",
 ) -> str:
-    """
-    Generates a static Seaborn bar chart (for papers/publications).
+    """Generates a static Seaborn bar chart (for papers/publications).
     x_column: categorical column for the x-axis groups.
     y_column: numeric column to aggregate.
     aggregation: how to aggregate y per group — 'mean' (default), 'sum', 'count', or 'median'.
     hue_column: optional column to split bars by colour.
     """
-    return plot_static_barchart_impl(data_file_path, x_column, y_column, title, x_label, y_label, hue_column, aggregation)
+    return plot_static_barchart_impl(
+        data_file_path,
+        x_column,
+        y_column,
+        title,
+        x_label,
+        y_label,
+        hue_column,
+        aggregation,
+    )
 
 
 @mcp.tool()
@@ -233,7 +290,9 @@ def generate_custom_static_plot(
     data_file_path: str, python_code: str, plot_filename_keyword: str
 ) -> str:
     """Executes custom Python code (plt, sns, pd) to generate complex static charts."""
-    return generate_custom_static_plot_impl(data_file_path, python_code, plot_filename_keyword)
+    return generate_custom_static_plot_impl(
+        data_file_path, python_code, plot_filename_keyword
+    )
 
 
 @mcp.tool()
@@ -243,13 +302,14 @@ def plot_static_pairplot(
     title: str = "Pair Plot",
     hue_column: str = "",
 ) -> str:
-    """
-    Generates a Seaborn pair plot (scatter matrix) for the specified columns.
+    """Generates a Seaborn pair plot (scatter matrix) for the specified columns.
     Use this for multi-feature distribution and correlation exploration.
     columns: comma-separated list of numeric column names (e.g. 'radius_mean,texture_mean,area_mean').
     hue_column: optional categorical column name to colour points by (e.g. 'diagnosis'). Leave empty if not needed.
     """
-    return plot_static_pairplot_impl(data_file_path, columns, title, hue_column or None)
+    return plot_static_pairplot_impl(
+        data_file_path, columns, title, hue_column or None
+    )
 
 
 @mcp.tool()
@@ -259,12 +319,13 @@ def plot_static_wordcloud(
     title: str = "Word Cloud",
     extra_stopwords: str | None = None,
 ) -> str:
-    """
-    Generates a static Word Cloud image from a column containing text data.
+    """Generates a static Word Cloud image from a column containing text data.
     Use this when the user wants to visualize the most frequent terms in a dataset.
     extra_stopwords: optional comma-separated words to exclude (e.g. "said,also,one").
     """
-    return plot_static_wordcloud_impl(data_file_path, text_column, title, extra_stopwords)
+    return plot_static_wordcloud_impl(
+        data_file_path, text_column, title, extra_stopwords
+    )
 
 
 @mcp.tool()
@@ -274,24 +335,25 @@ def plot_static_correlation_heatmap(
     method: str = "pearson",
     column_filter: str = "",
 ) -> str:
-    """
-    Generates a publication-ready Seaborn correlation heatmap.
+    """Generates a publication-ready Seaborn correlation heatmap.
     Use this when the user explicitly asks for static or publication figures.
     method must be 'pearson' or 'spearman'.
     column_filter: optional comma-separated column names or suffix patterns (e.g. '_mean')
         to restrict the heatmap to a subset of columns. Leave empty for all numeric columns.
     """
-    return plot_static_correlation_heatmap_impl(data_file_path, title, method, column_filter or None)
+    return plot_static_correlation_heatmap_impl(
+        data_file_path, title, method, column_filter or None
+    )
 
 
 # --- STATISTICAL TOOLS ---
+
 
 @mcp.tool()
 def run_correlation(
     data_file_path: str, x_column: str, y_column: str, method: str = "pearson"
 ) -> str:
-    """
-    Computes statistical correlation (pearson, spearman) between two numeric columns.
+    """Computes statistical correlation (pearson, spearman) between two numeric columns.
     Use this to mathematically verify relationships before plotting scatterplots.
     """
     return run_correlation_impl(data_file_path, x_column, y_column, method)
@@ -299,10 +361,12 @@ def run_correlation(
 
 @mcp.tool()
 def run_group_comparison(
-    data_file_path: str, target_col: str, group_col: str, method: str = "parametric"
+    data_file_path: str,
+    target_col: str,
+    group_col: str,
+    method: str = "parametric",
 ) -> str:
-    """
-    Tests whether a NUMERIC column (target_col) differs between the groups of a
+    """Tests whether a NUMERIC column (target_col) differs between the groups of a
     categorical column (group_col). Always reports assumption checks and an effect size.
     method:
       'parametric' (default): t-test for 2 groups, one-way ANOVA + Tukey post-hoc for 3+.
@@ -311,13 +375,16 @@ def run_group_comparison(
         parametric run reported doubtful normality.
     For two categorical columns use run_association_test instead.
     """
-    return run_group_comparison_impl(data_file_path, target_col, group_col, method)
+    return run_group_comparison_impl(
+        data_file_path, target_col, group_col, method
+    )
 
 
 @mcp.tool()
-def run_association_test(data_file_path: str, x_column: str, y_column: str) -> str:
-    """
-    Tests whether two CATEGORICAL columns are associated (e.g. sex and smoker, faculty and
+def run_association_test(
+    data_file_path: str, x_column: str, y_column: str
+) -> str:
+    """Tests whether two CATEGORICAL columns are associated (e.g. sex and smoker, faculty and
     answer). Returns the crosstab with row percentages, a chi-square test (Fisher's exact
     test for small 2x2 tables) and Cramer's V as the strength of the association.
     """
@@ -328,35 +395,37 @@ def run_association_test(data_file_path: str, x_column: str, y_column: str) -> s
 def run_linear_regression(
     data_file_path: str, target_col: str, predictor_cols: list[str]
 ) -> str:
-    """
-    Runs an OLS Linear Regression. 
+    """Runs an OLS Linear Regression.
     target_col is the dependent variable (Y).
-    predictor_cols is a list of independent variables (X). 
+    predictor_cols is a list of independent variables (X).
     CRITICAL: predictor_cols MUST be a valid JSON array of strings, e.g., ["col1", "col2"].
     """
-    return run_linear_regression_impl(data_file_path, target_col, predictor_cols)
+    return run_linear_regression_impl(
+        data_file_path, target_col, predictor_cols
+    )
+
 
 @mcp.tool()
 def run_logistic_regression(
     data_file_path: str, target_col: str, predictor_cols: list[str]
 ) -> str:
-    """
-    Runs a logistic regression for a BINARY outcome (two values such as yes/no, 0/1, M/B).
+    """Runs a logistic regression for a BINARY outcome (two values such as yes/no, 0/1, M/B).
     target_col is the binary outcome; predictor_cols are the predictors (numeric or
     categorical). Returns odds ratios with 95% confidence intervals.
     For a numeric outcome use run_linear_regression instead.
     CRITICAL: predictor_cols MUST be a valid JSON array of strings, e.g., ["col1", "col2"].
     """
-    return run_logistic_regression_impl(data_file_path, target_col, predictor_cols)
+    return run_logistic_regression_impl(
+        data_file_path, target_col, predictor_cols
+    )
 
 
 @mcp.tool()
 def rank_target_correlations(
     data_file_path: str, target_col: str, method: str = "pearson"
 ) -> str:
-    """
-    Calculates and ranks the correlation between a single target column and all other 
-    numeric columns in the dataset at once. Use this tool when the user wants to rank, 
+    """Calculates and ranks the correlation between a single target column and all other
+    numeric columns in the dataset at once. Use this tool when the user wants to rank,
     sort, or find top features related to a specific outcome column like diagnosis.
     """
     return rank_target_correlations_impl(data_file_path, target_col, method)
