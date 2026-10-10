@@ -3,9 +3,11 @@
 Audio transcription with WhisperX, including speaker diarization, VAD
 pre-filtering and Swiss German models.
 
-The code still lives in the files below and moves here during the refactor (see
-``docs/dev/architecture.md``):
+Moved from ``src/core`` with only import and path updates. The modules are
+reorganized when the feature is refactored (see ``docs/dev/architecture.md``):
 
-- ``src/core/transcribe_engine.py``
-- ``src/core/transcribe_worker.py``
+- ``transcribe_engine``: audio decoding, language detection, VAD and the
+  transcript exports (CSV, SRT, VTT, ELAN).
+- ``transcribe_worker``: subprocess that runs the WhisperX pipeline for the
+  Meeting Notes Generator.
 """

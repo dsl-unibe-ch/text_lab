@@ -3,8 +3,9 @@
 Meeting notes generated from a recording: transcription followed by LLM
 summarization.
 
-The code still lives in the files below and moves here during the refactor (see
-``docs/dev/architecture.md``):
+Moved from ``src/core`` with only import and path updates. The modules are
+reorganized when the feature is refactored (see ``docs/dev/architecture.md``):
 
-- ``src/core/summarize_engine.py``
+- ``summarize_engine``: chunked LLM summarization of a transcript into
+  structured notes.
 """

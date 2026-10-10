@@ -2,15 +2,27 @@
 
 set -euo pipefail
 
+# Optional developer overrides, e.g. TEXT_LAB_SRC pointing at a development
+# tree. Open OnDemand copies template/ into the job directory, so a
+# template/dev.env in a sandbox app ends up next to this script. The file is
+# gitignored and never part of a production deployment; see
+# template/dev.env.example.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "$SCRIPT_DIR/dev.env" ]]; then
+  echo "Loading developer overrides from $SCRIPT_DIR/dev.env"
+  # shellcheck source=/dev/null
+  source "$SCRIPT_DIR/dev.env"
+fi
+
 # Allow callers to override base directories via environment variables.
 HOST_TEXT_LAB_DIR="${TEXT_LAB_DIR:-/storage/research/dsl_shared/solutions/ondemand/text_lab}"
 
 CONT_TEXT_LAB_DIR="/text_lab"
 
-# App source served by Streamlit (read in-container via the /storage bind).
-# Export TEXT_LAB_SRC to serve a development tree instead, e.g.
-#   TEXT_LAB_SRC=$HOME/ondemand/dev/text_lab/src
-TEXT_LAB_SRC="${TEXT_LAB_SRC:-$HOST_TEXT_LAB_DIR/src_main280526/src}"
+# App source served by Streamlit (read in-container via the /storage bind):
+# the src/ directory of a checkout, which holds the textlab package. Set
+# TEXT_LAB_SRC in template/dev.env to serve a development tree instead.
+TEXT_LAB_SRC="${TEXT_LAB_SRC:-$HOST_TEXT_LAB_DIR/current/src}"
 
 #point to the apptainer containers
 # The published image must carry the paddle_vl_backend env (paddleocr 3.7 +
@@ -90,6 +102,8 @@ echo "Starting Text Lab Session for User: $USER"
 echo "Slurm Job ID: ${SLURM_JOB_ID:-unknown}"
 echo "Assigned Ollama Host/Port: $OLLAMA_HOST"
 echo "Assigned GPU(s): $CUDA_VISIBLE_DEVICES"
+echo "Source tree: $TEXT_LAB_SRC"
+echo "Container: $TL_CONTAINER"
 echo "=========================================================="
 
 apptainer exec \
@@ -116,13 +130,14 @@ apptainer exec \
   --env TEXTLAB_VISION_MODEL="${TEXTLAB_VISION_MODEL:-qwen3-vl:30b-a3b-instruct}" \
   --env TEXTLAB_APPROVED_SURVEY_MODELS="${TEXTLAB_APPROVED_SURVEY_MODELS:-qwen3-vl:30b-a3b-instruct}" \
   --env GROBID_PORT="$GROBID_PORT" \
+  --env PYTHONPATH="$TEXT_LAB_SRC" \
   "$TL_CONTAINER" \
   bash -c "export OLLAMA_TMPDIR=/tmp/ollama_${USER}_${SLURM_JOB_ID:-unknown} && \
            export TMPDIR=/tmp/ollama_${USER}_${SLURM_JOB_ID:-unknown} && \
            mkdir -p \$OLLAMA_TMPDIR && \
            ollama serve > $CONT_TEXT_LAB_DIR/logs/ollama_server_${SLURM_JOB_ID:-unknown}.log 2>&1 & \
            while ! curl -s http://$OLLAMA_HOST/api/tags > /dev/null; do sleep 1; done && \
-           /opt/conda/envs/text_lab_main/bin/python -u -m streamlit run '$TEXT_LAB_SRC/Home.py' \
+           /opt/conda/envs/text_lab_main/bin/python -u -m streamlit run '$TEXT_LAB_SRC/textlab/ui/streamlit/Home.py' \
              --server.address 0.0.0.0 \
              --server.port '$TEXT_LAB_PORT' \
              --server.baseUrlPath '$SERVER_BASEURLPATH' \

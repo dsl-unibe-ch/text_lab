@@ -1,7 +1,7 @@
 # Text Lab
 
 <p align="center">
-  <img src="src/assets/text_lab_logo.png" alt="Text Lab Logo" width="200"/>
+  <img src="src/textlab/ui/streamlit/assets/text_lab_logo.png" alt="Text Lab Logo" width="200"/>
 </p>
 
 **Text Lab** is a secure, interactive suite of advanced Artificial Intelligence and Natural Language Processing (NLP) tools designed to run directly on the University of Bern's High-Performance Computing cluster (UBELIX).
@@ -56,14 +56,15 @@ For more detailed guidelines on job submission, please refer to the [HPC Documen
 
 The code is being restructured so that each feature's processing logic (backend) is separate from the Streamlit pages (frontend). The [Developer Guide](https://text-lab.dsl.unibe.ch/dev/) describes the target structure and tracks the migration.
 
-- `src/textlab/`: the Python package. `features/` holds one backend package per feature, `common/` shared backend code, `ui/` the user interfaces.
-- `src/core/`, `src/pages/`, `src/Home.py`: backend and Streamlit pages not yet migrated into `src/textlab/`.
+- `src/textlab/features/`: backend, one package per feature (transcription, OCR, translation, ...).
+- `src/textlab/common/`: backend code shared by several features.
+- `src/textlab/ui/streamlit/`: the Streamlit app (`Home.py` and `pages/`).
 - `deploy/container/`: Apptainer definition of the image that holds all dependencies.
 - `deploy/sbatch/`: batch job templates (planned).
 - `scripts/`: developer scripts, such as running the tests on a compute node.
-- `tests/`: tests (feature tests move next to their feature during the migration).
+- `tests/`: cross-cutting tests; each feature keeps its own tests in its `tests/` folder.
 - `docs/`: MkDocs site with the user guide and the developer guide.
-- `manifest.yml`, `form.yml`, `submit.yml.erb`, `template/`: Open OnDemand app files.
+- `manifest.yml`, `form.yml`, `submit.yml.erb`, `template/`: Open OnDemand app files. `template/script.sh.erb` starts the app.
 
 ---
 

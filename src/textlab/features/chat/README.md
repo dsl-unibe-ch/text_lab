@@ -2,10 +2,13 @@
 
 Private chat with local LLMs over the user's own documents and data files.
 
-**Status:** not migrated yet. The code currently lives in:
+**Status:** moved, not refactored yet. The modules were moved here from
+`src/core` with only import and path updates; the package docstring in
+`__init__.py` says what each one does.
 
-- `src/core/chat_engine.py`
-- UI: `src/pages/Chat.py`
+- Modules: `chat_engine.py`
+- UI: `Chat.py` in `src/textlab/ui/streamlit/pages/`
+- Tests: none yet
 
 Once the feature is refactored, this file documents its pipeline, public API,
 files written to disk, configuration and tests, as described in the developer

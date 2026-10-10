@@ -24,13 +24,31 @@ The rest of the site is the user guide.
 | Path | What it holds |
 |---|---|
 | `manifest.yml`, `form.yml`, `submit.yml.erb`, `view.html.erb`, `template/` | Open OnDemand app files: the launch form and the job script that starts the app |
-| `src/textlab/` | The Python package, organized by feature (target structure) |
-| `src/core/`, `src/pages/`, `src/Home.py` | Code not yet migrated into `src/textlab/` |
+| `src/textlab/features/` | Backend, one package per feature |
+| `src/textlab/common/` | Backend code shared by several features |
+| `src/textlab/ui/streamlit/` | The Streamlit app: `Home.py`, `pages/`, `auth.py`, `assets/` |
 | `deploy/container/` | Apptainer definition of the image that holds all dependencies |
 | `deploy/sbatch/` | Batch job templates (planned) |
 | `scripts/` | Developer scripts, such as running the tests on a compute node |
-| `tests/` | Tests; feature tests move next to their feature during the refactor |
+| `tests/` | Cross-cutting tests; feature tests live in each feature's `tests/` folder |
 | `docs/` | This site: user guide and developer guide |
+
+## Running the app from your working tree
+
+The launch script `template/script.sh.erb` serves the code in `TEXT_LAB_SRC`,
+which defaults to the production release on research storage. To run your
+working tree in a sandbox Open OnDemand app instead, copy
+`template/dev.env.example` to `template/dev.env` and set `TEXT_LAB_SRC` to
+the `src/` folder of your checkout. Open OnDemand copies `template/` into the
+job directory, and the script loads `dev.env` from there at start-up; the job
+log shows which source tree and container it used.
+
+`template/dev.env` is gitignored, so the committed launch script always
+describes production. `TL_CONTAINER` in the same file selects a different
+image, for example one you have just built.
+
+The app imports the `textlab` package, so `src/` must be on `PYTHONPATH`. The
+launch script sets it inside the container; for tests, `pyproject.toml` does.
 
 ## Conventions
 

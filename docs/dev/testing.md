@@ -7,8 +7,10 @@
 - **Cross-cutting tests** live in `tests/`: architecture rules, checks that
   no user data stays on disk after a session, and shared fixtures.
 
-During the refactor most tests are still in `tests/`. They move into the
-feature packages as each feature is migrated.
+Shared code has its tests in `src/textlab/common/tests/`. Each `tests/`
+folder is a package (it has an `__init__.py`), so a test can import helpers
+from another test module by its full name, for example
+`from textlab.features.translation.tests.test_translation_pdf import make_pdf`.
 
 ## Markers
 
@@ -78,9 +80,9 @@ lint-imports            # backend never imports a user interface
 ```
 
 `lint-imports` needs `src` on the Python path (`PYTHONPATH=src`). Code that
-has not been migrated into `src/textlab/` yet is excluded from ruff
-(`extend-exclude` in `pyproject.toml`); each migrated feature is removed from
-that list.
+has been moved but not refactored yet is excluded from ruff
+(`extend-exclude` in `pyproject.toml`); each refactored feature is removed
+from that list.
 
 ## Continuous integration
 

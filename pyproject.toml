@@ -38,16 +38,85 @@ include = ["textlab*"]
 line-length = 79
 target-version = "py311"
 src = ["src"]
-# Code that has not been migrated into src/textlab yet. It is linted once it
-# moves; each refactor phase removes its entries from this list.
+# Code moved into src/textlab but not refactored yet: it still follows the
+# old conventions, so it is excluded until its feature is refactored. Each
+# refactor phase removes its entries from this list.
 extend-exclude = [
-    "src/Home.py",
-    "src/auth.py",
-    "src/language_mappings.py",
-    "src/core",
-    "src/pages",
-    "src/tools",
-    "tests",
+    # Shared backend
+    "src/textlab/common/artifacts.py",
+    "src/textlab/common/gpu_manager.py",
+    "src/textlab/common/html_safety.py",
+    "src/textlab/common/language_mappings.py",
+    "src/textlab/common/model_config.py",
+    "src/textlab/common/upload_safety.py",
+    "src/textlab/common/tests",
+    # Streamlit app
+    "src/textlab/ui/streamlit",
+    # Chat
+    "src/textlab/features/chat/chat_engine.py",
+    # Knowledge graph
+    "src/textlab/features/knowledge_graph/kg_engine.py",
+    # Meeting notes
+    "src/textlab/features/meeting_notes/summarize_engine.py",
+    # OCR
+    "src/textlab/features/ocr/auto_ocr.py",
+    "src/textlab/features/ocr/doc_ir.py",
+    "src/textlab/features/ocr/markup_detect.py",
+    "src/textlab/features/ocr/ocr_engine.py",
+    "src/textlab/features/ocr/paddle_ocr_worker.py",
+    "src/textlab/features/ocr/paddle_vl_worker.py",
+    "src/textlab/features/ocr/searchable_pdf.py",
+    "src/textlab/features/ocr/vision_enrich.py",
+    "src/textlab/features/ocr/tests",
+    # Survey
+    "src/textlab/features/survey/cli.py",
+    "src/textlab/features/survey/form_extract.py",
+    "src/textlab/features/survey/survey_batch.py",
+    "src/textlab/features/survey/survey_label.py",
+    "src/textlab/features/survey/survey_template.py",
+    "src/textlab/features/survey/tests",
+    # Topic modeling
+    "src/textlab/features/topic_modeling/bertopic_engine.py",
+    "src/textlab/features/topic_modeling/evaluation.py",
+    "src/textlab/features/topic_modeling/lda_engine.py",
+    "src/textlab/features/topic_modeling/small_corpus.py",
+    "src/textlab/features/topic_modeling/top2vec_engine.py",
+    "src/textlab/features/topic_modeling/topic_config.py",
+    "src/textlab/features/topic_modeling/topic_pipeline.py",
+    "src/textlab/features/topic_modeling/topic_utils.py",
+    "src/textlab/features/topic_modeling/tests",
+    # Transcription
+    "src/textlab/features/transcription/transcribe_engine.py",
+    "src/textlab/features/transcription/transcribe_worker.py",
+    # Translation
+    "src/textlab/features/translation/__init__.py",
+    "src/textlab/features/translation/chunking.py",
+    "src/textlab/features/translation/engine.py",
+    "src/textlab/features/translation/format.py",
+    "src/textlab/features/translation/gpu_memory.py",
+    "src/textlab/features/translation/gpu_profile.py",
+    "src/textlab/features/translation/hf_backend.py",
+    "src/textlab/features/translation/lang_detect.py",
+    "src/textlab/features/translation/messages.py",
+    "src/textlab/features/translation/ollama_backend.py",
+    "src/textlab/features/translation/pdf_checks.py",
+    "src/textlab/features/translation/pdf_extract.py",
+    "src/textlab/features/translation/pdf_workflow.py",
+    "src/textlab/features/translation/quality.py",
+    "src/textlab/features/translation/review.py",
+    "src/textlab/features/translation/shield.py",
+    "src/textlab/features/translation/tests",
+    # Visualization
+    "src/textlab/features/visualization/mcp_server.py",
+    "src/textlab/features/visualization/plot_data.py",
+    "src/textlab/features/visualization/plot_interactive.py",
+    "src/textlab/features/visualization/plot_static.py",
+    "src/textlab/features/visualization/r_code.py",
+    "src/textlab/features/visualization/stats_analysis.py",
+    "src/textlab/features/visualization/viz_agent.py",
+    "src/textlab/features/visualization/viz_config.py",
+    "src/textlab/features/visualization/viz_utils.py",
+    "src/textlab/features/visualization/tests",
 ]
 
 [tool.ruff.lint]
@@ -80,9 +149,7 @@ known-first-party = ["textlab"]
 # Feature tests live next to their code in src/textlab/features/*/tests/;
 # tests/ holds cross-cutting tests only.
 testpaths = ["src/textlab", "tests"]
-# "tests" is on the path only because the unmigrated tests import
-# conftest_path.py and each other. Remove it once they have moved.
-pythonpath = ["src", "tests"]
+pythonpath = ["src"]
 addopts = ["--import-mode=importlib", "-ra", "--strict-markers"]
 markers = [
     "gpu: needs a CUDA GPU",
@@ -104,3 +171,8 @@ name = "Backend never imports a user interface"
 type = "forbidden"
 source_modules = ["textlab.features", "textlab.common"]
 forbidden_modules = ["streamlit", "textlab.ui"]
+# Existing violations, removed as their features are refactored. Do not add
+# new entries: move the UI code into textlab.ui instead.
+ignore_imports = [
+    "textlab.common.gpu_manager -> streamlit",
+]

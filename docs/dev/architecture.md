@@ -26,7 +26,7 @@ The target layout of the repository:
 ```
 text_lab/
 ├── manifest.yml  form.yml  submit.yml.erb  view.html.erb  icon.png
-├── template/                  # Open OnDemand job scripts
+├── template/                  # Open OnDemand job scripts (+ dev.env.example)
 ├── deploy/
 │   ├── container/             # Apptainer definition (text_lab.def)
 │   └── sbatch/                # batch job templates (planned)
@@ -111,17 +111,41 @@ The feature README covers:
 
 ## Migration status
 
-| Feature | Backend today | Page today | Status |
-|---|---|---|---|
-| Transcription | `src/core/transcribe_*.py` | `src/pages/Transcribe.py` | Not migrated |
-| Meeting Notes | `src/core/summarize_engine.py` | `src/pages/Meeting_Notes_Generator.py` | Not migrated |
-| OCR | `src/core/` (OCR modules) | `src/pages/OCR.py` | Not migrated |
-| Survey | `src/core/form_extract.py`, `survey_*.py` | part of `src/pages/OCR.py` | Not migrated |
-| Translation | `src/core/translation/` | `src/pages/Translate.py` | Not migrated |
-| Topic Modeling | `src/core/topic_modeling/` | `src/pages/Topic_Modeling.py` | Not migrated |
-| Visualization | `src/core/visualization/` | `src/pages/Visualize_Data.py` | Not migrated |
-| Chat | `src/core/chat_engine.py` | `src/pages/Chat.py` | Not migrated |
-| Knowledge Graph | `src/core/kg_engine.py` | `src/pages/Knowledge_Graph.py` | Not migrated |
+All code now lives in `src/textlab/`; the old `src/core/`, `src/pages/` and
+`src/tools/` folders are gone. "Moved" means the modules sit in their feature
+package with only import and path updates: the page still holds backend
+logic, and the module names are still the old ones. "Refactored" means the
+feature follows the rules above.
 
-Each feature package already has a `README.md` listing the files that will
-move into it.
+| Feature | Backend | Page | Status |
+|---|---|---|---|
+| Transcription | `features/transcription/` | `Transcribe.py` | Moved |
+| Meeting Notes | `features/meeting_notes/` | `Meeting_Notes_Generator.py` | Moved |
+| OCR | `features/ocr/` | `OCR.py` | Moved |
+| Survey | `features/survey/` | part of `OCR.py` (hidden) | Moved |
+| Translation | `features/translation/` | `Translate.py` | Moved |
+| Topic Modeling | `features/topic_modeling/` | `Topic_Modeling.py` | Moved |
+| Visualization | `features/visualization/` | `Visualize_Data.py` | Moved |
+| Chat | `features/chat/` | `Chat.py` | Moved |
+| Knowledge Graph | `features/knowledge_graph/` | `Knowledge_Graph.py` | Moved |
+
+Backend paths are relative to `src/textlab/`, pages to
+`src/textlab/ui/streamlit/pages/`. Shared code (GPU management, upload and
+HTML safety, model and language configuration) is in `src/textlab/common/`.
+
+Known issues to resolve during the refactor:
+
+- `common/gpu_manager.py` imports Streamlit to show a spinner and a toast.
+  It is the only exception to rule 1, listed in `ignore_imports` in
+  `pyproject.toml`.
+- `common/gpu_manager.py` imports `features/ocr/vision_enrich.py`, so shared
+  code depends on a feature.
+- `features/chat/chat_engine.py` holds Ollama helpers used by Meeting Notes,
+  Translate and Visualization; they belong in `common/`.
+- Worker scripts and the MCP server are started by file path, and
+  `gpu_manager` recognizes leftover workers by file name, so these files
+  keep their names until the shared job runner replaces this.
+
+Code that is moved but not refactored is excluded from ruff
+(`extend-exclude` in `pyproject.toml`); refactoring a feature removes its
+entries.

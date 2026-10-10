@@ -3,12 +3,13 @@
 Extraction of filled-in survey and form responses from scanned documents, with
 templates and batch scoring.
 
-The code still lives in the files below and moves here during the refactor (see
-``docs/dev/architecture.md``):
+Moved from ``src/core`` with only import and path updates. The modules are
+reorganized when the feature is refactored (see ``docs/dev/architecture.md``):
 
-- ``src/core/form_extract.py``
-- ``src/core/survey_batch.py``
-- ``src/core/survey_label.py``
-- ``src/core/survey_template.py``
-- ``src/tools/survey_cli.py``
+- ``cli``: command-line batch extraction (``python -m
+  textlab.features.survey.cli``).
+- ``form_extract``: question-level response extraction.
+- ``survey_batch``: reading a batch of questionnaires against a template.
+- ``survey_label``: naming the controls on a synthesized blank form.
+- ``survey_template``: the printed form, learned once per batch.
 """

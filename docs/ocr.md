@@ -56,7 +56,7 @@ Choose **Batch OCR (ZIP)**, upload a `.zip` of PDFs/images, and press **Parse ba
 
 ### Survey/form response extraction (not enabled)
 
-A question-level survey/form response extractor is present in the codebase but **switched off in the interface** while it is validated against a representative multi-document benchmark. It renders complete 300-DPI question sections to the local vision-language model, assigns its own IDs, verifies each marked position against an echoed choice label, derives selection constraints independently, and flags empty or inconsistent responses; OCR text and table HTML are never modified by it. Developers can reach it through `auto_ocr.process_document(..., extract_survey=True)`, or re-expose the UI controls, the **Responses** tab, and the form-responses CSV by setting `SURVEY_EXTRACTION_UI_ENABLED = True` in `src/pages/OCR.py`.
+A question-level survey/form response extractor is present in the codebase but **switched off in the interface** while it is validated against a representative multi-document benchmark. It renders complete 300-DPI question sections to the local vision-language model, assigns its own IDs, verifies each marked position against an echoed choice label, derives selection constraints independently, and flags empty or inconsistent responses; OCR text and table HTML are never modified by it. Developers can reach it through `auto_ocr.process_document(..., extract_survey=True)`, or re-expose the UI controls, the **Responses** tab, and the form-responses CSV by setting `SURVEY_EXTRACTION_UI_ENABLED = True` in `src/textlab/ui/streamlit/pages/OCR.py`.
 
 ## Advanced: legacy engines
 

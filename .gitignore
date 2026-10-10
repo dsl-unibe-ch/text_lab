@@ -25,3 +25,6 @@ notes/
 .import_linter_cache/
 textlab-tests-*.out
 *.egg-info/
+
+# Developer overrides for a sandbox app (see template/dev.env.example).
+template/dev.env

@@ -3,10 +3,13 @@
 Meeting notes generated from a recording: transcription followed by LLM
 summarization.
 
-**Status:** not migrated yet. The code currently lives in:
+**Status:** moved, not refactored yet. The modules were moved here from
+`src/core` with only import and path updates; the package docstring in
+`__init__.py` says what each one does.
 
-- `src/core/summarize_engine.py`
-- UI: `src/pages/Meeting_Notes_Generator.py`
+- Modules: `summarize_engine.py`
+- UI: `Meeting_Notes_Generator.py` in `src/textlab/ui/streamlit/pages/`
+- Tests: none yet
 
 Once the feature is refactored, this file documents its pipeline, public API,
 files written to disk, configuration and tests, as described in the developer

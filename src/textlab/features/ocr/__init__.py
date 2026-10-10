@@ -4,15 +4,18 @@ Text, table and layout extraction from images and PDFs, with an automatic
 pipeline and manual engine selection (olmOCR, GLM-OCR, PaddleOCR, EasyOCR),
 plus searchable-PDF export.
 
-The code still lives in the files below and moves here during the refactor (see
-``docs/dev/architecture.md``):
+Moved from ``src/core`` with only import and path updates. The modules are
+reorganized when the feature is refactored (see ``docs/dev/architecture.md``):
 
-- ``src/core/ocr_engine.py``
-- ``src/core/auto_ocr.py``
-- ``src/core/doc_ir.py``
-- ``src/core/searchable_pdf.py``
-- ``src/core/markup_detect.py``
-- ``src/core/vision_enrich.py``
-- ``src/core/paddle_ocr_worker.py``
-- ``src/core/paddle_vl_worker.py``
+- ``auto_ocr``: the automatic OCR pipeline.
+- ``doc_ir``: typed intermediate representation of an OCR result.
+- ``markup_detect``: checkbox and survey-mark detection.
+- ``ocr_engine``: result handling and previews for the manually selected
+  engines.
+- ``paddle_ocr_worker``: PaddleOCR subprocess, run in the ``paddle_backend``
+  environment.
+- ``paddle_vl_worker``: PaddleOCR-VL subprocess, run in the
+  ``paddle_vl_backend`` environment.
+- ``searchable_pdf``: PDF export with an invisible text layer.
+- ``vision_enrich``: local vision-model client and optional enrichments.
 """

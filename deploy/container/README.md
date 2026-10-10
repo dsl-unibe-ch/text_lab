@@ -24,9 +24,9 @@ bind-mounted at runtime under `/opt/...` (see `template/script.sh.erb`).
 Build on a compute node, never on a login node, then copy the image to the
 container folder on research storage under a new dated name, for example
 `text_lab_DDMMYY.sif`. Do not move or delete existing images there: running
-sessions may still use them. Point `template/script.sh.erb` (or, once it
-exists, the site configuration) at the new image and test it in the sandbox
-app before switching production to it.
+sessions may still use them. Test the new image in a sandbox app first by
+setting `TL_CONTAINER` in `template/dev.env` (see the developer guide), then
+switch production to it.
 
 To add a dependency, edit the `%post` section of `text_lab.def` and rebuild.
 Keep the version pins: the image combines several GPU stacks (WhisperX,
