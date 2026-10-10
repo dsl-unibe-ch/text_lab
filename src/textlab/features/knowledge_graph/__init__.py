@@ -1,11 +1,13 @@
-"""Backend for the Knowledge Graph feature.
+"""Backend for the Knowledge Graph feature: graphs of a paper collection.
 
-Knowledge graphs built from collections of scientific papers, using Grobid for
-parsing and an LLM for topic extraction.
+Interfaces use :mod:`.service`. The modules behind it:
 
-Moved from ``src/core`` with only import and path updates. The modules are
-reorganized when the feature is refactored (see ``docs/dev/architecture.md``):
+- ``grobid``: the Grobid server that parses PDFs into TEI XML.
+- ``tei``: metadata, references and plain text from TEI XML.
+- ``corpus``: the corpus folder: parsing new papers, the corpus tables.
+- ``topics``: topics per paper from an LLM (Ollama or GPUStack).
+- ``graphs``: ego and full corpus graphs (NetworkX, Pyvis).
+- ``models``: the results of the steps.
 
-- ``kg_engine``: Grobid server and parsing, corpus table, LLM topic extraction
-  and graph building.
+See ``README.md`` in this folder for the pipeline and the files written.
 """

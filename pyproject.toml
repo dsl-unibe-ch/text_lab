@@ -54,9 +54,6 @@ extend-exclude = [
     # Streamlit app
     "src/textlab/ui/streamlit/Home.py",
     "src/textlab/ui/streamlit/auth.py",
-    "src/textlab/ui/streamlit/pages/Knowledge_Graph.py",
-    # Knowledge graph
-    "src/textlab/features/knowledge_graph/kg_engine.py",
 ]
 
 [tool.ruff.lint]

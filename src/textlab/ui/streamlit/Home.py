@@ -66,7 +66,6 @@ def main():
     # Convert images to base64
     main_logo_base64 = get_img_as_base64(main_logo_path)
     dsl_base64 = get_img_as_base64(dsl_icon_path)
-    digiki_base64 = get_img_as_base64(digiki_icon_path)
 
     # Render main logo
     st.markdown(f"""
@@ -96,7 +95,6 @@ def main():
 
         **Project details**:
         - **Maintained by**: The Data Science Lab (DSL)
-        - **Funded by**: The Digitalisation Commission & the Data Science Lab at the University of Bern
         - **For questions or issues**: [support.dsl@unibe.ch](mailto:support.dsl@unibe.ch)
 
         **Documentation**:
@@ -111,7 +109,6 @@ def main():
     st.markdown(f"""
     <div class="sub-logos">
       <img src="data:image/png;base64,{dsl_base64}" alt="DSL Icon">
-      <img src="data:image/png;base64,{digiki_base64}" alt="Digiki Icon">
     </div>
     """, unsafe_allow_html=True)
 

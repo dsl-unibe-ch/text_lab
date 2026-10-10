@@ -215,7 +215,7 @@ All code now lives in `src/textlab/`; the old `src/core/`, `src/pages/` and
 `src/tools/` folders are gone. "Moved" means the modules sit in their feature
 package with only import and path updates: the page still holds backend
 logic, and the module names are still the old ones. "Refactored" means the
-feature follows the rules above.
+feature follows the rules above. Every feature is now refactored.
 
 | Feature | Backend | Page | Status |
 |---|---|---|---|
@@ -227,7 +227,7 @@ feature follows the rules above.
 | Topic Modeling | `features/topic_modeling/` | `Topic_Modeling.py` | Refactored |
 | Visualization | `features/visualization/` | `Visualize_Data.py` | Refactored |
 | Chat | `features/chat/` | `Chat.py` | Refactored |
-| Knowledge Graph | `features/knowledge_graph/` | `Knowledge_Graph.py` | Moved |
+| Knowledge Graph | `features/knowledge_graph/` | `Knowledge_Graph.py` | Refactored |
 
 Backend paths are relative to `src/textlab/`, pages to
 `src/textlab/ui/streamlit/pages/`. Shared code (settings, workspace, worker
@@ -238,9 +238,9 @@ Known issues to resolve during the refactor:
 
 - The home page still names the University of Bern and UBELIX in its text
   (allow-listed in `tests/test_data_footprint.py`).
-- About 60 emojis remain in the Knowledge Graph page and the login check
-  (`auth.py`); they are removed when those are refactored, keeping
-  functional symbols such as checkbox glyphs.
+- A few emojis remain in the login check (`auth.py`), which is not
+  refactored yet; functional symbols such as the checkbox glyphs in
+  `markup_detect` stay.
 
 Code that is moved but not refactored is excluded from ruff
 (`extend-exclude` in `pyproject.toml`); refactoring a feature removes its
