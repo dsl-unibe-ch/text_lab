@@ -2,8 +2,8 @@
 # request. Nothing here needs a GPU, the Apptainer image or the models; those
 # tests run on a compute node with scripts/test_on_node.sbatch.
 #
-# A pytest job is added once the tests have moved next to their features and
-# the fast ones are marked (see docs/dev/testing.md).
+# A pytest job for the tests without markers is planned (see
+# docs/dev/testing.md).
 
 name: CI
 

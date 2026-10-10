@@ -95,10 +95,9 @@ ruff format --check .   # formatting
 lint-imports            # backend never imports a user interface
 ```
 
-`lint-imports` needs `src` on the Python path (`PYTHONPATH=src`). Code that
-has been moved but not refactored yet is excluded from ruff
-(`extend-exclude` in `pyproject.toml`); each refactored feature is removed
-from that list.
+`lint-imports` needs `src` on the Python path (`PYTHONPATH=src`). Code not
+refactored yet is excluded from ruff (`extend-exclude` in `pyproject.toml`);
+refactoring a module removes it from that list.
 
 ## Continuous integration
 
@@ -109,6 +108,6 @@ from that list.
 - the import-linter contracts
 - a strict build of this documentation site
 
-GitHub's machines have no GPU and no image, so they will run only the tests
-without markers. That job is added once the tests have moved into the
-feature packages.
+GitHub's machines have no GPU and no image, so a pytest job there could run
+only the tests without markers. Such a job is planned; until then, run the
+tests on a compute node.

@@ -21,7 +21,7 @@ tools that run as Slurm batch jobs, without copying any logic.
 
 ## Repository layout
 
-The target layout of the repository:
+The layout of the repository:
 
 ```
 text_lab/
@@ -234,7 +234,7 @@ Backend paths are relative to `src/textlab/`, pages to
 processes, progress, Ollama, GPU management, upload and HTML safety, model
 and language configuration) is in `src/textlab/common/`.
 
-Known issues to resolve during the refactor:
+Known issues:
 
 - The home page still names the University of Bern and UBELIX in its text
   (allow-listed in `tests/test_data_footprint.py`).
@@ -242,6 +242,6 @@ Known issues to resolve during the refactor:
   refactored yet; functional symbols such as the checkbox glyphs in
   `markup_detect` stay.
 
-Code that is moved but not refactored is excluded from ruff
-(`extend-exclude` in `pyproject.toml`); refactoring a feature removes its
-entries.
+Code not refactored yet (`Home.py`, `auth.py` and a few modules in
+`common/`) is excluded from ruff (`extend-exclude` in `pyproject.toml`);
+refactoring a module removes its entry.

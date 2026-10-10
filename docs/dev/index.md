@@ -4,12 +4,11 @@ This part of the documentation is for people who work on the Text Lab code:
 maintaining features, adding new ones, or deploying the app on a cluster.
 The rest of the site is the user guide.
 
-!!! note "Refactor in progress"
-    Text Lab is being restructured so that each feature's processing logic
-    (the backend) is separate from the Streamlit pages (the frontend). The
-    pages describe the target structure and say where the code is today.
-    The [migration status](architecture.md#migration-status) table shows how
-    far each feature has moved.
+!!! note "Restructured in version 3.0.0"
+    Since version 3.0.0, each feature's processing logic (the backend) is
+    separate from the Streamlit pages (the frontend). The few parts not
+    restructured yet are listed under
+    [known issues](architecture.md#migration-status).
 
 ## Contents
 
@@ -19,7 +18,8 @@ The rest of the site is the user guide.
 - [Testing](testing.md): where tests live, how to run them on a compute
   node, and what runs automatically on GitHub.
 - [Deployment](deployment.md): what the HPC team deploys and what you
-  control, the site configuration, sandbox apps, logs and releases.
+  control, how a session starts, the site configuration, sandbox apps,
+  model stores, logs, releases and rollbacks.
 - [Data handling](data-handling.md): where user data may be written, the
   job workspace, and the tests that keep the privacy promise true.
 

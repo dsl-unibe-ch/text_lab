@@ -66,7 +66,7 @@ For more detailed guidelines on job submission, please refer to the [HPC Documen
 
 ## Repository Structure
 
-The code is being restructured so that each feature's processing logic (backend) is separate from the Streamlit pages (frontend). The [Developer Guide](https://text-lab.dsl.unibe.ch/dev/) describes the target structure and tracks the migration.
+Each feature's processing logic (backend) is separate from the Streamlit pages (frontend). The [Developer Guide](https://text-lab.dsl.unibe.ch/dev/) describes the structure, testing and deployment.
 
 - `src/textlab/features/`: backend, one package per feature (transcription, OCR, translation, ...).
 - `src/textlab/common/`: backend code shared by several features.
