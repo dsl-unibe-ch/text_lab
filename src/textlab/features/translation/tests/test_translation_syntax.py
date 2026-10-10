@@ -2,16 +2,17 @@
 
 import ast
 import io
-from pathlib import Path
 import token
 import tokenize
+from pathlib import Path
 
 import pytest
 
-
 FEATURE_DIR = Path(__file__).resolve().parents[1]
 PACKAGE_DIR = FEATURE_DIR.parents[1]
-SOURCES = sorted(FEATURE_DIR.glob("*.py"))
+SOURCES = sorted(
+    path for path in FEATURE_DIR.rglob("*.py") if "tests" not in path.parts
+)
 SOURCES.append(PACKAGE_DIR / "ui" / "streamlit" / "pages" / "Translate.py")
 
 
@@ -22,9 +23,12 @@ def _check_syntax(source, filename):
     for item in tokenize.generate_tokens(io.StringIO(source).readline):
         kind = token.tok_name[item.type]
         if kind == "FSTRING_START":
-            stack.append((
-                item.start[0], item.string.endswith(('"""', "'''")),
-            ))
+            stack.append(
+                (
+                    item.start[0],
+                    item.string.endswith(('"""', "'''")),
+                )
+            )
         elif kind == "FSTRING_END":
             start, triple_quoted = stack.pop()
             if not triple_quoted and item.end[0] != start:
@@ -49,5 +53,6 @@ def test_multiline_single_quoted_fstring_is_rejected():
 def test_adjacent_and_triple_quoted_fstrings_are_allowed():
     _check_syntax(
         'message = (f"GPU ({name}, "\n f"{memory} GB)")\n'
-        'html = f"""\n<p>{message}</p>\n"""\n', "valid.py",
+        'html = f"""\n<p>{message}</p>\n"""\n',
+        "valid.py",
     )

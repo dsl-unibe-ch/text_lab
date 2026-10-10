@@ -27,6 +27,7 @@ import ollama
 
 from textlab.common.ollama import (
     MAX_CONTEXT_TOKENS,
+    call_no_think,
     chunk_text,
     estimate_tokens,
     message_text,
@@ -344,10 +345,7 @@ def _chat(
         "options": {"temperature": SUMMARY_TEMPERATURE},
     }
     if disable_thinking:
-        try:
-            return ollama.chat(think=False, **kwargs)
-        except TypeError:
-            pass  # Older ollama-python without the ``think`` keyword.
+        return call_no_think(ollama.chat, **kwargs)
     return ollama.chat(**kwargs)
 
 

@@ -7,10 +7,9 @@ never decodes token slices or cuts a word to satisfy a budget.
 
 from __future__ import annotations
 
+import re
 from bisect import bisect_right
 from collections.abc import Callable, Sequence
-import re
-
 
 MAX_SPLIT_RETRIES = 4
 
@@ -48,14 +47,14 @@ def split_into_sentences(text: str) -> list[str]:
 # Sentence ends for model input. Unlike _SENTENCE_RE this also skips
 # abbreviations ("et al.", "e.g.", "Fig. 3", initials), which are common in
 # research text and would otherwise cut a sentence in half.
-_SENTENCE_END_RE = re.compile(
-    r"[.!?…][\"'”’)\]]*\s+|[。！？]+[\"'”’）】]*\s*"
-)
-_ABBREVIATIONS = frozenset("""
+_SENTENCE_END_RE = re.compile(r"[.!?…][\"'”’)\]]*\s+|[。！？]+[\"'”’）】]*\s*")
+_ABBREVIATIONS = frozenset(
+    """
     al approx abb art bd bzw ca cf ch chap co corp dept dr ed eds eq eqs
     etc fig figs ggf hrsg inc incl inkl jr ltd mr mrs ms nr no nos op pp
     prof ref refs resp sec sect sr st str tab univ usw vgl vol vols vs
-""".split())
+""".split()
+)
 
 
 def sentence_slices(text: str) -> list[str]:
@@ -74,10 +73,13 @@ def sentence_slices(text: str) -> list[str]:
             following = text[end]
             if following.islower() or following.isdigit():
                 continue
-            before = text[:match.start()].rsplit(None, 1)
+            before = text[: match.start()].rsplit(None, 1)
             token = before[-1].lstrip("([\"'“‘") if before else ""
-            if ("." in token or token.lower() in _ABBREVIATIONS
-                    or (len(token) == 1 and token.isalpha())):
+            if (
+                "." in token
+                or token.lower() in _ABBREVIATIONS
+                or (len(token) == 1 and token.isalpha())
+            ):
                 continue
         cuts.append(end)
     slices = []
@@ -107,15 +109,18 @@ def split_text(
     if measure(text) <= budget:
         return [text]
 
-    boundaries = sorted({
-        *(match.end() for match in _BOUNDARY_RE.finditer(text)), len(text),
-    })
+    boundaries = sorted(
+        {
+            *(match.end() for match in _BOUNDARY_RE.finditer(text)),
+            len(text),
+        }
+    )
     sentences = [match.end() for match in _SENTENCE_RE.finditer(text)]
     chunks = []
     start = 0
     while start < len(text):
         first = bisect_right(boundaries, start)
-        if measure(text[start:boundaries[first]]) > budget:
+        if measure(text[start : boundaries[first]]) > budget:
             raise InputTooLongError(
                 "A word or unsegmented source span exceeds the model's "
                 f"input budget ({budget}). Add a word/sentence boundary "
@@ -126,7 +131,7 @@ def split_text(
         step = 1
         upper = first + step
         while upper < len(boundaries):
-            if measure(text[start:boundaries[upper]]) > budget:
+            if measure(text[start : boundaries[upper]]) > budget:
                 break
             best = upper
             step *= 2
@@ -134,7 +139,7 @@ def split_text(
         low, high = best + 1, min(upper, len(boundaries) - 1)
         while low <= high:
             middle = (low + high) // 2
-            if measure(text[start:boundaries[middle]]) <= budget:
+            if measure(text[start : boundaries[middle]]) <= budget:
                 best = middle
                 low = middle + 1
             else:
@@ -159,8 +164,9 @@ def split_text(
 def split_for_retry(text: str) -> list[str]:
     """Bisect a failed chunk at a word/sentence boundary, never mid-word."""
     ends = [
-        match.end() for match in _BOUNDARY_RE.finditer(text)
-        if text[:match.end()].strip() and text[match.end():].strip()
+        match.end()
+        for match in _BOUNDARY_RE.finditer(text)
+        if text[: match.end()].strip() and text[match.end() :].strip()
     ]
     if not ends:
         raise OutputTruncatedError(
@@ -173,7 +179,8 @@ def split_for_retry(text: str) -> list[str]:
 
 
 def join_translations(
-    sources: Sequence[str], translations: Sequence[str],
+    sources: Sequence[str],
+    translations: Sequence[str],
 ) -> str:
     """Reassemble output with the whitespace at the original boundaries."""
     if len(sources) != len(translations):
@@ -181,18 +188,19 @@ def join_translations(
             "The backend did not return one translation per source chunk."
         )
     parts = []
-    for source, translation in zip(sources, translations):
+    for source, translation in zip(sources, translations, strict=False):
         if not source.strip():
             parts.append(source)
             continue
-        leading = source[:len(source) - len(source.lstrip())]
-        trailing = source[len(source.rstrip()):]
+        leading = source[: len(source) - len(source.lstrip())]
+        trailing = source[len(source.rstrip()) :]
         parts.append(leading + translation.strip() + trailing)
     return "".join(parts)
 
 
 def translate_lines(
-    texts: Sequence[str], translate_parts: Callable[[list[str]], list[str]],
+    texts: Sequence[str],
+    translate_parts: Callable[[list[str]], list[str]],
 ) -> list[str]:
     """Batch nonblank lines across inputs while preserving blank lines."""
     layouts = [re.split(r"(\n+)", text) for text in texts]

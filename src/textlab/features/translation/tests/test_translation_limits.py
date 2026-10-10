@@ -1,16 +1,15 @@
 """Offline token-budget and recovery contracts; no models or GPU needed."""
 
-
+import sys
 from contextlib import nullcontext
 from types import SimpleNamespace
-import sys
 
 import pytest
 
 from textlab.features.translation import engine
 from textlab.features.translation.chunking import (
-    InputTooLongError,
     MAX_SPLIT_RETRIES,
+    InputTooLongError,
     OutputTruncatedError,
     TranslationLimitError,
     chunk_text_for_translation,
@@ -56,7 +55,8 @@ class Tokenizer:
         width = max(map(len, rows))
         return {
             "input_ids": Tensor(
-                [row + [0] * (width - len(row)) for row in rows], value,
+                [row + [0] * (width - len(row)) for row in rows],
+                value,
             ),
         }
 
@@ -71,7 +71,8 @@ class Model:
     def __init__(self, finish=None):
         self.config = SimpleNamespace(max_position_embeddings=24)
         self.generation_config = SimpleNamespace(
-            eos_token_id=2, forced_eos_token_id=2,
+            eos_token_id=2,
+            forced_eos_token_id=2,
         )
         self.finish = finish or (lambda text: True)
         self.calls = []
@@ -93,31 +94,42 @@ class Model:
 
 @pytest.fixture(autouse=True)
 def fake_torch(monkeypatch):
-    monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(
-        inference_mode=nullcontext,
-        cuda=SimpleNamespace(is_available=lambda: False),
-    ))
+    monkeypatch.setitem(
+        sys.modules,
+        "torch",
+        SimpleNamespace(
+            inference_mode=nullcontext,
+            cuda=SimpleNamespace(is_available=lambda: False),
+        ),
+    )
 
 
-@pytest.mark.parametrize("text", [
-    "One sentence. Another sentence.  A third!",
-    "Unübersehbare Wörter sind vollständig. 再见。再见。",
-    "alpha\t beta\r\n gamma\n\n delta ",
-    "alpha \x02TL_123\x03 beta \x02GL_0\x03 gamma",
-])
+@pytest.mark.parametrize(
+    "text",
+    [
+        "One sentence. Another sentence.  A third!",
+        "Unübersehbare Wörter sind vollständig. 再见。再见。",
+        "alpha\t beta\r\n gamma\n\n delta ",
+        "alpha \x02TL_123\x03 beta \x02GL_0\x03 gamma",
+    ],
+)
 def test_chunks_are_lossless_and_fit_measured_budget(text):
-    def measure(value): return len(value.encode("utf-8")) + 2
+    def measure(value):
+        return len(value.encode("utf-8")) + 2
+
     chunks = split_text(text, measure, 24)
     assert "".join(chunks) == text
     assert all(measure(chunk) <= 24 for chunk in chunks)
-    for left, right in zip(chunks, chunks[1:]):
+    for left, _right in zip(chunks, chunks[1:], strict=False):
         assert left[-1].isspace() or left[-1] in "。！？"
     assert join_translations(chunks, chunks) == text
 
 
 def test_sentence_boundaries_preferred_and_cjk_spacing_preserved():
     assert split_text("One. Two words here.", len, 12) == [
-        "One. ", "Two words ", "here.",
+        "One. ",
+        "Two words ",
+        "here.",
     ]
     source = "你好。世界。再见。"
     chunks = split_text(source, len, 4)
@@ -126,7 +138,11 @@ def test_sentence_boundaries_preferred_and_cjk_spacing_preserved():
 
 
 def test_indivisible_span_fails_without_cutting_word_or_placeholder():
-    for text in ("extraordinary", "\x02TL_123456789\x03", "无空格且没有句号的长文本"):
+    for text in (
+        "extraordinary",
+        "\x02TL_123456789\x03",
+        "无空格且没有句号的长文本",
+    ):
         with pytest.raises(InputTooLongError, match="No truncated"):
             split_text(text, len, 5)
     with pytest.raises(OutputTruncatedError, match="indivisible"):
@@ -135,12 +151,15 @@ def test_indivisible_span_fails_without_cutting_word_or_placeholder():
 
 def test_compatibility_chunker_never_hard_splits_words():
     assert chunk_text_for_translation("one two three", max_chars=8) == [
-        "one two ", "three",
+        "one two ",
+        "three",
     ]
     with pytest.raises(InputTooLongError):
         chunk_text_for_translation("indivisible", max_chars=3)
     assert chunk_text_for_translation(
-        "one two", measure=lambda text: len(text) + 2, max_tokens=6,
+        "one two",
+        measure=lambda text: len(text) + 2,
+        max_tokens=6,
     ) == ["one ", "two"]
 
 
@@ -160,16 +179,22 @@ def test_hf_multibyte_input_is_split_by_tokens_not_characters():
     source = "été été été été été été été été"
     progress = []
     result = generate_translations(
-        model, tokenizer, [source], "cpu", batch_size=2,
+        model,
+        tokenizer,
+        [source],
+        "cpu",
+        batch_size=2,
         progress_cb=lambda done, total: progress.append((done, total)),
     )
     assert result == [source.upper()]
     batches = [texts for texts, _ in model.calls]
     # Batches share a token budget of batch_size full windows (2 x 24).
-    assert all(len(texts) * (len(texts[0].encode()) + 2) <= 48
-               for texts in batches)
-    assert all(len(text.encode()) + 2 <= 24
-               for batch in batches for text in batch)
+    assert all(
+        len(texts) * (len(texts[0].encode()) + 2) <= 48 for texts in batches
+    )
+    assert all(
+        len(text.encode()) + 2 <= 24 for batch in batches for text in batch
+    )
     assert progress[-1][0] == progress[-1][1]
 
 
@@ -177,7 +202,11 @@ def test_madlad_prefix_and_special_tokens_are_in_every_chunk_budget():
     tokenizer, model = Tokenizer(), Model()
     source = "été été été été été"
     assert generate_translations(
-        model, tokenizer, [source], "cpu", source_prefix="<2fr> ",
+        model,
+        tokenizer,
+        [source],
+        "cpu",
+        source_prefix="<2fr> ",
     ) == [source.upper()]
     sent = [text for texts, _ in model.calls for text in texts]
     assert len(sent) > 1
@@ -190,10 +219,16 @@ def test_smaller_model_window_overrides_the_default_budget():
     tokenizer.model_max_length = 10**30
     model.config.max_position_embeddings = 12
     assert generate_translations(
-        model, tokenizer, ["one two three four"], "cpu",
+        model,
+        tokenizer,
+        ["one two three four"],
+        "cpu",
     ) == ["ONE TWO THREE FOUR"]
-    assert all(len(text.encode()) + 2 <= 12
-               for texts, _ in model.calls for text in texts)
+    assert all(
+        len(text.encode()) + 2 <= 12
+        for texts, _ in model.calls
+        for text in texts
+    )
 
 
 def test_output_retry_discards_partial_and_retries_only_failed_items():
@@ -201,8 +236,12 @@ def test_output_retry_discards_partial_and_retries_only_failed_items():
     model = Model(finish=lambda text: len(text.split()) <= 2)
     notices = []
     result = generate_translations(
-        model, tokenizer, ["one two three four", "fine"], "cpu",
-        max_new_tokens=4, status_cb=notices.append,
+        model,
+        tokenizer,
+        ["one two three four", "fine"],
+        "cpu",
+        max_new_tokens=4,
+        status_cb=notices.append,
     )
     assert result == ["ONE TWO THREE FOUR", "FINE"]
     assert notices and "Retrying" in notices[0]
@@ -214,11 +253,18 @@ def test_output_retry_discards_partial_and_retries_only_failed_items():
 
 def test_natural_eos_at_limit_is_complete_but_decoder_start_is_not():
     assert generate_translations(
-        Model(), Tokenizer(), ["one"], "cpu", max_new_tokens=2,
+        Model(),
+        Tokenizer(),
+        ["one"],
+        "cpu",
+        max_new_tokens=2,
     ) == ["ONE"]
     with pytest.raises(OutputTruncatedError, match="indivisible"):
         generate_translations(
-            Model(finish=lambda text: False), Tokenizer(), ["one"], "cpu",
+            Model(finish=lambda text: False),
+            Tokenizer(),
+            ["one"],
+            "cpu",
             max_new_tokens=2,
         )
 
@@ -230,8 +276,12 @@ def test_output_retries_are_bounded():
     notices = []
     with pytest.raises(OutputTruncatedError, match="No partial"):
         generate_translations(
-            model, tokenizer, ["word " * 64], "cpu",
-            max_new_tokens=2, status_cb=notices.append,
+            model,
+            tokenizer,
+            ["word " * 64],
+            "cpu",
+            max_new_tokens=2,
+            status_cb=notices.append,
         )
     assert len(notices) == MAX_SPLIT_RETRIES
     assert len(model.calls) == MAX_SPLIT_RETRIES + 1
@@ -248,16 +298,26 @@ def test_encoded_batch_is_checked_again_before_generation():
     model = Model()
     with pytest.raises(InputTooLongError, match="rather than truncating"):
         generate_translations(
-            model, InconsistentTokenizer(), ["one"], "cpu",
+            model,
+            InconsistentTokenizer(),
+            ["one"],
+            "cpu",
         )
     assert not model.calls
 
 
-@pytest.mark.parametrize("backend", [
-    "nllb", "nllb-large", "madlad-3b", "opus-mt",
-])
+@pytest.mark.parametrize(
+    "backend",
+    [
+        "nllb",
+        "nllb-large",
+        "madlad-3b",
+        "opus-mt",
+    ],
+)
 def test_single_and_batch_entrypoints_share_safe_generation(
-    monkeypatch, backend,
+    monkeypatch,
+    backend,
 ):
     tokenizer, model = Tokenizer(), Model()
     for name in ("_load_nllb", "_load_madlad", "_load_marian"):
@@ -293,7 +353,10 @@ def test_512_token_cap_retains_input_under_the_old_character_limit():
     assert len(source) < 1200
     assert len(source.encode()) + 2 > 512
     assert generate_translations(
-        model, tokenizer, [source], "cpu",
+        model,
+        tokenizer,
+        [source],
+        "cpu",
     ) == [source.upper()]
     chunks = [text for texts, _ in model.calls for text in texts]
     assert len(chunks) > 1
@@ -302,7 +365,8 @@ def test_512_token_cap_retains_input_under_the_old_character_limit():
 
 @pytest.mark.parametrize("backend", ["nllb", "madlad-3b", "opus-mt"])
 def test_legacy_backend_functions_preserve_device_and_progress(
-    monkeypatch, backend,
+    monkeypatch,
+    backend,
 ):
     tokenizer, model = Tokenizer(), Model()
     for name in ("_load_nllb", "_load_madlad", "_load_marian"):
@@ -314,10 +378,16 @@ def test_legacy_backend_functions_preserve_device_and_progress(
         "opus-mt": engine.translate_opus_mt,
     }[backend]
     progress = []
-    assert function(
-        "one two\nthree", "deu_Latn", "fra_Latn", device="cpu",
-        progress_cb=lambda done, total: progress.append((done, total)),
-    ) == "ONE TWO\nTHREE"
+    assert (
+        function(
+            "one two\nthree",
+            "deu_Latn",
+            "fra_Latn",
+            device="cpu",
+            progress_cb=lambda done, total: progress.append((done, total)),
+        )
+        == "ONE TWO\nTHREE"
+    )
     assert progress[-1][0] == progress[-1][1]
 
 
@@ -346,7 +416,9 @@ def test_status_callback_and_errors_propagate_through_factory(monkeypatch):
     monkeypatch.setattr(engine, "resolve_batch_size", lambda backend: 2)
     notices = []
     fn = engine.make_translate_fn(
-        "deu_Latn", "fra_Latn", status_cb=notices.append,
+        "deu_Latn",
+        "fra_Latn",
+        status_cb=notices.append,
     )
     assert fn("one two") == "ONE TWO"
     assert fn.many(["three four"]) == ["THREE FOUR"]
@@ -364,21 +436,33 @@ def test_sentences_are_translated_separately_and_rejoined_exactly():
         "FIRST ONE.  SECOND (ET AL. 2020) HERE! THIRD, E.G. THIS."
     ]
     sent = sorted(text for texts, _ in model.calls for text in texts)
-    assert sent == sorted([
-        "First one.", "Second (et al. 2020) here!", "Third, e.g. this.",
-    ])
+    assert sent == sorted(
+        [
+            "First one.",
+            "Second (et al. 2020) here!",
+            "Third, e.g. this.",
+        ]
+    )
 
 
-@pytest.mark.parametrize("text,expected", [
-    ("One. Two.", ["One. ", "Two."]),
-    ("See Fig. 3 and Eq. 2. Next.", ["See Fig. 3 and Eq. 2. ", "Next."]),
-    ("Smith et al. Found it. J. Doe agreed.",
-     ["Smith et al. Found it. ", "J. Doe agreed."]),
-    ("Values, i.e. Means. Done.", ["Values, i.e. Means. ", "Done."]),
-    ("e.g. lowercase follows. Then.", ["e.g. lowercase follows. ", "Then."]),
-    ("你好。世界。", ["你好。", "世界。"]),
-    ("no punctuation at all", ["no punctuation at all"]),
-])
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("One. Two.", ["One. ", "Two."]),
+        ("See Fig. 3 and Eq. 2. Next.", ["See Fig. 3 and Eq. 2. ", "Next."]),
+        (
+            "Smith et al. Found it. J. Doe agreed.",
+            ["Smith et al. Found it. ", "J. Doe agreed."],
+        ),
+        ("Values, i.e. Means. Done.", ["Values, i.e. Means. ", "Done."]),
+        (
+            "e.g. lowercase follows. Then.",
+            ["e.g. lowercase follows. ", "Then."],
+        ),
+        ("你好。世界。", ["你好。", "世界。"]),
+        ("no punctuation at all", ["no punctuation at all"]),
+    ],
+)
 def test_sentence_slices_skip_abbreviations_and_are_lossless(text, expected):
     from textlab.features.translation.chunking import sentence_slices
 
@@ -393,13 +477,21 @@ def test_repeated_sentences_are_translated_once_and_cache_is_reused():
     cache = {}
     texts = ["Header text. Body one.", "Header  text. Body two."]
     assert generate_translations(
-        model, tokenizer, texts, "cpu", cache=cache,
+        model,
+        tokenizer,
+        texts,
+        "cpu",
+        cache=cache,
     ) == ["HEADER TEXT. BODY ONE.", "HEADER TEXT. BODY TWO."]
     sent = [text for texts, _ in model.calls for text in texts]
     assert sorted(sent) == ["Body one.", "Body two.", "Header text."]
     model.calls.clear()
     assert generate_translations(
-        model, tokenizer, ["Body two. Header text."], "cpu", cache=cache,
+        model,
+        tokenizer,
+        ["Body two. Header text."],
+        "cpu",
+        cache=cache,
     ) == ["BODY TWO. HEADER TEXT."]
     assert not model.calls
 
@@ -408,6 +500,10 @@ def test_short_sentences_share_one_length_sorted_batch():
     tokenizer, model = Tokenizer(), Model()
     words = ["a", "bbbb", "cc", "ddd"]
     assert generate_translations(
-        model, tokenizer, words, "cpu", batch_size=2,
+        model,
+        tokenizer,
+        words,
+        "cpu",
+        batch_size=2,
     ) == [word.upper() for word in words]
     assert [texts for texts, _ in model.calls] == [["bbbb", "ddd", "cc", "a"]]

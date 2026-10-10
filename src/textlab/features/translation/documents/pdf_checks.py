@@ -5,11 +5,19 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass
 
+from .pdf_blocks import is_math_block, rect_intersect_area
+
 
 class PDFIntegrityError(ValueError):
     """A PDF deliverable failed coverage, extraction, or layout validation."""
 
     def __init__(self, message: str, pages=()):
+        """Store the affected pages and add them to the message.
+
+        Args:
+            message: What failed.
+            pages: The 1-based numbers of the affected pages.
+        """
         self.pages = tuple(sorted(set(pages)))
         suffix = ""
         if self.pages:
@@ -19,6 +27,17 @@ class PDFIntegrityError(ValueError):
 
 @dataclass(frozen=True)
 class PDFPagePlan:
+    """How one PDF page is read.
+
+    Attributes:
+        number: The 1-based page number.
+        route: ``"native"`` (text layer), ``"ocr"`` or ``"blank"``.
+        native_safe: Whether the text layer covers the page, so the page
+            can be rebuilt as a PDF.
+        reason: Why the page needs OCR, for the report.
+        has_images: Whether the page contains images.
+    """
+
     number: int
     route: str
     native_safe: bool
@@ -32,14 +51,19 @@ def _corrupt_text(text: str) -> bool:
         code = ord(char)
         if (code < 32 and char not in "\t\n\r") or code == 0xFFFD:
             return True
-        if (0xE000 <= code <= 0xF8FF or 0xF0000 <= code <= 0xFFFFD
-                or 0x100000 <= code <= 0x10FFFD):
+        if (
+            0xE000 <= code <= 0xF8FF
+            or 0xF0000 <= code <= 0xFFFFD
+            or 0x100000 <= code <= 0x10FFFD
+        ):
             private_count += 1
     return private_count >= 4
 
 
 def inspect_pdf(
-    pdf_bytes: bytes, *, math_ocr: bool = False,
+    pdf_bytes: bytes,
+    *,
+    math_ocr: bool = False,
 ) -> list[PDFPagePlan]:
     """Classify every page; a document-wide text count cannot hide scans.
 
@@ -54,8 +78,6 @@ def inspect_pdf(
     """
     import fitz
 
-    from .format import _is_math_block, _rect_intersect_area
-
     plans = []
     with fitz.open(stream=pdf_bytes, filetype="pdf") as document:
         if document.needs_pass:
@@ -66,17 +88,19 @@ def inspect_pdf(
             text = page.get_text("text") or ""
             blocks = page.get_text("dict").get("blocks", [])
             image_boxes = [
-                block["bbox"] for block in blocks
+                block["bbox"]
+                for block in blocks
                 if block.get("type") == 1 and block.get("bbox")
             ]
             area = max(1, page.rect.get_area())
             raster_area = sum(
-                _rect_intersect_area(tuple(page.rect), box)
+                rect_intersect_area(tuple(page.rect), box)
                 for box in image_boxes
             )
             drawings = page.get_drawings() if not text.strip() else []
             has_math = any(
-                _is_math_block(block) for block in blocks
+                is_math_block(block)
+                for block in blocks
                 if block.get("type", 0) == 0
             )
             if not text.strip() and not image_boxes and not drawings:
@@ -90,23 +114,43 @@ def inspect_pdf(
             elif not text.strip():
                 reason = "visible page content has no extractable text"
             if reason:
-                plans.append(PDFPagePlan(
-                    number, "ocr", False, reason, bool(image_boxes),
-                ))
+                plans.append(
+                    PDFPagePlan(
+                        number,
+                        "ocr",
+                        False,
+                        reason,
+                        bool(image_boxes),
+                    )
+                )
             elif has_math and math_ocr:
-                plans.append(PDFPagePlan(
-                    number, "ocr", True,
-                    "equations need structured extraction for Markdown",
-                    bool(image_boxes),
-                ))
+                plans.append(
+                    PDFPagePlan(
+                        number,
+                        "ocr",
+                        True,
+                        "equations need structured extraction for Markdown",
+                        bool(image_boxes),
+                    )
+                )
             else:
-                plans.append(PDFPagePlan(
-                    number, "native", True, has_images=bool(image_boxes),
-                ))
+                plans.append(
+                    PDFPagePlan(
+                        number,
+                        "native",
+                        True,
+                        has_images=bool(image_boxes),
+                    )
+                )
     return plans
 
 
 def require_native_coverage(plans: list[PDFPagePlan]) -> None:
+    """Refuse a PDF rebuild when a page has no usable text layer.
+
+    Raises:
+        PDFIntegrityError: Naming the pages that would stay untranslated.
+    """
     incomplete = [plan.number for plan in plans if not plan.native_safe]
     if incomplete:
         raise PDFIntegrityError(
@@ -122,11 +166,13 @@ def validate_document_pages(document, plans: list[PDFPagePlan]) -> None:
     expected = [plan.number for plan in plans]
     if Counter(numbers) != Counter(expected):
         missing = set(expected) - set(numbers)
-        duplicate = {number for number, count in Counter(numbers).items()
-                     if count > 1}
+        duplicate = {
+            number for number, count in Counter(numbers).items() if count > 1
+        }
         raise PDFIntegrityError(
             "Document extraction returned missing, duplicate, or unexpected "
-            "pages.", missing | duplicate | (set(numbers) - set(expected)),
+            "pages.",
+            missing | duplicate | (set(numbers) - set(expected)),
         )
     by_number = {page.page_number: page for page in document.pages}
     empty = []
@@ -140,5 +186,6 @@ def validate_document_pages(document, plans: list[PDFPagePlan]) -> None:
     if empty:
         raise PDFIntegrityError(
             "Document extraction produced empty or corrupt text on a "
-            "nonblank page; completeness cannot be verified.", empty,
+            "nonblank page; completeness cannot be verified.",
+            empty,
         )

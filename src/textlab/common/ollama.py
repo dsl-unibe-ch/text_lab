@@ -16,7 +16,7 @@ import functools
 import os
 import socket
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
 import ollama
@@ -159,16 +159,51 @@ def chat_no_think(
     if json_schema is not None:
         kwargs["format"] = json_schema
     try:
-        return _normalize_response(chat(think=False, **kwargs))
-    except TypeError:
-        # Older ollama-python without the ``think`` keyword.
-        return _normalize_response(chat(**kwargs))
+        return _normalize_response(call_no_think(chat, **kwargs))
     except ollama.ResponseError as exc:
         # Only a rejected ``think`` is worth retrying; any other error would
         # recur with the identical request.
         if "think" not in str(exc).lower():
             raise
         return _normalize_response(chat(**kwargs))
+
+
+def call_no_think(chat: Callable[..., Any], **request: Any) -> Any:
+    """Call a chat function with ``think=False``, as far as it supports it.
+
+    Clients older than the ``think`` keyword are called again without it.
+    Only that exact rejection, raised while binding the arguments, is
+    retried: a ``TypeError`` from inside the client, and every error from
+    the server, propagates unchanged. The response is returned as the client
+    gave it.
+
+    Args:
+        chat: ``ollama.chat`` or a client's ``chat`` method.
+        **request: The request arguments (``model``, ``messages``, ...).
+
+    Returns:
+        The chat response, or a stream when ``stream=True`` is requested.
+    """
+    try:
+        return chat(think=False, **request)
+    except TypeError as error:
+        if not _rejects_think_keyword(error):
+            raise
+    return chat(**request)
+
+
+def _rejects_think_keyword(error: TypeError) -> bool:
+    """Return True if ``error`` is Python refusing the ``think`` keyword.
+
+    Such an error is raised before the called function runs, so its
+    traceback holds only the caller's frame.
+    """
+    traceback = error.__traceback__
+    return (
+        str(error).endswith(" got an unexpected keyword argument 'think'")
+        and traceback is not None
+        and traceback.tb_next is None
+    )
 
 
 @functools.lru_cache(maxsize=4)
@@ -249,6 +284,56 @@ def extract_model_name(entry: Any) -> str:
     if isinstance(entry, tuple | list) and entry:
         return str(entry[0])
     return str(entry)
+
+
+def canonical_model_name(name: str) -> str:
+    """Return a model name with its tag, adding Ollama's default ``latest``.
+
+    Args:
+        name: A model name such as ``"llama3"`` or ``"llama3:8b"``.
+
+    Returns:
+        The name as Ollama lists loaded models, e.g. ``"llama3:latest"``.
+    """
+    return name if ":" in name.rsplit("/", 1)[-1] else name + ":latest"
+
+
+def running_model_names(client: Any = ollama) -> set[str] | None:
+    """Return the canonical names of the models a server holds in memory.
+
+    Unlike :func:`get_loaded_models`, an answer that cannot be trusted is
+    reported as unknown rather than as "nothing loaded", for callers that
+    must not unload a model unless they are sure of the server's state.
+
+    Args:
+        client: The ``ollama`` module or an ``ollama.Client``.
+
+    Returns:
+        The names, or ``None`` if the server cannot be reached or its answer
+        has an unexpected shape.
+    """
+    try:
+        response = client.ps()
+        models = _field(response, "models")
+        if not isinstance(models, list | tuple):
+            return None
+        names = set()
+        for model in models:
+            name = _field(model, "model") or _field(model, "name")
+            if not isinstance(name, str) or not name:
+                return None
+            names.add(canonical_model_name(name))
+        return names
+    except Exception:
+        # An old client without ps(), or a server that is not running.
+        return None
+
+
+def _field(value: Any, name: str) -> Any:
+    """Return a field of a response object or dictionary, or ``None``."""
+    if isinstance(value, Mapping):
+        return value.get(name)
+    return getattr(value, name, None)
 
 
 def get_loaded_models() -> list[str]:

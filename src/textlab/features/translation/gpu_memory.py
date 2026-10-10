@@ -12,7 +12,6 @@ import gc
 import threading
 import traceback
 
-
 _LOCK = threading.RLock()
 
 
@@ -23,14 +22,17 @@ def translation_session():
 
 def serialized(function):
     """Serialize model mutation and inference, including nested calls."""
+
     @functools.wraps(function)
     def guarded(*args, **kwargs):
         with translation_session():
             return function(*args, **kwargs)
+
     return guarded
 
 
 def is_cuda_device(device) -> bool:
+    """Return True for ``"cuda"`` and ``"cuda:<n>"`` devices."""
     return str(device).split(":", 1)[0] == "cuda"
 
 
@@ -66,7 +68,8 @@ def discard_exception_tensors(error: BaseException) -> None:
             continue
         seen.add(id(current))
         pending.extend(
-            linked for linked in (current.__cause__, current.__context__)
+            linked
+            for linked in (current.__cause__, current.__context__)
             if linked is not None
         )
         traceback.clear_frames(current.__traceback__)
@@ -83,6 +86,9 @@ def is_cuda_oom(error: RuntimeError, device, torch) -> bool:
     if isinstance(oom_type, type) and isinstance(error, oom_type):
         return True
     message = str(error).lower()
-    return message.startswith((
-        "cuda out of memory", "cuda error: out of memory",
-    ))
+    return message.startswith(
+        (
+            "cuda out of memory",
+            "cuda error: out of memory",
+        )
+    )

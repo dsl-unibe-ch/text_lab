@@ -50,14 +50,20 @@ def fake_ollama(monkeypatch):
 
 def _translate(text, **kwargs):
     return backend.translate_ollama(
-        text, "English", "German", "test-model", **kwargs,
+        text,
+        "English",
+        "German",
+        "test-model",
+        **kwargs,
     )
 
 
 @pytest.mark.parametrize("object_response", [False, True])
 @pytest.mark.parametrize("object_message", [False, True])
 def test_stop_success_and_explicit_options(
-    fake_ollama, object_response, object_message,
+    fake_ollama,
+    object_response,
+    object_message,
 ):
     message = {"content": "  Guten Tag!  "}
     if object_message:
@@ -70,7 +76,8 @@ def test_stop_success_and_explicit_options(
     statuses = []
 
     result = _translate(
-        "Hello!", progress_cb=lambda *args: progress.append(args),
+        "Hello!",
+        progress_cb=lambda *args: progress.append(args),
         status_cb=statuses.append,
     )
 
@@ -108,10 +115,16 @@ def test_stop_success_and_explicit_options(
     ],
 )
 def test_original_language_and_formality_prompt(
-    fake_ollama, formality, instruction,
+    fake_ollama,
+    formality,
+    instruction,
 ):
     backend.translate_ollama(
-        "Grüezi", "Swiss German", "English", "test-model", formality,
+        "Grüezi",
+        "Swiss German",
+        "English",
+        "test-model",
+        formality,
     )
     assert fake_ollama.calls[0]["messages"][0] == {
         "role": "system",
@@ -127,14 +140,20 @@ def test_original_language_and_formality_prompt(
 
 @pytest.mark.parametrize("text", ["", " ", "\n \t\r\n\n"])
 def test_blank_text_needs_no_client_or_callbacks(
-    fake_ollama, monkeypatch, text,
+    fake_ollama,
+    monkeypatch,
+    text,
 ):
     monkeypatch.setitem(sys.modules, "ollama", None)
     events = []
-    assert _translate(
-        text, progress_cb=lambda *args: events.append(args),
-        status_cb=events.append,
-    ) == text
+    assert (
+        _translate(
+            text,
+            progress_cb=lambda *args: events.append(args),
+            status_cb=events.append,
+        )
+        == text
+    )
     assert not events
     assert not fake_ollama.calls
 
@@ -151,7 +170,8 @@ def test_line_layout_and_boundary_whitespace_survive(fake_ollama):
     )
     assert result == "\n \t\n  eins \t\r\n\r\nzwei\r\n\n\t"
     assert [_source(call) for call in fake_ollama.calls] == [
-        "  alpha \t\r", "beta\r",
+        "  alpha \t\r",
+        "beta\r",
     ]
     assert progress == [(1, 2), (2, 2)]
 
@@ -170,9 +190,13 @@ def test_utf8_estimate_is_bytes_not_characters():
 )
 def test_chunks_preserve_source_without_word_splits(fake_ollama, text):
     progress = []
-    assert _translate(
-        text, progress_cb=lambda *args: progress.append(args),
-    ) == text
+    assert (
+        _translate(
+            text,
+            progress_cb=lambda *args: progress.append(args),
+        )
+        == text
+    )
     sources = [_source(call) for call in fake_ollama.calls]
     assert len(sources) > 1
     assert "".join(sources) == text
@@ -184,15 +208,19 @@ def test_chunks_preserve_source_without_word_splits(fake_ollama, text):
         assert estimate <= backend._SOURCE_BYTE_CAP == 2048
         assert call["think"] is False
         assert (
-            estimate + backend._estimate_tokens(system)
-            + backend._TEMPLATE_TOKEN_RESERVE + backend._NUM_PREDICT
+            estimate
+            + backend._estimate_tokens(system)
+            + backend._TEMPLATE_TOKEN_RESERVE
+            + backend._NUM_PREDICT
         ) <= backend._NUM_CTX
     assert progress == [(i, len(sources)) for i in range(1, len(sources) + 1)]
 
 
 @pytest.mark.parametrize(("words", "requests"), [(400, 1), (600, 2)])
 def test_initial_chunks_use_context_instead_of_output_expansion(
-    fake_ollama, words, requests,
+    fake_ollama,
+    words,
+    requests,
 ):
     system = backend._system_prompt("English", "German", "default")
     assert backend._input_budget(system) == 2048
@@ -215,9 +243,13 @@ def test_output_expansion_splits_only_after_observed_limit(fake_ollama):
 
     fake_ollama.respond = respond
     progress = []
-    assert _translate(
-        text, progress_cb=lambda *args: progress.append(args),
-    ) == text.upper()
+    assert (
+        _translate(
+            text,
+            progress_cb=lambda *args: progress.append(args),
+        )
+        == text.upper()
+    )
     sources = [_source(call) for call in fake_ollama.calls]
     assert sources == [text, "word " * 200, "word " * 200]
     assert progress == [(1, 1)]
@@ -236,20 +268,32 @@ def test_whitespace_only_chunk_is_not_duplicated_or_sent(fake_ollama):
 
 @pytest.mark.parametrize("formality", ["default", "formal", "informal"])
 def test_system_template_and_output_are_reserved(
-    fake_ollama, monkeypatch, formality,
+    fake_ollama,
+    monkeypatch,
+    formality,
 ):
     source, target = "Français", "日本語"
     system = backend._system_prompt(source, target, formality)
     monkeypatch.setattr(
-        backend, "_NUM_CTX",
-        backend._estimate_tokens(system) + backend._TEMPLATE_TOKEN_RESERVE
-        + backend._NUM_PREDICT + 20,
+        backend,
+        "_NUM_CTX",
+        backend._estimate_tokens(system)
+        + backend._TEMPLATE_TOKEN_RESERVE
+        + backend._NUM_PREDICT
+        + 20,
     )
     assert backend._input_budget(system) == 20
     text = "small words " * 6
-    assert backend.translate_ollama(
-        text, source, target, "test-model", formality,
-    ) == text
+    assert (
+        backend.translate_ollama(
+            text,
+            source,
+            target,
+            "test-model",
+            formality,
+        )
+        == text
+    )
     assert len(fake_ollama.calls) > 1
     for call in fake_ollama.calls:
         assert backend._estimate_tokens(_source(call)) <= 20
@@ -259,7 +303,10 @@ def test_system_template_and_output_are_reserved(
 def test_oversized_system_fails_before_request(fake_ollama):
     with pytest.raises(InputTooLongError, match="system prompt"):
         backend.translate_ollama(
-            "small", "é" * backend._NUM_CTX, "German", "test-model",
+            "small",
+            "é" * backend._NUM_CTX,
+            "German",
+            "test-model",
         )
     assert not fake_ollama.calls
 
@@ -296,25 +343,35 @@ def test_indivisible_word_at_exact_byte_budget_is_allowed(fake_ollama):
     ],
 )
 def test_limit_metadata_discards_content_and_retries(
-    fake_ollama, caplog, as_object, metadata,
+    fake_ollama,
+    caplog,
+    as_object,
+    metadata,
 ):
     text = "private-alpha \tprivate-beta"
 
     def respond(request):
         if _source(request) == text:
-            return _response("discarded partial", as_object=as_object,
-                             **metadata)
+            return _response(
+                "discarded partial", as_object=as_object, **metadata
+            )
         return _response(_source(request).upper(), as_object=as_object)
 
     fake_ollama.respond = respond
     statuses = []
     progress = []
-    assert _translate(
-        text, status_cb=statuses.append,
-        progress_cb=lambda *args: progress.append(args),
-    ) == text.upper()
+    assert (
+        _translate(
+            text,
+            status_cb=statuses.append,
+            progress_cb=lambda *args: progress.append(args),
+        )
+        == text.upper()
+    )
     assert [_source(call) for call in fake_ollama.calls] == [
-        text, "private-alpha \t", "private-beta",
+        text,
+        "private-alpha \t",
+        "private-beta",
     ]
     assert all(
         call["options"] == fake_ollama.calls[0]["options"]
@@ -330,10 +387,13 @@ def test_limit_metadata_discards_content_and_retries(
 
 @pytest.mark.parametrize("as_object", [False, True])
 def test_legacy_completion_count_below_budget_is_accepted(
-    fake_ollama, as_object,
+    fake_ollama,
+    as_object,
 ):
     fake_ollama.respond = lambda request: _response(
-        "fertig", as_object=as_object, done_reason=None,
+        "fertig",
+        as_object=as_object,
+        done_reason=None,
         eval_count=backend._NUM_PREDICT - 1,
         prompt_eval_count=backend._NUM_CTX - backend._NUM_PREDICT - 1,
     )
@@ -377,7 +437,8 @@ def test_indivisible_truncated_input_is_not_repeated(fake_ollama, text):
 
 def test_exhausted_retries_are_bounded_and_return_no_partial(fake_ollama):
     fake_ollama.respond = lambda request: _response(
-        "never return this", done_reason="length",
+        "never return this",
+        done_reason="length",
     )
     progress = []
     statuses = []
@@ -386,12 +447,15 @@ def test_exhausted_retries_are_bounded_and_return_no_partial(fake_ollama):
         match=f"after {MAX_SPLIT_RETRIES} smaller-chunk retries",
     ):
         _translate(
-            "word " * 64, status_cb=statuses.append,
+            "word " * 64,
+            status_cb=statuses.append,
             progress_cb=lambda *args: progress.append(args),
         )
     assert len(fake_ollama.calls) == MAX_SPLIT_RETRIES + 1
     lengths = [len(_source(call)) for call in fake_ollama.calls]
-    assert all(left > right for left, right in zip(lengths, lengths[1:]))
+    assert all(
+        left > right for left, right in zip(lengths, lengths[1:], strict=False)
+    )
     assert not progress
     assert "No partial translation" in statuses[-1]
 
@@ -415,7 +479,9 @@ def test_full_retry_tree_remains_bounded_and_lossless(fake_ollama):
 
 @pytest.mark.parametrize("truncate", [False, True])
 def test_legacy_client_keyword_fallback_keeps_completion_checks(
-    fake_ollama, monkeypatch, truncate,
+    fake_ollama,
+    monkeypatch,
+    truncate,
 ):
     def legacy_chat(*, model, messages, options):
         request = {"model": model, "messages": messages, "options": options}
@@ -464,7 +530,10 @@ def test_legacy_client_api_exception_propagates(monkeypatch):
 )
 @pytest.mark.parametrize("during_retry", [False, True])
 def test_api_exceptions_propagate_unchanged(
-    fake_ollama, caplog, error, during_retry,
+    fake_ollama,
+    caplog,
+    error,
+    during_retry,
 ):
     def respond(request):
         if during_retry and len(fake_ollama.calls) == 1:

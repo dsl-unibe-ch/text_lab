@@ -1,18 +1,23 @@
 """Offline GPU allocation, OOM recovery and lifecycle contracts."""
 
-
-from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager, nullcontext
 import functools
 import subprocess
 import sys
 import threading
-from types import SimpleNamespace
 import weakref
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager, nullcontext
+from types import SimpleNamespace
 
 import pytest
 
-from textlab.features.translation import engine, gpu_profile, hf_backend
+from textlab.common.ollama import canonical_model_name
+from textlab.features.translation import (
+    engine,
+    gpu_memory,
+    gpu_profile,
+    hf_backend,
+)
 from textlab.features.translation import ollama_backend as ollama
 from textlab.features.translation.chunking import (
     MAX_SPLIT_RETRIES,
@@ -23,7 +28,6 @@ from textlab.features.translation.tests.test_translation_limits import (
     Tensor,
     Tokenizer,
 )
-
 
 MIB = 1024 * 1024
 
@@ -50,7 +54,8 @@ class Cuda:
     def get_device_properties(self, index):
         self.queries.append(("properties", index))
         return SimpleNamespace(
-            name=f"allocated-{index}", total_memory=self.total[index] * MIB,
+            name=f"allocated-{index}",
+            total_memory=self.total[index] * MIB,
         )
 
     def mem_get_info(self, index):
@@ -74,9 +79,14 @@ class Cuda:
 @pytest.fixture(autouse=True)
 def offline(monkeypatch):
     cuda = Cuda()
-    monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(
-        cuda=cuda, inference_mode=nullcontext,
-    ))
+    monkeypatch.setitem(
+        sys.modules,
+        "torch",
+        SimpleNamespace(
+            cuda=cuda,
+            inference_mode=nullcontext,
+        ),
+    )
     monkeypatch.setitem(sys.modules, "transformers", None)
     monkeypatch.setitem(sys.modules, "ollama", None)
     monkeypatch.setattr(ollama, "_ACTIVE_OLLAMA", None)
@@ -89,8 +99,11 @@ def offline(monkeypatch):
 
     monkeypatch.setattr(subprocess, "check_output", forbidden)
     yield cuda
-    for loader in (engine._load_nllb, engine._load_madlad,
-                   engine._load_marian):
+    for loader in (
+        engine._load_nllb,
+        engine._load_madlad,
+        engine._load_marian,
+    ):
         clear = getattr(loader, "cache_clear", None)
         if clear is not None:
             clear()
@@ -159,7 +172,8 @@ def test_live_free_memory_caps_batch_and_beams(offline):
 
 
 def test_unknown_free_memory_does_not_assume_large_capacity(
-    monkeypatch, offline,
+    monkeypatch,
+    offline,
 ):
     def unavailable(index):
         raise RuntimeError("memory information unavailable")
@@ -173,7 +187,8 @@ def test_unknown_free_memory_does_not_assume_large_capacity(
 
 
 def test_engine_caps_default_and_explicit_batch_after_model_load(
-    monkeypatch, offline,
+    monkeypatch,
+    offline,
 ):
     tokenizer, model = Tokenizer(), Model()
     events = []
@@ -188,8 +203,10 @@ def test_engine_caps_default_and_explicit_batch_after_model_load(
         offline.free[1] = 20_000
         model.calls.clear()
         assert engine.translate_many(
-            ["one", "two", "three", "four", "five"], "deu_Latn",
-            "fra_Latn", batch_size=requested,
+            ["one", "two", "three", "four", "five"],
+            "deu_Latn",
+            "fra_Latn",
+            batch_size=requested,
         ) == ["ONE", "TWO", "THREE", "FOUR", "FIVE"]
         # The memory cap of 2 full windows (2 x 24 tokens) fits all five
         # short inputs in one length-sorted batch.
@@ -207,7 +224,11 @@ def test_explicit_cpu_uses_float32_and_small_batch(monkeypatch, offline):
 
     monkeypatch.setattr(engine, "_load_nllb", load)
     engine._translate_chunks_hf(
-        ["one"] * 9, "deu_Latn", "fra_Latn", "nllb", device="cpu",
+        ["one"] * 9,
+        "deu_Latn",
+        "fra_Latn",
+        "nllb",
+        device="cpu",
         batch_size=64,
     )
     assert calls[0][1:] == ("cpu", "float32")
@@ -244,19 +265,32 @@ def test_oom_retries_are_bounded_lossless_ordered_and_release_tensors(
     offline.on_cleanup = cleanup
     sources = ["one", "two", "three", "four", "five", "six", "seven"]
     outputs = hf_backend.generate_translations(
-        model, tokenizer, sources, "cuda:1", batch_size=6,
-        max_new_tokens=17, num_beams=2, status_cb=statuses.append,
+        model,
+        tokenizer,
+        sources,
+        "cuda:1",
+        batch_size=6,
+        max_new_tokens=17,
+        num_beams=2,
+        status_cb=statuses.append,
         progress_cb=lambda *args: progress.append(args),
     )
     assert outputs == [text.upper() for text in sources]
     assert [len(texts) for texts, _ in model.attempts] == [7, 3] + [1] * 7
     # Longest first; outputs are still returned in input order.
     assert [text for batch, _ in model.calls for text in batch] == [
-        "three", "seven", "four", "five", "one", "two", "six",
+        "three",
+        "seven",
+        "four",
+        "five",
+        "one",
+        "two",
+        "six",
     ]
-    assert all(options["max_new_tokens"] == 17
-               and options["num_beams"] == 2
-               for _, options in model.attempts)
+    assert all(
+        options["max_new_tokens"] == 17 and options["num_beams"] == 2
+        for _, options in model.attempts
+    )
     assert len(statuses) == 2
     assert all("Token budgets unchanged" in status for status in statuses)
     assert offline.cleanups == [1, 1]
@@ -286,7 +320,10 @@ def test_tensor_transfer_oom_releases_failed_allocations(offline):
 
     offline.on_cleanup = cleanup
     assert hf_backend.generate_translations(
-        Model(), TransferTokenizer(), ["one", "two"], "cuda:1",
+        Model(),
+        TransferTokenizer(),
+        ["one", "two"],
+        "cuda:1",
     ) == ["ONE", "TWO"]
     assert len(offline.cleanups) == 1
 
@@ -303,7 +340,10 @@ def test_output_retries_do_not_retain_generated_tensors(offline):
 
     model = NoRetainedTensorModel(finish=lambda text: len(text.split()) == 1)
     assert hf_backend.generate_translations(
-        model, Tokenizer(), ["one two", "three"], "cuda:1",
+        model,
+        Tokenizer(),
+        ["one two", "three"],
+        "cuda:1",
     ) == ["ONE TWO", "THREE"]
     assert all(ref() is None for ref in references)
 
@@ -313,7 +353,11 @@ def test_oom_batch_one_fails_clearly_without_retaining_traceback(offline):
     statuses = []
     with pytest.raises(RuntimeError, match="microbatch 1") as caught:
         hf_backend.generate_translations(
-            model, Tokenizer(), ["one", "two"], "cuda:1", batch_size=2,
+            model,
+            Tokenizer(),
+            ["one", "two"],
+            "cuda:1",
+            batch_size=2,
             status_cb=statuses.append,
         )
     assert [len(batch) for batch, _ in model.attempts] == [2, 1]
@@ -323,11 +367,14 @@ def test_oom_batch_one_fails_clearly_without_retaining_traceback(offline):
     assert len(offline.cleanups) == 2
 
 
-@pytest.mark.parametrize("device,message", [
-    ("cuda:1", "unrelated runtime error"),
-    ("cuda:1", "CUDA error: device-side assert triggered"),
-    ("cpu", "CUDA out of memory."),
-])
+@pytest.mark.parametrize(
+    "device,message",
+    [
+        ("cuda:1", "unrelated runtime error"),
+        ("cuda:1", "CUDA error: device-side assert triggered"),
+        ("cpu", "CUDA out of memory."),
+    ],
+)
 def test_unrelated_runtime_errors_are_not_caught(offline, device, message):
     error = RuntimeError(message)
 
@@ -337,7 +384,10 @@ def test_unrelated_runtime_errors_are_not_caught(offline, device, message):
 
     with pytest.raises(RuntimeError) as caught:
         hf_backend.generate_translations(
-            Broken(), Tokenizer(), ["one", "two"], device,
+            Broken(),
+            Tokenizer(),
+            ["one", "two"],
+            device,
         )
     assert caught.value is error
     assert not offline.cleanups
@@ -351,19 +401,29 @@ def test_legacy_cuda_oom_message_recovers(offline):
             return super().generate(input_ids, **kwargs)
 
     assert hf_backend.generate_translations(
-        Legacy(), Tokenizer(), ["one", "two"], "cuda:1",
+        Legacy(),
+        Tokenizer(),
+        ["one", "two"],
+        "cuda:1",
     ) == ["ONE", "TWO"]
     assert len(offline.cleanups) == 1
 
 
 def test_oom_does_not_consume_output_retry_budget(offline):
     model = OomModel(
-        offline, allowed=1, finish=lambda text: len(text.split()) == 1,
+        offline,
+        allowed=1,
+        finish=lambda text: len(text.split()) == 1,
     )
     statuses = []
     assert hf_backend.generate_translations(
-        model, Tokenizer(), ["one two", "three four"], "cuda:1",
-        batch_size=4, max_new_tokens=3, status_cb=statuses.append,
+        model,
+        Tokenizer(),
+        ["one two", "three four"],
+        "cuda:1",
+        batch_size=4,
+        max_new_tokens=3,
+        status_cb=statuses.append,
     ) == ["ONE TWO", "THREE FOUR"]
     assert sum("CUDA" in message for message in statuses) == 1
     assert sum("attempt 1/" in message for message in statuses) == 2
@@ -378,8 +438,12 @@ def test_output_retry_bound_is_preserved_after_oom(offline):
     statuses = []
     with pytest.raises(OutputTruncatedError, match="No partial"):
         hf_backend.generate_translations(
-            model, tokenizer, ["word " * 64, "fine"], "cuda:1",
-            max_new_tokens=2, status_cb=statuses.append,
+            model,
+            tokenizer,
+            ["word " * 64, "fine"],
+            "cuda:1",
+            max_new_tokens=2,
+            status_cb=statuses.append,
         )
     token_retries = [s for s in statuses if "output-token budget" in s]
     assert len(token_retries) == MAX_SPLIT_RETRIES
@@ -397,6 +461,7 @@ def cached_loaders(monkeypatch):
             loads.append((label, args))
             references.extend([weakref.ref(tokenizer), weakref.ref(model)])
             return tokenizer, model
+
         return load
 
     loaders = {}
@@ -422,8 +487,13 @@ def test_only_one_cached_model_survives_backend_and_pair_switches(
     assert len(cached_loaders.loads) == 4
     assert not engine.backend_is_loaded("opus-mt", "deu_Latn", "fra_Latn")
     assert engine.backend_is_loaded("opus-mt", "eng_Latn", "deu_Latn")
-    assert sum(loader.cache_info().currsize
-               for loader in cached_loaders.loaders.values()) == 1
+    assert (
+        sum(
+            loader.cache_info().currsize
+            for loader in cached_loaders.loaders.values()
+        )
+        == 1
+    )
     engine.free_translation_vram()
     assert not engine.backend_is_loaded("opus-mt", "eng_Latn", "deu_Latn")
     assert all(ref() is None for ref in cached_loaders.refs)
@@ -431,7 +501,7 @@ def test_only_one_cached_model_survives_backend_and_pair_switches(
 
 def test_ocr_guard_is_reentrant_and_translation_reloads(cached_loaders):
     engine.preload_backend("nllb")
-    with engine.translation_session():
+    with gpu_memory.translation_session():
         engine.free_translation_vram()
         assert not engine.backend_is_loaded("nllb")
         assert all(ref() is None for ref in cached_loaders.refs)
@@ -451,7 +521,8 @@ def test_device_change_invalidates_ui_and_reloads(cached_loaders, offline):
 
 
 def test_load_oom_cleans_failed_model_and_does_not_retry(
-    monkeypatch, offline,
+    monkeypatch,
+    offline,
 ):
     references, calls = [], []
 
@@ -538,7 +609,7 @@ def fake_service(monkeypatch):
 
     def chat(**request):
         state.calls.append(("chat", request))
-        state.running.add(ollama._canonical_model(request["model"]))
+        state.running.add(canonical_model_name(request["model"]))
         return {
             "done_reason": "stop",
             "message": {"content": request["messages"][-1]["content"]},
@@ -547,7 +618,7 @@ def fake_service(monkeypatch):
     def generate(**request):
         state.calls.append(("unload", request))
         assert request["keep_alive"] == 0
-        state.running.discard(ollama._canonical_model(request["model"]))
+        state.running.discard(canonical_model_name(request["model"]))
 
     state.client = SimpleNamespace(ps=ps, chat=chat, generate=generate)
     monkeypatch.setitem(sys.modules, "ollama", state.client)
@@ -555,26 +626,35 @@ def fake_service(monkeypatch):
 
 
 def test_hf_ollama_transitions_unload_only_owned_model(
-    cached_loaders, fake_service,
+    cached_loaders,
+    fake_service,
 ):
     engine.preload_backend("nllb")
-    assert engine.translate(
-        "one", "deu_Latn", "fra_Latn", backend="ollama",
-        ollama_model="translator",
-    ) == "one"
+    assert (
+        engine.translate(
+            "one",
+            "deu_Latn",
+            "fra_Latn",
+            backend="ollama",
+            ollama_model="translator",
+        )
+        == "one"
+    )
     assert all(ref() is None for ref in cached_loaders.refs)
     assert not engine.backend_is_loaded("nllb")
     assert engine.backend_is_loaded("ollama", ollama_model="translator")
     engine.preload_backend("madlad-3b")
     assert fake_service.running == {"unrelated:latest"}
     assert fake_service.calls[-1] == (
-        "unload", {"model": "translator", "keep_alive": 0},
+        "unload",
+        {"model": "translator", "keep_alive": 0},
     )
     assert not engine.backend_is_loaded("ollama", ollama_model="translator")
 
 
 def test_preexisting_ollama_model_is_borrowed_not_unloaded(
-    fake_service, cached_loaders,
+    fake_service,
+    cached_loaders,
 ):
     fake_service.running.add("translator:latest")
     engine.preload_backend("ollama", ollama_model="translator")
@@ -588,11 +668,12 @@ def test_ollama_model_switch_and_ocr_release_are_scoped(fake_service):
     engine.preload_backend("ollama", ollama_model="first")
     engine.preload_backend("ollama", ollama_model="second")
     assert fake_service.running == {"second:latest", "unrelated:latest"}
-    with engine.translation_session():
+    with gpu_memory.translation_session():
         engine.free_translation_vram()
     assert fake_service.running == {"unrelated:latest"}
-    assert [call[1]["model"] for call in fake_service.calls
-            if call[0] == "unload"] == ["first", "second"]
+    assert [
+        call[1]["model"] for call in fake_service.calls if call[0] == "unload"
+    ] == ["first", "second"]
 
 
 def test_ollama_ui_state_checks_server_expiry(fake_service):
@@ -605,7 +686,8 @@ def test_ollama_ui_state_checks_server_expiry(fake_service):
 
 
 def test_legacy_ollama_client_has_no_unproven_ownership(
-    monkeypatch, fake_service,
+    monkeypatch,
+    fake_service,
 ):
     monkeypatch.delattr(fake_service.client, "ps")
     engine.preload_backend("ollama", ollama_model="translator")
@@ -615,7 +697,9 @@ def test_legacy_ollama_client_has_no_unproven_ownership(
 
 
 def test_unverified_ollama_release_stops_handoff(
-    monkeypatch, fake_service, cached_loaders,
+    monkeypatch,
+    fake_service,
+    cached_loaders,
 ):
     engine.preload_backend("ollama", ollama_model="translator")
     monkeypatch.delattr(fake_service.client, "ps")
@@ -626,7 +710,9 @@ def test_unverified_ollama_release_stops_handoff(
 
 
 def test_failed_ollama_unload_does_not_claim_memory_was_freed(
-    monkeypatch, fake_service, cached_loaders,
+    monkeypatch,
+    fake_service,
+    cached_loaders,
 ):
     engine.preload_backend("ollama", ollama_model="translator")
     monkeypatch.setattr(fake_service.client, "generate", lambda **kwargs: {})

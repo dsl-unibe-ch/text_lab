@@ -6,26 +6,24 @@ input measurement, complete-output validation, and bounded split/retry.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 import logging
-
-from .gpu_memory import (
-    clear_cuda_cache,
-    discard_exception_tensors,
-    is_cuda_oom,
-    serialized,
-)
+from collections.abc import Callable
 
 from .chunking import (
-    InputTooLongError,
     MAX_SPLIT_RETRIES,
+    InputTooLongError,
     OutputTruncatedError,
     join_translations,
     sentence_slices,
     split_for_retry,
     split_text,
 )
-
+from .gpu_memory import (
+    clear_cuda_cache,
+    discard_exception_tensors,
+    is_cuda_oom,
+    serialized,
+)
 
 LOGGER = logging.getLogger(__name__)
 DEFAULT_INPUT_TOKENS = 512
@@ -52,7 +50,9 @@ def input_token_limit(tokenizer, model) -> int:
 
 def _eos_ids(model, tokenizer) -> set[int]:
     for config in (
-        getattr(model, "generation_config", None), model.config, tokenizer,
+        getattr(model, "generation_config", None),
+        model.config,
+        tokenizer,
     ):
         value = getattr(config, "eos_token_id", None)
         if value is not None:
@@ -102,7 +102,8 @@ def generate_translations(
     """
     if batch_size <= 0 or max_new_tokens <= 0:
         raise ValueError(
-            "Batch size and output-token budget must be positive.")
+            "Batch size and output-token budget must be positive."
+        )
     if not texts:
         return []
 
@@ -215,7 +216,7 @@ def generate_translations(
         outputs = []
         offset = 0
         while offset < len(chunks):
-            batch = chunks[offset:offset + microbatch_size]
+            batch = chunks[offset : offset + microbatch_size]
             outcome = attempt(batch)
             if outcome is None:
                 clear_cuda_cache(device)
@@ -243,7 +244,7 @@ def generate_translations(
         retry_sources = []
         retry_slots = []
         results = list(decoded)
-        for index, (row, text) in enumerate(zip(rows, decoded)):
+        for index, (row, text) in enumerate(zip(rows, decoded, strict=False)):
             # Encoder-decoder outputs begin with a decoder start token,
             # which itself can be EOS (notably for NLLB).
             complete = any(token in eos_ids for token in row[1:])
@@ -259,7 +260,8 @@ def generate_translations(
             smaller = split_for_retry(chunks[index])
             # Recheck independently: tokenization can change at boundaries.
             smaller = [
-                part for piece in smaller
+                part
+                for piece in smaller
                 for part in split_text(piece, measure, limit)
             ]
             retry_slots.append((index, smaller, len(retry_sources)))
@@ -276,21 +278,25 @@ def generate_translations(
             recovered = generate_pending(retry_sources, depth + 1)
             for index, smaller, start in retry_slots:
                 results[index] = join_translations(
-                    smaller, recovered[start:start + len(smaller)],
+                    smaller,
+                    recovered[start : start + len(smaller)],
                 )
         return results
 
     done = 0
     for batch in batches:
-        for key, output in zip(batch, generate_pending(batch, 0)):
+        for key, output in zip(
+            batch, generate_pending(batch, 0), strict=False
+        ):
             store[key] = output
         done += len(batch)
         if progress_cb is not None:
             progress_cb(done, len(pending))
 
     return [
-        join_translations(chunks, [
-            store.get(" ".join(chunk.split()), "") for chunk in chunks
-        ])
+        join_translations(
+            chunks,
+            [store.get(" ".join(chunk.split()), "") for chunk in chunks],
+        )
         for chunks in pieces
     ]

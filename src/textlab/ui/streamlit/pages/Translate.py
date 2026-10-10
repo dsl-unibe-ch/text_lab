@@ -1,5 +1,4 @@
-"""
-Translate page for Text Lab.
+"""Translate page for Text Lab.
 
 Two clearly separated workflows:
 
@@ -11,10 +10,10 @@ Two clearly separated workflows:
   translates, and reconstructs the file in its original format with
   structural markup preserved. Supports multi-file batch upload.
 
-All translation is routed through :func:`textlab.features.translation.shielded_translate`
-so Markdown links, LaTeX equations, inline code, HTML tags, URLs, and
-placeholders survive intact. Glossary terms are enforced via the same
-sentinel mechanism.
+Translation goes through :mod:`textlab.features.translation.service`, which
+shields Markdown links, LaTeX equations, inline code, HTML tags, URLs and
+placeholders so they survive intact, and enforces glossary terms the same
+way.
 
 State-management note
 ---------------------
@@ -28,10 +27,8 @@ pattern that fixes the classic "value= is ignored after rerun" trap.
 from __future__ import annotations
 
 import html
-import io
 import os
 import time
-import zipfile
 
 import streamlit as st
 import streamlit.components.v1 as components
@@ -46,40 +43,13 @@ favicon = Image.open(favicon_path)
 
 st.set_page_config(page_title="Translate", page_icon=favicon, layout="wide")
 
-from textlab.ui.streamlit.auth import check_token  # noqa: E402
+from textlab.common import gpu_manager  # noqa: E402
 from textlab.common.language_mappings import (  # noqa: E402
     TRANSLATE_LANGUAGE_MAPPING,
 )
-from textlab.features.translation import (  # noqa: E402
-    FORMALITY_CAPABLE_BACKENDS,
-    FORMALITY_CHOICES,
-    TRANSLATION_BACKENDS,
-    TranslationLimitError,
-    ProtectedContentError,
-    backend_is_loaded,
-    backend_load_signature,
-    build_review_docx,
-    build_review_html,
-    describe_error,
-    detect_document_language,
-    detect_gpu_profile,
-    detect_language,
-    make_translate_fn,
-    preload_backend,
-    record_translations,
-    reflow_soft_wraps,
-    shielded_translate,
-    translate_docx,
-    translate_markdown,
-    translate_pptx,
-    translate_xlsx,
-)
-from textlab.common import gpu_manager  # noqa: E402
+from textlab.features.translation import service  # noqa: E402
+from textlab.ui.streamlit.auth import check_token  # noqa: E402
 from textlab.ui.streamlit.components.gpu import free_gpu_for  # noqa: E402
-from textlab.features.translation.pdf_workflow import (  # noqa: E402
-    translate_pdf_outputs,
-)
-
 
 # ---------------------------------------------------------------------------
 # Page config
@@ -91,7 +61,7 @@ GLOSSARY_MAX_ROWS = 50
 check_token()
 st.title("Translate")
 st.caption(
-    "Neural machine translation — all inference runs locally on UBELIX."
+    "Neural machine translation — all inference runs locally in your session."
 )
 
 
@@ -106,7 +76,7 @@ _STATE_DEFAULTS = {
     "source_text": "",
     "target_text": "",
     # Backend & options.
-    "backend_label": next(iter(TRANSLATION_BACKENDS.values())),
+    "backend_label": next(iter(service.TRANSLATION_BACKENDS.values())),
     "formality": "default",
     "ollama_model": None,
     # Glossary.
@@ -129,8 +99,7 @@ for _k, _v in _STATE_DEFAULTS.items():
 
 
 def _swap_languages() -> None:
-    """
-    Callback for the ⇄ button.
+    """Callback for the ⇄ button.
 
     Runs BEFORE the language selectboxes / text_areas re-render on the
     next frame, so the widgets pick up the swapped values naturally.
@@ -163,7 +132,7 @@ col_backend, col_src, col_swap, col_tgt = st.columns([2, 1, 0.4, 1])
 with col_backend:
     st.selectbox(
         "Translation backend",
-        list(TRANSLATION_BACKENDS.values()),
+        list(service.TRANSLATION_BACKENDS.values()),
         key="backend_label",
         help=(
             "NLLB-200 covers 200 languages. MADLAD-400 is strong on "
@@ -172,8 +141,9 @@ with col_backend:
         ),
     )
 backend_label = st.session_state["backend_label"]
-backend_key = next(k for k, v in TRANSLATION_BACKENDS.items()
-                   if v == backend_label)
+backend_key = next(
+    k for k, v in service.TRANSLATION_BACKENDS.items() if v == backend_label
+)
 
 with col_src:
     st.selectbox("Source language", lang_names, key="src_lang")
@@ -200,14 +170,15 @@ ollama_model = None
 if backend_key == "ollama":
     try:
         from textlab.common.gpu_manager import get_gpu_name
-        from textlab.common.ollama import check_ollama_server
         from textlab.common.model_config import get_available_models
+        from textlab.common.ollama import check_ollama_server
 
         if check_ollama_server():
             models = get_available_models(get_gpu_name())
             if models:
                 ollama_model = st.selectbox(
-                    "LLM model (Ollama)", models, index=0)
+                    "LLM model (Ollama)", models, index=0
+                )
             else:
                 st.warning("No Ollama models are available on this GPU.")
         else:
@@ -217,10 +188,10 @@ if backend_key == "ollama":
 
 # Formality control — only shown for backends that actually honour it.
 formality = "default"
-if backend_key in FORMALITY_CAPABLE_BACKENDS:
+if backend_key in service.FORMALITY_CAPABLE_BACKENDS:
     formality = st.radio(
         "Formality",
-        FORMALITY_CHOICES,
+        service.FORMALITY_CHOICES,
         key="formality",
         horizontal=True,
         help=(
@@ -229,28 +200,7 @@ if backend_key in FORMALITY_CAPABLE_BACKENDS:
         ),
     )
 
-# What needs to be resident in VRAM for the Text tab, given the current
-# controls above. Compared against ``st.session_state["loaded_signature"]``
-# to know whether the user still needs to hit "Load model".
-current_load_sig = backend_load_signature(
-    backend=backend_key,
-    src_lang=src_code,
-    tgt_lang=tgt_code,
-    ollama_model=ollama_model,
-)
-model_is_loaded = (
-    st.session_state["loaded_signature"] == current_load_sig
-    and backend_is_loaded(
-        backend_key, src_lang=src_code, tgt_lang=tgt_code,
-        ollama_model=ollama_model,
-    )
-)
-
-opus_mt_supported = True
-if backend_key == "opus-mt":
-    from textlab.features.translation.engine import flores_to_iso2
-    if not flores_to_iso2(src_code) or not flores_to_iso2(tgt_code):
-        opus_mt_supported = False
+opus_mt_supported = service.supports_pair(backend_key, src_code, tgt_code)
 
 # ---------------------------------------------------------------------------
 # Glossary editor (shared between Text and Document tabs)
@@ -269,7 +219,7 @@ def _current_glossary() -> dict[str, str]:
 
 
 with st.expander(
-    "📖 Glossary / term lock  "
+    "Glossary / term lock  "
     f"({len(_current_glossary())} active term"
     f"{'s' if len(_current_glossary()) != 1 else ''})",
     expanded=False,
@@ -306,8 +256,25 @@ with st.expander(
         ),
     )
 
-glossary = _current_glossary()
-glossary_case_sensitive = st.session_state["glossary_case_sensitive"]
+options = service.TranslationOptions(
+    backend=backend_key,
+    source_code=src_code,
+    source_name=src_name,
+    target_code=tgt_code,
+    target_name=tgt_name,
+    ollama_model=ollama_model,
+    formality=formality,
+    glossary=_current_glossary(),
+    glossary_case_sensitive=st.session_state["glossary_case_sensitive"],
+)
+
+# What needs to be resident in VRAM for the Text tab, given the current
+# controls above. Compared against ``st.session_state["loaded_signature"]``
+# to know whether the user still needs to hit "Load model".
+current_load_sig = service.load_signature(options)
+model_is_loaded = st.session_state[
+    "loaded_signature"
+] == current_load_sig and service.backend_ready(options)
 
 st.divider()
 
@@ -315,126 +282,6 @@ st.divider()
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-def _mime_for(name: str) -> str:
-    lower = name.lower()
-    if lower.endswith(".pdf"):
-        return "application/pdf"
-    if lower.endswith(".docx"):
-        return (
-            "application/vnd.openxmlformats-officedocument"
-            ".wordprocessingml.document"
-        )
-    if lower.endswith(".pptx"):
-        return (
-            "application/vnd.openxmlformats-officedocument"
-            ".presentationml.presentation"
-        )
-    if lower.endswith(".xlsx"):
-        return (
-            "application/vnd.openxmlformats-officedocument"
-            ".spreadsheetml.sheet"
-        )
-    if lower.endswith(".md"):
-        return "text/markdown"
-    if lower.endswith(".zip"):
-        return "application/zip"
-    if lower.endswith(".html"):
-        return "text/html"
-    return "text/plain"
-
-
-def _translate_one(
-    name: str,
-    data: bytes,
-    tfn,
-    progress_stage_cb,
-    tgt_code_,
-    pdf_result_cb=None,
-    pdf_outputs=("markdown", "pdf"),
-    math_ocr=False,
-    backend_key_=None,
-) -> list[tuple[str, bytes]]:
-    """Return checked outputs, keeping PDF deliverable failures independent."""
-    base, ext = os.path.splitext(name)
-    ext_lower = ext.lower()
-    stem = os.path.basename(base)
-    out_stem = f"{stem}.{tgt_code_}"
-
-    if ext_lower == ".md":
-        progress_stage_cb(0, 1, "parsing markdown")
-        text = data.decode("utf-8", errors="replace")
-        result = translate_markdown(
-            text, tfn, progress_cb=progress_stage_cb, glossary=glossary,
-            glossary_case_sensitive=glossary_case_sensitive,
-        )
-        progress_stage_cb(1, 1, "reconstructing markdown")
-        return [(f"{out_stem}.md", result.encode("utf-8"))]
-
-    if ext_lower == ".pdf":
-        result = translate_pdf_outputs(
-            data, tfn, stem=out_stem, source_name=os.path.basename(name),
-            progress_cb=progress_stage_cb, glossary=glossary,
-            glossary_case_sensitive=glossary_case_sensitive,
-            outputs=pdf_outputs, math_ocr=math_ocr, backend=backend_key_,
-        )
-        if pdf_result_cb is not None:
-            pdf_result_cb(result)
-        if not result.outputs:
-            reasons = " ".join(
-                item.get("message", item["reason"]) for item in result.blocked
-            )
-            raise ValueError(reasons or "No PDF deliverables passed checks.")
-        return result.outputs + [
-            (f"{out_stem}.translation-report.json", result.report_bytes()),
-        ]
-
-    if ext_lower == ".docx":
-        progress_stage_cb(0, 1, "parsing docx")
-        result = translate_docx(
-            data, tfn, progress_cb=progress_stage_cb, glossary=glossary,
-            glossary_case_sensitive=glossary_case_sensitive,
-        )
-        progress_stage_cb(1, 1, "reconstructing docx")
-        return [(f"{out_stem}.docx", result)]
-
-    if ext_lower == ".xlsx":
-        progress_stage_cb(0, 1, "parsing xlsx")
-        result = translate_xlsx(
-            data, tfn, progress_cb=progress_stage_cb, glossary=glossary,
-            glossary_case_sensitive=glossary_case_sensitive,
-        )
-        progress_stage_cb(1, 1, "reconstructing xlsx")
-        return [(f"{out_stem}.xlsx", result)]
-
-    if ext_lower == ".pptx":
-        progress_stage_cb(0, 1, "parsing pptx")
-        result = translate_pptx(
-            data, tfn, progress_cb=progress_stage_cb, glossary=glossary,
-            glossary_case_sensitive=glossary_case_sensitive,
-        )
-        progress_stage_cb(1, 1, "reconstructing pptx")
-        return [(f"{out_stem}.pptx", result)]
-
-    if ext_lower in (".txt", ".srt", ".vtt"):
-        progress_stage_cb(0, 1, f"translating {ext_lower}")
-        text = data.decode("utf-8", errors="replace")
-        if ext_lower == ".txt":
-            # Plain prose: rejoin sentences the file hard-wrapped, so the model
-            # gets whole ones. Subtitles are excluded deliberately -- there
-            # every line break carries timing, and joining them destroys the
-            # cue structure.
-            text = reflow_soft_wraps(text)
-        result = shielded_translate(
-            text, tfn,
-            glossary=glossary,
-            glossary_case_sensitive=glossary_case_sensitive,
-        )
-        progress_stage_cb(1, 1, "done")
-        return [(f"{out_stem}{ext_lower}", result.encode("utf-8"))]
-
-    raise ValueError(f"Unsupported file type: {ext_lower}")
-
-
 def _count_words(text: str) -> int:
     return len(text.split()) if text and text.strip() else 0
 
@@ -442,70 +289,25 @@ def _count_words(text: str) -> int:
 # ---------------------------------------------------------------------------
 # Workflow tabs
 # ---------------------------------------------------------------------------
-def _zip_file_outputs(file_outputs, errors) -> bytes:
-    """One ZIP for all outputs; Markdown bundles are unpacked next to the PDF.
+def _render_doc_results(results: service.DocumentResults) -> None:
+    file_outputs = results.file_outputs
+    errors = results.errors
+    pdf_reports = results.pdf_reports
+    outputs = results.outputs
 
-    A single source file is written at the root; several sources each get a
-    folder so their ``assets/`` directories cannot collide.
-    """
-    buffer = io.BytesIO()
-    nested = len(file_outputs) + len(errors) > 1
-    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zout:
-        for source, outputs in file_outputs:
-            folder = (os.path.splitext(os.path.basename(source))[0] + "/"
-                      if nested else "")
-            for name, data in outputs:
-                if name.endswith(".md.zip"):
-                    with zipfile.ZipFile(io.BytesIO(data)) as bundle:
-                        for entry in bundle.namelist():
-                            zout.writestr(folder + entry, bundle.read(entry))
-                else:
-                    zout.writestr(folder + name, data)
-        for name, msg in errors:
-            zout.writestr(
-                f"{name}.ERROR.txt",
-                f"Failed to translate: {msg}".encode("utf-8"),
-            )
-    return buffer.getvalue()
-
-
-def _review_files(
-    source: str, pairs, source_language: str, target_language: str,
-    tgt_code_: str,
-) -> list[tuple[str, bytes]]:
-    """Side-by-side HTML (and Word, when python-docx is available)."""
-    if not pairs:
-        return []
-    title = os.path.basename(source)
-    stem = f"{os.path.splitext(title)[0]}.{tgt_code_}.side-by-side"
-    options = dict(
-        title=title, source_language=source_language,
-        target_language=target_language,
-    )
-    files = [(f"{stem}.html", build_review_html(pairs, **options))]
-    docx_bytes = build_review_docx(pairs, **options)
-    if docx_bytes is not None:
-        files.append((f"{stem}.docx", docx_bytes))
-    return files
-
-
-def _render_doc_results(results: dict) -> None:
-    file_outputs = results["file_outputs"]
-    errors = results["errors"]
-    pdf_reports = results["pdf_reports"]
-    outputs = [item for _, items in file_outputs for item in items]
-
-    elapsed = int(results.get("elapsed", 0))
+    elapsed = int(results.elapsed)
     details = [f"Finished in {elapsed // 60}:{elapsed % 60:02d}"]
     details += [
         f"{os.path.basename(name)}: {language}"
-        for name, language in results.get("languages", {}).items()
+        for name, language in results.languages.items()
     ]
     st.caption(" · ".join(details))
 
     blocked_count = sum(len(result.blocked) for _, result in pdf_reports)
     if pdf_reports:
-        with st.expander("PDF validation reports", expanded=bool(blocked_count)):
+        with st.expander(
+            "PDF validation reports", expanded=bool(blocked_count)
+        ):
             for name, result in pdf_reports:
                 st.write(name)
                 for issue in result.blocked:
@@ -521,7 +323,8 @@ def _render_doc_results(results: dict) -> None:
     shown_errors = [item for item in errors if item[0] not in reported]
     if shown_errors:
         with st.expander(
-            f"⚠ {len(shown_errors)} file(s) failed", expanded=True,
+            f"{len(shown_errors)} file(s) failed",
+            expanded=True,
         ):
             for name, msg in shown_errors:
                 st.error(f"**{name}** — {msg}")
@@ -533,13 +336,16 @@ def _render_doc_results(results: dict) -> None:
         tname, tbytes = outputs[0]
         st.success(f"Translated → {tname}")
         st.download_button(
-            f"⬇ Download {tname}", data=tbytes, file_name=tname,
-            mime=_mime_for(tname), on_click="ignore",
+            f"Download {tname}",
+            data=tbytes,
+            file_name=tname,
+            mime=service.mime_type(tname),
+            on_click="ignore",
             key="doc_download_single",
         )
         return
     summary = (
-        f"{len(file_outputs)}/{results['total']} files produced "
+        f"{len(file_outputs)}/{results.total} files produced "
         "downloadable outputs."
     )
     if blocked_count:
@@ -549,14 +355,16 @@ def _render_doc_results(results: dict) -> None:
     else:
         st.success(summary)
     st.download_button(
-        "⬇ Download translated ZIP",
-        data=_zip_file_outputs(file_outputs, errors),
-        file_name=f"translated_{results['tgt_code']}.zip",
-        mime="application/zip", on_click="ignore", key="doc_download_zip",
+        "Download translated ZIP",
+        data=service.outputs_zip(file_outputs, errors),
+        file_name=f"translated_{results.target_code}.zip",
+        mime="application/zip",
+        on_click="ignore",
+        key="doc_download_zip",
     )
 
 
-text_tab, doc_tab = st.tabs(["📝 Text", "📄 Document"])
+text_tab, doc_tab = st.tabs(["Text", "Document"])
 
 
 # ===========================================================================
@@ -597,7 +405,7 @@ with text_tab:
             f"<div style='{cap_style}font-size:13px;'>"
             f"{char_count:,} / {TEXT_SOFT_CAP:,} characters &nbsp;·&nbsp; "
             f"{word_count:,} words"
-            f"{' &nbsp;·&nbsp; ⚠ exceeds soft limit' if over_cap else ''}"
+            f"{' &nbsp;·&nbsp; exceeds soft limit' if over_cap else ''}"
             "</div>",
             unsafe_allow_html=True,
         )
@@ -606,7 +414,7 @@ with text_tab:
         det_col1, det_col2 = st.columns([1, 3])
         with det_col1:
             do_detect = st.button(
-                "🔍 Detect",
+                "Detect",
                 help="Auto-detect the source language of the pasted text.",
                 disabled=not source_value.strip(),
                 key="detect_btn",
@@ -617,8 +425,10 @@ with text_tab:
                 if det.display_name and det.flores_code:
                     pct = int(round(det.confidence * 100))
                     badge_color = (
-                        "#2e7d32" if det.confidence >= 0.85
-                        else "#f9a825" if det.confidence >= 0.60
+                        "#2e7d32"
+                        if det.confidence >= 0.85
+                        else "#f9a825"
+                        if det.confidence >= 0.60
                         else "#c62828"
                     )
                     st.markdown(
@@ -646,7 +456,9 @@ with text_tab:
 
         if do_detect:
             with st.spinner("Detecting language…"):
-                st.session_state["detection"] = detect_language(source_value)
+                st.session_state["detection"] = service.detect_language(
+                    source_value
+                )
             st.rerun()
 
     with right:
@@ -720,7 +532,7 @@ with text_tab:
                     style="padding:6px 14px;border-radius:6px;
                            border:1px solid #888;background:#f6f6f6;
                            cursor:pointer;font-size:14px;">
-                    📋 Copy translation
+                    Copy translation
                 </button>
                 <span id="tl-copy-msg"
                     style="margin-left:10px;color:#0a0;font-size:13px;">
@@ -762,13 +574,13 @@ with text_tab:
         )
     elif model_is_loaded:
         st.success(
-            f"✅ **{backend_label}** is ready on the current compute device."
+            f"**{backend_label}** is ready on the current compute device."
         )
     else:
         load_col, msg_col = st.columns([1, 3])
         with load_col:
             do_load = st.button(
-                "🚀 Load model",
+                "Load model",
                 type="primary",
                 disabled=(not opus_mt_supported or src_code == tgt_code),
                 key="load_model_btn",
@@ -791,26 +603,21 @@ with text_tab:
 
         if do_load:
             free_gpu_for(
-                gpu_manager.TRANSLATION, ollama_model=ollama_model,
+                gpu_manager.TRANSLATION,
+                ollama_model=ollama_model,
             )
             with st.spinner(
                 f"Loading {backend_label} onto the compute device… "
                 "(first time can take 1-2 min)"
             ):
                 try:
-                    preload_backend(
-                        backend=backend_key,
-                        src_lang=src_code,
-                        tgt_lang=tgt_code,
-                        ollama_model=ollama_model,
-                        src_lang_name=src_name,
-                        tgt_lang_name=tgt_name,
-                    )
+                    service.load_backend(options)
                     st.session_state["loaded_signature"] = current_load_sig
                     st.session_state["load_error"] = None
                     st.session_state["load_traceback"] = None
                 except Exception as exc:
                     import traceback as _tb
+
                     st.session_state["load_error"] = (
                         f"Model load failed: {exc}"
                     )
@@ -835,9 +642,12 @@ with text_tab:
         ),
         key="translate_btn",
         help=(
-            "Source and target languages are the same." if src_code == tgt_code
-            else "OPUS-MT pair unsupported." if not opus_mt_supported
-            else None if model_is_loaded
+            "Source and target languages are the same."
+            if src_code == tgt_code
+            else "OPUS-MT pair unsupported."
+            if not opus_mt_supported
+            else None
+            if model_is_loaded
             else "Load the model first (button above)."
         ),
     )
@@ -856,7 +666,8 @@ with text_tab:
 
     if do_translate:
         free_gpu_for(
-            gpu_manager.TRANSLATION, ollama_model=ollama_model,
+            gpu_manager.TRANSLATION,
+            ollama_model=ollama_model,
         )
         st.session_state["translation_notices"] = []
         progress = st.progress(0.0, text="Translating…")
@@ -868,44 +679,33 @@ with text_tab:
                 notices.append(message)
             retry_status.info(message)
 
-        def _cb(done: int, total: int) -> None:
-            if total > 0:
-                progress.progress(
-                    min(done / total, 1.0),
-                    text=f"Translating chunk {done}/{total}",
-                )
-
-        tfn = make_translate_fn(
-            src_lang=src_code, tgt_lang=tgt_code,
-            backend=backend_key,
-            ollama_model=ollama_model,
-            src_lang_name=src_name, tgt_lang_name=tgt_name,
-            formality=formality,
-            progress_cb=_cb,
-            status_cb=_text_retry_notice,
-        )
         try:
-            translated = shielded_translate(
-                # Pasted text is usually prose, and a paste out of a PDF or an
-                # email arrives hard-wrapped. Rejoin those sentences so the
-                # model sees each one whole; a break after a finished sentence
-                # is left where it is.
-                reflow_soft_wraps(st.session_state["source_text"]), tfn,
-                glossary=glossary,
-                glossary_case_sensitive=glossary_case_sensitive,
+            translated = service.translate_text(
+                st.session_state["source_text"],
+                options,
+                on_progress=lambda update: progress.progress(
+                    update.fraction,
+                    text=update.message,
+                ),
+                on_notice=_text_retry_notice,
             )
             st.session_state["target_text"] = translated
             # Clear any previous error on a successful run.
             st.session_state["translate_error"] = None
             st.session_state["translate_traceback"] = None
-        except (TranslationLimitError, ProtectedContentError) as exc:
+        except (
+            service.TranslationLimitError,
+            service.ProtectedContentError,
+        ) as exc:
             st.session_state["target_text"] = ""
-            st.session_state["translate_error"] = describe_error(
-                exc, backend_key,
+            st.session_state["translate_error"] = service.describe_error(
+                exc,
+                backend_key,
             )
             st.session_state["translate_traceback"] = None
         except Exception as exc:
             import traceback as _tb
+
             st.session_state["target_text"] = ""
             st.session_state["translate_error"] = f"Translation failed: {exc}"
             st.session_state["translate_traceback"] = _tb.format_exc()
@@ -939,7 +739,7 @@ with doc_tab:
         key="doc_uploader",
     )
 
-    _gpu = detect_gpu_profile()
+    _gpu = service.detect_gpu_profile()
     if _gpu.tier == "cpu":
         st.caption(
             "No GPU detected — translation will run on CPU (slow). "
@@ -964,37 +764,41 @@ with doc_tab:
     pdf_outputs = ("markdown", "pdf")
     math_ocr = False
     if has_pdf:
-        pdf_outputs = tuple(st.multiselect(
-            "PDF outputs",
-            list(pdf_output_labels),
-            default=list(pdf_output_labels),
-            format_func=pdf_output_labels.__getitem__,
-            key="pdf_outputs",
-            help="Choose only what you need: each output is extracted "
-                 "separately. Text shared by both is translated once.",
-        ))
+        pdf_outputs = tuple(
+            st.multiselect(
+                "PDF outputs",
+                list(pdf_output_labels),
+                default=list(pdf_output_labels),
+                format_func=pdf_output_labels.__getitem__,
+                key="pdf_outputs",
+                help="Choose only what you need: each output is extracted "
+                "separately. Text shared by both is translated once.",
+            )
+        )
         if "markdown" in pdf_outputs:
             math_ocr = st.checkbox(
                 "Convert equations to LaTeX in the Markdown (slower)",
                 key="pdf_math_ocr",
                 help="Runs OCR on pages with equations. Otherwise equations "
-                     "are kept as they appear in the PDF, untranslated.",
+                "are kept as they appear in the PDF, untranslated.",
             )
 
     opt_detect, opt_review = st.columns(2)
     with opt_detect:
         detect_source = st.checkbox(
             "Detect each document's language",
-            value=True, key="doc_detect_source",
+            value=True,
+            key="doc_detect_source",
             help=f"Uses {src_name} (selected above) when a document's "
-                 "language cannot be identified with confidence.",
+            "language cannot be identified with confidence.",
         )
     with opt_review:
         make_review = st.checkbox(
             "Add side-by-side review file",
-            value=True, key="doc_review",
+            value=True,
+            key="doc_review",
             help="Source and translation paragraph by paragraph, as HTML "
-                 "and Word. The easiest way to check a translation.",
+            "and Word. The easiest way to check a translation.",
         )
 
     total_size = sum(d.size for d in docs) if docs else 0
@@ -1014,10 +818,14 @@ with doc_tab:
     run_doc = st.button(
         "Translate document(s)",
         type="primary",
-        disabled=(not docs
-                  or (not detect_source
-                      and (src_code == tgt_code or not opus_mt_supported))
-                  or (has_pdf and not pdf_outputs)),
+        disabled=(
+            not docs
+            or (
+                not detect_source
+                and (src_code == tgt_code or not opus_mt_supported)
+            )
+            or (has_pdf and not pdf_outputs)
+        ),
         key="translate_doc_btn",
     )
     if st.session_state.pop("doc_cancelled", False):
@@ -1026,7 +834,8 @@ with doc_tab:
     if run_doc and docs:
         st.session_state["doc_results"] = None
         free_gpu_for(
-            gpu_manager.TRANSLATION, ollama_model=ollama_model,
+            gpu_manager.TRANSLATION,
+            ollama_model=ollama_model,
         )
         card = st.container(border=True)
         with card:
@@ -1037,180 +846,55 @@ with doc_tab:
             # Clicking reruns the page, which stops this run at its next
             # progress update (Streamlit interrupts the running script).
             st.button(
-                "Cancel", key="cancel_doc_btn",
+                "Cancel",
+                key="cancel_doc_btn",
                 on_click=lambda: st.session_state.update(doc_cancelled=True),
             )
         run_started = time.monotonic()
 
-        def _stage(stage: str) -> None:
+        def _show_progress(update) -> None:
             elapsed = int(time.monotonic() - run_started)
             stage_ph.markdown(
-                f"**Stage:** {stage}  \n"
+                f"**Stage:** {update.message}  \n"
                 f"Elapsed {elapsed // 60}:{elapsed % 60:02d}"
             )
-
-        def _document_retry_notice(message: str) -> None:
-            # Retries are routine; the stage line is enough.
-            _stage("retrying some text in smaller pieces")
-
-        last_update = {"time": 0.0, "stage": None}
-        rate = {"start": 0.0, "done": 0, "total": 0}
-
-        def _time_left(done: int, total: int) -> str:
-            now = time.monotonic()
-            if total != rate["total"] or done < rate["done"]:
-                rate.update(start=now, total=total)
-            rate["done"] = done
-            elapsed = now - rate["start"]
-            if done <= 0 or done >= total or elapsed < 5:
-                return ""
-            remaining = elapsed / done * (total - done)
-            if remaining < 60:
-                return " · less than a minute left"
-            return f" · about {round(remaining / 60)} min left"
-
-        def _show_progress(done: int, total: int, stage: str,
-                           label: str | None = None) -> None:
-            # Each update is a browser round-trip; per-line reports from the
-            # parsers would otherwise slow the run itself.
-            now = time.monotonic()
-            if (stage == last_update["stage"] and done < total
-                    and now - last_update["time"] < 0.25):
-                return
-            last_update.update(time=now, stage=stage)
-            _stage(label or stage)
-            if total > 0:
-                bar.progress(min(done / total, 1.0))
-
-        def _prog_translate(done: int, total: int) -> None:
-            eta = _time_left(done, total)
-            _show_progress(done, total, "translating",
-                           f"translating sentences {done}/{total}{eta}")
-
-        def _prog_stage(done: int, total: int, stage: str) -> None:
-            _show_progress(done, total, stage)
-
-        translators = {}
-
-        def _translator(code: str, name: str):
-            # One per source language, so its sentence cache is shared by
-            # all outputs of all files in that language.
-            if code not in translators:
-                translators[code] = make_translate_fn(
-                    src_lang=code, tgt_lang=tgt_code,
-                    backend=backend_key,
-                    ollama_model=ollama_model,
-                    src_lang_name=name, tgt_lang_name=tgt_name,
-                    formality=formality,
-                    progress_cb=_prog_translate,
-                    status_cb=_document_retry_notice,
-                )
-            return translators[code]
+            if update.fraction is not None:
+                bar.progress(update.fraction)
 
         source_label = "auto-detect" if detect_source else src_name
         info_ph.markdown(
             f"**{source_label} → {tgt_name}** · engine: `{backend_label}` · "
-            f"glossary: {len(glossary)} term(s)"
+            f"glossary: {len(options.glossary)} term(s)"
         )
 
-        flat_inputs: list[tuple[str, bytes]] = []
-        for up in docs:
-            name = up.name
-            raw = up.read()
-            if name.lower().endswith(".zip"):
-                try:
-                    with zipfile.ZipFile(io.BytesIO(raw), "r") as zin:
-                        for entry in zin.namelist():
-                            if entry.endswith("/"):
-                                continue
-                            ext = os.path.splitext(entry)[1].lower()
-                            if ext not in (
-                                ".md", ".txt", ".srt", ".vtt", ".pdf",
-                                ".docx", ".xlsx", ".pptx",
-                            ):
-                                st.warning(
-                                    f"Skipped {entry}: "
-                                    "unsupported file type inside ZIP."
-                                )
-                                continue
-                            flat_inputs.append((entry, zin.read(entry)))
-                except zipfile.BadZipFile:
-                    st.error(f"{name}: not a valid ZIP archive.")
-                    continue
-            else:
-                flat_inputs.append((name, raw))
+        unpacked = service.unpack_uploads((up.name, up.read()) for up in docs)
+        for entry in unpacked.skipped:
+            st.warning(f"Skipped {entry}: unsupported file type inside ZIP.")
+        for name in unpacked.invalid:
+            st.error(f"{name}: not a valid ZIP archive.")
 
-        if not flat_inputs:
+        if not unpacked.files:
             st.warning("No translatable files found in the upload.")
             st.stop()
 
         title_ph.markdown(
-            f"### 📄 Translating {len(flat_inputs)} file"
-            f"{'s' if len(flat_inputs) != 1 else ''}"
+            f"### Translating {len(unpacked.files)} file"
+            f"{'s' if len(unpacked.files) != 1 else ''}"
         )
 
-        file_outputs: list[tuple[str, list[tuple[str, bytes]]]] = []
-        errors: list[tuple[str, str]] = []
-        pdf_reports = []
-        languages: dict[str, str] = {}
-
-        for i, (entry_name, entry_data) in enumerate(flat_inputs, start=1):
-            prefix = f"[{i}/{len(flat_inputs)}] {entry_name}"
-            _stage(prefix)
-            bar.progress((i - 1) / len(flat_inputs))
-            file_src_code, file_src_name = src_code, src_name
-            if detect_source:
-                _stage(f"{prefix}: detecting language")
-                detection = detect_document_language(entry_name, entry_data)
-                if detection is not None and detection.display_name:
-                    file_src_code = detection.flores_code
-                    file_src_name = detection.display_name
-                    languages[entry_name] = f"{file_src_name} (detected)"
-                else:
-                    languages[entry_name] = (
-                        f"{src_name} (not detected, using your selection)"
-                    )
-            if file_src_code == tgt_code:
-                errors.append((
-                    entry_name,
-                    f"This document already appears to be in {tgt_name}.",
-                ))
-                continue
-            try:
-                with record_translations() as pairs:
-                    outputs = _translate_one(
-                        entry_name, entry_data,
-                        _translator(file_src_code, file_src_name),
-                        _prog_stage, tgt_code,
-                        pdf_result_cb=lambda result: pdf_reports.append(
-                            (entry_name, result)
-                        ),
-                        pdf_outputs=pdf_outputs, math_ocr=math_ocr,
-                        backend_key_=backend_key,
-                    )
-                if make_review:
-                    if pdf_reports and pdf_reports[-1][0] == entry_name:
-                        pairs = pdf_reports[-1][1].pairs
-                    outputs += _review_files(
-                        entry_name, pairs, file_src_name, tgt_name, tgt_code,
-                    )
-                file_outputs.append((entry_name, outputs))
-            except Exception as exc:
-                errors.append((entry_name, describe_error(exc, backend_key)))
-
-        _stage("done")
-        bar.progress(1.0)
         # Kept in session state so downloads (and any other rerun) do not
         # wipe the results; replaced by the next translation run.
-        st.session_state["doc_results"] = {
-            "file_outputs": file_outputs,
-            "errors": errors,
-            "pdf_reports": pdf_reports,
-            "total": len(flat_inputs),
-            "tgt_code": tgt_code,
-            "languages": languages,
-            "elapsed": time.monotonic() - run_started,
-        }
+        st.session_state["doc_results"] = service.translate_documents(
+            unpacked.files,
+            options,
+            service.DocumentOptions(
+                pdf_outputs=pdf_outputs,
+                math_ocr=math_ocr,
+                detect_source=detect_source,
+                review=make_review,
+            ),
+            on_progress=_show_progress,
+        )
 
     if st.session_state.get("doc_results"):
         _render_doc_results(st.session_state["doc_results"])

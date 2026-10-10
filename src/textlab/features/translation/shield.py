@@ -18,10 +18,10 @@ from __future__ import annotations
 
 import re
 from bisect import bisect_left
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from secrets import token_hex
-from typing import Iterator, List, Mapping, Optional, Tuple
 
 from .chunking import InputTooLongError
 
@@ -29,9 +29,7 @@ _MARKER_START = r"(?:\[|\x02)(?:TL|GL)_"
 _MARKER_START_RE = re.compile(_MARKER_START, re.IGNORECASE)
 _MARKER_RE = re.compile(r"\[(?:TL|GL)_[0-9A-F]{16}_(?:0|[1-9][0-9]*)\]")
 _LEGACY_RE = re.compile(r"\x02TL_([0-9]+)\x03|\[TL_([0-9]+)\]")
-_LITERAL_MARKER = (
-    r"(?i:" + _MARKER_START + r")[^\]\x03\r\n]*(?:\]|\x03)?"
-)
+_LITERAL_MARKER = r"(?i:" + _MARKER_START + r")[^\]\x03\r\n]*(?:\]|\x03)?"
 _INLINE_CODE = r"(?P<ticks>`+)(?!`)[\s\S]+?(?<!`)(?P=ticks)(?!`)"
 _MATH = (
     r"\$\$[\s\S]+?\$\$|\\\[[\s\S]+?\\\]"
@@ -40,25 +38,27 @@ _MATH = (
 _HTML_COMMENT = r"<!--[\s\S]*?(?:-->|\Z)"
 _HTML_TAG = r"</?[A-Za-z](?:[^>\"']|\"[^\"]*\"|'[^']*')*>"
 _OPAQUE_LABEL_RE = re.compile(
-    "|".join((_INLINE_CODE, _MATH, _HTML_COMMENT, _HTML_TAG,
-              _LITERAL_MARKER))
+    "|".join((_INLINE_CODE, _MATH, _HTML_COMMENT, _HTML_TAG, _LITERAL_MARKER))
 )
 _TOKEN_RE = re.compile(
     r"^[ \t]*(?P<fence>`{3,})[^\r\n]*\r?\n[\s\S]*?"
     r"(?:^[ \t]*(?P=fence)`*[ \t]*(?=\r?$)|\Z)"
     r"|^[ \t]*(?P<tilde>~{3,})[^\r\n]*\r?\n[\s\S]*?"
     r"(?:^[ \t]*(?P=tilde)~*[ \t]*(?=\r?$)|\Z)"
-    r"|" + _INLINE_CODE
-    + r"|" + _MATH
-    + r"|" + _HTML_COMMENT
-    + r"|" + _HTML_TAG
+    r"|"
+    + _INLINE_CODE
+    + r"|"
+    + _MATH
+    + r"|"
+    + _HTML_COMMENT
+    + r"|"
+    + _HTML_TAG
     + r"|https?://\S+|ftp://\S+|www\.\S+"
     r"|(?<![\w/])(?:/[A-Za-z0-9_.\-]+){2,}/?"
     r"|[\w.+\-]+@[\w\-]+(?:\.[\w\-]+)+"
     r"|\{[A-Za-z_][A-Za-z0-9_.]*\}|%\([^)]+\)[sdif]"
     r"|%[0-9.\-+ #]*[sdifxXoeEgG]"
-    r"|" + _LITERAL_MARKER
-    + r"|(?P<link>!?\[)",
+    r"|" + _LITERAL_MARKER + r"|(?P<link>!?\[)",
     re.MULTILINE,
 )
 _BOUNDARY_CHAR_RE = re.compile(
@@ -74,8 +74,16 @@ class ProtectedContentError(ValueError):
     failure blocks every nonempty unit because alignment cannot be trusted.
     """
 
-    def __init__(self, message: str, *, partial_results=None,
-                 failed_indices=()):
+    def __init__(
+        self, message: str, *, partial_results=None, failed_indices=()
+    ):
+        """Store which units failed and what could be translated.
+
+        Args:
+            message: What failed, without source text.
+            partial_results: Outputs in input order, ``None`` where blocked.
+            failed_indices: Zero-based indices of the blocked units.
+        """
         super().__init__(message)
         self.partial_results = partial_results
         self.failed_indices = tuple(failed_indices)
@@ -87,7 +95,7 @@ class _PlaceholderTable(list[str]):
         self.namespace = token_hex(8).upper()
         while self.namespace in text.upper():
             self.namespace = token_hex(8).upper()
-        self.markers: List[str] = []
+        self.markers: list[str] = []
 
     def protect(self, text: str, kind: str = "TL") -> str:
         marker = f"[{kind}_{self.namespace}_{len(self)}]"
@@ -96,7 +104,7 @@ class _PlaceholderTable(list[str]):
         return marker
 
 
-def _link_bounds(text: str, start: int) -> Optional[Tuple[int, int, int]]:
+def _link_bounds(text: str, start: int) -> tuple[int, int, int] | None:
     """Find a balanced inline link, skipping opaque/escaped label content."""
     label = start + (2 if text.startswith("![", start) else 1)
     pos, depth = label, 1
@@ -116,7 +124,7 @@ def _link_bounds(text: str, start: int) -> Optional[Tuple[int, int, int]]:
             if depth == 0:
                 break
         pos += 1
-    if depth or text[pos:pos + 2] != "](":
+    if depth or text[pos : pos + 2] != "](":
         return None
 
     close = pos
@@ -157,13 +165,21 @@ def _glossary_pattern(src: str) -> str:
 def _prepare(text: str, glossary=None, case_sensitive: bool = False):
     table = _PlaceholderTable(text)
     items = sorted(
-        ((src, tgt) for src, tgt in (glossary or {}).items()
-         if src and src.strip()),
-        key=lambda item: len(item[0]), reverse=True,
+        (
+            (src, tgt)
+            for src, tgt in (glossary or {}).items()
+            if src and src.strip()
+        ),
+        key=lambda item: len(item[0]),
+        reverse=True,
     )
     patterns = [
-        (re.compile(_glossary_pattern(src),
-                    0 if case_sensitive else re.IGNORECASE), target)
+        (
+            re.compile(
+                _glossary_pattern(src), 0 if case_sensitive else re.IGNORECASE
+            ),
+            target,
+        )
         for src, target in items
     ]
 
@@ -198,16 +214,16 @@ def _prepare(text: str, glossary=None, case_sensitive: bool = False):
                 if bounds is None:
                     pos = match.end()
                     continue
-            parts.append(plain(value[start:match.start()]))
+            parts.append(plain(value[start : match.start()]))
             if bounds is None:
                 parts.append(table.protect(match.group()))
                 pos = match.end()
             else:
                 label, close, pos = bounds
                 if value.startswith("![", match.start()):
-                    parts.append(table.protect(value[match.start():pos]))
+                    parts.append(table.protect(value[match.start() : pos]))
                 else:
-                    parts.append(table.protect(value[match.start():label]))
+                    parts.append(table.protect(value[match.start() : label]))
                     parts.append(scan(value[label:close]))
                     parts.append(table.protect(value[close:pos]))
             start = pos
@@ -217,7 +233,7 @@ def _prepare(text: str, glossary=None, case_sensitive: bool = False):
     return scan(text), table
 
 
-def shield(text: str) -> Tuple[str, List[str]]:
+def shield(text: str) -> tuple[str, list[str]]:
     """Return masked text and its list-compatible, per-input restoration table.
 
     Source text resembling markers is itself protected as literal content.
@@ -226,12 +242,12 @@ def shield(text: str) -> Tuple[str, List[str]]:
     return _prepare(text)
 
 
-def unshield(text: str, placeholders: List[str]) -> str:
-    """Validate marker counts/order, then restore without recursion.
+def unshield(text: str, placeholders: list[str]) -> str:
+    r"""Validate marker counts/order, then restore without recursion.
 
     Structural TL markers must retain source order; GL markers may move for
     target grammar. Use the intact table returned by ``shield``. Plain
-    positional lists support historical ``\\x02TL_N\\x03`` and ``[TL_N]``
+    positional lists support historical ``\x02TL_N\x03`` and ``[TL_N]``
     markers in table order, but cannot detect cross-unit swaps.
     """
     if not isinstance(text, str):
@@ -239,9 +255,12 @@ def unshield(text: str, placeholders: List[str]) -> str:
     if isinstance(placeholders, _PlaceholderTable):
         if len(placeholders.markers) != len(placeholders):
             raise ProtectedContentError("Protection table was modified.")
-        expected = dict(zip(placeholders.markers, placeholders))
-        structural_order = [marker for marker in placeholders.markers
-                            if marker.startswith("[TL_")]
+        expected = dict(zip(placeholders.markers, placeholders, strict=False))
+        structural_order = [
+            marker
+            for marker in placeholders.markers
+            if marker.startswith("[TL_")
+        ]
         marker_re = _MARKER_RE
     else:
         expected = dict(enumerate(placeholders))
@@ -257,8 +276,10 @@ def unshield(text: str, placeholders: List[str]) -> str:
         if match is None:
             raise ProtectedContentError("Malformed protected marker.")
         try:
-            key = match.group() if marker_re is _MARKER_RE else int(
-                match.group(1) or match.group(2)
+            key = (
+                match.group()
+                if marker_re is _MARKER_RE
+                else int(match.group(1) or match.group(2))
             )
         except ValueError:
             raise ProtectedContentError("Unknown protected marker.") from None
@@ -286,7 +307,7 @@ def unshield(text: str, placeholders: List[str]) -> str:
     return "".join(parts)
 
 
-def _restore_nonempty(text: str, placeholders: List[str]) -> str:
+def _restore_nonempty(text: str, placeholders: list[str]) -> str:
     restored = unshield(text, placeholders)
     if not restored.strip():
         raise ProtectedContentError(
@@ -305,21 +326,28 @@ _MARKER_SPLIT_RE = re.compile(f"({_MARKER_RE.pattern})")
 _HAS_LETTER_RE = re.compile(r"[^\W\d_]")
 
 
-def _needs_segments(masked: str, table: List[str]) -> bool:
-    return (len(table) > MAX_INLINE_MARKERS
-            or bool(_MARKER_RUN_RE.search(masked)))
+def _needs_segments(masked: str, table: list[str]) -> bool:
+    return len(table) > MAX_INLINE_MARKERS or bool(
+        _MARKER_RUN_RE.search(masked)
+    )
 
 
-def _segment_sources(masked: str) -> List[str]:
-    """Translatable text between markers; protected spans never reach the model."""
-    return [part.strip() for part in _MARKER_SPLIT_RE.split(masked)[::2]
-            if _HAS_LETTER_RE.search(part)]
+def _segment_sources(masked: str) -> list[str]:
+    """Return the text between markers; protected spans stay out."""
+    return [
+        part.strip()
+        for part in _MARKER_SPLIT_RE.split(masked)[::2]
+        if _HAS_LETTER_RE.search(part)
+    ]
 
 
-def _segment_restore(masked: str, table: List[str], outputs) -> str:
-    """Reassemble a segment-mode unit: originals for markers, translations
-    between them, with each segment's surrounding whitespace preserved."""
-    expected = dict(zip(table.markers, table))
+def _segment_restore(masked: str, table: list[str], outputs) -> str:
+    """Reassemble a unit translated segment by segment.
+
+    Markers get their originals back and the segments between them their
+    translations, keeping each segment's surrounding whitespace.
+    """
+    expected = dict(zip(table.markers, table, strict=False))
     outputs = iter(outputs)
     parts = []
     for index, part in enumerate(_MARKER_SPLIT_RE.split(masked)):
@@ -333,8 +361,8 @@ def _segment_restore(masked: str, table: List[str], outputs) -> str:
                 raise ProtectedContentError(
                     "Empty translation output for nonempty input."
                 )
-            leading = part[:len(part) - len(part.lstrip())]
-            trailing = part[len(part.rstrip()):]
+            leading = part[: len(part) - len(part.lstrip())]
+            trailing = part[len(part.rstrip()) :]
             parts.append(leading + translated.strip() + trailing)
         else:
             parts.append(part)
@@ -346,14 +374,16 @@ def _segment_restore(masked: str, table: List[str], outputs) -> str:
     return restored
 
 
-def _call_many(translate_fn, texts: List[str]):
+def _call_many(translate_fn, texts: list[str]):
     many = getattr(translate_fn, "many", None)
-    return many(texts) if callable(many) else [
-        translate_fn(text) for text in texts
-    ]
+    return (
+        many(texts)
+        if callable(many)
+        else [translate_fn(text) for text in texts]
+    )
 
 
-def _translate_segments(units, translate_fn) -> List[str]:
+def _translate_segments(units, translate_fn) -> list[str]:
     """Translate (masked, table) units piecewise in one batched call."""
     sources = [_segment_sources(masked) for masked, _ in units]
     flat = [source for unit in sources for source in unit]
@@ -365,10 +395,14 @@ def _translate_segments(units, translate_fn) -> List[str]:
         )
     restored = []
     offset = 0
-    for (masked, table), unit in zip(units, sources):
-        restored.append(_segment_restore(
-            masked, table, outputs[offset:offset + len(unit)],
-        ))
+    for (masked, table), unit in zip(units, sources, strict=False):
+        restored.append(
+            _segment_restore(
+                masked,
+                table,
+                outputs[offset : offset + len(unit)],
+            )
+        )
         offset += len(unit)
     return restored
 
@@ -376,7 +410,7 @@ def _translate_segments(units, translate_fn) -> List[str]:
 def shielded_translate(
     text: str,
     translate_fn,
-    glossary: Optional[Mapping[str, str]] = None,
+    glossary: Mapping[str, str] | None = None,
     glossary_case_sensitive: bool = False,
     *,
     fallback: bool = True,
@@ -395,24 +429,28 @@ def shielded_translate(
     protected spans, so protected content never passes through the model.
     """
     return shielded_translate_many(
-        [text], translate_fn, glossary, glossary_case_sensitive,
+        [text],
+        translate_fn,
+        glossary,
+        glossary_case_sensitive,
         fallback=fallback,
     )[0]
 
 
-_RECORDER: ContextVar[Optional[List[Tuple[str, str]]]] = ContextVar(
-    "translation_recorder", default=None,
+_RECORDER: ContextVar[list[tuple[str, str]] | None] = ContextVar(
+    "translation_recorder",
+    default=None,
 )
 
 
 @contextmanager
-def record_translations() -> Iterator[List[Tuple[str, str]]]:
+def record_translations() -> Iterator[list[tuple[str, str]]]:
     """Collect ``(source, translation)`` pairs of every unit translated here.
 
     Used for side-by-side review files. Nested scopes record only into the
     innermost list.
     """
-    pairs: List[Tuple[str, str]] = []
+    pairs: list[tuple[str, str]] = []
     token = _RECORDER.set(pairs)
     try:
         yield pairs
@@ -421,13 +459,13 @@ def record_translations() -> Iterator[List[Tuple[str, str]]]:
 
 
 def shielded_translate_many(
-    texts: List[str],
+    texts: list[str],
     translate_fn,
-    glossary: Optional[Mapping[str, str]] = None,
+    glossary: Mapping[str, str] | None = None,
     glossary_case_sensitive: bool = False,
     *,
     fallback: bool = True,
-) -> List[str]:
+) -> list[str]:
     """Translate units in order, using ``translate_fn.many`` when available.
 
     Empty/whitespace inputs pass through without model calls. Output count,
@@ -439,50 +477,63 @@ def shielded_translate_many(
     """
     if fallback:
         result = _translate_with_fallback(
-            texts, translate_fn, glossary, glossary_case_sensitive,
+            texts,
+            translate_fn,
+            glossary,
+            glossary_case_sensitive,
         )
     else:
         result = _translate_with_markers(
-            texts, translate_fn, glossary, glossary_case_sensitive,
+            texts,
+            translate_fn,
+            glossary,
+            glossary_case_sensitive,
         )
     recorder = _RECORDER.get()
     if recorder is not None:
         recorder.extend(
-            (text, output) for text, output in zip(texts, result)
+            (text, output)
+            for text, output in zip(texts, result, strict=False)
             if text.strip()
         )
     return result
 
 
 def _translate_with_fallback(
-    texts: List[str],
+    texts: list[str],
     translate_fn,
-    glossary: Optional[Mapping[str, str]],
+    glossary: Mapping[str, str] | None,
     glossary_case_sensitive: bool,
-) -> List[str]:
+) -> list[str]:
     result = [text if not text.strip() else None for text in texts]
     prepared = {
         i: _prepare(text, glossary, glossary_case_sensitive)
-        for i, text in enumerate(texts) if text.strip()
+        for i, text in enumerate(texts)
+        if text.strip()
     }
-    segmented = {i for i, (masked, table) in prepared.items()
-                 if _needs_segments(masked, table)}
+    segmented = {
+        i
+        for i, (masked, table) in prepared.items()
+        if _needs_segments(masked, table)
+    }
     inline = [i for i in prepared if i not in segmented]
-    failed: List[int] = []
+    failed: list[int] = []
     error = None
     if inline:
         try:
             outputs = _translate_with_markers(
-                [texts[i] for i in inline], translate_fn, glossary,
+                [texts[i] for i in inline],
+                translate_fn,
+                glossary,
                 glossary_case_sensitive,
                 prepared=[prepared[i] for i in inline],
             )
-            for i, output in zip(inline, outputs):
+            for i, output in zip(inline, outputs, strict=False):
                 result[i] = output
         except ProtectedContentError as exc:
             error = exc
             partial = exc.partial_results or [None] * len(inline)
-            for i, output in zip(inline, partial):
+            for i, output in zip(inline, partial, strict=False):
                 result[i] = output
             failed = [inline[j] for j in exc.failed_indices]
         except InputTooLongError:
@@ -494,36 +545,42 @@ def _translate_with_fallback(
     unrecoverable = [i for i in failed if not prepared[i][1]]
     retry = sorted(segmented | (set(failed) - set(unrecoverable)))
     if retry:
-        for i, output in zip(retry, _translate_segments(
-                [prepared[i] for i in retry], translate_fn)):
+        for i, output in zip(
+            retry,
+            _translate_segments([prepared[i] for i in retry], translate_fn),
+            strict=False,
+        ):
             result[i] = output
     if unrecoverable:
         raise ProtectedContentError(
-            str(error), partial_results=result,
+            str(error),
+            partial_results=result,
             failed_indices=unrecoverable,
         )
     return result
 
 
 def _translate_with_markers(
-    texts: List[str],
+    texts: list[str],
     translate_fn,
-    glossary: Optional[Mapping[str, str]] = None,
+    glossary: Mapping[str, str] | None = None,
     glossary_case_sensitive: bool = False,
     *,
     prepared=None,
-) -> List[str]:
+) -> list[str]:
     """Strict marker round-trip: any corrupted marker blocks its unit."""
     result = [text if not text.strip() else None for text in texts]
-    positions: List[int] = []
-    masked_list: List[str] = []
-    tables: List[List[str]] = []
+    positions: list[int] = []
+    masked_list: list[str] = []
+    tables: list[list[str]] = []
     for i, text in enumerate(texts):
         if not text.strip():
             continue
-        masked, table = (prepared[len(positions)] if prepared is not None
-                         else _prepare(text, glossary,
-                                       glossary_case_sensitive))
+        masked, table = (
+            prepared[len(positions)]
+            if prepared is not None
+            else _prepare(text, glossary, glossary_case_sensitive)
+        )
         positions.append(i)
         masked_list.append(masked)
         tables.append(table)
@@ -531,28 +588,31 @@ def _translate_with_markers(
         return result
 
     outputs = _call_many(translate_fn, masked_list)
-    if isinstance(outputs, (str, bytes)) or outputs is None:
+    if isinstance(outputs, str | bytes) or outputs is None:
         raise ProtectedContentError(
             "Translation batch must contain one output per input.",
-            partial_results=result, failed_indices=positions,
+            partial_results=result,
+            failed_indices=positions,
         )
     try:
         outputs = list(outputs)
     except TypeError:
         raise ProtectedContentError(
             "Translation batch must contain one output per input.",
-            partial_results=result, failed_indices=positions,
+            partial_results=result,
+            failed_indices=positions,
         ) from None
     if len(outputs) != len(positions):
         raise ProtectedContentError(
             f"Translation batch output count mismatch: expected "
             f"{len(positions)}, received {len(outputs)}.",
-            partial_results=result, failed_indices=positions,
+            partial_results=result,
+            failed_indices=positions,
         )
 
     failures = []
     failed_indices = []
-    for pos, output, table in zip(positions, outputs, tables):
+    for pos, output, table in zip(positions, outputs, tables, strict=False):
         try:
             result[pos] = _restore_nonempty(output, table)
         except ProtectedContentError as exc:
@@ -560,7 +620,8 @@ def _translate_with_markers(
             failed_indices.append(pos)
     if failures:
         raise ProtectedContentError(
-            " ".join(failures), partial_results=result,
+            " ".join(failures),
+            partial_results=result,
             failed_indices=failed_indices,
         )
     return result

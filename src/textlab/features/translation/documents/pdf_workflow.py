@@ -2,21 +2,29 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
 import json
+from dataclasses import asdict, dataclass, field
 
-from .format import (
-    pack_markdown_bundle,
-    translate_pdf,
-    translate_pdf_to_markdown,
-)
-from .messages import describe_error
+from ..messages import describe_error
+from ..shield import record_translations
+from .pdf import translate_pdf
 from .pdf_checks import PDFIntegrityError, inspect_pdf, require_native_coverage
-from .shield import record_translations
+from .pdf_markdown import pack_markdown_bundle, translate_pdf_to_markdown
 
 
 @dataclass
 class PDFTranslationResult:
+    """The outputs of one PDF and what kept others from being built.
+
+    Attributes:
+        outputs: Output files that passed their checks.
+        blocked: One entry per output that was not built, with the user
+            message, the technical reason and the affected pages.
+        warnings: Layout compromises and limits of the checks.
+        pages: How each page was read (:class:`.pdf_checks.PDFPagePlan`).
+        pairs: ``(source, translation)`` units for the review file.
+    """
+
     outputs: list[tuple[str, bytes]] = field(default_factory=list)
     blocked: list[dict] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
@@ -25,6 +33,7 @@ class PDFTranslationResult:
     pairs: list[tuple[str, str]] = field(default_factory=list)
 
     def report_bytes(self) -> bytes:
+        """Return the validation report offered next to the outputs (JSON)."""
         report = {
             "status": "partial" if self.blocked else "passed_checks",
             "available_outputs": [name for name, _ in self.outputs],
@@ -80,17 +89,19 @@ def translate_pdf_outputs(
     if "markdown" not in outputs:
         needs_ocr = []
     if ocr_allowed is None and needs_ocr:
-        from .gpu_profile import sequential_ocr_allowed
+        from ..gpu_profile import sequential_ocr_allowed
 
         ocr_allowed = sequential_ocr_allowed(device="cuda:0")
 
     def blocked(output: str, error: Exception) -> None:
-        result.blocked.append({
-            "output": output,
-            "message": describe_error(error, backend),
-            "reason": str(error),
-            "pages": list(getattr(error, "pages", ())),
-        })
+        result.blocked.append(
+            {
+                "output": output,
+                "message": describe_error(error, backend),
+                "reason": str(error),
+                "pages": list(getattr(error, "pages", ())),
+            }
+        )
 
     if "markdown" in outputs:
         try:
@@ -103,10 +114,13 @@ def translate_pdf_outputs(
                 )
             with record_translations() as markdown_pairs:
                 markdown, assets = translate_pdf_to_markdown(
-                    pdf_bytes, translate_fn, progress_cb=progress_cb,
+                    pdf_bytes,
+                    translate_fn,
+                    progress_cb=progress_cb,
                     glossary=glossary,
                     glossary_case_sensitive=glossary_case_sensitive,
-                    source_name=source_name, math_ocr=math_ocr,
+                    source_name=source_name,
+                    math_ocr=math_ocr,
                 )
             result.pairs = markdown_pairs
             data, name = pack_markdown_bundle(markdown, assets, stem=stem)
@@ -120,7 +134,9 @@ def translate_pdf_outputs(
             layout_warnings: list[str] = []
             with record_translations() as pdf_pairs:
                 data = translate_pdf(
-                    pdf_bytes, translate_fn, progress_cb=progress_cb,
+                    pdf_bytes,
+                    translate_fn,
+                    progress_cb=progress_cb,
                     glossary=glossary,
                     glossary_case_sensitive=glossary_case_sensitive,
                     warnings=layout_warnings,

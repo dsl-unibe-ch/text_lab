@@ -39,9 +39,6 @@ SITE_ALLOWED = {
         "support e-mail, documentation and mailing-list links on the home "
         "page; to be moved to the site configuration"
     ),
-    "ui/streamlit/pages/Translate.py": (
-        "page caption naming UBELIX; reworded when Translate is refactored"
-    ),
 }
 
 #: Strings that identify the UBELIX deployment.

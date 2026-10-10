@@ -58,8 +58,10 @@ Each feature uses its own area name, so features cannot delete each other's
 files. Worker processes (`textlab.common.jobs`) exchange their request,
 progress and result through a job folder in the caller's area, removed when
 the run ends; the transcription feature stages uploads the same way
-(`staged_uploads`, `staged_zip`). Without `TEXT_LAB_WORKDIR` (tests, scripts run by hand), the
-workspace is a private folder under the system temporary directory.
+(`staged_uploads`, `staged_zip`), and translation writes the PDF pages it
+sends to OCR to `translation/ocr-*`. Without `TEXT_LAB_WORKDIR` (tests,
+scripts run by hand), the workspace is a private folder under the system
+temporary directory.
 
 A workspace folder that already exists but belongs to another user is
 refused with `WorkspaceError`, so a shared `/tmp` cannot be used to read

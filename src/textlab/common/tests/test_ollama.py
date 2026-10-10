@@ -125,3 +125,72 @@ def test_loaded_models_is_empty_without_a_server(monkeypatch):
 
     monkeypatch.setattr(client, "ps", unreachable)
     assert ollama.get_loaded_models() == []
+
+
+def test_call_no_think_falls_back_for_clients_without_think():
+    calls = []
+
+    def legacy_chat(*, model, messages):
+        calls.append(model)
+        return "reply"
+
+    assert ollama.call_no_think(legacy_chat, model="m", messages=[]) == (
+        "reply"
+    )
+    assert calls == ["m"]
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        TypeError("Client.chat() got an unexpected keyword argument 'think'"),
+        TypeError("API failure"),
+        RuntimeError("model does not support thinking"),
+    ],
+)
+def test_call_no_think_propagates_errors_raised_inside_the_client(error):
+    calls = []
+
+    def chat(**request):
+        calls.append(request)
+        raise error
+
+    with pytest.raises(type(error)) as caught:
+        ollama.call_no_think(chat, model="m")
+    assert caught.value is error
+    assert calls == [{"think": False, "model": "m"}]
+
+
+@pytest.mark.parametrize(
+    "name,expected",
+    [
+        ("llama3", "llama3:latest"),
+        ("qwen3:8b", "qwen3:8b"),
+        ("registry.io:5000/team/model", "registry.io:5000/team/model:latest"),
+    ],
+)
+def test_canonical_model_name(name, expected):
+    assert ollama.canonical_model_name(name) == expected
+
+
+def test_running_model_names_are_canonical():
+    server = SimpleNamespace(
+        ps=lambda: {"models": [{"model": "llama3"}, {"name": "qwen3:8b"}]}
+    )
+    assert ollama.running_model_names(server) == {
+        "llama3:latest",
+        "qwen3:8b",
+    }
+
+
+@pytest.mark.parametrize(
+    "response",
+    [{"models": None}, {"models": [{"model": ""}]}, ConnectionError()],
+)
+def test_running_model_names_are_unknown_when_untrustworthy(response):
+    def ps():
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+    assert ollama.running_model_names(SimpleNamespace(ps=ps)) is None

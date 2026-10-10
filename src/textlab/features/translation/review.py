@@ -1,8 +1,9 @@
 """Side-by-side review files: source and translation, paragraph by paragraph.
 
 Built from the ``(source, translation)`` pairs collected with
-:func:`textlab.features.translation.shield.record_translations`. Layout-free, so they
-work for every input format and are the easiest way to check a translation.
+:func:`textlab.features.translation.shield.record_translations`. They have no
+layout, so they work for every input format and are the easiest way to check
+a translation.
 """
 
 from __future__ import annotations
@@ -10,9 +11,9 @@ from __future__ import annotations
 import html
 import io
 import re
-from typing import Iterable, List, Optional, Tuple
+from collections.abc import Iterable
 
-Pairs = Iterable[Tuple[str, str]]
+Pairs = Iterable[tuple[str, str]]
 
 _TAG_RE = re.compile(r"<[^>]+>")
 _FENCE_RE = re.compile(r"^\s*(?:```|~~~)")
@@ -24,7 +25,7 @@ def _display(text: str) -> str:
     return " ".join(_TAG_RE.sub(" ", text).split())
 
 
-def review_rows(pairs: Pairs) -> List[Tuple[str, str]]:
+def review_rows(pairs: Pairs) -> list[tuple[str, str]]:
     """Readable, de-duplicated rows; units without words are dropped."""
     rows = []
     seen = set()
@@ -70,8 +71,23 @@ td.n, th.n { width: 3.5em; color: var(--muted); text-align: end; }
 
 
 def build_review_html(
-    pairs: Pairs, *, title: str, source_language: str, target_language: str,
+    pairs: Pairs,
+    *,
+    title: str,
+    source_language: str,
+    target_language: str,
 ) -> bytes:
+    """Return a two-column HTML page, readable in any browser and printable.
+
+    Args:
+        pairs: ``(source, translation)`` units, in document order.
+        title: The document's name, used as the heading.
+        source_language: The source language's display name.
+        target_language: The target language's display name.
+
+    Returns:
+        The page, UTF-8 encoded.
+    """
     rows = review_rows(pairs)
     esc = html.escape
     body = "\n".join(
@@ -98,8 +114,12 @@ def build_review_html(
 
 
 def build_review_docx(
-    pairs: Pairs, *, title: str, source_language: str, target_language: str,
-) -> Optional[bytes]:
+    pairs: Pairs,
+    *,
+    title: str,
+    source_language: str,
+    target_language: str,
+) -> bytes | None:
     """A two-column Word table, or ``None`` without python-docx."""
     try:
         import docx

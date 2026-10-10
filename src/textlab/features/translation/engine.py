@@ -1,48 +1,39 @@
-"""
-Core machine-translation engine for Text Lab.
+"""Translation backends: the backend table, model loading and dispatch.
 
-Provides multiple selectable backends:
+The backends are listed in :data:`BACKENDS`:
 
-- ``nllb``       : facebook/nllb-200-distilled-600M (default, 200+ languages,
-                   good CPU/GPU trade-off, ships in transformers).
-- ``nllb-large`` : facebook/nllb-200-3.3B (higher quality, needs more VRAM).
-- ``opus-mt``    : Helsinki-NLP/opus-mt-<src>-<tgt> bilingual MarianMT models
-                   (small, fast, per-pair; auto-resolved when a pair exists).
-- ``ollama``     : LLM prompt-based translation, useful as a fallback and
-                   for dialects such as Swiss German.
+- ``nllb`` and ``nllb-large``: Meta's NLLB-200 (600M distilled, the
+  default, and 3.3B), 200 languages.
+- ``madlad-3b``: Google's MADLAD-400, strong on low-resource languages.
+- ``opus-mt``: Helsinki-NLP's bilingual MarianMT models, small and fast,
+  for the pairs that have one.
+- ``ollama``: a prompted LLM on the session's Ollama server, useful for
+  dialects such as Swiss German.
 
-The module is intentionally free of Streamlit calls. All state / progress
-reporting is done via ``progress_cb`` callbacks so it can be reused by the
-Streamlit page, MCP tools, or CLI scripts.
+Callers exchange FLORES-200 language codes (``deu_Latn``, see
+``language_mappings.TRANSLATE_LANGUAGE_MAPPING``); each backend converts
+them as it needs. Progress is reported through ``progress_cb`` callbacks.
 
-Language codes exchanged by callers are the FLORES-200 codes defined in
-``language_mappings.TRANSLATE_LANGUAGE_MAPPING`` (e.g. ``deu_Latn``).
-Backend-specific adapters convert them internally.
-
-NOTE: The first call for a given (backend, model) pair downloads the model
-into ``HF_HOME`` (``/opt/huggingface``), which is bind-mounted from research
-storage. Only the active HF model remains cached. All model lifecycle and
-inference work shares the reentrant ``translation_session()`` guard; OCR
-callers hold that guard across eviction, OCR, and subsequent translation.
+Models are read from ``HF_HOME``, the model store the launch script mounts;
+a model missing there is downloaded on first use. Only one Hugging Face
+model is kept loaded at a time. Loading, unloading and inference all hold
+the reentrant ``translation_session()`` lock (:mod:`.gpu_memory`); OCR
+holds it across releasing the model, OCR and the translation that follows.
 """
 
 from __future__ import annotations
 
 import functools
-from typing import Callable, Dict, List, Optional
+from collections.abc import Callable
+from dataclasses import dataclass
 
-from .chunking import (
-    chunk_text_for_translation,
-    split_into_sentences,
-    translate_lines,
-)
+from .chunking import translate_lines
 from .gpu_memory import (
     clear_cuda_cache,
     discard_exception_tensors,
     is_cuda_device,
     is_cuda_oom,
     serialized,
-    translation_session,
 )
 from .gpu_profile import cap_batch_size, resolve_batch_size
 from .hf_backend import (
@@ -60,47 +51,128 @@ from .ollama_backend import (
 # Backend registry
 # ---------------------------------------------------------------------------
 
-# Public backend identifier -> user-facing label.
-TRANSLATION_BACKENDS: Dict[str, str] = {
-    "nllb": "NLLB-200 Distilled (600M, fast, 200 languages)",
-    "nllb-large": "NLLB-200 (3.3B, higher quality, needs bigger GPU)",
-    "madlad-3b": "MADLAD-400 (3B, strong on low-resource languages)",
-    "opus-mt": "OPUS-MT / MarianMT (small, bilingual per pair)",
-    "ollama": "LLM (Ollama) - prompt-based, good for dialects",
+
+@dataclass(frozen=True)
+class Backend:
+    """A translation backend the user can choose.
+
+    Attributes:
+        label: The name shown in the backend list.
+        family: How it is run: ``"nllb"``, ``"madlad"`` and ``"opus-mt"``
+            are Hugging Face seq2seq models loaded in this process;
+            ``"ollama"`` sends prompts to the session's Ollama server.
+        model_id: The Hugging Face model; per language pair for OPUS-MT
+            (:func:`opus_mt_model_for`) and chosen by the user for Ollama.
+        formality: Whether a formality preference changes the output.
+    """
+
+    label: str
+    family: str
+    model_id: str | None = None
+    formality: bool = False
+
+
+#: Every backend, in the order the page lists them; the first is the default.
+BACKENDS: dict[str, Backend] = {
+    "nllb": Backend(
+        "NLLB-200 Distilled (600M, fast, 200 languages)",
+        "nllb",
+        "facebook/nllb-200-distilled-600M",
+    ),
+    "nllb-large": Backend(
+        "NLLB-200 (3.3B, higher quality, needs bigger GPU)",
+        "nllb",
+        "facebook/nllb-200-3.3B",
+    ),
+    "madlad-3b": Backend(
+        "MADLAD-400 (3B, strong on low-resource languages)",
+        "madlad",
+        "google/madlad400-3b-mt",
+    ),
+    "opus-mt": Backend(
+        "OPUS-MT / MarianMT (small, bilingual per pair)",
+        "opus-mt",
+    ),
+    "ollama": Backend(
+        "LLM (Ollama) - prompt-based, good for dialects",
+        "ollama",
+        formality=True,
+    ),
 }
 
-NLLB_MODEL_IDS: Dict[str, str] = {
-    "nllb": "facebook/nllb-200-distilled-600M",
-    "nllb-large": "facebook/nllb-200-3.3B",
-}
+_HF_FAMILIES = frozenset({"nllb", "madlad", "opus-mt"})
 
-MADLAD_MODEL_IDS: Dict[str, str] = {
-    "madlad-3b": "google/madlad400-3b-mt",
+# Views of BACKENDS used by callers and tests.
+TRANSLATION_BACKENDS: dict[str, str] = {
+    key: backend.label for key, backend in BACKENDS.items()
 }
+NLLB_MODEL_IDS: dict[str, str] = {
+    key: backend.model_id
+    for key, backend in BACKENDS.items()
+    if backend.family == "nllb"
+}
+MADLAD_MODEL_IDS: dict[str, str] = {
+    key: backend.model_id
+    for key, backend in BACKENDS.items()
+    if backend.family == "madlad"
+}
+FORMALITY_CAPABLE_BACKENDS = frozenset(
+    key for key, backend in BACKENDS.items() if backend.formality
+)
 
-# Backends that meaningfully honour a formality preference. Others silently
-# ignore the parameter so a UI toggle can be shown/hidden accordingly.
-FORMALITY_CAPABLE_BACKENDS = frozenset({"ollama"})
+
+def is_hf_backend(backend: str) -> bool:
+    """Return True for backends run with Hugging Face models in-process."""
+    entry = BACKENDS.get(backend)
+    return entry is not None and entry.family in _HF_FAMILIES
+
 
 # Allowed formality values exchanged with the UI / MCP layer.
 FORMALITY_CHOICES = ("default", "formal", "informal")
 
 # FLORES-200 -> ISO 639-1 for OPUS-MT (subset; extended lazily).
-_FLORES_TO_ISO2: Dict[str, str] = {
-    "eng_Latn": "en", "deu_Latn": "de", "fra_Latn": "fr", "ita_Latn": "it",
-    "spa_Latn": "es", "por_Latn": "pt", "nld_Latn": "nl", "dan_Latn": "da",
-    "swe_Latn": "sv", "nob_Latn": "no", "fin_Latn": "fi", "pol_Latn": "pl",
-    "ces_Latn": "cs", "slk_Latn": "sk", "slv_Latn": "sl", "hrv_Latn": "hr",
-    "bul_Cyrl": "bg", "ron_Latn": "ro", "hun_Latn": "hu", "ell_Grek": "el",
-    "tur_Latn": "tr", "rus_Cyrl": "ru", "ukr_Cyrl": "uk", "arb_Arab": "ar",
-    "heb_Hebr": "he", "pes_Arab": "fa", "urd_Arab": "ur", "hin_Deva": "hi",
-    "zho_Hans": "zh", "jpn_Jpan": "ja", "kor_Hang": "ko", "vie_Latn": "vi",
-    "tha_Thai": "th", "ind_Latn": "id", "swh_Latn": "sw", "cat_Latn": "ca",
+_FLORES_TO_ISO2: dict[str, str] = {
+    "eng_Latn": "en",
+    "deu_Latn": "de",
+    "fra_Latn": "fr",
+    "ita_Latn": "it",
+    "spa_Latn": "es",
+    "por_Latn": "pt",
+    "nld_Latn": "nl",
+    "dan_Latn": "da",
+    "swe_Latn": "sv",
+    "nob_Latn": "no",
+    "fin_Latn": "fi",
+    "pol_Latn": "pl",
+    "ces_Latn": "cs",
+    "slk_Latn": "sk",
+    "slv_Latn": "sl",
+    "hrv_Latn": "hr",
+    "bul_Cyrl": "bg",
+    "ron_Latn": "ro",
+    "hun_Latn": "hu",
+    "ell_Grek": "el",
+    "tur_Latn": "tr",
+    "rus_Cyrl": "ru",
+    "ukr_Cyrl": "uk",
+    "arb_Arab": "ar",
+    "heb_Hebr": "he",
+    "pes_Arab": "fa",
+    "urd_Arab": "ur",
+    "hin_Deva": "hi",
+    "zho_Hans": "zh",
+    "jpn_Jpan": "ja",
+    "kor_Hang": "ko",
+    "vie_Latn": "vi",
+    "tha_Thai": "th",
+    "ind_Latn": "id",
+    "swh_Latn": "sw",
+    "cat_Latn": "ca",
     "eus_Latn": "eu",
 }
 
 
-def flores_to_iso2(code: str) -> Optional[str]:
+def flores_to_iso2(code: str) -> str | None:
     """Return an ISO 639-1 code for the given FLORES-200 code, or None."""
     return _FLORES_TO_ISO2.get(code)
 
@@ -109,7 +181,7 @@ _ACTIVE_HF_SIGNATURE = None
 _ACTIVE_HF_DEVICE = None
 
 
-def _resolve_device(device: Optional[str]) -> str:
+def _resolve_device(device: str | None) -> str:
     import torch
 
     if device is not None and not is_cuda_device(device):
@@ -161,7 +233,7 @@ def _load_hf(backend, src_lang, tgt_lang, device):
         raise ValueError(f"Not an HF seq2seq backend: {backend}")
 
     release_ollama_model()
-    if (_ACTIVE_HF_SIGNATURE != signature or _ACTIVE_HF_DEVICE != device):
+    if _ACTIVE_HF_SIGNATURE != signature or _ACTIVE_HF_DEVICE != device:
         _free_hf_cache()
     loaded = None
     try:
@@ -193,19 +265,19 @@ def _load_hf(backend, src_lang, tgt_lang, device):
 
 @serialized
 def _translate_chunks_hf(
-    chunks: List[str],
+    chunks: list[str],
     src_lang: str,
     tgt_lang: str,
     backend: str,
     *,
-    device: Optional[str] = None,
+    device: str | None = None,
     num_beams: int = DEFAULT_NUM_BEAMS,
     max_new_tokens: int = 512,
-    batch_size: Optional[int] = None,
-    progress_cb: Optional[Callable[[int, int], None]] = None,
-    status_cb: Optional[Callable[[str], None]] = None,
-    cache: Optional[Dict[str, str]] = None,
-) -> List[str]:
+    batch_size: int | None = None,
+    progress_cb: Callable[[int, int], None] | None = None,
+    status_cb: Callable[[str], None] | None = None,
+    cache: dict[str, str] | None = None,
+) -> list[str]:
     """Load a backend, then split and batch inputs with its real tokenizer.
 
     Return one complete translation per input. Language prefixes, special
@@ -222,17 +294,23 @@ def _translate_chunks_hf(
     if batch_size is None:
         batch_size = resolve_batch_size(backend)
     batch_size = cap_batch_size(
-        backend, batch_size, device, num_beams=num_beams,
+        backend,
+        batch_size,
+        device,
+        num_beams=num_beams,
     )
     source_prefix = ""
 
     if backend in NLLB_MODEL_IDS:
         tokenizer.src_lang = src_lang
         forced_bos_token_id = tokenizer.convert_tokens_to_ids(tgt_lang)
-        if (forced_bos_token_id is None
-                or forced_bos_token_id == tokenizer.unk_token_id):
+        if (
+            forced_bos_token_id is None
+            or forced_bos_token_id == tokenizer.unk_token_id
+        ):
             raise ValueError(
-                f"Target language {tgt_lang} is not supported by NLLB.")
+                f"Target language {tgt_lang} is not supported by NLLB."
+            )
     elif backend in MADLAD_MODEL_IDS:
         tgt_iso = flores_to_iso2(tgt_lang)
         if not tgt_iso:
@@ -265,25 +343,31 @@ def _translate_chunks_hf(
 
 
 def _translate_hf_texts(
-    texts: List[str],
+    texts: list[str],
     src_lang: str,
     tgt_lang: str,
     backend: str,
     *,
-    device: Optional[str] = None,
+    device: str | None = None,
     num_beams: int = DEFAULT_NUM_BEAMS,
     max_new_tokens: int = 512,
-    batch_size: Optional[int] = None,
-    progress_cb: Optional[Callable[[int, int], None]] = None,
-    status_cb: Optional[Callable[[str], None]] = None,
-    cache: Optional[Dict[str, str]] = None,
-) -> List[str]:
+    batch_size: int | None = None,
+    progress_cb: Callable[[int, int], None] | None = None,
+    status_cb: Callable[[str], None] | None = None,
+    cache: dict[str, str] | None = None,
+) -> list[str]:
     """Use the same layout and generation path for single and batch inputs."""
     translator = functools.partial(
         _translate_chunks_hf,
-        src_lang=src_lang, tgt_lang=tgt_lang, backend=backend,
-        device=device, num_beams=num_beams, max_new_tokens=max_new_tokens,
-        batch_size=batch_size, progress_cb=progress_cb, status_cb=status_cb,
+        src_lang=src_lang,
+        tgt_lang=tgt_lang,
+        backend=backend,
+        device=device,
+        num_beams=num_beams,
+        max_new_tokens=max_new_tokens,
+        batch_size=batch_size,
+        progress_cb=progress_cb,
+        status_cb=status_cb,
         cache=cache,
     )
     return translate_lines(texts, translator)
@@ -316,20 +400,25 @@ def translate_nllb(
     src_lang: str,
     tgt_lang: str,
     backend: str = "nllb",
-    device: Optional[str] = None,
+    device: str | None = None,
     max_new_tokens: int = 512,
     num_beams: int = DEFAULT_NUM_BEAMS,
-    progress_cb: Optional[Callable[[int, int], None]] = None,
+    progress_cb: Callable[[int, int], None] | None = None,
     *,
-    status_cb: Optional[Callable[[str], None]] = None,
+    status_cb: Callable[[str], None] | None = None,
 ) -> str:
     """Translate with NLLB using FLORES-200 language codes."""
     if backend not in NLLB_MODEL_IDS:
         raise ValueError(f"Unknown NLLB backend: {backend}")
     return _translate_hf_texts(
-        [text], src_lang, tgt_lang, backend,
-        device=device, num_beams=num_beams,
-        max_new_tokens=max_new_tokens, progress_cb=progress_cb,
+        [text],
+        src_lang,
+        tgt_lang,
+        backend,
+        device=device,
+        num_beams=num_beams,
+        max_new_tokens=max_new_tokens,
+        progress_cb=progress_cb,
         status_cb=status_cb,
     )[0]
 
@@ -357,15 +446,20 @@ def translate_opus_mt(
     text: str,
     src_lang: str,
     tgt_lang: str,
-    device: Optional[str] = None,
-    progress_cb: Optional[Callable[[int, int], None]] = None,
+    device: str | None = None,
+    progress_cb: Callable[[int, int], None] | None = None,
     *,
-    status_cb: Optional[Callable[[str], None]] = None,
+    status_cb: Callable[[str], None] | None = None,
 ) -> str:
     """Translate with a direct MarianMT pair, or report an unavailable pair."""
     return _translate_hf_texts(
-        [text], src_lang, tgt_lang, "opus-mt", device=device,
-        progress_cb=progress_cb, status_cb=status_cb,
+        [text],
+        src_lang,
+        tgt_lang,
+        "opus-mt",
+        device=device,
+        progress_cb=progress_cb,
+        status_cb=status_cb,
     )[0]
 
 
@@ -396,20 +490,25 @@ def translate_madlad(
     src_lang: str,
     tgt_lang: str,
     backend: str = "madlad-3b",
-    device: Optional[str] = None,
+    device: str | None = None,
     max_new_tokens: int = 512,
     num_beams: int = DEFAULT_NUM_BEAMS,
-    progress_cb: Optional[Callable[[int, int], None]] = None,
+    progress_cb: Callable[[int, int], None] | None = None,
     *,
-    status_cb: Optional[Callable[[str], None]] = None,
+    status_cb: Callable[[str], None] | None = None,
 ) -> str:
     """Translate with MADLAD's target-language prefix (source is detected)."""
     if backend not in MADLAD_MODEL_IDS:
         raise ValueError(f"Unknown MADLAD backend: {backend}")
     return _translate_hf_texts(
-        [text], src_lang, tgt_lang, backend,
-        device=device, num_beams=num_beams,
-        max_new_tokens=max_new_tokens, progress_cb=progress_cb,
+        [text],
+        src_lang,
+        tgt_lang,
+        backend,
+        device=device,
+        num_beams=num_beams,
+        max_new_tokens=max_new_tokens,
+        progress_cb=progress_cb,
         status_cb=status_cb,
     )[0]
 
@@ -424,14 +523,14 @@ def translate(
     src_lang: str,
     tgt_lang: str,
     backend: str = "nllb",
-    ollama_model: Optional[str] = None,
-    src_lang_name: Optional[str] = None,
-    tgt_lang_name: Optional[str] = None,
+    ollama_model: str | None = None,
+    src_lang_name: str | None = None,
+    tgt_lang_name: str | None = None,
     formality: str = "default",
-    progress_cb: Optional[Callable[[int, int], None]] = None,
+    progress_cb: Callable[[int, int], None] | None = None,
     *,
-    status_cb: Optional[Callable[[str], None]] = None,
-    cache: Optional[Dict[str, str]] = None,
+    status_cb: Callable[[str], None] | None = None,
+    cache: dict[str, str] | None = None,
 ) -> str:
     """Dispatch to a backend; limit failures propagate to the caller.
 
@@ -441,11 +540,15 @@ def translate(
     if not text or not text.strip():
         return ""
 
-    if (backend in NLLB_MODEL_IDS or backend in MADLAD_MODEL_IDS
-            or backend == "opus-mt"):
+    if is_hf_backend(backend):
         return _translate_hf_texts(
-            [text], src_lang, tgt_lang, backend,
-            progress_cb=progress_cb, status_cb=status_cb, cache=cache,
+            [text],
+            src_lang,
+            tgt_lang,
+            backend,
+            progress_cb=progress_cb,
+            status_cb=status_cb,
+            cache=cache,
         )[0]
     if backend == "ollama":
         if not ollama_model:
@@ -464,22 +567,21 @@ def translate(
 
 @serialized
 def translate_many(
-    texts: List[str],
+    texts: list[str],
     src_lang: str,
     tgt_lang: str,
     backend: str = "nllb",
-    ollama_model: Optional[str] = None,
-    src_lang_name: Optional[str] = None,
-    tgt_lang_name: Optional[str] = None,
+    ollama_model: str | None = None,
+    src_lang_name: str | None = None,
+    tgt_lang_name: str | None = None,
     formality: str = "default",
-    batch_size: Optional[int] = None,
-    progress_cb: Optional[Callable[[int, int], None]] = None,
+    batch_size: int | None = None,
+    progress_cb: Callable[[int, int], None] | None = None,
     *,
-    status_cb: Optional[Callable[[str], None]] = None,
-    cache: Optional[Dict[str, str]] = None,
-) -> List[str]:
-    """
-    Translate a list of independent texts, returning one output per input.
+    status_cb: Callable[[str], None] | None = None,
+    cache: dict[str, str] | None = None,
+) -> list[str]:
+    """Translate a list of independent texts, returning one output per input.
 
     For the HuggingFace seq2seq backends this flattens every text into its
     chunks, translates all chunks in padded mini-batches (one shared GPU
@@ -496,15 +598,20 @@ def translate_many(
 
     # Empty / whitespace-only inputs pass through untouched.
     to_do = [i for i, t in enumerate(texts) if t and t.strip()]
-    result: List[str] = list(texts)
+    result: list[str] = list(texts)
     if not to_do:
         return result
 
-    if (backend in NLLB_MODEL_IDS or backend in MADLAD_MODEL_IDS
-            or backend == "opus-mt"):
+    if is_hf_backend(backend):
         return _translate_hf_texts(
-            texts, src_lang, tgt_lang, backend, batch_size=batch_size,
-            progress_cb=progress_cb, status_cb=status_cb, cache=cache,
+            texts,
+            src_lang,
+            tgt_lang,
+            backend,
+            batch_size=batch_size,
+            progress_cb=progress_cb,
+            status_cb=status_cb,
+            cache=cache,
         )
 
     # Ollama (and any other non-batchable backend): per-text loop.
@@ -530,18 +637,18 @@ def make_translate_fn(
     src_lang: str,
     tgt_lang: str,
     backend: str = "nllb",
-    ollama_model: Optional[str] = None,
-    src_lang_name: Optional[str] = None,
-    tgt_lang_name: Optional[str] = None,
+    ollama_model: str | None = None,
+    src_lang_name: str | None = None,
+    tgt_lang_name: str | None = None,
     formality: str = "default",
-    progress_cb: Optional[Callable[[int, int], None]] = None,
+    progress_cb: Callable[[int, int], None] | None = None,
     *,
-    status_cb: Optional[Callable[[str], None]] = None,
+    status_cb: Callable[[str], None] | None = None,
 ) -> Callable[[str], str]:
-    """
-    Return a single-argument ``str -> str`` translator with all backend
-    parameters baked in. Handy for feeding to format-preserving pipelines
-    (:mod:`textlab.features.translation.format`) or the shielding wrapper.
+    """Return a ``str -> str`` translator with all backend options fixed.
+
+    The document translators (:mod:`.documents`) and the shielding wrapper
+    (:mod:`.shield`) take such a translator.
 
     The returned callable also exposes a ``.many`` attribute: a
     ``List[str] -> List[str]`` batched translator with the same parameters
@@ -552,7 +659,7 @@ def make_translate_fn(
     so text repeated across a run (running headers, the Markdown and PDF
     outputs of the same document) is translated only once.
     """
-    cache: Dict[str, str] = {}
+    cache: dict[str, str] = {}
 
     def _fn(text: str) -> str:
         return translate(
@@ -569,7 +676,7 @@ def make_translate_fn(
             cache=cache,
         )
 
-    def _many(texts: List[str]) -> List[str]:
+    def _many(texts: list[str]) -> list[str]:
         return translate_many(
             texts,
             src_lang=src_lang,
@@ -589,47 +696,6 @@ def make_translate_fn(
 
 
 # ---------------------------------------------------------------------------
-# Helpers for batch / file handling used by the UI
-# ---------------------------------------------------------------------------
-
-
-def read_text_from_upload(name: str, data: bytes) -> str:
-    """
-    Extract plain text from a supported upload.
-
-    - .txt / .csv / .tsv / .md -> utf-8 decode with replacement
-    - .pdf                     -> pymupdf text extraction
-    - .docx                    -> python-docx if available, else raise
-
-    Kept intentionally lightweight; the UI decides which extensions to allow.
-    """
-    lower = name.lower()
-    if lower.endswith((".txt", ".md", ".csv", ".tsv", ".srt", ".vtt")):
-        return data.decode("utf-8", errors="replace")
-    if lower.endswith(".pdf"):
-        import fitz  # pymupdf
-
-        doc = fitz.open(stream=data, filetype="pdf")
-        try:
-            return "\n\n".join(page.get_text() for page in doc)
-        finally:
-            doc.close()
-    if lower.endswith(".docx"):
-        try:
-            import docx  # python-docx, optional
-        except ImportError as exc:
-            raise RuntimeError(
-                "python-docx is not installed in this container; "
-                "upload .txt or .pdf instead."
-            ) from exc
-        import io as _io
-
-        d = docx.Document(_io.BytesIO(data))
-        return "\n\n".join(p.text for p in d.paragraphs)
-    raise ValueError(f"Unsupported file type: {name}")
-
-
-# ---------------------------------------------------------------------------
 # Explicit preload / warm-up
 #
 # Text Lab runs on Slurm-allocated GPU nodes where the first inference for
@@ -645,11 +711,11 @@ def backend_load_signature(
     backend: str,
     src_lang: str = "",
     tgt_lang: str = "",
-    ollama_model: Optional[str] = None,
+    ollama_model: str | None = None,
 ) -> tuple:
-    """
-    Return an opaque tuple identifying what needs to be resident in VRAM
-    for a given (backend, language-pair, ollama-model) combination.
+    """Return an opaque tuple naming what must be loaded for a translation.
+
+    It depends on the backend, the language pair and the Ollama model:
 
     * NLLB / MADLAD only depend on the backend: one model handles every
       pair.
@@ -688,7 +754,7 @@ def backend_is_loaded(
     backend: str,
     src_lang: str = "",
     tgt_lang: str = "",
-    ollama_model: Optional[str] = None,
+    ollama_model: str | None = None,
 ) -> bool:
     """Validate residency, rather than trusting a stale UI load signature.
 
@@ -710,12 +776,11 @@ def preload_backend(
     backend: str,
     src_lang: str = "",
     tgt_lang: str = "",
-    ollama_model: Optional[str] = None,
-    src_lang_name: Optional[str] = None,
-    tgt_lang_name: Optional[str] = None,
+    ollama_model: str | None = None,
+    src_lang_name: str | None = None,
+    tgt_lang_name: str | None = None,
 ) -> None:
-    """
-    Warm up the given backend so the next :func:`translate` call is fast.
+    """Warm up the given backend so the next :func:`translate` call is fast.
 
     * For NLLB / MADLAD / OPUS-MT this triggers the transformers download
       (if the wheels aren't already in ``HF_HOME``) and moves the weights
@@ -726,8 +791,7 @@ def preload_backend(
     Idempotent — calling twice with the same arguments is essentially a
     no-op because the underlying loaders are ``lru_cache``-d.
     """
-    if (backend in NLLB_MODEL_IDS or backend in MADLAD_MODEL_IDS
-            or backend == "opus-mt"):
+    if is_hf_backend(backend):
         _load_hf(backend, src_lang, tgt_lang, _resolve_device(None))
         return
 
@@ -760,6 +824,7 @@ except ImportError:  # pragma: no cover - standalone imports
     _gpu_manager = None
 if _gpu_manager is not None:
     _gpu_manager.register(
-        _gpu_manager.TRANSLATION, "Unloaded translation model",
+        _gpu_manager.TRANSLATION,
+        "Unloaded translation model",
         _release_for_other_feature,
     )

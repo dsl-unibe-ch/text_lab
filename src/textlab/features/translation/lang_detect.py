@@ -1,11 +1,10 @@
-"""
-Lightweight language detection for the Translate page.
+"""Lightweight language detection for the Translate page.
 
 Uses ``papluca/xlm-roberta-base-language-detection`` (a 278 MB
 XLM-Roberta-base classifier fine-tuned for 20 common languages) via the
-Hugging Face ``transformers`` pipeline. The model file is cached under
-``$HF_HOME`` (bind-mounted from research storage in the OOD container), so
-the first call downloads once and every subsequent call is a cache hit.
+Hugging Face ``transformers`` pipeline. The model is read from
+``$HF_HOME``, the model store the launch script mounts, and loaded once per
+session.
 
 Public API
 ----------
@@ -31,30 +30,28 @@ from __future__ import annotations
 
 import functools
 from dataclasses import dataclass
-from typing import Optional
-
 
 # ISO 639-1 codes returned by the classifier -> FLORES-200 codes used by NLLB.
 _ISO2_TO_FLORES: dict[str, str] = {
-    "ar": "arb_Arab",   # Arabic (MSA)
-    "bg": "bul_Cyrl",   # Bulgarian
-    "de": "deu_Latn",   # German
-    "el": "ell_Grek",   # Greek
-    "en": "eng_Latn",   # English
-    "es": "spa_Latn",   # Spanish
-    "fr": "fra_Latn",   # French
-    "hi": "hin_Deva",   # Hindi
-    "it": "ita_Latn",   # Italian
-    "ja": "jpn_Jpan",   # Japanese
-    "nl": "nld_Latn",   # Dutch
-    "pl": "pol_Latn",   # Polish
-    "pt": "por_Latn",   # Portuguese
-    "ru": "rus_Cyrl",   # Russian
-    "sw": "swh_Latn",   # Swahili
-    "th": "tha_Thai",   # Thai
-    "tr": "tur_Latn",   # Turkish
-    "ur": "urd_Arab",   # Urdu
-    "vi": "vie_Latn",   # Vietnamese
+    "ar": "arb_Arab",  # Arabic (MSA)
+    "bg": "bul_Cyrl",  # Bulgarian
+    "de": "deu_Latn",  # German
+    "el": "ell_Grek",  # Greek
+    "en": "eng_Latn",  # English
+    "es": "spa_Latn",  # Spanish
+    "fr": "fra_Latn",  # French
+    "hi": "hin_Deva",  # Hindi
+    "it": "ita_Latn",  # Italian
+    "ja": "jpn_Jpan",  # Japanese
+    "nl": "nld_Latn",  # Dutch
+    "pl": "pol_Latn",  # Polish
+    "pt": "por_Latn",  # Portuguese
+    "ru": "rus_Cyrl",  # Russian
+    "sw": "swh_Latn",  # Swahili
+    "th": "tha_Thai",  # Thai
+    "tr": "tur_Latn",  # Turkish
+    "ur": "urd_Arab",  # Urdu
+    "vi": "vie_Latn",  # Vietnamese
     # Chinese (Simplified) - default; user can flip to Traditional
     "zh": "zho_Hans",
 }
@@ -69,18 +66,18 @@ class DetectionResult:
 
     iso639_1: str
     confidence: float
-    flores_code: Optional[str]
-    display_name: Optional[str]
+    flores_code: str | None
+    display_name: str | None
 
     @property
     def is_confident(self) -> bool:
+        """Whether the confidence is high enough to use the result."""
         return self.confidence >= 0.60
 
 
 @functools.lru_cache(maxsize=1)
 def _load_pipeline():
     """Lazy-load the classifier once and reuse it across calls."""
-    import torch
     from transformers import pipeline
 
     device = -1
@@ -94,8 +91,7 @@ def _load_pipeline():
     )
 
 
-def _flores_and_name_from_iso2(
-        iso2: str) -> tuple[Optional[str], Optional[str]]:
+def _flores_and_name_from_iso2(iso2: str) -> tuple[str | None, str | None]:
     """Map an ISO 639-1 code to its FLORES-200 code and UI display name."""
     from textlab.common.language_mappings import (
         TRANSLATE_LANGUAGE_CODE_TO_NAME,
@@ -107,9 +103,8 @@ def _flores_and_name_from_iso2(
     return flores, TRANSLATE_LANGUAGE_CODE_TO_NAME.get(flores)
 
 
-def detect_language(text: str) -> Optional[DetectionResult]:
-    """
-    Detect the language of ``text``.
+def detect_language(text: str) -> DetectionResult | None:
+    """Detect the language of ``text``.
 
     Returns ``None`` if the input is empty or the classifier errors out
     (network problem, corrupt cache, etc). The caller should treat ``None``
@@ -153,8 +148,11 @@ def supported_iso639_1_codes() -> list[str]:
 
 
 def detect_document_language(
-    name: str, data: bytes, *, samples: int = 5,
-) -> Optional[DetectionResult]:
+    name: str,
+    data: bytes,
+    *,
+    samples: int = 5,
+) -> DetectionResult | None:
     """Detect a document's language from paragraphs spread across it.
 
     A title page, an English abstract or a reference list would mislead a
@@ -162,14 +160,13 @@ def detect_document_language(
     classified and their confidences summed per language. Returns ``None``
     for unsupported formats, too little text, or an uncertain result.
     """
-    from .engine import read_text_from_upload
-
     try:
         text = read_text_from_upload(name, data)
     except Exception:
         return None
     paragraphs = [
-        " ".join(part.split()) for part in text.split("\n\n")
+        " ".join(part.split())
+        for part in text.split("\n\n")
         if sum(char.isalpha() for char in part) >= 60
     ]
     if not paragraphs:
@@ -194,6 +191,43 @@ def detect_document_language(
         return None
     winner = results[best]
     return DetectionResult(
-        iso639_1=winner.iso639_1, confidence=confidence,
-        flores_code=winner.flores_code, display_name=winner.display_name,
+        iso639_1=winner.iso639_1,
+        confidence=confidence,
+        flores_code=winner.flores_code,
+        display_name=winner.display_name,
     )
+
+
+def read_text_from_upload(name: str, data: bytes) -> str:
+    """Extract plain text from a supported upload.
+
+    - .txt / .csv / .tsv / .md -> utf-8 decode with replacement
+    - .pdf                     -> pymupdf text extraction
+    - .docx                    -> python-docx if available, else raise
+
+    Kept intentionally lightweight; the UI decides which extensions to allow.
+    """
+    lower = name.lower()
+    if lower.endswith((".txt", ".md", ".csv", ".tsv", ".srt", ".vtt")):
+        return data.decode("utf-8", errors="replace")
+    if lower.endswith(".pdf"):
+        import fitz  # pymupdf
+
+        doc = fitz.open(stream=data, filetype="pdf")
+        try:
+            return "\n\n".join(page.get_text() for page in doc)
+        finally:
+            doc.close()
+    if lower.endswith(".docx"):
+        try:
+            import docx  # python-docx, optional
+        except ImportError as exc:
+            raise RuntimeError(
+                "python-docx is not installed in this container; "
+                "upload .txt or .pdf instead."
+            ) from exc
+        import io as _io
+
+        d = docx.Document(_io.BytesIO(data))
+        return "\n\n".join(p.text for p in d.paragraphs)
+    raise ValueError(f"Unsupported file type: {name}")

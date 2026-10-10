@@ -233,6 +233,13 @@ The **side-by-side review file** shows a numbered table with the original on the
 * check that names and technical terms are consistent (add them to the [glossary](#glossary-term-lock) and translate again if not),
 * hand the translation to a native speaker for proofreading. The Word version can be edited and commented on directly.
 
+## Data Privacy & Security
+
+* **Local processing:** All translation runs in your own Text Lab session, on the compute node it was started on. The translation models run on your session's GPU, and the LLM backend uses the Ollama server of your session. Your texts and documents are never sent to an online translation service.
+* **No files left behind:** Uploaded documents and their translations are kept in your session's memory, not written to disk. The one exception is a PDF with scanned pages: the pages that need text recognition are written to your session's private workspace on the compute node, which only your user account can open, and deleted as soon as recognition is finished. The whole workspace is deleted when your session ends.
+* **Results last as long as your session:** Translations stay on the page until you start a new translation, reload the page or end your session. Download what you want to keep; nothing is saved to your home directory.
+* **No AI training:** The models only translate. They do not learn from your texts, and your data is never used to train or improve them.
+
 ## Tips for good results
 
 * **Choose the right source language**, or keep language detection on. A wrong source language is the most common cause of poor translations.

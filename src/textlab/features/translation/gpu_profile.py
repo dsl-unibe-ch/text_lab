@@ -20,8 +20,8 @@ from .gpu_memory import is_cuda_device
 OCR_COEXIST_MIN_MB = 32_000
 
 # Batch-size tiers by total VRAM. Larger cards -> larger batches -> faster.
-_H200_MIN_MB = 120_000   # H200 (~141 GB)
-_80GB_MIN_MB = 60_000    # A100-80 / H100 (~80 GB)
+_H200_MIN_MB = 120_000  # H200 (~141 GB)
+_80GB_MIN_MB = 60_000  # A100-80 / H100 (~80 GB)
 _A100_40_MIN_MB = 32_000  # A100-40 (~40 GB)
 
 # 3B-parameter backends use much more activation memory per sample, so their
@@ -35,14 +35,15 @@ class GpuProfile:
 
     name: str
     vram_mb: int
-    tier: str                 # "cpu" | "standard" | "high"
-    batch_size: int           # base translation mini-batch (small models)
+    tier: str  # "cpu" | "standard" | "high"
+    batch_size: int  # base translation mini-batch (small models)
     ocr_with_translation: bool  # may OCR + translation be resident together?
     device: str = "cpu"
     free_mb: int | None = None
 
     @property
     def is_high_memory(self) -> bool:
+        """Whether the GPU belongs to the high-memory tier."""
         return self.tier == "high"
 
 
@@ -100,8 +101,11 @@ def detect_gpu_profile(device: str | None = None) -> GpuProfile:
 
 
 def cap_batch_size(
-    backend: str, requested: int, device: str | None = None,
-    *, num_beams: int = 1,
+    backend: str,
+    requested: int,
+    device: str | None = None,
+    *,
+    num_beams: int = 1,
 ) -> int:
     """Cap a requested batch against *current* post-load free memory.
 
@@ -139,7 +143,9 @@ def ocr_with_translation_allowed() -> bool:
 
 
 def sequential_ocr_allowed(
-    *, min_free_mb: int | None = None, device: str | None = None,
+    *,
+    min_free_mb: int | None = None,
+    device: str | None = None,
 ) -> bool:
     """Check allocated GPU capacity and optionally current free VRAM (MiB).
 
@@ -153,8 +159,11 @@ def sequential_ocr_allowed(
     """
     if min_free_mb is not None and min_free_mb < 0:
         raise ValueError("The free-memory budget must be nonnegative.")
-    profile = (detect_gpu_profile(device) if device is not None
-               else detect_gpu_profile())
+    profile = (
+        detect_gpu_profile(device)
+        if device is not None
+        else detect_gpu_profile()
+    )
     return profile.vram_mb >= 24_000 and (
         min_free_mb is None
         or (profile.free_mb is not None and profile.free_mb >= min_free_mb)

@@ -14,11 +14,16 @@ be detected.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
 import logging
+from collections.abc import Callable, Mapping
 from typing import Any
 
-from .gpu_memory import serialized
+from textlab.common.ollama import (
+    call_no_think,
+    canonical_model_name,
+    running_model_names,
+)
+
 from .chunking import (
     MAX_SPLIT_RETRIES,
     InputTooLongError,
@@ -28,7 +33,7 @@ from .chunking import (
     split_text,
     translate_lines,
 )
-
+from .gpu_memory import serialized
 
 _NUM_CTX = 4096
 _NUM_PREDICT = 1024
@@ -64,7 +69,9 @@ def _system_prompt(source: str, target: str, formality: str) -> str:
 
 def _input_budget(system: str) -> int:
     available = (
-        _NUM_CTX - _NUM_PREDICT - _TEMPLATE_TOKEN_RESERVE
+        _NUM_CTX
+        - _NUM_PREDICT
+        - _TEMPLATE_TOKEN_RESERVE
         - _estimate_tokens(system)
     )
     budget = min(available, _SOURCE_BYTE_CAP)
@@ -125,29 +132,6 @@ def _completed_text(response: Any) -> str:
     return content
 
 
-def _chat_no_think(chat: Callable[..., Any], **request: Any) -> Any:
-    """Keep reasoning out of the output budget when the client supports it.
-
-    Only Python argument binding rejecting exactly ``think`` allows a plain
-    retry. Legacy clients cannot explicitly disable thinking. Client-internal
-    TypeErrors and model/server errors propagate; completion checks remain
-    mandatory in either case.
-    """
-    try:
-        return chat(think=False, **request)
-    except TypeError as error:
-        traceback = error.__traceback__
-        if (
-            not str(error).endswith(
-                " got an unexpected keyword argument 'think'"
-            )
-            or traceback is None
-            or traceback.tb_next is not None
-        ):
-            raise
-    return chat(**request)
-
-
 def _report(
     message: str,
     status_cb: Callable[[str], None] | None,
@@ -168,7 +152,7 @@ def _translate_chunk(
 ) -> str:
     if not text.strip():
         return text
-    response = _chat_no_think(
+    response = call_no_think(
         chat,
         model=model_name,
         messages=[
@@ -210,7 +194,12 @@ def _translate_chunk(
         )
         translations = [
             _translate_chunk(
-                part, system, model_name, chat, status_cb, depth + 1,
+                part,
+                system,
+                model_name,
+                chat,
+                status_cb,
+                depth + 1,
             )
             for part in pieces
         ]
@@ -229,29 +218,6 @@ _ACTIVE_OLLAMA = None
 _OWNED_OLLAMA = None
 
 
-def _canonical_model(name: str) -> str:
-    return name if ":" in name.rsplit("/", 1)[-1] else name + ":latest"
-
-
-def _running_models(client):
-    """Unknown residency must never be treated as ownership permission."""
-    try:
-        response = client.ps()
-        models = _field(response, "models")
-        if not isinstance(models, (list, tuple)):
-            return None
-        names = set()
-        for model in models:
-            name = _field(model, "model") or _field(model, "name")
-            if not isinstance(name, str) or not name:
-                return None
-            names.add(_canonical_model(name))
-        return names
-    except Exception:
-        # Missing legacy API / disconnected service: cannot prove ownership.
-        return None
-
-
 @serialized
 def release_ollama_model() -> None:
     """Unload only the model this translator observed absent before loading.
@@ -265,14 +231,14 @@ def release_ollama_model() -> None:
 
     if _OWNED_OLLAMA is not None:
         client, name = _OWNED_OLLAMA
-        running = _running_models(client)
+        running = running_model_names(client)
         if running is None:
             raise RuntimeError(
                 "Cannot verify the translation-owned Ollama model's "
                 "residency; GPU handoff stopped rather than unloading "
                 "an unverified model."
             )
-        if _canonical_model(name) in running:
+        if canonical_model_name(name) in running:
             unload = getattr(client, "generate", None)
             if unload is None:
                 raise RuntimeError(
@@ -280,9 +246,8 @@ def release_ollama_model() -> None:
                     "model. GPU handoff stopped."
                 )
             unload(model=name, keep_alive=0)
-            remaining = _running_models(client)
-            if (remaining is None
-                    or _canonical_model(name) in remaining):
+            remaining = running_model_names(client)
+            if remaining is None or canonical_model_name(name) in remaining:
                 raise RuntimeError(
                     "Ollama has not released the translation model; "
                     "GPU handoff stopped."
@@ -297,14 +262,15 @@ def prepare_ollama_model(model_name: str) -> None:
     global _ACTIVE_OLLAMA, _OWNED_OLLAMA
 
     import ollama
+
     from . import engine
 
-    current = (ollama, _canonical_model(model_name))
+    current = (ollama, canonical_model_name(model_name))
     if _ACTIVE_OLLAMA != current:
         release_ollama_model()
     if engine._ACTIVE_HF_SIGNATURE is not None:
         engine._free_hf_cache()
-    running = _running_models(ollama)
+    running = running_model_names(ollama)
     if running is not None and current[1] not in running:
         _OWNED_OLLAMA = (ollama, model_name)
     _ACTIVE_OLLAMA = current
@@ -316,8 +282,8 @@ def ollama_model_is_loaded(model_name: str) -> bool:
     if _ACTIVE_OLLAMA is None:
         return False
     client, active = _ACTIVE_OLLAMA
-    canonical = _canonical_model(model_name)
-    running = _running_models(client)
+    canonical = canonical_model_name(model_name)
+    running = running_model_names(client)
     return active == canonical and running is not None and canonical in running
 
 
@@ -357,9 +323,15 @@ def translate_ollama(
         for parts in chunks:
             outputs = []
             for part in parts:
-                outputs.append(_translate_chunk(
-                    part, system, model_name, ollama.chat, status_cb,
-                ))
+                outputs.append(
+                    _translate_chunk(
+                        part,
+                        system,
+                        model_name,
+                        ollama.chat,
+                        status_cb,
+                    )
+                )
                 completed += 1
                 if progress_cb is not None:
                     progress_cb(completed, total)

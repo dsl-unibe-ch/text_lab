@@ -151,6 +151,18 @@ A batch job would call `transcribe_files()` directly, and a web frontend
 would call `run_transcription()` with its own progress callback; neither
 needs the Streamlit page.
 
+### When a feature runs in the app process: translation
+
+Not every feature uses a worker process. Translation keeps its model loaded
+in the Streamlit process between clicks, because the text editor must
+answer in a second or two and a worker would reload the model every time.
+Its GPU memory is released through `common.gpu_manager` when another
+feature needs the GPU. The service is the same kind of API either way:
+`translation.service.translate_text()` and `translate_documents()` take
+options and an `on_progress` callback, and the page imports nothing else
+from the feature. Use a worker when a feature's models are only needed for
+one run; keep it in-process when keeping a model loaded is the point.
+
 ## Migration status
 
 All code now lives in `src/textlab/`; the old `src/core/`, `src/pages/` and
@@ -165,7 +177,7 @@ feature follows the rules above.
 | Meeting Notes | `features/meeting_notes/` | `Meeting_Notes_Generator.py` | Refactored |
 | OCR | `features/ocr/` | `OCR.py` | Moved |
 | Survey | `features/survey/` | part of `OCR.py` (hidden) | Moved |
-| Translation | `features/translation/` | `Translate.py` | Moved |
+| Translation | `features/translation/` | `Translate.py` | Refactored |
 | Topic Modeling | `features/topic_modeling/` | `Topic_Modeling.py` | Moved |
 | Visualization | `features/visualization/` | `Visualize_Data.py` | Moved |
 | Chat | `features/chat/` | `Chat.py` | Moved |
@@ -183,8 +195,11 @@ Known issues to resolve during the refactor:
 - The PaddleOCR workers and the MCP server are still started by file path,
   and `gpu_manager` recognizes leftover workers by file or module name; they
   move to `common.jobs` when OCR and Visualization are refactored.
-- The home page and the Translate page still name the University of Bern
-  and UBELIX in their text (allow-listed in `tests/test_data_footprint.py`).
+- The home page still names the University of Bern and UBELIX in its text
+  (allow-listed in `tests/test_data_footprint.py`).
+- Translation calls the OCR feature for scanned PDF pages
+  (`translation/documents/pdf_extract.py`); the connection is revisited
+  when OCR is refactored.
 - About 190 emojis remain in the pages; they are removed as each feature is
   refactored, keeping functional symbols such as checkbox glyphs.
 

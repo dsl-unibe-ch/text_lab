@@ -5,8 +5,7 @@ a time: the model got half a clause, with no subject and no verb, and returned
 a translation to match.
 """
 
-
-from textlab.features.translation.format import (
+from textlab.features.translation.documents.markdown import (
     reflow_soft_wraps,
     translate_markdown,
 )
@@ -37,8 +36,10 @@ def test_a_break_after_a_finished_sentence_is_kept():
 
 
 def test_a_word_hyphenated_across_the_break_is_put_back_together():
-    assert reflow_soft_wraps(
-        "Ein Wort wurde ge-\ntrennt.") == "Ein Wort wurde getrennt."
+    assert (
+        reflow_soft_wraps("Ein Wort wurde ge-\ntrennt.")
+        == "Ein Wort wurde getrennt."
+    )
 
 
 def test_markdown_structure_keeps_its_own_lines():
@@ -64,8 +65,9 @@ def test_fenced_code_is_never_reflowed():
 
 
 def test_reflow_is_idempotent_and_safe_on_edge_cases():
-    assert reflow_soft_wraps(reflow_soft_wraps(
-        WRAPPED)) == reflow_soft_wraps(WRAPPED)
+    assert reflow_soft_wraps(reflow_soft_wraps(WRAPPED)) == reflow_soft_wraps(
+        WRAPPED
+    )
     for text in ("", "no newlines here", "\n", "\n\n\n"):
         assert reflow_soft_wraps(text) == text
 
