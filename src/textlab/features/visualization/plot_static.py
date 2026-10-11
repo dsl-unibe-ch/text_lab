@@ -6,21 +6,18 @@ Generates publication-ready Matplotlib and Seaborn charts (.png).
 import os
 
 import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
 import pandas.api.types as ptypes
 import seaborn as sns
 from wordcloud import STOPWORDS, WordCloud
 
-from textlab.features.visualization import r_code
+from textlab.features.visualization import r_code, sandbox
 from textlab.features.visualization.viz_config import CUSTOM_CODE_TIMEOUT
 from textlab.features.visualization.viz_utils import (
     _strip_show_calls,
-    describe_code_error,
     format_plot_output,
     get_plot_path,
     load_data_safely,
-    run_generated_code,
     split_comma_list,
 )
 
@@ -224,86 +221,22 @@ def generate_custom_static_plot_impl(
 ) -> str:
     """Run model-written Python code that draws a Matplotlib/Seaborn chart.
 
-    The LLM may either assign its figure to `fig`, or just call
-    seaborn/matplotlib directly; we save the current active figure in either
-    case.
+    The code is checked and then run in the sandbox (:mod:`.sandbox`), with
+    ``df``, ``pd``, ``np``, ``sns``, ``plt`` and ``WordCloud`` provided. The
+    chart is ``fig`` if the code assigns it, otherwise the current figure.
     """
-    columns: list[str] = []
-    clean_code = ""
-    try:
-        df = load_data_safely(data_file_path)
-        columns = [str(c) for c in df.columns]
-
-        # Pass as a single dict (used as both globals and locals) so that
-        # nested scopes like list comprehensions can also resolve `df`, `sns`,
-        # etc. Using exec(code, {}, locals) would hide injected names inside
-        # comprehensions and function defs due to Python 3's exec scoping
-        # rules.
-        local_scope = {
-            "pd": pd,
-            "np": np,
-            "sns": sns,
-            "plt": plt,
-            "WordCloud": WordCloud,
-            # A copy, because load_data_safely returns a cached DataFrame
-            # shared with every later tool call in this server process.
-            # Generated code such as df.dropna(inplace=True) must not change
-            # the data for them.
-            "df": df.copy(),
-            # data_file_path is intentionally NOT exposed: the model should use
-            # df directly and must not call pd.read_csv() or reference file
-            # paths.
-        }
-
-        clean_code = (
-            python_code.replace("```python", "").replace("```", "").strip()
-        )
-        # Strip plt.show() / fig.show() calls before exec — on non-interactive
-        # backends (Agg on HPC), plt.show() clears the active figure, making
-        # it impossible to retrieve and save it afterwards.
-        clean_code = _strip_show_calls(clean_code)
-
-        # Close any stale figures from previous runs in this process.
-        plt.close("all")
-
-        run_generated_code(clean_code, local_scope, CUSTOM_CODE_TIMEOUT)
-
-        # Prefer an explicit `fig` if the LLM created one; otherwise use the
-        # currently active matplotlib figure.
-        fig = local_scope.get("fig")
-        if fig is None:
-            if not plt.get_fignums():
-                return (
-                    "Error: Your code did not produce any matplotlib figure."
-                )
-            fig = plt.gcf()
-
-        plot_path = get_plot_path(
-            data_file_path,
-            f"custom_static_{plot_filename_keyword}",
-            ext=".png",
-        )
-        fig.savefig(plot_path, bbox_inches="tight", dpi=300)
-        plt.close("all")
-
-        full_user_code = _generate_static_code_snippet(
-            clean_code, data_file_path=data_file_path
-        )
-
-        return f"{plot_path}|||{full_user_code}"
-
-    except SystemExit:
-        # exit()/sys.exit() in generated code would otherwise shut down the MCP
-        # server that every worker of the analysis shares.
-        plt.close("all")
-        return (
-            "Error: Your code must not call exit() or sys.exit(). Remove that "
-            "call."
-        )
-    except Exception as e:
-        plt.close("all")
-        detail = describe_code_error(e, clean_code, columns)
-        return f"Error executing custom static plot code: {detail}"
+    return sandbox.run_custom_code(
+        "static",
+        data_file_path,
+        python_code,
+        f"custom_static_{plot_filename_keyword}",
+        ".png",
+        "Error executing custom static plot code",
+        lambda code: _generate_static_code_snippet(
+            code, data_file_path=data_file_path
+        ),
+        CUSTOM_CODE_TIMEOUT,
+    )
 
 
 def plot_static_lineplot_impl(

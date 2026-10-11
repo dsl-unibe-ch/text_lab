@@ -81,6 +81,8 @@ The **Agent Activity Log** shows what is happening, for example:
 * *... failed: ... Retrying...* and *is retrying*: a plot or test did not work on the first attempt, and the agent is correcting it. This is normal.
 * *Worker 'stats' is interpreting the results.*: the statistics specialist is explaining its numbers.
 
+When no ready-made chart fits, an agent writes its own Python code. That code runs in a sealed-off area of your session that holds only a copy of your table: it cannot open your other files, your home folder or research storage, and has no internet access. Code that tries to use files or other programs is rejected, and the agent rewrites it.
+
 An analysis usually takes one to a few minutes, and is stopped after 10 minutes. The first analysis after choosing a model takes longer, because the model is loaded into GPU memory. Click **Cancel Analysis** to stop a running analysis.
 
 ## Available plots and tests

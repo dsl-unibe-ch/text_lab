@@ -17,6 +17,7 @@ import contextlib
 import copy
 import difflib
 import json
+import os
 import re
 import sys
 import threading
@@ -30,7 +31,7 @@ from mcp.client.stdio import get_default_environment, stdio_client
 
 from textlab.common.jobs import worker_environment
 from textlab.common.ollama import chat_no_think, message_text
-from textlab.features.visualization import r_code
+from textlab.features.visualization import r_code, sandbox
 from textlab.features.visualization.plot_data import (
     get_all_columns_summary_impl,
 )
@@ -573,13 +574,19 @@ async def _mcp_session(
     The server runs as ``python -m`` with ``sys.executable``, so it uses the
     same Python environment as the app, whatever ``python3`` resolves to on
     ``PATH``; ``PYTHONPATH`` makes ``textlab`` importable
-    (``common.jobs.worker_environment``).
+    (``common.jobs.worker_environment``), and the image variables let the
+    custom chart tools start their sandbox (:mod:`.sandbox`).
 
     With ``include_r_code`` the server's tools also return R equivalents of
     their Python snippets (see ``r_code.py``).
     """
     env = get_default_environment()
     env["PYTHONPATH"] = worker_environment()["PYTHONPATH"]
+    # The custom chart tools run their code in a sandbox made from the
+    # app's image, which they find through these variables.
+    for name in sandbox.IMAGE_VARIABLES:
+        if os.environ.get(name):
+            env[name] = os.environ[name]
     if include_r_code:
         env[r_code.R_CODE_ENV] = "1"
     server_params = StdioServerParameters(
