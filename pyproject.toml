@@ -11,7 +11,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "textlab"
-version = "3.0.0"
+version = "3.0.1"
 description = "AI and NLP tools for research data, served through Open OnDemand"
 readme = "readme.MD"
 license = "MIT"
