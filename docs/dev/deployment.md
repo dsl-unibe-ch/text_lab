@@ -209,11 +209,13 @@ start, so running sessions keep the version they started with.
 
 ### Making a release
 
-1. Merge the changes into `main` and check that CI passes. Merging
+1. Set the new version in `pyproject.toml` (`version = "X.Y.Z"`) in the
+   last pull request of the release.
+2. Merge the changes into `main` and check that CI passes. Merging
    publishes the documentation site, including the user guide.
-2. Run the tests on a compute node (`scripts/test_on_node.sbatch`).
-3. Tag the commit (`vX.Y.Z`) and create a GitHub release with notes.
-4. Check out the tag into a new release folder, readable by everyone:
+3. Run the tests on a compute node (`scripts/test_on_node.sbatch`).
+4. Tag the commit (`vX.Y.Z`) and create a GitHub release with notes.
+5. Check out the tag into a new release folder, readable by everyone:
 
     ```bash
     cd "$TEXT_LAB_BASE/releases"
@@ -222,16 +224,16 @@ start, so running sessions keep the version they started with.
     chmod -R a+rX,go-w vX.Y.Z
     ```
 
-5. If `deploy/site.env` changed, copy it to `$TEXT_LAB_BASE/site.env`.
-6. Try the release in a sandbox app with `TEXT_LAB_SRC` set to the new
+6. If `deploy/site.env` changed, copy it to `$TEXT_LAB_BASE/site.env`.
+7. Try the release in a sandbox app with `TEXT_LAB_SRC` set to the new
    folder's `src/`.
-7. Switch new sessions to it:
+8. Switch new sessions to it:
 
     ```bash
     ln -sfn releases/vX.Y.Z "$TEXT_LAB_BASE/current"
     ```
 
-8. If the Open OnDemand files changed, ask the HPC team to deploy them from
+9. If the Open OnDemand files changed, ask the HPC team to deploy them from
    the tag.
 
 ### Rolling back

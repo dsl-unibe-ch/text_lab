@@ -2,8 +2,7 @@
 # request. Nothing here needs a GPU, the Apptainer image or the models; those
 # tests run on a compute node with scripts/test_on_node.sbatch.
 #
-# A pytest job for the tests without markers is planned (see
-# docs/dev/testing.md).
+# The tests themselves run on a compute node (see docs/dev/testing.md).
 
 name: CI
 

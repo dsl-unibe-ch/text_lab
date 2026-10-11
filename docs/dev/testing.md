@@ -108,6 +108,13 @@ refactoring a module removes it from that list.
 - the import-linter contracts
 - a strict build of this documentation site
 
-GitHub's machines have no GPU and no image, so a pytest job there could run
-only the tests without markers. Such a job is planned; until then, run the
-tests on a compute node.
+GitHub's machines have no GPU and no image, so the tests do not run there:
+run them on a compute node and give the Slurm job ID in the pull request.
+
+## Pull requests
+
+`main` is protected: changes arrive through pull requests, and a pull
+request can be merged only when both CI jobs pass. The pull request
+template (`.github/pull_request_template.md`) asks for what CI cannot
+check: the test job ID, a UI check in a sandbox app, updated documentation,
+no emojis, and an explanation of any change to model-facing prompts.
