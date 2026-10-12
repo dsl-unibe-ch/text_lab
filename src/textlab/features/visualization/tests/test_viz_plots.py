@@ -131,6 +131,7 @@ def test_schema_reports_long_text_columns_without_raw_text(text_data_file):
     assert "at length" not in schema
 
 
+@pytest.mark.container
 def test_custom_code_cannot_modify_the_cached_dataset(data_file):
     code = (
         "df.drop(columns=['radius_mean'], inplace=True)\n"
@@ -162,6 +163,7 @@ def test_time_limit_interrupts_a_runaway_loop():
                 pass
 
 
+@pytest.mark.container
 def test_endless_custom_plotly_code_is_stopped(data_file, monkeypatch):
     monkeypatch.setattr(plot_interactive, "CUSTOM_CODE_TIMEOUT", 0.3)
     output = generate_custom_plotly_impl(
@@ -171,6 +173,7 @@ def test_endless_custom_plotly_code_is_stopped(data_file, monkeypatch):
     assert output.startswith("Error") and "did not finish" in output
 
 
+@pytest.mark.container
 def test_endless_custom_static_code_is_stopped(data_file, monkeypatch):
     monkeypatch.setattr(plot_static, "CUSTOM_CODE_TIMEOUT", 0.3)
     output = plot_static.generate_custom_static_plot_impl(
@@ -193,6 +196,7 @@ def test_exit_in_custom_code_returns_an_error_instead_of_stopping(
         assert result.startswith("Error") and "exit()" in result
 
 
+@pytest.mark.container
 def test_custom_code_errors_name_the_line_and_the_columns(data_file):
     code = "x = 1\nfig = px.histogram(df, x=df['Radius_mean'])"
     output = generate_custom_plotly_impl(data_file, code, "typo")
@@ -327,6 +331,7 @@ def test_plot_tools_return_no_r_code_by_default(r_data_file):
     assert len(output.split("|||")) == 2
 
 
+@pytest.mark.container
 def test_custom_code_plots_have_no_r_code(r_data_file, r_enabled):
     output = generate_custom_plotly_impl(
         r_data_file, "fig = px.histogram(df, x='radius_mean')", "custom"

@@ -25,6 +25,8 @@ it. The run:
      (`plot_static`) and statistical tests (`stats_analysis`), each with its
      R equivalent (`r_code`) when `TEXTLAB_R_CODE` is set. The agents run
      concurrently on it; tools write their charts next to the table.
+     When no tool fits, the custom chart tools run code the model writes,
+     in the sandbox (see below).
    - Statistical results are interpreted by the model, and the supervisor
      writes the summary.
 4. **Reads the results** (`runs.read_artifacts`): every chart file, its code
@@ -38,6 +40,29 @@ The heavy work is outside the app process: the models run in the Ollama
 server and the tools in the MCP server process, so the run itself is a
 thread, not a worker process. The agent and the MCP library are imported
 only when a run starts.
+
+## Model-written code
+
+`generate_custom_plotly` and `generate_custom_static_plot` run Python the
+model writes. Text in the table can steer the model, so that code is
+untrusted (`sandbox.py`):
+
+1. `check_code` parses it and rejects imports outside the data and
+   plotting libraries, private attributes (`_x`), and file, process and
+   introspection functions (`open`, `eval`, `getattr`, `read_*`, `to_csv`,
+   ...). The model gets the reason and rewrites the code.
+2. `run_in_sandbox` runs it in a new container made from the app's image
+   (`apptainer exec --containall --no-home --net --network none`, started
+   with only `PATH` in its environment, since Apptainer's `APPTAINER_BIND`
+   would otherwise pass on the app container's bind mounts), seeing only a
+   folder with a copy of the table and the read-only source tree.
+   There `sandbox_runner` runs the code with reduced builtins and the time
+   limit, and saves the chart. The app reads the chart back without
+   following links. Starting the sandbox adds a few seconds per custom
+   chart.
+
+If the sandbox cannot start (no image, no `apptainer`), custom code is not
+run and the model is told so.
 
 ## Public API
 
@@ -87,6 +112,8 @@ visualization/
 ├── stats_analysis.py   # statistical tests
 ├── r_code.py           # R equivalents of the tools' code
 ├── viz_utils.py        # data loading, file names, code formatting
+├── sandbox.py          # checking and isolating model-written code
+├── sandbox_runner.py   # runs that code inside the sandbox
 └── tests/
 ```
 
@@ -111,13 +138,17 @@ exactly as written (see the ruff exceptions in `pyproject.toml`).
 
 ## Tests
 
-In `tests/`, without models or GPU:
+In `tests/`, without models or GPU (tests marked `container` need the
+image and nested Apptainer, as on a compute node):
 
 - `test_viz_agent.py`: the supervisor and agents with a scripted model and
   an in-memory MCP session: planning, retries, column fixes, cancellation,
   summaries, the server start.
 - `test_viz_plots.py`: every tool on sample data, its code and R code,
   statistics checked against SciPy.
+- `test_sandbox.py`: the code check with ordinary and malicious code, the
+  runner, reading results back (planted links), and, marked `container`,
+  that the real sandbox has no home folder, storage or network.
 - `test_service.py`: background runs with a fake agent (results, cleanup,
   timeout, cancel, model download errors), previews, the ZIP and report.
 - `test_visualize_page.py`: the page imports only the service, and neither

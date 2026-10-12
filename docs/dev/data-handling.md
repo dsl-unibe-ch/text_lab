@@ -92,6 +92,19 @@ no longer matches anything also fails the test, so the lists stay accurate.
 permissions, cleanup of temporary folders on errors, and the refusal of
 folders owned by someone else.
 
+## Code written by a model
+
+Text a model reads can steer it (prompt injection): a cell of an uploaded
+table can tell it to write harmful code. Model-written code is therefore
+never run in the app's own process. The Visualization feature's custom
+chart tools check the code first and run it in a sandbox: a separate
+container started with `apptainer exec --containall --no-home --net
+--network none` with a clean environment (inside a container, Apptainer's
+`APPTAINER_BIND` would pass on the outer container's bind mounts), which
+sees a copy of the table and nothing else of the
+user's files, and has no network (see `features/visualization/sandbox.py`).
+Any new feature that runs model-written code must use the same sandbox.
+
 ## When you add or change a feature
 
 - Write temporary files only through `get_workspace()`, in the feature's own
