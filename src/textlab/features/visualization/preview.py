@@ -6,6 +6,10 @@ import io
 
 import pandas as pd
 
+from textlab.features.visualization.viz_utils import (
+    drop_empty_unnamed_columns,
+)
+
 #: Rows read for the preview and the column profile.
 PROFILE_ROWS = 2000
 
@@ -20,8 +24,16 @@ def read_preview(name: str, data: bytes, nrows: int = PROFILE_ROWS):
         nrows: Rows to read.
 
     Returns:
-        A ``pandas.DataFrame``, or ``None`` if the file cannot be read.
+        A ``pandas.DataFrame`` without empty header-less columns (see
+        :func:`.viz_utils.drop_empty_unnamed_columns`), or ``None`` if the
+        file cannot be read.
     """
+    df = _read_table(name, data, nrows)
+    return drop_empty_unnamed_columns(df) if df is not None else None
+
+
+def _read_table(name: str, data: bytes, nrows: int):
+    """Parse the first ``nrows`` rows of a table, or return ``None``."""
     lower = name.lower()
     try:
         if lower.endswith(".csv"):

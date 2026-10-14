@@ -112,9 +112,9 @@ Which test fits depends on the kind of columns you want to relate:
 | Two **numeric** columns | **Correlation** | Strength and direction of the relationship, p-value and confidence interval. Pearson (default), Spearman or Kendall |
 | A **numeric** column and **groups** | **Group comparison** | Whether the values differ between the groups, with an effect size and assumption checks (see below) |
 | Two **categorical** columns | **Association test** | The crosstab with row percentages, a chi-square test, and Cramér's V for the strength of the association. For a 2×2 table with small counts, Fisher's exact test is used instead |
-| A **numeric outcome** and predictors | **Linear regression** | Ordinary least squares with intercept: coefficients, p-values and R² |
-| A **yes/no outcome** and predictors | **Logistic regression** | Odds ratios with 95% confidence intervals, p-values and McFadden's pseudo R² |
-| One target and **all** numeric columns | **Correlation ranking** | Which columns are most strongly correlated with the target |
+| A **numeric outcome** and predictors | **Linear regression** | Ordinary least squares with intercept: coefficients with 95% confidence intervals, p-values, R² and adjusted R² |
+| A **yes/no outcome** and predictors | **Logistic regression** | Odds ratios with 95% confidence intervals, p-values and McFadden's pseudo R². For numeric predictors also the odds ratio per standard deviation |
+| One target and **all** numeric columns | **Correlation ranking** | Which columns are most strongly correlated with the target. Identifier columns such as *id* are left out |
 
 **Group comparisons** come in two versions:
 
@@ -124,18 +124,18 @@ Which test fits depends on the kind of columns you want to relate:
 | **Three or more groups** | One-way ANOVA with Tukey post-hoc tests. Effect size: partial eta squared | Kruskal-Wallis test with pairwise Mann-Whitney tests (Holm-corrected). Effect size: eta squared (H) |
 | **Use for** | Roughly normally distributed measurements | Ratings, Likert scales and ranks, small groups, or skewed data |
 
-Ask for a non-parametric test explicitly ("use a non-parametric test"), or let the AI choose: every group comparison reports **assumption checks**, a Shapiro-Wilk normality test per group and Levene's test for equal variances, and a note when they look violated. Post-hoc tests are shown for up to 10 groups.
+Ask for a non-parametric test explicitly ("use a non-parametric test"), or let the AI choose: every group comparison reports **assumption checks**, a Shapiro-Wilk normality test per group and Levene's test for equal variances, and a note when they look violated. When normality looks doubtful, a parametric comparison also runs the non-parametric test as a **robustness check**, so you can see whether the result holds without asking again. Post-hoc tests are shown for up to 10 groups.
 
 **Yes/no outcomes and categories:**
 
 * An outcome with two values, such as *yes/no*, *M/B* or *1/2*, is coded as 1 and 0 automatically. The result says which value counts as 1: a typical positive label such as *yes* or *M*, otherwise the larger number or the alphabetically later value.
 * Text predictors in a logistic regression are compared with their alphabetically first category (the *reference*).
 
-Rows with missing values in the columns of a test are left out of that test.
+Rows with missing values in the columns of a test are left out of that test. Empty columns without a name, which a comma at the end of every line of a CSV file creates, are ignored.
 
 ## Understanding the results
 
-* **Analysis Summary**: the supervisor's written summary of all results. The numbers in it come from the actual calculations, but the interpretation is written by the AI.
+* **Analysis Summary**: the supervisor's written summary of all results. The numbers in it come from the actual calculations, but the interpretation is written by the AI. If a test you asked for was not run, the summary says so.
 * **Statistical Analysis Results**: one card per test with the result table and its code.
 * **Generated Visualisations**: each chart with its code under *View Source Code*. Interactive charts can be zoomed and panned, show values when you hover over them, and can be saved as an image with the camera icon in their toolbar.
 
@@ -200,7 +200,9 @@ Click a problem to see what to do.
     Free-text columns (long texts such as comments) cannot be used for statistics; use them for word clouds. For two category columns (such as *sex* and *smoker*), ask for an association test instead of a correlation or t-test.
 
 ??? question "The logistic regression reports 'separation' or extremely large odds ratios"
-    One predictor (almost) perfectly predicts the outcome, so its effect cannot be estimated. Remove that predictor, or merge rare categories of it.
+    If the result reports separation, one predictor (almost) perfectly predicts the outcome, so its effect cannot be estimated. Remove that predictor, or merge rare categories of it.
+
+    Without that note, a huge odds ratio usually comes from a predictor measured on a small scale: the odds ratio is per one-unit increase, and a predictor that only ranges from 0 to 0.3 never increases by one unit. Read the **OR per SD** column instead, the odds ratio per standard deviation of the predictor.
 
 ??? question "'Some expected counts are below 5'"
     Some combinations of categories are too rare for a reliable chi-square test. Merge rare categories (for example combine small faculties into *Other*) and run the test again.

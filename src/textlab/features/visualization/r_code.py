@@ -15,7 +15,7 @@ Custom-code tools run arbitrary model-written Python and have no R snippet.
 
 import numbers
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any
 
 from textlab.features.visualization.viz_config import MAX_ROWS
@@ -619,6 +619,7 @@ def group_comparison(
     equal_sizes: bool | None,
     method: str = "parametric",
     posthoc: bool = False,
+    robustness: bool = False,
 ) -> str:
     """Group comparison mirroring ``run_group_comparison``.
 
@@ -633,9 +634,30 @@ def group_comparison(
         method: 'parametric' (t-test / ANOVA + Tukey) or 'nonparametric'
             (Mann-Whitney / Kruskal-Wallis + pairwise Mann-Whitney, Holm).
         posthoc: Whether the Python tool ran post-hoc comparisons.
+        robustness: Whether the Python tool added the non-parametric test
+            to a parametric one (because normality was doubtful).
     """
     target, group = r_str(target_col), r_str(group_col)
     formula = f"{r_col(target_col)} ~ factor({r_col(group_col)})"
+    wilcox = (
+        "# exact = FALSE gives the same large-sample p-value (with "
+        "continuity\n"
+        "# correction) as the Python version.\n"
+        "result <- wilcox.test(samples[[1]], samples[[2]], exact = FALSE, "
+        "correct = TRUE)\n"
+        "print(result)\n"
+        "n1 <- length(samples[[1]])\n"
+        "n2 <- length(samples[[2]])\n"
+        'cat("Rank-biserial r:", 2 * unname(result$statistic) / (n1 * n2) '
+        '- 1, "\\n")\n'
+    )
+    kruskal = (
+        f"result <- kruskal.test({formula}, data = clean_df)\n"
+        "print(result)\n"
+        "k <- length(groups)\n"
+        'cat("eta2[H]:", (unname(result$statistic) - k + 1) / '
+        '(nrow(clean_df) - k), "\\n")\n'
+    )
     body = (
         f"clean_df <- na.omit(df[, {r_vector([target_col, group_col])}])\n"
         f"groups <- c({', '.join(r_value(g) for g in groups)})\n"
@@ -661,26 +683,9 @@ def group_comparison(
         if posthoc:
             body += "print(TukeyHSD(model))\n"
     elif len(groups) == 2:
-        body += (
-            "# exact = FALSE gives the same large-sample p-value (with "
-            "continuity\n"
-            "# correction) as the Python version.\n"
-            "result <- wilcox.test(samples[[1]], samples[[2]], exact = FALSE, "
-            "correct = TRUE)\n"
-            "print(result)\n"
-            "n1 <- length(samples[[1]])\n"
-            "n2 <- length(samples[[2]])\n"
-            'cat("Rank-biserial r:", 2 * unname(result$statistic) / (n1 * n2) '
-            '- 1, "\\n")\n'
-        )
+        body += wilcox
     else:
-        body += (
-            f"result <- kruskal.test({formula}, data = clean_df)\n"
-            "print(result)\n"
-            "k <- length(groups)\n"
-            'cat("eta2[H]:", (unname(result$statistic) - k + 1) / '
-            '(nrow(clean_df) - k), "\\n")\n'
-        )
+        body += kruskal
         if posthoc:
             body += (
                 f"print(pairwise.wilcox.test(clean_df[[{target}]], "
@@ -688,6 +693,10 @@ def group_comparison(
                 '                           p.adjust.method = "holm", exact = '
                 "FALSE))\n"
             )
+    if robustness and method == "parametric":
+        body += "\n# Robustness check: the non-parametric test\n" + (
+            wilcox if len(groups) == 2 else kruskal
+        )
     body += (
         "\n# Assumption checks: Shapiro-Wilk per group (3 to 5000 values) "
         "and\n"
@@ -759,6 +768,7 @@ def logistic_regression(
     target_col: str,
     predictor_cols: list[str],
     encoding: tuple[Any, Any] | None,
+    numeric_cols: Sequence[str] = (),
 ) -> str:
     """Logistic regression with odds ratios, as ``run_logistic_regression``.
 
@@ -768,6 +778,8 @@ def logistic_regression(
         predictor_cols: The predictor columns.
         encoding: ``(positive, negative)`` values when the Python tool coded a
             two-value outcome as 1/0, otherwise None (outcome already 0/1).
+        numeric_cols: The numeric predictors, whose odds ratios per standard
+            deviation the Python tool also reports.
     """
     target = r_str(target_col)
     formula = f"{r_col(target_col)} ~ " + " + ".join(
@@ -798,6 +810,18 @@ def logistic_regression(
         'cat("McFadden pseudo R-squared:", 1 - model$deviance / '
         'model$null.deviance, "\\n")'
     )
+    if numeric_cols:
+        # A numeric predictor's coefficient is named like its term label.
+        positions = [predictor_cols.index(c) + 1 for c in numeric_cols]
+        body += (
+            "\n\n# Odds ratios per standard deviation of the numeric "
+            "predictors\n"
+            'terms_sd <- attr(terms(model), "term.labels")'
+            f"[c({', '.join(map(str, positions))})]\n"
+            f"sds <- sapply(clean_df[, {r_vector(list(numeric_cols))}, "
+            "drop = FALSE], sd)\n"
+            "print(exp(coef(model)[terms_sd] * sds))"
+        )
     return _header(data_file_path, []) + body
 
 
@@ -806,6 +830,7 @@ def rank_correlations(
     target_col: str,
     method: str,
     encoding: tuple[Any, Any] | None,
+    identifiers: Sequence[str] = (),
 ) -> str:
     """Correlation of every numeric column with the target, strongest first.
 
@@ -815,6 +840,7 @@ def rank_correlations(
         method: The correlation method, such as 'pearson' or 'spearman'.
         encoding: ``(positive, negative)`` values when the Python tool encoded
             a binary text target as 1/0, otherwise None.
+        identifiers: Row-identifier columns the Python tool left out.
     """
     target = r_str(target_col)
     body = ""
@@ -832,7 +858,8 @@ def rank_correlations(
         "num <- df[, sapply(df, is.numeric), drop = FALSE]\n"
         'corr <- cor(num, use = "pairwise.complete.obs", method = '
         f"{r_str(method)})[, {target}]\n"
-        f"corr <- corr[names(corr) != {target}]\n"
+        "corr <- corr[!(names(corr) %in% "
+        f"{r_vector([target_col, *identifiers])}) & !is.na(corr)]\n"
         "ranking <- corr[order(abs(corr), decreasing = TRUE)]\n"
         "print(data.frame(Feature = names(ranking), Correlation = "
         "unname(ranking)))"
