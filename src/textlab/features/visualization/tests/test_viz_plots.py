@@ -532,6 +532,31 @@ def test_logistic_regression_reports_odds_ratios(survey_file, r_enabled):
     assert "family = binomial" in output and "confint.default(model)" in output
 
 
+def test_logistic_regression_reports_odds_ratios_per_sd(tmp_path, r_enabled):
+    rng = np.random.RandomState(1)
+    small = rng.uniform(0, 0.3, 200)  # a predictor on a small scale
+    outcome = (small + rng.normal(0, 0.08, 200) > 0.15).astype(int)
+    path = tmp_path / "small_scale.csv"
+    pd.DataFrame({"y": outcome, "small": small}).to_csv(path, index=False)
+
+    output = stats_analysis.run_logistic_regression_impl(
+        str(path), "y", ["small"]
+    )
+
+    assert "OR per SD" in output and "standard deviation" in output
+    row = next(
+        line for line in output.splitlines() if line.startswith("| Q('small')")
+    )
+    cells = [cell.strip() for cell in row.split("|")]
+    per_unit, per_sd = float(cells[-5]), float(cells[-2])
+    assert per_sd < per_unit  # 0.3 units span ~3.5 SDs of this predictor
+    assert "sd_terms = {'small': \"Q('small')\"}" in output
+    assert "so it never changes by one unit" in output
+    assert "No separation was detected" in output
+    assert 'attr(terms(model), "term.labels")[c(1)]' in output
+    assert 'sds <- sapply(clean_df[, c("small"), drop = FALSE], sd)' in output
+
+
 def test_logistic_regression_handles_perfect_separation(tmp_path):
     path = tmp_path / "separated.csv"
     pd.DataFrame(
@@ -564,3 +589,124 @@ def test_logistic_regression_needs_a_binary_outcome(survey_file):
 )
 def test_binary_encoding_is_deterministic(values, expected):
     assert stats_analysis._binary_encoding(values) == expected
+
+
+def _ranking_file(tmp_path):
+    """A CSV like the Breast Cancer Wisconsin one: id, trailing commas."""
+    rows = ["id,diagnosis,radius_mean,texture_mean,flat,"]
+    values = [
+        (842302, "M", 17.99, 10.38),
+        (842517, "M", 20.57, 17.77),
+        (84300903, "M", 19.69, 21.25),
+        (84348301, "B", 11.42, 20.38),
+        (84358402, "B", 12.45, 15.70),
+        (843786, "B", 13.08, 19.98),
+    ]
+    rows += [f"{i},{d},{r},{t},1.0," for i, d, r, t in values]
+    path = tmp_path / "wdbc.csv"
+    path.write_text("\n".join(rows) + "\n")
+    return str(path)
+
+
+def test_loading_drops_empty_unnamed_columns(tmp_path):
+    columns = viz_utils.load_data_safely(_ranking_file(tmp_path)).columns
+    assert list(columns) == [
+        "id",
+        "diagnosis",
+        "radius_mean",
+        "texture_mean",
+        "flat",
+    ]
+
+
+def test_ranking_leaves_out_identifiers_and_matches_its_code(
+    tmp_path, r_enabled, capsys
+):
+    path = _ranking_file(tmp_path)
+    output = stats_analysis.rank_target_correlations_impl(path, "diagnosis")
+
+    table = output.split("```python")[0]
+    assert "Left out as row identifiers: id." in table
+    assert "Left out (no variation or no values): flat." in table
+    assert "| id " not in table and "Unnamed" not in table
+    features = [
+        line.split("|")[1].strip()
+        for line in table.splitlines()
+        if line.startswith("| ") and "Feature" not in line
+    ]
+    assert features == ["radius_mean", "texture_mean"]
+
+    code = output.split("```python\n")[1].split("```")[0]
+    exec(code.replace("your_data.csv", path), {})
+    printed = capsys.readouterr().out
+    assert printed.index("radius_mean") < printed.index("texture_mean")
+    assert "id " not in printed and "flat" not in printed
+    assert 'c("diagnosis", "id")' in output and "!is.na(corr)" in output
+
+
+def test_linear_regression_reports_a_table_and_weak_predictors(
+    tmp_path, r_enabled
+):
+    rng = np.random.RandomState(0)
+    x = np.arange(20.0)
+    z = np.tile([1.0, -1.0], 10)
+    # Noise orthogonal to the intercept, x and z: z's coefficient is 0.
+    basis = np.column_stack([np.ones(20), x, z])
+    noise = rng.normal(size=20)
+    noise -= basis @ np.linalg.lstsq(basis, noise, rcond=None)[0]
+    path = tmp_path / "linear.csv"
+    pd.DataFrame({"y": 2 * x + noise, "x": x, "z": z}).to_csv(
+        path, index=False
+    )
+
+    output = stats_analysis.run_linear_regression_impl(
+        str(path), "y", ["x", "z"]
+    )
+
+    assert "OLS Regression Results" not in output  # no statsmodels dump
+    header, *rows = output.split("\n\n")[1].splitlines()
+    assert [c.strip() for c in header.split("|")][2:-1] == [
+        "coef",
+        "std err",
+        "t",
+        "p-val",
+        "CI 2.5%",
+        "CI 97.5%",
+    ]
+    assert [r.split("|")[1].strip() for r in rows[1:]] == ["const", "x", "z"]
+    assert "n = 20, R-squared = " in output and "F-test p = " in output
+    assert "are in the model: z." in output
+    assert "lm(`y` ~ `x` + `z`" in output
+
+
+def _skewed_groups_file(tmp_path):
+    rng = np.random.RandomState(0)
+    values = np.concatenate(
+        [rng.exponential(1.0, 40), rng.exponential(3.0, 40)]
+    )
+    path = tmp_path / "skewed.csv"
+    pd.DataFrame({"g": ["a"] * 40 + ["b"] * 40, "y": values}).to_csv(
+        path, index=False
+    )
+    return str(path)
+
+
+def test_doubtful_normality_adds_a_nonparametric_check(tmp_path, r_enabled):
+    output = stats_analysis.run_group_comparison_impl(
+        _skewed_groups_file(tmp_path), "y", "g"
+    )
+
+    assert "Independent t-test" in output
+    assert "Robustness check (non-parametric" in output
+    assert "Mann-Whitney U test" in output
+    assert "nonparametric'" not in output  # no parameter names for users
+    assert "# Robustness check" in output and "wilcox.test(" in output
+
+
+def test_a_nonparametric_run_adds_no_robustness_check(tmp_path):
+    output = stats_analysis.run_group_comparison_impl(
+        _skewed_groups_file(tmp_path), "y", "g", method="nonparametric"
+    )
+
+    assert "Mann-Whitney U test" in output
+    assert "Robustness check" not in output

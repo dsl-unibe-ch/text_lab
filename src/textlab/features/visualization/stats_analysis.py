@@ -9,6 +9,7 @@ the Python call is configured so both give the same numbers (noted inline).
 """
 
 import math
+import re
 import warnings
 
 import numpy as np
@@ -51,6 +52,11 @@ _POSTHOC_MAX_GROUPS = 10
 _SHAPIRO_MIN_N, _SHAPIRO_MAX_N = 3, 5000
 # Crosstabs larger than this usually mean a numeric column was passed.
 _MAX_CROSSTAB_CELLS = 400
+# Log-odds coefficient above which a per-unit odds ratio counts as extreme
+# (an odds ratio above 1000 or below 1/1000).
+_EXTREME_LOG_ODDS = math.log(1000)
+# Column names of row identifiers: "id", "patient_id", "Sample ID", ...
+_IDENTIFIER_NAME_RE = re.compile(r"(?:.*[\W_])?id", re.IGNORECASE)
 
 
 def _py_literal(value) -> str:
@@ -84,6 +90,21 @@ def _binary_encoding(values) -> tuple | None:
         1,
     )
     return ordered[pos_idx], ordered[1 - pos_idx]
+
+
+def _identifier_columns(df: pd.DataFrame) -> list:
+    """Return integer columns that only number the rows, such as 'id'.
+
+    A column counts as an identifier when its name says so and every value
+    is different. Its correlation with anything is meaningless.
+    """
+    return [
+        column
+        for column in df.columns
+        if _IDENTIFIER_NAME_RE.fullmatch(str(column))
+        and pd.api.types.is_integer_dtype(df[column])
+        and df[column].dropna().is_unique
+    ]
 
 
 def _stats_code_header(data_file_path: str) -> str:
@@ -157,13 +178,20 @@ def run_correlation_impl(
 
 
 def _assumption_checks(
-    samples: list[pd.Series], groups: list
-) -> tuple[str, list[str], str]:
+    samples: list[pd.Series], groups: list, method: str
+) -> tuple[str, list[str], str, bool]:
     """Shapiro-Wilk per group and Levene's test, as markdown plus plain notes.
 
+    Args:
+        samples: The values of each group.
+        groups: The group labels, in the order of ``samples``.
+        method: The comparison that was run, 'parametric' or
+            'nonparametric'; it decides what the normality note says.
+
     Returns:
-        ``(markdown, notes, python_code)`` where ``notes`` flags violated
-        assumptions in words the model and the user can act on.
+        ``(markdown, notes, python_code, normality_doubtful)`` where
+        ``notes`` flags violated assumptions in words the model and the user
+        can act on.
     """
     rows = []
     for group, values in zip(groups, samples, strict=False):
@@ -182,11 +210,16 @@ def _assumption_checks(
     lev_w, lev_p = stats.levene(*samples, center="median")
 
     notes = []
-    if (normality["p-val"].dropna() < 0.05).any():
+    normality_doubtful = bool((normality["p-val"].dropna() < 0.05).any())
+    if normality_doubtful:
         notes.append(
             "Normality is doubtful in at least one group (Shapiro-Wilk p < "
             "0.05); "
-            "with small groups, consider method='nonparametric'."
+            + (
+                "the non-parametric robustness check below does not assume it."
+                if method == "parametric"
+                else "the non-parametric test used here does not assume it."
+            )
         )
     if lev_p < 0.05:
         notes.append("Group variances differ (Levene p < 0.05).")
@@ -213,7 +246,63 @@ def _assumption_checks(
         "        print(group, stats.shapiro(values))\n"
         "print(stats.levene(*samples, center='median'))\n"
     )
-    return markdown, notes, code
+    return markdown, notes, code, normality_doubtful
+
+
+def _mann_whitney(
+    samples: list[pd.Series], groups: list, target_col: str, group_col: str
+) -> tuple[str, str]:
+    """Mann-Whitney U test of two groups, as ``(markdown, python_code)``."""
+    n1, n2 = len(samples[0]), len(samples[1])
+    # method="asymptotic" matches R's wilcox.test(exact = FALSE); SciPy's
+    # default switches to an exact test at a different sample size.
+    u, p = stats.mannwhitneyu(
+        samples[0],
+        samples[1],
+        use_continuity=True,
+        alternative="two-sided",
+        method="asymptotic",
+    )
+    rbc = 2 * u / (n1 * n2) - 1
+    table = pd.DataFrame(
+        [{"U": u, "p-val": p, "rank-biserial r": rbc, "n1": n1, "n2": n2}]
+    )
+    markdown = (
+        f"Mann-Whitney U test for '{target_col}' grouped by '{group_col}' "
+        f"(Groups: {groups[0]} vs {groups[1]}; rank-biserial r > 0 means "
+        f"'{groups[0]}' tends to have larger "
+        f"values):\n\n{table.to_markdown(index=False)}"
+    )
+    code = (
+        "u, p = stats.mannwhitneyu(samples[0], samples[1], "
+        "use_continuity=True,\n"
+        "                          alternative='two-sided', "
+        "method='asymptotic')\n"
+        "rbc = 2 * u / (len(samples[0]) * len(samples[1])) - 1\n"
+        "print(u, p, rbc)\n"
+    )
+    return markdown, code
+
+
+def _kruskal_wallis(
+    samples: list[pd.Series], target_col: str, group_col: str, n: int
+) -> tuple[str, str]:
+    """Kruskal-Wallis test of 3+ groups, as ``(markdown, python_code)``."""
+    k = len(samples)
+    h, p = stats.kruskal(*samples)
+    eta2 = (h - k + 1) / (n - k)
+    table = pd.DataFrame(
+        [{"H": h, "dof": k - 1, "p-val": p, "eta2[H]": eta2, "n": n}]
+    )
+    markdown = (
+        f"Kruskal-Wallis test for '{target_col}' grouped by '{group_col}' "
+        f"({k} groups):\n\n{table.to_markdown(index=False)}"
+    )
+    code = (
+        "h, p = stats.kruskal(*samples)\n"
+        f"print(h, p, (h - {k} + 1) / ({n} - {k}))\n"
+    )
+    return markdown, code
 
 
 def run_group_comparison_impl(
@@ -281,7 +370,9 @@ def run_group_comparison_impl(
                 "remove them or merge rare groups."
             )
 
-        checks_md, notes, checks_code = _assumption_checks(samples, groups)
+        checks_md, notes, checks_code, normality_doubtful = _assumption_checks(
+            samples, groups, method
+        )
         sections: list[str] = []
         equal_sizes = (
             len(samples[0]) == len(samples[1]) if len(groups) == 2 else None
@@ -335,60 +426,17 @@ def run_group_comparison_impl(
                     f"between={group_col!r}))\n"
                 )
         elif k == 2:
-            n1, n2 = len(samples[0]), len(samples[1])
-            # method="asymptotic" matches R's wilcox.test(exact = FALSE);
-            # SciPy's default switches to an exact test at a different sample
-            # size.
-            u, p = stats.mannwhitneyu(
-                samples[0],
-                samples[1],
-                use_continuity=True,
-                alternative="two-sided",
-                method="asymptotic",
+            markdown, test_code = _mann_whitney(
+                samples, groups, target_col, group_col
             )
-            rbc = 2 * u / (n1 * n2) - 1
-            table = pd.DataFrame(
-                [
-                    {
-                        "U": u,
-                        "p-val": p,
-                        "rank-biserial r": rbc,
-                        "n1": n1,
-                        "n2": n2,
-                    }
-                ]
-            )
-            sections.append(
-                f"Mann-Whitney U test for '{target_col}' grouped by "
-                f"'{group_col}' "
-                f"(Groups: {groups[0]} vs {groups[1]}; rank-biserial r > 0 "
-                "means "
-                f"'{groups[0]}' tends to have larger "
-                f"values):\n\n{table.to_markdown(index=False)}"
-            )
-            code_logic += (
-                "u, p = stats.mannwhitneyu(samples[0], samples[1], "
-                "use_continuity=True,\n"
-                "                          alternative='two-sided', "
-                "method='asymptotic')\n"
-                "rbc = 2 * u / (len(samples[0]) * len(samples[1])) - 1\n"
-                "print(u, p, rbc)\n"
-            )
+            sections.append(markdown)
+            code_logic += test_code
         else:
-            h, p = stats.kruskal(*samples)
-            eta2 = (h - k + 1) / (n - k)
-            table = pd.DataFrame(
-                [{"H": h, "dof": k - 1, "p-val": p, "eta2[H]": eta2, "n": n}]
+            markdown, test_code = _kruskal_wallis(
+                samples, target_col, group_col, n
             )
-            sections.append(
-                f"Kruskal-Wallis test for '{target_col}' grouped by "
-                f"'{group_col}' "
-                f"({k} groups):\n\n{table.to_markdown(index=False)}"
-            )
-            code_logic += (
-                "h, p = stats.kruskal(*samples)\n"
-                f"print(h, p, (h - {k} + 1) / ({n} - {k}))\n"
-            )
+            sections.append(markdown)
+            code_logic += test_code
             if posthoc:
                 pairs, pvals = [], []
                 for i in range(k):
@@ -426,6 +474,25 @@ def run_group_comparison_impl(
                     "         for i, j in pairs]\n"
                     "print(multipletests(pvals, method='holm')[1])\n"
                 )
+        # Doubtful normality: also run the non-parametric test, so the user
+        # sees whether the result holds without asking for a second run.
+        robustness = method == "parametric" and normality_doubtful
+        if robustness:
+            if k == 2:
+                markdown, test_code = _mann_whitney(
+                    samples, groups, target_col, group_col
+                )
+            else:
+                markdown, test_code = _kruskal_wallis(
+                    samples, target_col, group_col, n
+                )
+            sections.append(
+                "Robustness check (non-parametric, because normality is "
+                f"doubtful): {markdown}"
+            )
+            code_logic += (
+                "\n# Robustness check: the non-parametric test\n" + test_code
+            )
         if k >= 3 and not posthoc:
             notes.append(
                 "Post-hoc comparisons are skipped for more than "
@@ -455,6 +522,7 @@ def run_group_comparison_impl(
             equal_sizes,
             method,
             posthoc,
+            robustness,
         )
         return _with_r_block(
             "\n\n".join(sections) + f"\n\n```python\n{code}\n```", r_snippet
@@ -614,8 +682,8 @@ def run_linear_regression_impl(
         predictor_cols: A list of independent variables (X).
 
     Returns:
-        A formatted string of the statsmodels regression summary + reproducible
-        code, or an error message.
+        A markdown coefficient table with the model fit + reproducible code,
+        or an error message.
     """
     try:
         df = load_data_safely(data_file_path)
@@ -648,6 +716,33 @@ def run_linear_regression_impl(
         y = clean_df[target_col]
         model = sm.OLS(y, X).fit()
 
+        # A table instead of statsmodels' text summary: that summary does not
+        # render as markdown, and models misread its many statistics.
+        conf = model.conf_int()
+        table = pd.DataFrame(
+            {
+                "coef": model.params,
+                "std err": model.bse,
+                "t": model.tvalues,
+                "p-val": model.pvalues,
+                "CI 2.5%": conf[0],
+                "CI 97.5%": conf[1],
+            }
+        )
+        sections = [
+            f"OLS Linear Regression Results (Target: {target_col}):\n\n"
+            f"{table.to_markdown()}",
+            f"n = {int(model.nobs)}, R-squared = {model.rsquared:.4f}, "
+            f"adjusted R-squared = {model.rsquared_adj:.4f}, "
+            f"F-test p = {model.f_pvalue:.4g}",
+        ]
+        weak = [c for c in predictor_cols if model.pvalues[c] >= 0.05]
+        if weak:
+            sections.append(
+                "Note: not significant (p >= 0.05) when the other predictors "
+                f"are in the model: {', '.join(map(str, weak))}."
+            )
+
         pred_list = str(predictor_cols)
         code = (
             _stats_code_header(data_file_path)
@@ -663,9 +758,7 @@ def run_linear_regression_impl(
             r_code.regression, data_file_path, target_col, predictor_cols
         )
         return _with_r_block(
-            f"OLS Linear Regression Results (Target: {target_col}):\n\n"
-            f"{model.summary().as_text()}\n\n"
-            f"```python\n{code}\n```",
+            "\n\n".join(sections) + f"\n\n```python\n{code}\n```",
             r_snippet,
         )
     except Exception as e:
@@ -771,9 +864,10 @@ def run_logistic_regression_impl(
                     "predictors duplicate each other. Remove the predictor "
                     "concerned."
                 )
-        if any(
+        separated = any(
             issubclass(w.category, PerfectSeparationWarning) for w in caught
-        ):
+        )
+        if separated:
             notes.append(
                 "Perfect or quasi-perfect separation detected: some estimates "
                 "and odds "
@@ -786,6 +880,16 @@ def run_logistic_regression_impl(
             )
 
         conf = model.conf_int()
+        # Per one-unit odds ratios explode for predictors on small scales
+        # (e.g. 0 to 0.3); per standard deviation they stay comparable.
+        sd_terms = {
+            c: _formula_term(c, False)
+            for c in predictor_cols
+            if not categorical[c]
+        }
+        per_sd = pd.Series(np.nan, index=model.params.index)
+        for column, term in sd_terms.items():
+            per_sd[term] = np.exp(model.params[term] * clean_df[column].std())
         table = pd.DataFrame(
             {
                 "coef": model.params,
@@ -798,6 +902,7 @@ def run_logistic_regression_impl(
                 "odds ratio": np.exp(model.params),
                 "OR 2.5%": np.exp(conf[0]),
                 "OR 97.5%": np.exp(conf[1]),
+                "OR per SD": per_sd,
             }
         )
         coding = (
@@ -812,6 +917,30 @@ def run_logistic_regression_impl(
             f"{model.prsquared:.4f}, "
             f"likelihood-ratio test p = {model.llr_pvalue:.4g}",
         ]
+        # An extreme per-unit odds ratio without separation comes from the
+        # predictor's small scale; said here so it is not taken for a flaw.
+        for column, term in sd_terms.items():
+            values = clean_df[column]
+            if (
+                not separated
+                and abs(model.params[term]) >= _EXTREME_LOG_ODDS
+                and values.max() - values.min() < 1
+            ):
+                sections.append(
+                    f"Note: the odds ratio of '{column}' "
+                    f"({np.exp(model.params[term]):.3g}) is per one-unit "
+                    f"increase, but '{column}' only ranges from "
+                    f"{values.min():.3g} to {values.max():.3g} (SD "
+                    f"{values.std():.3g}), so it never changes by one unit. "
+                    "No separation was detected; per standard deviation the "
+                    f"odds ratio is {per_sd[term]:.3g}."
+                )
+        if sd_terms:
+            sections.append(
+                "Note: 'odds ratio' is per one-unit increase of a predictor; "
+                "'OR per SD' is per increase of one standard deviation, which "
+                "compares predictors measured on different scales."
+            )
         if any(categorical.values()):
             sections.append(
                 "Note: categorical predictors are compared with their "
@@ -840,12 +969,20 @@ def run_logistic_regression_impl(
             + "print(np.exp(model.params))      # odds ratios\n"
             + "print(np.exp(model.conf_int()))  # 95% CI of the odds ratios"
         )
+        if sd_terms:
+            code += (
+                f"\n\nsd_terms = {sd_terms!r}\n"
+                "for col, term in sd_terms.items():  # odds ratio per SD\n"
+                "    print(col, np.exp(model.params[term] * "
+                "clean_df[col].std()))"
+            )
         r_snippet = r_code.build(
             r_code.logistic_regression,
             data_file_path,
             target_col,
             predictor_cols,
             encoding,
+            list(sd_terms),
         )
         return _with_r_block(
             "\n\n".join(sections) + f"\n\n```python\n{code}\n```", r_snippet
@@ -914,9 +1051,17 @@ def rank_target_correlations_impl(
                 "numerically."
             )
 
+        identifiers = [
+            c for c in _identifier_columns(numeric_df) if c != target_col
+        ]
         correlations = numeric_df.corr(method=method)[target_col].drop(
-            target_col
+            [target_col] + identifiers
         )
+        # Constant or empty columns have no correlation (NaN).
+        no_variation = [
+            str(c) for c in correlations.index[correlations.isna()]
+        ]
+        correlations = correlations.dropna()
 
         if correlations.empty:
             return (
@@ -935,14 +1080,30 @@ def rank_target_correlations_impl(
             .drop(columns=["Absolute Strength"])
         )
 
+        notes = []
+        if identifiers:
+            notes.append(
+                "Left out as row identifiers: "
+                f"{', '.join(map(str, identifiers))}."
+            )
+        if no_variation:
+            notes.append(
+                "Left out (no variation or no values): "
+                f"{', '.join(no_variation)}."
+            )
+
+        excluded = [target_col] + identifiers
         code = (
             _stats_code_header(data_file_path)
             + binary_encode_snippet
             + "corr = "
             "df.select_dtypes(include='number')"
-            f".corr(method='{method}')['{target_col}']\n" + "corr = "
-            f"corr.drop('{target_col}').abs().sort_values(ascending=False)\n"
-            + "print(corr)"
+            f".corr(method={method!r})[{target_col!r}]\n"
+            f"corr = corr.drop({excluded!r}).dropna()\n"
+            "# Strongest first, keeping the sign\n"
+            "corr = corr.reindex(corr.abs().sort_values(ascending=False)"
+            ".index)\n"
+            "print(corr)"
         )
         r_snippet = r_code.build(
             r_code.rank_correlations,
@@ -950,13 +1111,15 @@ def rank_target_correlations_impl(
             target_col,
             method,
             encoding,
+            identifiers,
         )
-        return _with_r_block(
+        result = (
             "Correlation Ranking with respect to target column "
             f"'{target_col}' ({method}):\n\n"
-            f"{ranking_df.to_markdown(index=False)}\n\n"
-            f"```python\n{code}\n```",
-            r_snippet,
+            f"{ranking_df.to_markdown(index=False)}"
         )
+        if notes:
+            result += "\n\n" + "\n".join(notes)
+        return _with_r_block(f"{result}\n\n```python\n{code}\n```", r_snippet)
     except Exception as e:
         return f"Error ranking correlations: {str(e)}"

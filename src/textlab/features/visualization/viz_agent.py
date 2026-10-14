@@ -96,8 +96,10 @@ COLUMN_PARAMS = frozenset(
     }
 )
 COLUMN_LIST_PARAMS = frozenset({"predictor_cols"})
-# Above this many columns the enums are left out to keep tool schemas short.
-MAX_ENUM_COLUMNS = 150
+# Above this many columns the enums are left out to keep tool schemas short:
+# every column parameter repeats the full list, so the stats tools' eleven
+# column parameters cost about 50 tokens per column.
+MAX_ENUM_COLUMNS = 50
 
 # Minimum difflib similarity for mapping a misspelled tool name onto an allowed
 # tool, e.g. 'run_rank_target_correlations' -> 'rank_target_correlations'.
@@ -105,7 +107,7 @@ TOOL_NAME_CUTOFF = 0.7
 
 INTERPRET_INSTRUCTION = (
     "Write a short plain-English interpretation of the statistical results "
-    "above. Do not call any tools."
+    "above, using only their numbers. Do not call any tools."
 )
 
 # The supervisor returns its plan as JSON via Ollama structured output instead
@@ -234,11 +236,6 @@ def _new_report(role: str, instruction: str) -> WorkerReport:
     }
 
 
-def _tool_message(tool_name: str, content: str) -> dict[str, Any]:
-    """Build a ``tool`` role message for the Ollama chat history."""
-    return {"role": "tool", "tool_name": tool_name, "content": content}
-
-
 def _parse_tool_call(tool_call: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     """Return ``(name, arguments)`` of a tool call; args may be JSON text."""
     function = tool_call.get("function", {})
@@ -359,6 +356,101 @@ def _fix_column_args(
         if isinstance(tool_args[name], list):
             tool_args[name] = [fix(v) for v in tool_args[name]]
     return fixes
+
+
+def _check_tool_args(
+    tool_name: str,
+    parameters: dict[str, Any] | None,
+    tool_args: dict[str, Any],
+) -> tuple[str | None, list[str]]:
+    """Check a call's arguments against the tool's schema before running it.
+
+    Models sometimes invent parameter names (e.g. ``col1`` for ``x_column``).
+    The server's validation error for that is long, repeats the hidden file
+    path and never names the expected parameters, so the call is checked here
+    and the model gets a short error listing them instead. Unknown arguments
+    are dropped when every required one is present.
+
+    Args:
+        tool_name: The tool being called.
+        parameters: The tool's parameter schema as shown to the model, or
+            None if it is not known (then nothing is checked).
+        tool_args: The model's arguments; unknown ones are removed in place.
+
+    Returns:
+        ``(error, dropped)``: an error message for the model, or None if the
+        call can run, and the names of the unknown arguments dropped.
+    """
+    properties = (parameters or {}).get("properties") or {}
+    if not properties:
+        return None, []
+    required = [
+        name for name in parameters.get("required", []) if name in properties
+    ]
+    missing = [name for name in required if tool_args.get(name) is None]
+    unknown = [name for name in tool_args if name not in properties]
+    if missing:
+        accepted = ", ".join(
+            f"{name} ({'required' if name in required else 'optional'})"
+            for name in properties
+        )
+        parts = [
+            f"Error: wrong arguments for '{tool_name}'.",
+            f"Missing: {', '.join(missing)}.",
+        ]
+        if unknown:
+            parts.append(f"Not parameters of this tool: {', '.join(unknown)}.")
+        parts.append(f"Its parameters are: {accepted}.")
+        return " ".join(parts), []
+    for name in unknown:
+        del tool_args[name]
+    return None, unknown
+
+
+def _hide_paths(text: str, data_file_path: str) -> str:
+    """Remove the dataset's path and run folder from text for the model."""
+    run_dir = os.path.dirname(data_file_path)
+    text = text.replace(data_file_path, "the dataset")
+    return text.replace(run_dir + os.sep, "") if run_dir else text
+
+
+def _describe_call(tool_name: str, tool_args: dict[str, Any]) -> str:
+    """Render a tool call as ``name({...})`` for a retry prompt."""
+    shown = {k: v for k, v in tool_args.items() if k not in INJECTED_ARGS}
+    return f"{tool_name}({json.dumps(shown, ensure_ascii=False, default=str)})"
+
+
+def _retry_messages(
+    task_messages: list[dict[str, Any]],
+    done_calls: list[str],
+    failed_calls: list[str],
+) -> list[dict[str, Any]]:
+    """Build a fresh, short request for a worker's retry round.
+
+    Instead of growing the chat history with every tool call and its full
+    result, a retry repeats the original task and adds which calls already
+    succeeded and which failed with what error. This keeps each request far
+    below the context window: when Ollama has to cut a too-long request it
+    drops the oldest messages, including the task itself, which made models
+    lose track (or the server reject the request) after one round.
+    """
+    system, task = task_messages
+    parts = [str(task["content"])]
+    if done_calls:
+        parts.append(
+            "These tool calls already succeeded. Do not repeat them:\n"
+            + "\n".join(f"- {call}" for call in done_calls)
+        )
+    parts.append(
+        "These tool calls failed. Correct them and make only these calls "
+        "again:\n" + "\n".join(failed_calls)
+    )
+    return [system, {"role": "user", "content": "\n\n".join(parts)}]
+
+
+def _cut_off(response: dict[str, Any]) -> bool:
+    """Return True if a reply stopped because the context window was full."""
+    return response.get("done_reason") == "length"
 
 
 def _dataset_columns(data_file_path: str) -> list[str]:
@@ -616,33 +708,76 @@ async def _run_worker_agent(
 
     Each round is one LLM call plus the tool calls it requests. The loop only
     continues while tool calls keep failing, so a fully successful round ends
-    the worker:
-
-    * plot workers return immediately (no extra "I am done" LLM turn);
-    * stats workers get one tool-free turn to interpret the numbers.
+    the worker. Plot workers then return immediately (no extra "I am done"
+    LLM turn); stats workers get one tool-free turn to interpret the numbers,
+    also when they stopped with only part of their tests done.
 
     When the iteration limit is reached, everything that did succeed is still
     returned together with the unresolved errors.
     """
     report = _new_report(agent_role, task_instruction)
+    await _run_worker_rounds(
+        report,
+        session,
+        data_file_path,
+        schema,
+        model_name,
+        global_plots,
+        global_stats,
+        log,
+        cancel_event,
+    )
+    cancelled = cancel_event is not None and cancel_event.is_set()
+    if agent_role == "stats" and report["stats"] and not cancelled:
+        log("info", f"Worker '{agent_role}' is interpreting the results.")
+        report["text"] = await _interpret_stats(model_name, report, log)
+    if report["completed"]:
+        log("info", f"Worker '{agent_role}' finished task successfully.")
+    return report
+
+
+async def _run_worker_rounds(
+    report: WorkerReport,
+    session: ClientSession,
+    data_file_path: str,
+    schema: str,
+    model_name: str,
+    global_plots: list[PlotArtifact],
+    global_stats: list[StatsArtifact],
+    log: LogFn,
+    cancel_event: threading.Event | None,
+) -> None:
+    """Run a worker's tool-calling rounds, filling ``report`` in place.
+
+    A retry round does not continue the chat history: it sends the task
+    again with the calls that succeeded and the ones that failed (see
+    :func:`_retry_messages`), so requests stay short however many tools ran.
+    """
+    agent_role = report["role"]
     allowed_tools = AGENT_TOOLS.get(agent_role, [])
     # Cached in-process by load_data_safely, so this does not re-read the file.
     columns = await asyncio.to_thread(_dataset_columns, data_file_path)
     tools = await _get_mcp_tools(
         session, allowed_names=allowed_tools, columns=columns
     )
+    parameters = {
+        tool["function"]["name"]: tool["function"]["parameters"]
+        for tool in tools
+    }
 
-    messages: list[dict[str, Any]] = [
+    task_messages: list[dict[str, Any]] = [
         {"role": "system", "content": WORKER_PROMPTS[agent_role]},
         {
             "role": "user",
             "content": (
                 "Dataset schema (already loaded — use your tools to analyze "
                 f"it):\n{schema}\n\n"
-                f"Task: {task_instruction}"
+                f"Task: {report['instruction']}"
             ),
         },
     ]
+    messages = task_messages
+    done_calls: list[str] = []
 
     log("info", f"Supervisor delegated task to '{agent_role}' agent.")
 
@@ -650,7 +785,7 @@ async def _run_worker_agent(
         if cancel_event and cancel_event.is_set():
             log("warning", f"Worker '{agent_role}' cancelled by user.")
             report["errors"].append("Cancelled by user.")
-            return report
+            return
 
         try:
             response = await _chat(model_name, messages, tools)
@@ -658,15 +793,16 @@ async def _run_worker_agent(
             reason = _describe_model_error(exc)
             log("error", f"Worker '{agent_role}' stopped: {reason}")
             report["errors"].append(reason)
-            return report
-        messages.append(response["message"])
+            return
 
         tool_calls = response["message"].get("tool_calls")
         if not tool_calls:
-            report["text"] = _model_text(response["message"])
+            # A stats worker's results are interpreted separately; text it
+            # writes instead of retrying would only replace that.
+            if not (agent_role == "stats" and report["stats"]):
+                report["text"] = _model_text(response["message"])
             report["completed"] = True
-            log("info", f"Worker '{agent_role}' finished task successfully.")
-            return report
+            return
 
         log(
             "info",
@@ -678,6 +814,7 @@ async def _run_worker_agent(
         round_errors: list[str] = []
         round_stats: list[str] = []
         round_plots: list[str] = []
+        failed_calls: list[str] = []
 
         for tool_call in tool_calls:
             requested_name, tool_args = _parse_tool_call(tool_call)
@@ -695,7 +832,9 @@ async def _run_worker_agent(
                     "Retrying...",
                 )
                 round_errors.append(error)
-                messages.append(_tool_message(requested_name, error))
+                failed_calls.append(
+                    f"- {_describe_call(requested_name, tool_args)}: {error}"
+                )
                 continue
             if tool_name != requested_name:
                 log(
@@ -712,17 +851,42 @@ async def _run_worker_agent(
                 )
             for name in INJECTED_ARGS:
                 tool_args.pop(name, None)
-            tool_args["data_file_path"] = data_file_path
+            call = _describe_call(tool_name, tool_args)
 
-            try:
-                succeeded, output = await _call_tool(
-                    session, tool_name, tool_args
+            error, dropped = _check_tool_args(
+                tool_name, parameters.get(tool_name), tool_args
+            )
+            if dropped:
+                log(
+                    "info",
+                    f"Worker '{agent_role}' passed unknown arguments to "
+                    f"'{tool_name}' ({', '.join(dropped)}); ignoring them.",
                 )
-            except Exception as exc:
-                succeeded, output = (
-                    False,
-                    f"Error: tool '{tool_name}' crashed: {exc}",
-                )
+            if error is None:
+                call = _describe_call(tool_name, tool_args)
+                # Retry rounds often repeat calls that already worked. Their
+                # results can differ (e.g. a timestamp), so they are matched
+                # by tool and arguments, not by output.
+                if call in done_calls:
+                    log(
+                        "info",
+                        f"Worker '{agent_role}' repeated '{tool_name}' with "
+                        "the same arguments; skipping it.",
+                    )
+                    continue
+            if error is not None:
+                succeeded, output = False, error
+            else:
+                tool_args["data_file_path"] = data_file_path
+                try:
+                    succeeded, output = await _call_tool(
+                        session, tool_name, tool_args
+                    )
+                except Exception as exc:
+                    succeeded, output = (
+                        False,
+                        f"Error: tool '{tool_name}' crashed: {exc}",
+                    )
 
             if succeeded and tool_name in PLOT_TOOLS:
                 succeeded = _record_plot(global_plots, tool_name, output)
@@ -730,6 +894,7 @@ async def _run_worker_agent(
                     output = "Error: the plot tool did not return a plot file."
 
             if not succeeded:
+                output = _hide_paths(output, data_file_path)
                 log(
                     "warning",
                     f"Worker '{agent_role}' tool '{tool_name}' failed: "
@@ -738,52 +903,32 @@ async def _run_worker_agent(
                 round_errors.append(
                     f"{get_tool_label(tool_name)}: {output.strip()}"
                 )
-                messages.append(
-                    _tool_message(
-                        tool_name,
-                        "Execution Error: "
-                        f"{_clip(output, MAX_TOOL_ERROR_CHARS)}\n"
-                        "Please correct your code or parameters and try "
-                        "again.",
-                    )
+                failed_calls.append(
+                    f"- {call}: {_clip(output, MAX_TOOL_ERROR_CHARS)}"
                 )
                 continue
 
+            done_calls.append(call)
             if tool_name in PLOT_TOOLS:
                 title = str(tool_args.get("title") or "").strip()
                 label = get_tool_label(tool_name)
                 round_plots.append(f"{label}: {title}" if title else label)
-                # Generic message — never expose internal file paths to the
-                # model.
-                messages.append(
-                    _tool_message(
-                        tool_name,
-                        "Plot generated successfully. It will be displayed to "
-                        "the user. "
-                        "Do not generate it again.",
-                    )
+            elif tool_name in STATS_TOOLS:
+                result_text, code_snippet, r_snippet = _extract_stats_code(
+                    output
                 )
-            else:
-                if tool_name in STATS_TOOLS:
-                    result_text, code_snippet, r_snippet = _extract_stats_code(
-                        output
+                # A retry round may repeat a test that already succeeded.
+                if all(s["result"] != result_text for s in global_stats):
+                    global_stats.append(
+                        {
+                            "title": get_tool_label(tool_name),
+                            "result": result_text,
+                            "code": code_snippet,
+                            "r_code": r_snippet,
+                        }
                     )
-                    # A retry round may repeat a test that already succeeded.
-                    if all(s["result"] != result_text for s in global_stats):
-                        global_stats.append(
-                            {
-                                "title": get_tool_label(tool_name),
-                                "result": result_text,
-                                "code": code_snippet,
-                                "r_code": r_snippet,
-                            }
-                        )
-                    round_stats.append(result_text)
-                model_output, _ = _split_r_block(output)
-                messages.append(
-                    _tool_message(
-                        tool_name, _clip(model_output, MAX_TOOL_OUTPUT_CHARS)
-                    )
+                round_stats.append(
+                    f"{get_tool_label(tool_name)}:\n{result_text}"
                 )
 
         report["plots"].extend(round_plots)
@@ -792,33 +937,22 @@ async def _run_worker_agent(
         )
         previous_errors, report["errors"] = report["errors"], round_errors
 
-        if round_errors:
-            # The model ignored the error feedback and repeated the exact same
-            # failing calls; further rounds would only repeat them again.
-            if round_errors == previous_errors and not (
-                round_plots or round_stats
-            ):
-                log(
-                    "error",
-                    f"Worker '{agent_role}' repeated the same failing call; "
-                    "stopping.",
-                )
-                return report
-            continue
-
-        if agent_role in PLOT_ROLES and round_plots:
+        if not round_errors:
             report["completed"] = True
-            log("info", f"Worker '{agent_role}' finished task successfully.")
-            return report
+            return
 
-        if agent_role == "stats" and round_stats:
-            log("info", f"Worker '{agent_role}' is interpreting the results.")
-            report["text"] = await _interpret_stats(
-                model_name, messages, agent_role, log
+        # The model ignored the error feedback and repeated the exact same
+        # failing calls; further rounds would only repeat them again.
+        if round_errors == previous_errors and not (
+            round_plots or round_stats
+        ):
+            log(
+                "error",
+                f"Worker '{agent_role}' repeated the same failing call; "
+                "stopping.",
             )
-            report["completed"] = True
-            log("info", f"Worker '{agent_role}' finished task successfully.")
-            return report
+            return
+        messages = _retry_messages(task_messages, done_calls, failed_calls)
 
     if report["plots"] or report["stats"]:
         log(
@@ -832,7 +966,6 @@ async def _run_worker_agent(
             f"Worker '{agent_role}' reached the iteration limit without any "
             "results.",
         )
-    return report
 
 
 def _describe_round(
@@ -864,23 +997,46 @@ def _describe_round(
 
 
 async def _interpret_stats(
-    model_name: str,
-    messages: list[dict[str, Any]],
-    agent_role: str,
-    log: LogFn,
+    model_name: str, report: WorkerReport, log: LogFn
 ) -> str:
     """Ask the stats worker for a tool-free interpretation of its results.
 
-    Returns an empty string on failure; the raw result tables still reach the
-    summary step through the worker report.
+    The request holds only the task and the result tables (without code),
+    not the tool-calling history, so it stays short.
+
+    Returns:
+        The interpretation, or an empty string on failure or when the reply
+        was cut off; the raw result tables still reach the summary step
+        through the worker report.
     """
-    messages.append({"role": "user", "content": INTERPRET_INSTRUCTION})
+    results = "\n\n".join(
+        _clip(entry, MAX_TOOL_OUTPUT_CHARS) for entry in report["stats"]
+    )
+    messages = [
+        {"role": "system", "content": WORKER_PROMPTS[report["role"]]},
+        {
+            "role": "user",
+            "content": (
+                f"Task: {report['instruction']}\n\n"
+                f"Results of your statistical tests:\n\n{results}\n\n"
+                f"{INTERPRET_INSTRUCTION}"
+            ),
+        },
+    ]
     try:
         response = await _chat(model_name, messages)
     except Exception as exc:
         log(
             "warning",
-            f"Worker '{agent_role}' could not interpret its results: {exc}",
+            f"Worker '{report['role']}' could not interpret its results: "
+            f"{exc}",
+        )
+        return ""
+    if _cut_off(response):
+        log(
+            "warning",
+            f"Worker '{report['role']}' interpretation was cut off; leaving "
+            "it out.",
         )
         return ""
     return _model_text(response["message"])
@@ -1043,9 +1199,15 @@ def _format_report(report: WorkerReport) -> str:
     lines = [f"### Task: {report['instruction']}"]
     if report["plots"]:
         lines.append("Visualisations generated: " + "; ".join(report["plots"]))
-    if report["stats"]:
-        lines.append("Statistical results:")
-        lines.extend(report["stats"])
+    if report["role"] == "stats":
+        if report["stats"]:
+            lines.append("Statistical tests run:")
+            lines.extend(
+                _clip(entry, MAX_TOOL_OUTPUT_CHARS)
+                for entry in report["stats"]
+            )
+        else:
+            lines.append("Statistical tests run: none")
     if report["text"]:
         lines.append(f"Specialist notes:\n{report['text']}")
     if report["errors"]:
@@ -1106,6 +1268,10 @@ async def _summarise(
         str(m.get("content", "")) for m in messages if m.get("role") == "user"
     )
     results = "\n\n".join(_format_report(report) for report in reports)
+    if not any(report["plots"] for report in reports):
+        # Stated explicitly: told only to "list the visualisations", models
+        # invented some for runs that made none.
+        results = f"Visualisations generated: none\n\n{results}"
     if truncated:
         results += (
             f"\n\nNote: the dataset was truncated to the first {MAX_ROWS:,} "
@@ -1125,6 +1291,14 @@ async def _summarise(
     except Exception as exc:
         log("warning", f"Supervisor could not write the summary: {exc}")
         summary = ""
+    else:
+        if _cut_off(response):
+            log(
+                "warning",
+                "The summary was cut off by the model's context window; "
+                "showing a short summary instead.",
+            )
+            summary = ""
     return summary or _template_summary(reports, truncated)
 
 

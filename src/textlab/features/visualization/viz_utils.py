@@ -36,6 +36,26 @@ def shorten_text(value: object, limit: int) -> str:
     return flat if len(flat) <= limit else flat[: max(limit - 3, 0)] + "..."
 
 
+# Names pandas gives to columns without a header, e.g. "Unnamed: 32".
+_UNNAMED_COLUMN_RE = re.compile(r"Unnamed: \d+")
+
+
+def drop_empty_unnamed_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Remove header-less columns that hold no values.
+
+    A CSV whose rows end with a separator (a trailing comma) gets an extra
+    column such as "Unnamed: 32" that is entirely empty. It is no data, but
+    it would show up in the dataset summary and in every analysis.
+    """
+    empty = [
+        column
+        for column in df.columns
+        if _UNNAMED_COLUMN_RE.fullmatch(str(column))
+        and df[column].isna().all()
+    ]
+    return df.drop(columns=empty) if empty else df
+
+
 def _read_csv_with_fallback(
     file_path: str, sep: str = ",", nrows: int | None = None
 ) -> pd.DataFrame:
@@ -154,6 +174,7 @@ def _load_data_cached(file_path: str, mtime: float, size: int) -> pd.DataFrame:
             f"Unsupported file type: {os.path.basename(file_path)}"
         )
 
+    df = drop_empty_unnamed_columns(df)
     truncated = len(df) > MAX_ROWS
     LAST_LOAD_TRUNCATED[file_path] = truncated
     if truncated:

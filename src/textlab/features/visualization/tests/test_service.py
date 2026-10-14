@@ -186,6 +186,11 @@ def test_previews_read_the_supported_formats(name, data):
     assert service.read_preview(name, data)["age"].tolist()[:2] == [30, 40]
 
 
+def test_the_preview_drops_empty_unnamed_columns():
+    table = service.read_preview("data.csv", b"age,group,\n30,a,\n40,b,\n")
+    assert list(table.columns) == ["age", "group"]
+
+
 def test_an_unreadable_preview_is_none():
     assert service.read_preview("data.xlsx", b"not excel") is None
     assert service.read_preview("data.txt", b"x") is None

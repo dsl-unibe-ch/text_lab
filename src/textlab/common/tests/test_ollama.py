@@ -88,13 +88,16 @@ def test_chat_no_think_does_not_retry_other_errors(monkeypatch):
 
 def test_chat_no_think_normalizes_message_objects(monkeypatch):
     message = SimpleNamespace(role="assistant", content=None, tool_calls=None)
-    response = SimpleNamespace(message=message, model="m", done=True)
+    response = SimpleNamespace(
+        message=message, model="m", done=True, done_reason="length"
+    )
     monkeypatch.setattr(client, "chat", lambda **kwargs: response)
     reply = ollama.chat_no_think("m", [])
     assert reply == {
         "message": {"role": "assistant", "content": ""},
         "model": "m",
         "done": True,
+        "done_reason": "length",
     }
 
 

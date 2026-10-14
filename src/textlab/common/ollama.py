@@ -228,6 +228,8 @@ def _normalize_response(response: Any) -> dict[str, Any]:
         "message": _normalize_message(message) if message is not None else {},
         "model": getattr(response, "model", ""),
         "done": getattr(response, "done", True),
+        # "length" when the reply was cut off by the context window.
+        "done_reason": getattr(response, "done_reason", None),
     }
 
 

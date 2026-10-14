@@ -67,28 +67,69 @@ class ScriptedChat:
         return response
 
 
-class FakeSession:
-    """In-memory MCP session with every agent tool, taking data_file_path."""
+# Parameters of the fake tools; every name the tests pass is accepted.
+LOOSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        name: {"type": "string"}
+        for name in (
+            "data_file_path",
+            "column",
+            "title",
+            "x_column",
+            "y_column",
+            "target_col",
+            "python_code",
+        )
+    },
+    "required": ["data_file_path"],
+}
 
-    def __init__(self, outputs):
+CORRELATION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "data_file_path": {"type": "string"},
+        "x_column": {"type": "string"},
+        "y_column": {"type": "string"},
+        "method": {"type": "string", "default": "pearson"},
+    },
+    "required": ["data_file_path", "x_column", "y_column"],
+}
+
+
+HISTOGRAM_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "data_file_path": {"type": "string"},
+        "column": {"type": "string"},
+        "title": {"type": "string"},
+    },
+    "required": ["data_file_path", "column", "title"],
+}
+
+
+class FakeSession:
+    """In-memory MCP session with every agent tool, taking data_file_path.
+
+    Tools accept the parameters of ``LOOSE_SCHEMA`` unless ``schemas`` gives
+    a tool its own.
+    """
+
+    def __init__(self, outputs, schemas=None):
         self.outputs = {name: list(values) for name, values in outputs.items()}
+        self.schemas = schemas or {}
         self.calls = []
         self.timeouts = []
 
     async def list_tools(self):
-        schema = {
-            "type": "object",
-            "properties": {
-                "data_file_path": {"type": "string"},
-                "column": {"type": "string"},
-                "title": {"type": "string"},
-            },
-            "required": ["data_file_path", "column"],
-        }
         names = [n for tools in viz_agent.AGENT_TOOLS.values() for n in tools]
         return SimpleNamespace(
             tools=[
-                SimpleNamespace(name=n, description=n, inputSchema=schema)
+                SimpleNamespace(
+                    name=n,
+                    description=n,
+                    inputSchema=self.schemas.get(n, LOOSE_SCHEMA),
+                )
                 for n in names
             ]
         )
@@ -359,13 +400,8 @@ def test_long_tool_output_is_clipped_for_the_model_only(monkeypatch, logs):
 
     _, _, stats = _run_loop("stats", session, logs)
 
-    tool_messages = [
-        m for m in chat.calls[1]["messages"] if m.get("role") == "tool"
-    ]
-    assert (
-        len(tool_messages[0]["content"])
-        <= viz_agent.MAX_TOOL_OUTPUT_CHARS + 20
-    )
+    interpretation_request = chat.calls[1]["messages"][1]["content"]
+    assert len(interpretation_request) <= viz_agent.MAX_TOOL_OUTPUT_CHARS + 500
     assert stats[0]["result"] == long_table.strip()
 
 
@@ -830,7 +866,8 @@ def test_worker_tools_carry_column_enums_and_fix_near_misses(
     )
     monkeypatch.setattr(viz_agent, "chat_no_think", chat)
     session = FakeSession(
-        {"plot_interactive_histogram": ["/tmp/run/plots/h.json|||code"]}
+        {"plot_interactive_histogram": ["/tmp/run/plots/h.json|||code"]},
+        schemas={"plot_interactive_histogram": HISTOGRAM_SCHEMA},
     )
 
     _run_loop("interactive", session, logs)
@@ -920,11 +957,10 @@ def test_stats_r_block_is_stored_and_removed_from_the_model_view(
 
     assert stats[0]["code"] == "print(1)"
     assert stats[0]["r_code"] == "print(cor.test(a, b))"
-    tool_messages = [
-        m for m in chat.calls[1]["messages"] if m.get("role") == "tool"
-    ]
-    assert "```r" not in tool_messages[0]["content"]
-    assert "```python" in tool_messages[0]["content"]
+    interpretation_request = chat.calls[1]["messages"][1]["content"]
+    assert "| r | 0.9 |" in interpretation_request
+    assert "cor.test" not in interpretation_request
+    assert "print(1)" not in interpretation_request
 
 
 @pytest.mark.parametrize("include_r_code", [True, False])
@@ -984,3 +1020,227 @@ def test_run_analysis_passes_the_r_code_option_to_the_server(
     )
 
     assert fake_server == [("server.py", True)]
+
+
+# --- Argument checks, retries and interpretation ------------------------
+
+
+def test_wrong_argument_names_are_explained_without_calling_the_tool(
+    monkeypatch, logs
+):
+    good = ("run_correlation", {"x_column": "age", "y_column": "income"})
+    chat = ScriptedChat(
+        [
+            _reply(calls=[("run_correlation", {"col1": "age", "col2": "x"})]),
+            _reply(calls=[good]),
+            _reply("Age and income are correlated."),
+        ]
+    )
+    monkeypatch.setattr(viz_agent, "chat_no_think", chat)
+    session = FakeSession(
+        {"run_correlation": ["| r | 0.9 |"]},
+        schemas={"run_correlation": CORRELATION_SCHEMA},
+    )
+
+    report, _, stats = _run_loop("stats", session, logs)
+
+    assert [name for name, _ in session.calls] == ["run_correlation"]
+    retry = chat.calls[1]["messages"]
+    assert [m["role"] for m in retry] == ["system", "user"]
+    feedback = retry[1]["content"]
+    assert "Missing: x_column, y_column." in feedback
+    assert "Not parameters of this tool: col1, col2." in feedback
+    assert "x_column (required)" in feedback
+    assert "method (optional)" in feedback
+    assert DATA_PATH not in feedback
+    assert report["completed"] is True and len(stats) == 1
+
+
+def test_unknown_extra_arguments_are_dropped(monkeypatch, logs):
+    call = ("run_correlation", {"x_column": "a", "y_column": "b", "z": "c"})
+    chat = ScriptedChat([_reply(calls=[call]), _reply("Done.")])
+    monkeypatch.setattr(viz_agent, "chat_no_think", chat)
+    session = FakeSession(
+        {"run_correlation": ["| r | 0.9 |"]},
+        schemas={"run_correlation": CORRELATION_SCHEMA},
+    )
+
+    _run_loop("stats", session, logs)
+
+    assert "z" not in session.calls[0][1]
+    assert (
+        "info",
+        "Worker 'stats' passed unknown arguments to 'run_correlation' (z); "
+        "ignoring them.",
+    ) in logs
+
+
+def test_a_retry_sends_a_short_fresh_request(monkeypatch, logs):
+    long_table = "| row | 0.5 |\n" * 500
+    good = ("rank_target_correlations", {"target_col": "income"})
+    bad = ("run_correlation", {"x_column": "age", "y_column": "nope"})
+    fixed = ("run_correlation", {"x_column": "age", "y_column": "income"})
+    chat = ScriptedChat(
+        [
+            _reply(calls=[good, bad]),
+            _reply(calls=[fixed]),
+            _reply("Interpretation."),
+        ]
+    )
+    monkeypatch.setattr(viz_agent, "chat_no_think", chat)
+    session = FakeSession(
+        {
+            "rank_target_correlations": [long_table],
+            "run_correlation": [
+                f"Error: Column 'nope' not found in {DATA_PATH}.",
+                "| r | 0.9 |",
+            ],
+        }
+    )
+
+    report, _, stats = _run_loop("stats", session, logs)
+
+    retry = chat.calls[1]["messages"]
+    assert [m["role"] for m in retry] == ["system", "user"]
+    feedback = retry[1]["content"]
+    assert feedback.startswith(chat.calls[0]["messages"][1]["content"])
+    assert 'rank_target_correlations({"target_col": "income"})' in feedback
+    assert "Column 'nope' not found in the dataset." in feedback
+    assert "| row | 0.5 |" not in feedback
+    assert DATA_PATH not in feedback
+    assert report["completed"] is True and len(stats) == 2
+
+
+def test_partial_stats_are_interpreted_after_a_model_error(monkeypatch, logs):
+    good = ("run_correlation", {"x_column": "age", "y_column": "income"})
+    bad = ("run_correlation", {"x_column": "age", "y_column": "nope"})
+    chat = ScriptedChat(
+        [
+            _reply(calls=[good, bad]),
+            RuntimeError("no user query found in messages (status code: 500)"),
+            _reply("Age and income are correlated."),
+        ]
+    )
+    monkeypatch.setattr(viz_agent, "chat_no_think", chat)
+    session = FakeSession(
+        {"run_correlation": ["| r | 0.9 |", "Error: Column 'nope'."]}
+    )
+
+    report, _, stats = _run_loop("stats", session, logs)
+
+    assert len(chat.calls) == 3
+    assert chat.calls[2]["tools"] is None
+    assert report["text"] == "Age and income are correlated."
+    assert report["completed"] is False and len(stats) == 1
+
+
+def test_cut_off_interpretation_is_left_out(monkeypatch, logs):
+    call = ("run_correlation", {"x_column": "age", "y_column": "income"})
+    cut = _reply("Age and income are")
+    cut["done_reason"] = "length"
+    chat = ScriptedChat([_reply(calls=[call]), cut])
+    monkeypatch.setattr(viz_agent, "chat_no_think", chat)
+    session = FakeSession({"run_correlation": ["| r | 0.9 |"]})
+
+    report, _, _ = _run_loop("stats", session, logs)
+
+    assert report["text"] == ""
+    assert any("cut off" in msg for level, msg in logs if level == "warning")
+
+
+def _stats_report(**fields):
+    report = viz_agent._new_report("stats", "Correlate age and income")
+    report.update({"stats": ["Correlation Analysis:\n| r | 0.9 |"]})
+    report.update(fields)
+    return report
+
+
+def test_summary_states_that_no_visualisations_were_made(monkeypatch):
+    chat = ScriptedChat([_reply("Summary.")])
+    monkeypatch.setattr(viz_agent, "chat_no_think", chat)
+
+    asyncio.run(
+        viz_agent._summarise(
+            [{"role": "user", "content": "Correlate"}],
+            [_stats_report()],
+            "fake",
+            False,
+            lambda *_: None,
+        )
+    )
+
+    content = chat.calls[0]["messages"][1]["content"]
+    assert "Visualisations generated: none" in content
+    assert "Statistical tests run:\nCorrelation Analysis:" in content
+
+
+def test_cut_off_summary_falls_back_to_the_template(monkeypatch):
+    cut = _reply("The correlation between age and income would be a more")
+    cut["done_reason"] = "length"
+    monkeypatch.setattr(viz_agent, "chat_no_think", ScriptedChat([cut]))
+    logs = []
+
+    summary = asyncio.run(
+        viz_agent._summarise(
+            [{"role": "user", "content": "Correlate"}],
+            [_stats_report(text="Age and income are strongly correlated.")],
+            "fake",
+            False,
+            lambda level, msg: logs.append((level, msg)),
+        )
+    )
+
+    assert summary == "Age and income are strongly correlated."
+    assert any("cut off" in msg for _, msg in logs)
+
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [(None, 16384), ("", 16384), ("0", None), ("8192", 8192)],
+)
+def test_agent_context_window_defaults_to_16k(monkeypatch, value, expected):
+    from textlab.features.visualization import viz_config
+
+    if value is None:
+        monkeypatch.delenv("TEXTLAB_AGENT_NUM_CTX", raising=False)
+    else:
+        monkeypatch.setenv("TEXTLAB_AGENT_NUM_CTX", value)
+    assert viz_config._agent_num_ctx() == expected
+
+
+def test_a_repeated_successful_call_is_not_run_again(monkeypatch, logs):
+    good = ("run_correlation", {"x_column": "age", "y_column": "income"})
+    bad = ("run_correlation", {"x_column": "age", "y_column": "nope"})
+    fixed = ("run_correlation", {"x_column": "income", "y_column": "age"})
+    chat = ScriptedChat(
+        [
+            _reply(calls=[good, bad]),
+            _reply(calls=[good, fixed]),
+            _reply("Interpretation."),
+        ]
+    )
+    monkeypatch.setattr(viz_agent, "chat_no_think", chat)
+    session = FakeSession(
+        {
+            "run_correlation": [
+                "| r | 0.9 | 12:00:01",
+                "Error: Column 'nope' not found.",
+                "| r | 0.9 | 12:00:05",
+            ]
+        }
+    )
+
+    report, _, stats = _run_loop("stats", session, logs)
+
+    assert [args["x_column"] for _, args in session.calls] == [
+        "age",
+        "age",
+        "income",
+    ]
+    assert len(stats) == 2  # the repeat added no second card
+    assert report["completed"] is True
+    assert (
+        "info",
+        "Worker 'stats' repeated 'run_correlation' with the same arguments; "
+        "skipping it.",
+    ) in logs

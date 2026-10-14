@@ -55,11 +55,23 @@ def _env_int(name: str) -> int | None:
 # which matters most for the small models this app runs.
 AGENT_TEMPERATURE: float = 0.1
 
-# Context window for agent calls. Left unset by default because a num_ctx that
-# differs from the one used elsewhere (e.g. the Chat page) makes Ollama reload
-# the model on every switch. Set TEXTLAB_AGENT_NUM_CTX (e.g. 16384) when the
-# Ollama server log reports "truncating input prompt" during an analysis.
-AGENT_NUM_CTX: int | None = _env_int("TEXTLAB_AGENT_NUM_CTX")
+# Context window (tokens) for agent calls. Ollama's default (often 4096) is
+# too small: a stats worker's tool schemas, tool results and retry feedback
+# exceed it, and Ollama then silently drops the oldest messages, including the
+# task itself. A num_ctx that differs from the Chat page's makes Ollama reload
+# the model when switching pages, which is the smaller cost.
+# TEXTLAB_AGENT_NUM_CTX overrides it; 0 uses the model's default.
+DEFAULT_AGENT_NUM_CTX: int = 16384
+
+
+def _agent_num_ctx() -> int | None:
+    """Return the agents' context window, or None for the model's default."""
+    if not os.environ.get("TEXTLAB_AGENT_NUM_CTX", "").strip():
+        return DEFAULT_AGENT_NUM_CTX
+    return _env_int("TEXTLAB_AGENT_NUM_CTX")
+
+
+AGENT_NUM_CTX: int | None = _agent_num_ctx()
 
 # HTTP timeout (seconds) for each agent model call, so a request Ollama never
 # answers fails the step instead of freezing the analysis. Generous enough to
@@ -158,10 +170,10 @@ SUMMARY_PROMPT: str = """
 You are the Lead Data Scientist. Specialist agents have finished the user's data analysis request; their results are given below.
 
 Write a concise, cohesive Markdown summary for the user:
-1. Report the key statistical findings with their numbers (p-values, coefficients, R², correlations) and explain what they mean in plain English.
-2. Briefly list the visualisations that were generated. They are displayed automatically below your summary.
-3. If some steps could not be completed, say so briefly.
-4. Only use numbers that appear in the results. NEVER invent statistics.
+1. Report the key statistical findings with their numbers (p-values, coefficients, R², correlations) and explain what they mean in plain English. Where specialist notes are given, follow their interpretation.
+2. Mention visualisations only if some are listed under "Visualisations generated"; they are displayed automatically below your summary. NEVER describe a visualisation that is not listed.
+3. If the request asked for an analysis that is not among the statistical tests run, say plainly that it was not run. Do not guess a reason. If steps are listed under "Could not be completed", say so briefly.
+4. Only use numbers that appear in the results. NEVER invent statistics, and do not speculate about tests that were not run.
 5. Do not mention the agents or tools. NEVER include file paths, directory names, or storage locations — all files are temporary.
 """  # noqa: E501
 
@@ -217,7 +229,7 @@ CRITICAL RULES — follow these exactly:
 2. Choose the tool by the types of the columns involved:
    - numeric vs numeric: `run_correlation` (one pair) or `rank_target_correlations` (one target against all numeric columns).
    - numeric vs groups of a categorical column: `run_group_comparison` (t-test / ANOVA).
-     Use method='nonparametric' for ordinal data (Likert scales, ratings, ranks), for small groups, or when a parametric run reports doubtful normality.
+     Use method='nonparametric' for ordinal data (Likert scales, ratings, ranks) or small groups. When normality is doubtful, a parametric run adds the non-parametric test itself, so do not run it again.
    - categorical vs categorical: `run_association_test` (chi-square / Fisher).
    - numeric outcome explained by predictors: `run_linear_regression`.
    - binary outcome (two values such as yes/no) explained by predictors: `run_logistic_regression`.

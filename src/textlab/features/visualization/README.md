@@ -27,8 +27,15 @@ it. The run:
      concurrently on it; tools write their charts next to the table.
      When no tool fits, the custom chart tools run code the model writes,
      in the sandbox (see below).
-   - Statistical results are interpreted by the model, and the supervisor
-     writes the summary.
+   - Before a tool runs, the agent checks the model's arguments against the
+     tool's parameters; a wrong call gets a short error naming them. A
+     worker with failed calls retries with a fresh request (the task, the
+     calls that succeeded, the errors) instead of the growing chat, so
+     requests stay well within the context window. A call repeated with the
+     same arguments is skipped, so a result never appears twice.
+   - The statistics agent interprets its results (also partial ones), and
+     the supervisor writes the summary. A summary cut off by the context
+     window is replaced by a short template summary.
 4. **Reads the results** (`runs.read_artifacts`): every chart file, its code
    and its R code, before the run folder is removed.
 
@@ -132,7 +139,7 @@ exactly as written (see the ruff exceptions in `pyproject.toml`).
 
 | Setting | Used for |
 |---|---|
-| `TEXTLAB_AGENT_NUM_CTX` | Context window for the agents' model calls; the model's default if unset |
+| `TEXTLAB_AGENT_NUM_CTX` | Context window (tokens) for the agents' model calls: 16384 if unset, `0` for the model's default |
 | `TEXTLAB_AGENT_TIMEOUT` | Seconds a single model call may take (300) |
 | `TEXTLAB_R_CODE` | Set by the run for the MCP server when R code is requested |
 
@@ -142,7 +149,8 @@ In `tests/`, without models or GPU (tests marked `container` need the
 image and nested Apptainer, as on a compute node):
 
 - `test_viz_agent.py`: the supervisor and agents with a scripted model and
-  an in-memory MCP session: planning, retries, column fixes, cancellation,
+  an in-memory MCP session: planning, argument checks, retries, column
+  fixes, cancellation,
   summaries, the server start.
 - `test_viz_plots.py`: every tool on sample data, its code and R code,
   statistics checked against SciPy.
