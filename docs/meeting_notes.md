@@ -1,6 +1,6 @@
 # Meeting Notes Generator
 
-The Meeting Notes Generator turns a recording into written notes in one step. Upload the audio of a meeting, interview or lecture, and you get back a full transcript together with a structured summary: decisions and action items for a meeting, themes and quotes for an interview, or study notes for a lecture. If you already have a transcript, you can summarise it directly.
+The Meeting Notes Generator turns a recording into written notes in one step. Upload the audio of a meeting, interview or lecture, and you get back a full transcript together with a structured summary: decisions and action items for a meeting, themes and quotes for an interview, or study notes for a lecture. Each point in the summary shows where in the transcript it comes from, so you can check it. If you already have a transcript, you can summarise it directly.
 
 All processing runs on the university cluster. Your audio and text never leave the university network, and nothing is sent to external services such as OpenAI, Google or Anthropic.
 
@@ -11,7 +11,7 @@ All processing runs on the university cluster. Your audio and text never leave t
 3. **Choose the language** spoken in the recording, or keep *Auto-detect*.
 4. **Choose a summary type**, for example *Meeting Notes*.
 5. Click **Transcribe and Summarize**.
-6. When it is done, read the summary and download the results.
+6. When it is done, read the summary, check its points against the **Sources** tab, and download the results.
 
 A one-hour recording usually takes several minutes. The page shows each step as it happens.
 
@@ -34,7 +34,7 @@ The summary type decides what the notes focus on and how they are organised.
 | **Academic Abstract** | Talks and presentations about research | Background and objective, methods, findings, conclusions and implications |
 | **Lecture Notes** | Lectures and seminars | Lecture overview, topics covered, key concepts and definitions, important examples, summary |
 
-You can try another type later without transcribing the recording again (see [Changing settings after a run](#changing-settings-after-a-run)).
+You can try another type later without transcribing the recording again (see [Changing settings after a run](#changing-settings-after-a-run)). Whatever the type, each point shows where in the transcript it comes from.
 
 ## From Audio
 
@@ -72,14 +72,14 @@ The transcript labels the voices it finds as `SPEAKER_00`, `SPEAKER_01` and so o
 2. Type a name for each speaker, for example *Interviewer* and *Participant*, or the people's names.
 3. Click **Re-summarize with current settings**.
 
-The first summary is created right after the transcription, before you can enter names. It still uses the `SPEAKER_00` labels. Clicking **Re-summarize** creates a new summary and a new transcript download that use your names. The recording is not transcribed again.
+The first summary is created right after the transcription, before you can enter names. It still uses the `SPEAKER_00` labels, and a notice appears once you have entered names. Clicking **Re-summarize** creates a new summary, sources and transcript download that use your names. The recording is not transcribed again.
 
 !!! tip "Finding out who is who"
-    Open the **Full Transcript** tab and read the first few lines of each speaker to work out who they are. Speaker separation is automatic and can make mistakes, especially with similar voices, people talking over each other, or poor audio.
+    Open the **Full Transcript** tab and read the first few lines of each speaker to work out who they are. You can also listen to a passage in the **Sources** tab (see [Checking the summary against the transcript](#checking-the-summary-against-the-transcript)). Speaker separation is automatic and can make mistakes, especially with similar voices, people talking over each other, or poor audio.
 
 ### Changing settings after a run
 
-After a run you can change the **summary type**, **summary language** or **model** and click **Re-summarize with current settings**. Only the summary is created again, which is much faster than the first run. A notice reminds you when the summary shown no longer matches your current settings.
+After a run you can change the **summary type**, **summary language**, **model** or **speaker names** and click **Re-summarize with current settings**. Only the summary is created again, which is much faster than the first run. A notice reminds you when the summary shown no longer matches your current settings.
 
 If you upload a different file or change the **language**, the recording has to be transcribed again: click **Transcribe and Summarize**.
 
@@ -94,6 +94,8 @@ If something goes wrong while the summary is written, the page shows the error, 
     * **Upload transcript CSV (from Transcribe page)**: the CSV download from the [Transcription](transcription.md) page. Speaker labels are kept, and you can name the speakers under *Name the speakers (optional)*.
     * **Upload text file**: a plain `.txt` file.
     * **Paste text**: paste the transcript into the text box.
+
+    If the text has the labels `SPEAKER_00`, `SPEAKER_01` and so on at the start of its lines, you can name the speakers here too.
 3. Check the word count shown below the input to make sure the whole text was read.
 4. Choose the **summary type**, **model** and **summary language**.
 5. Click **Generate Summary**.
@@ -103,15 +105,19 @@ The summary stays on the page while you download files. If you then change the t
 !!! tip "Better summaries from pasted text"
     If your text has speaker names at the start of each line (for example `Anna: I think we should...`), the summary can say who said what and who owns each action item.
 
+    The summary cites the lines of your text, so keep one statement or speaker turn per line. Very long lines, such as text pasted without line breaks, are split into sentences.
+
 ## Results and downloads
 
-At the top, the results show the summary type, the number of words in the transcript and, for audio, the length of the recording. Two tabs show the **Summary** and the **Full Transcript**.
+At the top, the results show the summary type, the number of words in the transcript and, for audio, the length of the recording. Three tabs show the **Summary**, its **Sources** and the **Full Transcript**.
+
+Each line of the transcript starts with a label: the time it was said, such as `[05:12]`, or its line number, such as `[12]`, for text without timestamps. The summary uses the same labels to show where each point comes from (see [Checking the summary against the transcript](#checking-the-summary-against-the-transcript)).
 
 Downloads:
 
-* **Summary (.md)**: the notes only.
-* **Transcript (.txt)**: the transcript, one line per segment, with speaker names if you set them.
-* **Full document (.md)**: the summary and the full transcript in one file, with the file name and summary type at the top.
+* **Summary (.md)**: the notes only. The sources are footnotes: each point is followed by a reference such as `[^12]`, and the footnotes at the end quote the transcript lines with their time and speaker.
+* **Transcript (.txt)**: the transcript, one line per segment, with its time or line number and with speaker names if you set them.
+* **Full document (.md)**: the summary with its footnotes and the full transcript in one file, with the file name and summary type at the top.
 
 From Audio also offers **Download raw transcription files**:
 
@@ -124,15 +130,23 @@ Results are kept only while the page is open. Download everything you want to ke
 
 ## Long recordings
 
-Recordings of several hours are supported. When a transcript is too long for the model to read at once (roughly 50,000 words), it is split into parts. Notes are taken for each part, and then the notes are combined into one summary. You see the progress as *Analyzing part 2 of 5...* and then *Synthesizing final summary...*. This takes longer than a single pass, and small details are more likely to be left out.
+Recordings of several hours are supported. When a transcript is too long for the model to read at once (roughly 12,000 words, about one and a half hours of conversation), it is split into parts. Notes are taken for each part, and then the notes are combined into one summary. You see the progress as *Analyzing part 2 of 5...* and then *Synthesizing final summary...*. This takes longer than a single pass, and small details are more likely to be left out. The sources are kept through every step, so the summary of a long recording cites the transcript too.
 
-## Checking the results
+## Checking the summary against the transcript
 
-Summaries are written by a language model, and transcripts by speech recognition. Both can be wrong. Before you share or act on the notes:
+The model is asked to cite, after every point, the transcript lines it is based on. Text Lab then checks these citations against the transcript:
 
-* **Check names, numbers and dates** against the transcript. Speech recognition often mishears names and technical terms.
+* In the **Summary** tab, each point ends with grey labels such as *(05:12, 06:40)*: the times (or line numbers) of the lines it is based on. A note above the summary says how many lines are cited.
+* Points marked *(no source)* in orange cite nothing. Check these first: they may be a general remark, or something the model added.
+* Citations of lines that do not exist are removed, and the note above the summary says how many. Many removed citations mean the model struggled; try another model.
+* The **Sources** tab lists every cited line with its time, speaker and text. For a recording, choose a passage under **Listen to a cited passage** to play the audio from that moment.
+* If the summary cites nothing at all, a warning says so. Some models do not follow the instruction; try another one.
+
+A citation shows where a point comes from, not that the point is right: the model can still misread a line. Before you share or act on the notes:
+
+* **Check names, numbers and dates** against the cited lines. Speech recognition often mishears names and technical terms.
 * **Check action items and decisions.** The model may miss one, or give it to the wrong person, especially when speaker labels are wrong.
-* **Use the Full Transcript tab** to look up anything in the summary that seems surprising.
+* **Use the Full Transcript tab** to read the context around a cited line.
 
 The model is told to use only what is in the transcript and not to add information. It can still make mistakes.
 
