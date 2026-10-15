@@ -86,6 +86,10 @@ Rules 1, 4 and 5 are checked automatically: rule 1 by import-linter, rules 4
 and 5 by `tests/test_data_footprint.py`. Rules 3 and 6 have shared modules in
 `textlab.common`: `progress` (progress updates and cancellation) and `jobs`
 (worker processes). LLM features share `textlab.common.ollama`.
+Requests that send long text to Ollama set its context window (`num_ctx`)
+to one that holds the prompt and the answer: Ollama's default window is
+small, and Ollama drops what does not fit without an error.
+`features/meeting_notes/README.md` describes how Meeting Notes sizes it.
 
 ## Feature packages
 

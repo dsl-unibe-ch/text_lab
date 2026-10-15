@@ -26,7 +26,7 @@ The application features a modular, secure architecture offering the following t
 - **Knowledge Graph Generator:** Process collections of scientific papers using Grobid to automatically extract metadata, citations, and research topics via LLMs, visualizing them as an interactive network graph.
 - **Topic Modeling:** Extract topics from raw text data using SOTA models.
 - **Translation:** Translate text and documents (Word, PowerPoint, Excel, PDF) with local models while keeping their formatting.
-- **Meeting Notes Generator:** Turn a meeting recording into a transcript and structured notes.
+- **Meeting Notes Generator:** Turn a meeting recording into a transcript and structured notes, each point citing the transcript lines it comes from.
 
 ---
 

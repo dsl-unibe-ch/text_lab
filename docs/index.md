@@ -21,7 +21,7 @@ One of the primary advantages of Text Lab is **data sovereignty**
 * **Transcription:** Convert audio files to text with high accuracy, featuring a specialized model for Swiss German.
 * **OCR (Optical Character Recognition):** Extract text from scanned PDFs using state-of-the-art AI models.
 * **Translate:** Securely translate text and complex documents while preserving formatting.
-* **Meeting Notes Generator:** Automatically transcribe and summarize audio recordings into structured notes.
+* **Meeting Notes Generator:** Automatically transcribe and summarize audio recordings into structured notes, with each point linked to the part of the transcript it comes from.
 * **Chat:** Interact with local Large Language Models (LLMs) securely.
 * **Data Visualization:** Generate insights and plots from your data.
 * **Knowledge Graphs:** Extract metadata from research papers and visulise the data with knowledge graphs.

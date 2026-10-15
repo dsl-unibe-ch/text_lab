@@ -1,15 +1,24 @@
-"""Summarizing transcripts into notes: the Meeting Notes feature's API.
+"""Summarizing transcripts into cited notes: the Meeting Notes feature's API.
 
-A transcript that fits in the model's context window is summarized in one
-streamed request (:func:`get_summary_stream`). A longer one is summarized
-map-reduce style: :func:`get_partial_notes` extracts notes from each chunk,
-then :func:`get_synthesis_stream` streams the final summary from them. Use
+A transcript is a list of numbered segments (:mod:`.transcript`). The model
+sees each line with its number and cites the lines every point is based on;
+:func:`cite_summary` then checks those citations against the transcript.
+
+A transcript that fits in one request is summarized in one streamed request
+(:func:`get_summary_stream`). A longer one is summarized map-reduce style:
+:func:`get_partial_notes` extracts cited notes from each chunk, then
+:func:`get_synthesis_stream` streams the final summary from them. Use
 :func:`needs_chunking` to choose.
 
+Every request sets Ollama's context window (``num_ctx``) to one that holds
+the whole prompt and the answer. Without it, Ollama uses its default window
+and silently drops whatever does not fit, so a summary of a long meeting
+would be based on part of it. The largest window is
+:data:`DEFAULT_MAX_CONTEXT` tokens, or ``TEXTLAB_SUMMARY_NUM_CTX``; longer
+transcripts are chunked to fit it.
+
 The summary's structure depends on the mode (:data:`SUMMARY_MODES`), e.g.
-meeting notes with decisions and action items, or lecture notes. Helpers
-turn a transcript table into speaker-labeled text, apply names the user gave
-the speakers, and build the Markdown document users download.
+meeting notes with decisions and action items, or lecture notes.
 
 Streaming functions are plain generators of text, so any interface can
 display them as they arrive.
@@ -17,26 +26,156 @@ display them as they arrive.
 
 from __future__ import annotations
 
-import csv
-import io
-import re
-from collections.abc import Iterator
+import os
+from collections.abc import Iterator, Sequence
 from typing import Any
 
 import ollama
 
-from textlab.common.ollama import (
-    MAX_CONTEXT_TOKENS,
-    call_no_think,
-    chunk_text,
-    estimate_tokens,
-    message_text,
-)
+from textlab.common.ollama import call_no_think, estimate_tokens, message_text
 from textlab.common.progress import Progress, ProgressCallback, no_progress
+from textlab.features.meeting_notes.citations import (
+    cite_summary,
+    format_citations,
+    mark_uncited_points,
+    with_footnotes,
+)
+from textlab.features.meeting_notes.models import CitedSummary, Segment
+from textlab.features.meeting_notes.transcript import (
+    numbered_text,
+    rename_speakers,
+    segment_label,
+    segments_from_table,
+    segments_from_text,
+    speakers,
+    transcript_text,
+    word_count,
+)
+
+__all__ = [
+    # Data classes
+    "CitedSummary",
+    "Segment",
+    # Summary modes
+    "SUMMARY_MODES",
+    # Summarization
+    "get_partial_notes",
+    "get_summary_stream",
+    "get_synthesis_stream",
+    "needs_chunking",
+    # Transcripts
+    "build_speaker_context",
+    "rename_speakers",
+    "segment_label",
+    "segments_from_table",
+    "segments_from_text",
+    "speakers",
+    "transcript_text",
+    "word_count",
+    # Citations and export
+    "cite_summary",
+    "format_citations",
+    "format_summary_document",
+    "mark_uncited_points",
+    "with_footnotes",
+]
 
 # Low temperature keeps summaries close to the transcript instead of
 # paraphrasing creatively or adding detail that was never said.
 SUMMARY_TEMPERATURE = 0.2
+
+
+# ---------------------------------------------------------------------------
+# Context window
+# ---------------------------------------------------------------------------
+
+#: Largest context window (tokens) a request may use, unless
+#: ``TEXTLAB_SUMMARY_NUM_CTX`` sets another. Longer transcripts are chunked.
+DEFAULT_MAX_CONTEXT = 32768
+#: Context windows a request may use, smallest first. A request uses the
+#: smallest that fits; keeping to a few sizes means Ollama reloads the model
+#: rarely (it reloads whenever ``num_ctx`` changes).
+_CONTEXT_STEPS = (8192, 16384, 32768, 65536, 131072)
+#: Tokens kept free for the model's answer.
+RESPONSE_TOKENS = 4096
+#: Token estimates assume four characters per token, which undercounts many
+#: languages other than English, so estimates are multiplied by this factor.
+ESTIMATE_MARGIN = 1.3
+#: Tokens of instructions around the transcript, for planning chunks.
+PROMPT_OVERHEAD_TOKENS = 1000
+
+
+def max_context() -> int:
+    """Return the largest context window a request may use.
+
+    Returns:
+        ``TEXTLAB_SUMMARY_NUM_CTX`` if set to a number, otherwise
+        :data:`DEFAULT_MAX_CONTEXT`; at least the smallest step.
+    """
+    raw = os.environ.get("TEXTLAB_SUMMARY_NUM_CTX", "").strip()
+    try:
+        value = int(raw) if raw else DEFAULT_MAX_CONTEXT
+    except ValueError:
+        value = DEFAULT_MAX_CONTEXT
+    return max(value, _CONTEXT_STEPS[0])
+
+
+def _context_sizes() -> tuple[int, ...]:
+    """Return the context windows a request may use, smallest first."""
+    limit = max_context()
+    return tuple(size for size in _CONTEXT_STEPS if size < limit) + (limit,)
+
+
+def _fits(prompt_tokens: int, num_ctx: int) -> bool:
+    """Return True if a prompt and an answer fit in a context window."""
+    return prompt_tokens * ESTIMATE_MARGIN + RESPONSE_TOKENS <= num_ctx
+
+
+def _context_for(messages: Sequence[dict[str, str]]) -> int:
+    """Return the smallest context window that holds a request.
+
+    Args:
+        messages: The request's messages.
+
+    Returns:
+        The window size; the largest one if none is big enough.
+    """
+    tokens = sum(estimate_tokens(message["content"]) for message in messages)
+    sizes = _context_sizes()
+    return next((size for size in sizes if _fits(tokens, size)), sizes[-1])
+
+
+def _text_budget() -> int:
+    """Return how many tokens of transcript or notes one request can hold."""
+    usable = (max_context() - RESPONSE_TOKENS) / ESTIMATE_MARGIN
+    return int(usable) - PROMPT_OVERHEAD_TOKENS
+
+
+def _group_by_budget(texts: Sequence[str], budget: int) -> list[list[str]]:
+    """Group texts in order so that each group fits a token budget.
+
+    A text larger than the budget forms a group of its own.
+
+    Args:
+        texts: The texts, e.g. transcript lines or notes.
+        budget: Token budget per group.
+
+    Returns:
+        The groups, in order.
+    """
+    groups: list[list[str]] = []
+    current: list[str] = []
+    used = 0
+    for text in texts:
+        tokens = estimate_tokens(text) + 1  # +1 for the joining newline
+        if current and used + tokens > budget:
+            groups.append(current)
+            current, used = [], 0
+        current.append(text)
+        used += tokens
+    if current:
+        groups.append(current)
+    return groups
 
 
 # ---------------------------------------------------------------------------
@@ -145,8 +284,9 @@ SUMMARY_MODES: dict[str, dict[str, str]] = {
     },
 }
 
+
 # ---------------------------------------------------------------------------
-# System prompt
+# Prompts
 # ---------------------------------------------------------------------------
 
 SUMMARIZER_SYSTEM_PROMPT = (
@@ -160,6 +300,32 @@ SUMMARIZER_SYSTEM_PROMPT = (
     "briefly "
     "rather than guessing. "
     "Always follow the output language instruction given in the user message."
+)
+
+#: How to cite, for prompts that contain the numbered transcript.
+TRANSCRIPT_CITATION_RULE = (
+    "Each transcript line starts with its line number in square brackets, "
+    "for example [12]. After every bullet point, decision, action item, "
+    "quote and statement you write, cite the transcript lines it is based "
+    "on, with their numbers in square brackets, for example [12] or "
+    "[12, 15]. Cite only line numbers that appear in the transcript. Do not "
+    "put citations in headings."
+)
+
+#: How to cite, for prompts that contain notes with citations.
+NOTES_CITATION_RULE = (
+    "The notes cite transcript lines by number in square brackets, for "
+    "example [12]. After every bullet point, decision, action item, quote "
+    "and statement you write, cite the lines it is based on, copying the "
+    "numbers from the notes, for example [12] or [12, 15]. Use only numbers "
+    "that appear in the notes; never invent new ones. Do not put citations "
+    "in headings."
+)
+
+#: Task for merging notes when there are too many for one request.
+CONDENSE_INSTRUCTION = (
+    "Merge these notes into one shorter set of notes. Keep every decision, "
+    "action item, name, number and date, and drop repetitions."
 )
 
 
@@ -188,16 +354,24 @@ def _language_instruction(output_language: str | None) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _messages(prompt: str) -> list[dict[str, str]]:
+    """Wrap a user prompt with the system prompt."""
+    return [
+        {"role": "system", "content": SUMMARIZER_SYSTEM_PROMPT},
+        {"role": "user", "content": prompt},
+    ]
+
+
 def _build_single_pass_messages(
     text: str,
     mode_key: str,
     speaker_context: str | None,
     output_language: str | None = "English",
 ) -> list[dict[str, str]]:
-    """Build an Ollama message list for a single-pass summarization call.
+    """Build the messages for a single-pass summarization call.
 
     Args:
-        text: The full transcript text.
+        text: The full numbered transcript (:func:`numbered_text`).
         mode_key: Key in SUMMARY_MODES selecting the summarization style.
         speaker_context: Optional sentence describing identified speakers.
         output_language: Desired language for the summary output. Pass
@@ -213,17 +387,13 @@ def _build_single_pass_messages(
         if speaker_context
         else ""
     )
-    lang_note = _language_instruction(output_language)
-    prompt = (
+    return _messages(
         f"Below is a transcript of an audio recording.{context_note}\n\n"
         f"--- Transcript Start ---\n{text}\n--- Transcript End ---\n\n"
         f"Task: {mode['synthesis_instruction']}\n\n"
-        f"{lang_note}"
+        f"{TRANSCRIPT_CITATION_RULE}\n\n"
+        f"{_language_instruction(output_language)}"
     )
-    return [
-        {"role": "system", "content": SUMMARIZER_SYSTEM_PROMPT},
-        {"role": "user", "content": prompt},
-    ]
 
 
 def _build_chunk_messages(
@@ -234,10 +404,10 @@ def _build_chunk_messages(
     speaker_context: str | None,
     output_language: str | None = "English",
 ) -> list[dict[str, str]]:
-    """Build an Ollama message list for processing one chunk in the map phase.
+    """Build the messages for processing one chunk in the map phase.
 
     Args:
-        chunk: Text fragment to analyze.
+        chunk: Numbered transcript lines to analyze.
         chunk_index: 1-based position of this chunk.
         total_chunks: Total number of chunks.
         mode_key: Key in SUMMARY_MODES.
@@ -255,28 +425,33 @@ def _build_chunk_messages(
         if speaker_context
         else ""
     )
-    lang_note = _language_instruction(output_language)
-    prompt = (
+    return _messages(
         f"You are processing part {chunk_index} of {total_chunks} of a "
         "transcript."
         f"{context_note}\n\n"
         f"--- Transcript Part {chunk_index}/{total_chunks} ---\n{chunk}\n"
         f"--- End of Part {chunk_index}/{total_chunks} ---\n\n"
         f"Task: {mode['chunk_instruction']}\n\n"
-        f"{lang_note}"
+        f"{TRANSCRIPT_CITATION_RULE} Keep the citations in your notes; the "
+        "final summary is written from them.\n\n"
+        f"{_language_instruction(output_language)}"
     )
-    return [
-        {"role": "system", "content": SUMMARIZER_SYSTEM_PROMPT},
-        {"role": "user", "content": prompt},
-    ]
+
+
+def _notes_text(notes: Sequence[str]) -> str:
+    """Join partial notes, each under a header with its part number."""
+    return "\n\n".join(
+        f"--- Notes from Part {i + 1} ---\n{note}"
+        for i, note in enumerate(notes)
+    )
 
 
 def _build_synthesis_messages(
-    partial_notes: list[str],
+    partial_notes: Sequence[str],
     mode_key: str,
     output_language: str | None = "English",
 ) -> list[dict[str, str]]:
-    """Build an Ollama message list for the reduce (synthesis) phase.
+    """Build the messages for the reduce (synthesis) phase.
 
     Args:
         partial_notes: Extracted notes from each chunk, in order.
@@ -289,24 +464,39 @@ def _build_synthesis_messages(
         A list of role/content message dicts.
     """
     mode = SUMMARY_MODES[mode_key]
-    lang_note = _language_instruction(output_language)
-    parts_text = "\n\n".join(
-        f"--- Notes from Part {i + 1} ---\n{note}"
-        for i, note in enumerate(partial_notes)
-    )
-    prompt = (
+    return _messages(
         f"A transcript was split into {len(partial_notes)} parts and each "
         "was analyzed "
         f"separately. Below are the extracted notes.\n\n"
-        f"{parts_text}\n\n"
+        f"{_notes_text(partial_notes)}\n\n"
         f"--- End of Partial Notes ---\n\n"
         f"Task: {mode['synthesis_instruction']}\n\n"
-        f"{lang_note}"
+        f"{NOTES_CITATION_RULE}\n\n"
+        f"{_language_instruction(output_language)}"
     )
-    return [
-        {"role": "system", "content": SUMMARIZER_SYSTEM_PROMPT},
-        {"role": "user", "content": prompt},
-    ]
+
+
+def _build_condense_messages(
+    notes: Sequence[str],
+    output_language: str | None = "English",
+) -> list[dict[str, str]]:
+    """Build the messages for merging several partial notes into one.
+
+    Args:
+        notes: Consecutive partial notes.
+        output_language: Desired language for the merged notes.
+
+    Returns:
+        A list of role/content message dicts.
+    """
+    return _messages(
+        "Below are notes taken from consecutive parts of a transcript.\n\n"
+        f"{_notes_text(notes)}\n\n"
+        f"--- End of Notes ---\n\n"
+        f"Task: {CONDENSE_INSTRUCTION}\n\n"
+        f"{NOTES_CITATION_RULE}\n\n"
+        f"{_language_instruction(output_language)}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -318,6 +508,7 @@ def _chat(
     model_name: str,
     messages: list[dict[str, str]],
     stream: bool,
+    num_ctx: int,
     disable_thinking: bool = True,
 ) -> Any:
     """Call ``ollama.chat`` with the summarization options.
@@ -331,6 +522,8 @@ def _chat(
         model_name: The Ollama model identifier.
         messages: Role/content message dicts.
         stream: Whether to return a token stream instead of one response.
+        num_ctx: Context window in tokens; it must hold the whole request
+            and the answer, or Ollama drops part of the request.
         disable_thinking: Send ``think=False``. Callers pass ``False`` to
             retry when the server or model rejects the ``think`` argument.
 
@@ -342,7 +535,7 @@ def _chat(
         "model": model_name,
         "messages": messages,
         "stream": stream,
-        "options": {"temperature": SUMMARY_TEMPERATURE},
+        "options": {"temperature": SUMMARY_TEMPERATURE, "num_ctx": num_ctx},
     }
     if disable_thinking:
         return call_no_think(ollama.chat, **kwargs)
@@ -367,30 +560,32 @@ def _response_text(response: Any) -> str:
     return message_text(message)
 
 
-def _complete_text(model_name: str, messages: list[dict[str, str]]) -> str:
+def _complete_text(
+    model_name: str, messages: list[dict[str, str]], num_ctx: int
+) -> str:
     """Run one blocking chat call and return the reply text.
 
     Args:
         model_name: The Ollama model identifier.
         messages: Role/content message dicts.
+        num_ctx: Context window in tokens.
 
     Returns:
         The model's reply, or an empty string if it produced no content.
     """
     try:
-        response = _chat(model_name, messages, stream=False)
+        response = _chat(model_name, messages, False, num_ctx)
     except ollama.ResponseError as exc:
         if not _is_think_rejection(exc):
             raise
         response = _chat(
-            model_name, messages, stream=False, disable_thinking=False
+            model_name, messages, False, num_ctx, disable_thinking=False
         )
     return _response_text(response)
 
 
 def _stream_text(
-    model_name: str,
-    messages: list[dict[str, str]],
+    model_name: str, messages: list[dict[str, str]], num_ctx: int
 ) -> Iterator[str]:
     """Stream a chat reply as text tokens.
 
@@ -400,13 +595,14 @@ def _stream_text(
     Args:
         model_name: The Ollama model identifier.
         messages: Role/content message dicts.
+        num_ctx: Context window in tokens.
 
     Yields:
         Incremental string tokens (never ``None``).
     """
     started = False
     try:
-        for chunk in _chat(model_name, messages, stream=True):
+        for chunk in _chat(model_name, messages, True, num_ctx):
             started = True
             yield _response_text(chunk)
         return
@@ -414,7 +610,7 @@ def _stream_text(
         if started or not _is_think_rejection(exc):
             raise
     for chunk in _chat(
-        model_name, messages, stream=True, disable_thinking=False
+        model_name, messages, True, num_ctx, disable_thinking=False
     ):
         yield _response_text(chunk)
 
@@ -424,35 +620,35 @@ def _stream_text(
 # ---------------------------------------------------------------------------
 
 
-def needs_chunking(text: str) -> bool:
-    """Return True if a transcript is too long for one summarization request.
+def needs_chunking(segments: Sequence[Segment]) -> bool:
+    """Return True if a transcript is too long for one request.
 
     Args:
-        text: The transcript text.
+        segments: The transcript.
 
     Returns:
-        True if it exceeds :data:`MAX_CONTEXT_TOKENS` by estimate, so it
-        must go through :func:`get_partial_notes`.
+        True if the numbered transcript does not fit in the largest context
+        window (:func:`max_context`) together with the instructions and the
+        answer, so it must go through :func:`get_partial_notes`.
     """
-    return estimate_tokens(text) > MAX_CONTEXT_TOKENS
+    return estimate_tokens(numbered_text(segments)) > _text_budget()
 
 
 def get_summary_stream(
     model_name: str,
-    text: str,
+    segments: Sequence[Segment],
     mode_key: str,
     speaker_context: str | None = None,
     output_language: str | None = "English",
 ) -> Iterator[str]:
-    """Stream a summary of a transcript that fits in one context window.
+    """Stream a cited summary of a transcript that fits in one request.
 
-    Use estimate_tokens(text) <= MAX_CONTEXT_TOKENS to confirm the text is
-    short enough before calling this function. For longer texts use the
-    get_partial_notes / get_synthesis_stream pair instead.
+    Check with :func:`needs_chunking` first; for longer transcripts use
+    :func:`get_partial_notes` and :func:`get_synthesis_stream`.
 
     Args:
         model_name: The Ollama model identifier.
-        text: The full transcript text.
+        segments: The transcript.
         mode_key: Key in SUMMARY_MODES.
         speaker_context: Optional sentence describing identified speakers.
         output_language: Language for the summary output. Pass ``None`` or
@@ -460,17 +656,18 @@ def get_summary_stream(
             Defaults to ``"English"``.
 
     Yields:
-        Incremental string tokens from the language model.
+        Incremental string tokens from the language model. Pass the joined
+        text to :func:`cite_summary`.
     """
     messages = _build_single_pass_messages(
-        text, mode_key, speaker_context, output_language
+        numbered_text(segments), mode_key, speaker_context, output_language
     )
-    yield from _stream_text(model_name, messages)
+    yield from _stream_text(model_name, messages, _context_for(messages))
 
 
 def get_partial_notes(
     model_name: str,
-    text: str,
+    segments: Sequence[Segment],
     mode_key: str,
     speaker_context: str | None = None,
     on_progress: ProgressCallback = no_progress,
@@ -478,13 +675,14 @@ def get_partial_notes(
 ) -> list[str]:
     """Run the map phase of chunked summarization.
 
-    Splits a long transcript into chunks and extracts partial notes from each
-    using a single blocking LLM call per chunk. Designed to be followed by
-    get_synthesis_stream() to produce the final summary.
+    Splits a long transcript into chunks of whole lines that fit in the
+    largest context window, and extracts cited notes from each with one
+    blocking request. All requests use the same window, so the model is
+    loaded once. Follow with :func:`get_synthesis_stream`.
 
     Args:
         model_name: The Ollama model identifier.
-        text: The full transcript text (expected to exceed MAX_CONTEXT_TOKENS).
+        segments: The transcript (expected not to fit in one request).
         mode_key: Key in SUMMARY_MODES.
         speaker_context: Optional sentence describing identified speakers.
         on_progress: Receives an update before each chunk. The fraction
@@ -496,7 +694,10 @@ def get_partial_notes(
     Returns:
         A list of partial note strings, one per chunk, in order.
     """
-    chunks = chunk_text(text)
+    lines = numbered_text(segments).splitlines()
+    chunks = [
+        "\n".join(group) for group in _group_by_budget(lines, _text_budget())
+    ]
     total_steps = len(chunks) + 1  # +1 reserved for synthesis
     partial_notes: list[str] = []
 
@@ -515,20 +716,61 @@ def get_partial_notes(
             speaker_context=speaker_context,
             output_language=output_language,
         )
-        partial_notes.append(_complete_text(model_name, messages))
+        partial_notes.append(
+            _complete_text(model_name, messages, max_context())
+        )
 
     return partial_notes
 
 
+def _condensed(
+    model_name: str,
+    partial_notes: Sequence[str],
+    output_language: str | None,
+) -> list[str]:
+    """Merge consecutive notes until all of them fit in one request.
+
+    Only needed for very long recordings, whose notes do not fit in the
+    largest context window together.
+
+    Args:
+        model_name: The Ollama model identifier.
+        partial_notes: Notes from :func:`get_partial_notes`.
+        output_language: Language for the merged notes.
+
+    Returns:
+        The notes, merged as far as needed.
+    """
+    notes = list(partial_notes)
+    budget = _text_budget()
+    while sum(estimate_tokens(note) for note in notes) > budget:
+        groups = _group_by_budget(notes, budget)
+        if len(groups) == len(notes):
+            break  # no two notes fit together; merging cannot help
+        notes = [
+            group[0]
+            if len(group) == 1
+            else _complete_text(
+                model_name,
+                _build_condense_messages(group, output_language),
+                max_context(),
+            )
+            for group in groups
+        ]
+    return notes
+
+
 def get_synthesis_stream(
     model_name: str,
-    partial_notes: list[str],
+    partial_notes: Sequence[str],
     mode_key: str,
     output_language: str | None = "English",
 ) -> Iterator[str]:
-    """Stream the final synthesized summary from per-chunk partial notes.
+    """Stream the final cited summary from per-chunk partial notes.
 
-    This is the reduce phase of the map-reduce summarization strategy.
+    This is the reduce phase of the map-reduce summarization strategy. If
+    the notes are too long for one request, consecutive notes are merged
+    first. The request uses the same context window as the map phase.
 
     Args:
         model_name: The Ollama model identifier.
@@ -539,90 +781,17 @@ def get_synthesis_stream(
             Defaults to ``"English"``.
 
     Yields:
-        Incremental string tokens from the language model.
+        Incremental string tokens from the language model. Pass the joined
+        text to :func:`cite_summary`.
     """
-    messages = _build_synthesis_messages(
-        partial_notes, mode_key, output_language
-    )
-    yield from _stream_text(model_name, messages)
+    notes = _condensed(model_name, partial_notes, output_language)
+    messages = _build_synthesis_messages(notes, mode_key, output_language)
+    yield from _stream_text(model_name, messages, max_context())
 
 
 # ---------------------------------------------------------------------------
-# Public API: transcript text utilities
+# Public API: speakers and export
 # ---------------------------------------------------------------------------
-
-
-def transcript_csv_to_speaker_text(csv_text: str) -> str:
-    """Convert a WhisperX segment table into speaker-labeled plain text.
-
-    Each segment is formatted as ``SPEAKER_XX: segment text``. If no Speaker
-    column is present, plain text lines are returned without a label prefix.
-    Consecutive segments from the same speaker are kept on separate lines so
-    the LLM can follow speaker turns naturally.
-
-    Args:
-        csv_text: The TSV string produced by generate_transcription_csv().
-
-    Returns:
-        A multi-line string suitable for sending to the summarization LLM.
-    """
-    reader = csv.DictReader(io.StringIO(csv_text), delimiter="\t")
-    rows = list(reader)
-    if not rows:
-        return ""
-
-    has_speaker_col = "Speaker" in rows[0]
-    lines: list[str] = []
-
-    for row in rows:
-        text = (row.get("Text") or row.get("text") or "").strip()
-        if not text:
-            continue
-        if has_speaker_col:
-            speaker = (row.get("Speaker") or "UNKNOWN").strip()
-            lines.append(f"{speaker}: {text}")
-        else:
-            lines.append(text)
-
-    return "\n".join(lines)
-
-
-def apply_speaker_labels(text: str, label_map: dict[str, str]) -> str:
-    """Replace generic speaker identifiers with human-readable labels.
-
-    Applies whole-word replacement so that e.g. ``SPEAKER_00`` is replaced
-    with ``Interviewer`` throughout the transcript text.
-
-    Args:
-        text: Transcript text containing SPEAKER_XX identifiers.
-        label_map: Mapping from original label (e.g. ``SPEAKER_00``) to the
-            desired display name (e.g. ``Interviewer``).
-
-    Returns:
-        The transcript text with speaker identifiers substituted.
-    """
-    for original, replacement in label_map.items():
-        if not replacement or replacement.strip() == original:
-            continue
-        pattern = re.compile(re.escape(original), re.IGNORECASE)
-        text = pattern.sub(replacement.strip(), text)
-    return text
-
-
-def extract_unique_speakers(text: str) -> list[str]:
-    """Find all unique speaker identifiers in speaker-labeled transcript text.
-
-    Matches patterns such as ``SPEAKER_00``, ``SPEAKER_01``, etc., which are
-    the default labels produced by WhisperX diarization.
-
-    Args:
-        text: Speaker-labeled transcript text.
-
-    Returns:
-        Sorted list of unique speaker identifier strings found in the text.
-    """
-    pattern = re.compile(r"\bSPEAKER_\d+\b")
-    return sorted(set(pattern.findall(text)))
 
 
 def build_speaker_context(speaker_labels: list[str]) -> str | None:
@@ -645,23 +814,22 @@ def build_speaker_context(speaker_labels: list[str]) -> str | None:
     return f"There are {len(speaker_labels)} speakers: {joined}."
 
 
-# ---------------------------------------------------------------------------
-# Public API: export
-# ---------------------------------------------------------------------------
-
-
 def format_summary_document(
-    summary: str,
-    transcript_text: str,
+    cited: CitedSummary,
+    segments: Sequence[Segment],
     source_label: str,
     mode_key: str,
     duration_str: str | None = None,
 ) -> str:
     """Build the Markdown document with the summary and the transcript.
 
+    Citations become footnotes that quote the cited lines
+    (:func:`with_footnotes`), and the transcript lines carry the same
+    labels, so every point can be traced back.
+
     Args:
-        summary: The generated summary text (may contain Markdown).
-        transcript_text: The plain or speaker-labeled transcript text.
+        cited: The summary, checked by :func:`cite_summary`.
+        segments: The transcript.
         source_label: The original file name, shown in the document header.
         mode_key: The summary mode key used, for display in the header.
         duration_str: Human-readable audio duration, e.g. ``"42m 10s"``.
@@ -682,8 +850,8 @@ def format_summary_document(
         f"{meta_block}\n\n"
         f"---\n\n"
         f"## Summary\n\n"
-        f"{summary}\n\n"
+        f"{with_footnotes(cited).rstrip()}\n\n"
         f"---\n\n"
         f"## Full Transcript\n\n"
-        f"{transcript_text}\n"
+        f"{transcript_text(segments)}\n"
     )

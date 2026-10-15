@@ -54,15 +54,23 @@ from textlab.common.ollama import (  # noqa: E402
 )
 from textlab.features.meeting_notes.service import (  # noqa: E402
     SUMMARY_MODES,
-    apply_speaker_labels,
     build_speaker_context,
-    extract_unique_speakers,
+    cite_summary,
+    format_citations,
     format_summary_document,
     get_partial_notes,
     get_summary_stream,
     get_synthesis_stream,
+    mark_uncited_points,
     needs_chunking,
-    transcript_csv_to_speaker_text,
+    rename_speakers,
+    segment_label,
+    segments_from_table,
+    segments_from_text,
+    speakers,
+    transcript_text,
+    with_footnotes,
+    word_count,
 )
 from textlab.features.transcription.audio import (  # noqa: E402
     SAMPLE_RATE,
@@ -127,47 +135,141 @@ def _stream_or_write(container, generator, key: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+#: Shown after a bullet point that cites no transcript line.
+UNCITED_NOTE = ":orange[(no source)]"
+
+
+def _citation_text(sources) -> str:
+    """Render one citation for display, e.g. ``(05:12, 06:40)`` in gray."""
+    labels = dict.fromkeys(segment_label(segment) for segment in sources)
+    return f":gray[({', '.join(labels)})]"
+
+
+def _render_citation_notice(cited) -> None:
+    """Explain the citations in a summary, or warn that there are none.
+
+    Args:
+        cited: The summary, checked by ``cite_summary``.
+    """
+    if not cited.sources:
+        st.warning(
+            "This summary cites no transcript lines, so its points cannot be "
+            "traced back automatically. Check it against the Full Transcript "
+            "tab, or re-summarize with another model."
+        )
+        return
+    parts = [
+        "The labels in brackets show where in the transcript each point "
+        f"comes from ({len(cited.sources)} transcript lines cited, listed "
+        "in the Sources tab)."
+    ]
+    if cited.uncited_points:
+        parts.append(
+            f"{cited.uncited_points} point(s) marked *(no source)* cite "
+            "nothing: check these first."
+        )
+    if cited.invalid_citations:
+        parts.append(
+            f"{cited.invalid_citations} citation(s) of lines that do not "
+            "exist were removed."
+        )
+    st.caption(" ".join(parts))
+
+
+def _render_sources(cited, audio, key_prefix: str) -> None:
+    """List the cited transcript lines, with a player for cited passages.
+
+    Args:
+        cited: The summary, checked by ``cite_summary``.
+        audio: The uploaded recording, or ``None``. With a recording and
+            timestamps, a player starts at the chosen passage.
+        key_prefix: Unique prefix for Streamlit widget keys.
+    """
+    if not cited.sources:
+        st.info("The summary cites no transcript lines.")
+        return
+
+    has_speakers = any(segment.speaker for segment in cited.sources)
+    rows = []
+    for segment in cited.sources:
+        row = {"Cited as": segment_label(segment)}
+        if has_speakers:
+            row["Speaker"] = segment.speaker or ""
+        row["Text"] = segment.text
+        rows.append(row)
+    st.dataframe(rows, hide_index=True, use_container_width=True)
+
+    timed = {s.id: s for s in cited.sources if s.start is not None}
+    if audio is None or not timed:
+        return
+    chosen = st.selectbox(
+        "Listen to a cited passage",
+        options=list(timed),
+        format_func=lambda segment_id: (
+            f"{segment_label(timed[segment_id])}: "
+            f"{timed[segment_id].text[:80]}"
+        ),
+        key=f"{key_prefix}_source_play",
+    )
+    st.audio(
+        audio.getvalue(),
+        format=audio.type or "audio/wav",
+        start_time=int(timed[chosen].start),
+    )
+
+
 def _render_summary_results(
     summary: str,
-    transcript_text: str,
+    segments: list,
     source_label: str,
     mode_key: str,
     duration_str: str,
-    word_count: int,
     key_prefix: str,
+    audio=None,
 ) -> None:
-    """Render the summary and transcript results with download options.
+    """Render the cited summary, its sources and the transcript.
 
+    The summary's citations are checked against the transcript first.
     Download buttons use ``on_click="ignore"`` so that saving a file does not
     rerun the page.
 
     Args:
-        summary: The generated summary text (Markdown).
-        transcript_text: The full plain/speaker-labeled transcript.
+        summary: The generated summary text (Markdown) with citations.
+        segments: The transcript the summary was written from.
         source_label: Original filename or input label shown in exports.
         mode_key: Summary mode key used.
         duration_str: Human-readable audio duration string.
-        word_count: Number of words in the transcript.
         key_prefix: Unique prefix for Streamlit widget keys.
+        audio: The uploaded recording, for listening to cited passages, or
+            ``None``.
     """
     mode_label = SUMMARY_MODES[mode_key]["label"]
+    cited = cite_summary(summary, segments)
+    transcript = transcript_text(segments)
 
     col_a, col_b, col_c = st.columns(3)
     col_a.metric("Summary type", mode_label)
-    col_b.metric("Transcript words", f"{word_count:,}")
+    col_b.metric("Transcript words", f"{word_count(segments):,}")
     col_c.metric("Audio duration", duration_str or "N/A")
 
     st.divider()
 
-    tab_summary, tab_transcript = st.tabs(["Summary", "Full Transcript"])
+    tab_summary, tab_sources, tab_transcript = st.tabs(
+        ["Summary", f"Sources ({len(cited.sources)})", "Full Transcript"]
+    )
 
     with tab_summary:
-        st.markdown(summary)
+        _render_citation_notice(cited)
+        marked = mark_uncited_points(cited.text, UNCITED_NOTE)
+        st.markdown(format_citations(marked, cited.sources, _citation_text))
+
+    with tab_sources:
+        _render_sources(cited, audio, key_prefix)
 
     with tab_transcript:
         st.text_area(
             "Transcript",
-            value=transcript_text,
+            value=transcript,
             height=420,
             disabled=True,
             label_visibility="collapsed",
@@ -182,8 +284,8 @@ def _render_summary_results(
     )
 
     full_doc = format_summary_document(
-        summary=summary,
-        transcript_text=transcript_text,
+        cited=cited,
+        segments=segments,
         source_label=source_label,
         mode_key=mode_key,
         duration_str=duration_str,
@@ -194,7 +296,7 @@ def _render_summary_results(
     with col_d1:
         st.download_button(
             label="Summary (.md)",
-            data=summary,
+            data=with_footnotes(cited),
             file_name=f"{base_name}_summary_{timestamp}.md",
             mime="text/markdown",
             use_container_width=True,
@@ -204,7 +306,7 @@ def _render_summary_results(
     with col_d2:
         st.download_button(
             label="Transcript (.txt)",
-            data=transcript_text,
+            data=transcript,
             file_name=f"{base_name}_transcript_{timestamp}.txt",
             mime="text/plain",
             use_container_width=True,
@@ -221,6 +323,44 @@ def _render_summary_results(
             on_click="ignore",
             key=f"{key_prefix}_full_dl",
         )
+
+
+def _render_speaker_naming(labels: list[str], key_prefix: str) -> dict:
+    """Render inputs for naming the diarized speakers.
+
+    Args:
+        labels: The speaker labels (``SPEAKER_XX``) in the transcript.
+        key_prefix: Unique prefix for Streamlit widget keys.
+
+    Returns:
+        A mapping from each label to the name entered (the label itself
+        until the user changes it).
+    """
+    names: dict[str, str] = {}
+    with st.expander(
+        f"Name the speakers (optional) - {len(labels)} speaker(s) detected",
+        expanded=False,
+    ):
+        st.caption(
+            "Assign readable names to each speaker. These names will appear "
+            "in the summary, its sources and the transcript export."
+        )
+        n_cols = min(len(labels), 3)
+        speaker_cols = st.columns(n_cols)
+        for idx, label in enumerate(labels):
+            with speaker_cols[idx % n_cols]:
+                names[label] = st.text_input(
+                    label,
+                    value=label,
+                    key=f"{key_prefix}_spk_{label}",
+                    help=f"Custom display name for {label}.",
+                )
+    return names
+
+
+def _speaker_context(labels: list[str], names: dict) -> str | None:
+    """Describe the speakers for the model, using the names given."""
+    return build_speaker_context([names.get(label, label) for label in labels])
 
 
 # ---------------------------------------------------------------------------
@@ -452,7 +592,7 @@ def _run_transcription(
 
 def _run_summarization(
     model_name: str,
-    transcript_text: str,
+    segments: list,
     mode_key: str,
     speaker_context,
     output_language: str | None = "English",
@@ -464,14 +604,14 @@ def _run_summarization(
 
     Args:
         model_name: Ollama model identifier.
-        transcript_text: The transcript text to summarize.
+        segments: The transcript to summarize.
         mode_key: Key in SUMMARY_MODES.
         speaker_context: Optional speaker description string.
         output_language: Language for the summary. ``None`` instructs the
             model to match the transcript language. Defaults to ``"English"``.
 
     Returns:
-        The generated summary as a string.
+        The generated summary as a string, with the model's citations.
     """
     # The transcription worker has exited; leave only the summary LLM.
     free_gpu_for(gpu_manager.LLM, ollama_model=model_name)
@@ -486,13 +626,13 @@ def _run_summarization(
 
     st.caption("This may take several minutes. To cancel, refresh the page.")
 
-    if not needs_chunking(transcript_text):
+    if not needs_chunking(segments):
         with st.status(loading_hint, expanded=False) as status:
             status.update(label="Generating summary...", state="running")
             result_container = st.container()
             stream = get_summary_stream(
                 model_name,
-                transcript_text,
+                segments,
                 mode_key,
                 speaker_context,
                 output_language,
@@ -517,7 +657,7 @@ def _run_summarization(
 
         partial_notes = get_partial_notes(
             model_name,
-            transcript_text,
+            segments,
             mode_key,
             speaker_context,
             on_progress=_progress,
@@ -731,67 +871,42 @@ def _render_audio_tab(gpu_name: str) -> None:
         duration_str = transcript_data["duration_str"]
         audio_name = st.session_state.get("audio_sum_audio_name", "audio")
 
-        speaker_text = transcript_csv_to_speaker_text(csv_text)
-        unique_speakers = (
-            extract_unique_speakers(speaker_text) if has_speakers else []
-        )
+        base_segments = segments_from_table(csv_text)
+        unique_speakers = speakers(base_segments) if has_speakers else []
 
         label_map: dict[str, str] = {}
+        if unique_speakers:
+            label_map = _render_speaker_naming(unique_speakers, "audio_sum")
 
-        if has_speakers and unique_speakers:
-            with st.expander(
-                f"Name the speakers (optional) - {len(unique_speakers)} "
-                "speaker(s) detected",
-                expanded=False,
-            ):
-                st.caption(
-                    "Assign readable names to each speaker. These names will "
-                    "appear "
-                    "in the summary and transcript export."
-                )
-                n_cols = min(len(unique_speakers), 3)
-                speaker_cols = st.columns(n_cols)
-                for idx, spk in enumerate(unique_speakers):
-                    with speaker_cols[idx % n_cols]:
-                        label = st.text_input(
-                            spk,
-                            value=spk,
-                            key=f"audio_sum_spk_{spk}",
-                            help=f"Custom display name for {spk}.",
-                        )
-                        label_map[spk] = label
-
-        # Apply speaker labels to transcript text
-        display_transcript = (
-            apply_speaker_labels(speaker_text, label_map)
-            if label_map
-            else speaker_text
-        )
-        plain_transcript = transcription_text_from_csv(csv_text)
-        word_count = len(plain_transcript.split())
-
-        # Build speaker context for the LLM prompt
-        labelled_speakers = [label_map.get(s, s) for s in unique_speakers]
+        segments = rename_speakers(base_segments, label_map)
         speaker_context = (
-            build_speaker_context(labelled_speakers) if has_speakers else None
+            _speaker_context(unique_speakers, label_map)
+            if has_speakers
+            else None
+        )
+
+        # The recording the summary cites, for listening to its sources.
+        # Only offered while the uploader still holds the transcribed file.
+        cited_audio = (
+            audio_file
+            if st.session_state.get("audio_sum_last_sig") == current_sig
+            else None
         )
 
         # --- Summarize on a button click, or when there is no summary yet ---
-        # If settings (model/mode/language) change after a summary exists,
-        # show the existing result with a notice and let the user decide to
-        # re-summarize. After a failure, summarization only runs again when
-        # the user asks for it, so ordinary widget interactions do not
-        # restart a long LLM job.
+        # If settings (model/mode/language/speaker names) change after a
+        # summary exists, show the existing result with a notice and let the
+        # user decide to re-summarize. After a failure, summarization only
+        # runs again when the user asks for it, so ordinary widget
+        # interactions do not restart a long LLM job.
         existing_summary = st.session_state.get("audio_sum_summary")
         summary_error = st.session_state.get("audio_sum_summary_error")
-        existing_mode = st.session_state.get("audio_sum_mode_used")
-        existing_model = st.session_state.get("audio_sum_model_used")
-        existing_lang = st.session_state.get("audio_sum_lang_used")
 
         settings_changed = existing_summary is not None and (
-            (existing_mode != mode_key)
-            or (existing_model != model_name)
-            or (existing_lang != output_language)
+            st.session_state.get("audio_sum_mode_used") != mode_key
+            or st.session_state.get("audio_sum_model_used") != model_name
+            or st.session_state.get("audio_sum_lang_used") != output_language
+            or st.session_state.get("audio_sum_names_used") != label_map
         )
 
         if run_clicked or (existing_summary is None and summary_error is None):
@@ -800,7 +915,7 @@ def _render_audio_tab(gpu_name: str) -> None:
             try:
                 summary = _run_summarization(
                     model_name=model_name,
-                    transcript_text=display_transcript,
+                    segments=segments,
                     mode_key=mode_key,
                     speaker_context=speaker_context,
                     output_language=output_language,
@@ -820,10 +935,8 @@ def _render_audio_tab(gpu_name: str) -> None:
                 st.session_state["audio_sum_mode_used"] = mode_key
                 st.session_state["audio_sum_model_used"] = model_name
                 st.session_state["audio_sum_lang_used"] = output_language
-                st.session_state["audio_sum_display_transcript"] = (
-                    display_transcript
-                )
-                st.session_state["audio_sum_word_count"] = word_count
+                st.session_state["audio_sum_names_used"] = label_map
+                st.session_state["audio_sum_segments"] = segments
                 st.session_state["audio_sum_duration_str"] = duration_str
                 st.session_state["audio_sum_source_label"] = audio_name
                 st.session_state.pop("audio_sum_summary_error", None)
@@ -852,7 +965,7 @@ def _render_audio_tab(gpu_name: str) -> None:
             st.write("**Transcript**")
             st.text_area(
                 "Transcript",
-                value=display_transcript,
+                value=transcript_text(segments),
                 height=420,
                 disabled=True,
                 label_visibility="collapsed",
@@ -876,15 +989,13 @@ def _render_audio_tab(gpu_name: str) -> None:
             if settings_changed:
                 st.info(
                     "Settings have changed. Click **Re-summarize** above to "
-                    "regenerate "
-                    "with the new model, type, or language."
+                    "regenerate with the new model, type, language or "
+                    "speaker names."
                 )
 
             _render_summary_results(
                 summary=st.session_state["audio_sum_summary"],
-                transcript_text=st.session_state.get(
-                    "audio_sum_display_transcript", display_transcript
-                ),
+                segments=st.session_state.get("audio_sum_segments", segments),
                 source_label=st.session_state.get(
                     "audio_sum_source_label", audio_name
                 ),
@@ -892,10 +1003,8 @@ def _render_audio_tab(gpu_name: str) -> None:
                 duration_str=st.session_state.get(
                     "audio_sum_duration_str", duration_str
                 ),
-                word_count=st.session_state.get(
-                    "audio_sum_word_count", word_count
-                ),
                 key_prefix="audio_sum",
+                audio=cited_audio,
             )
             _render_raw_transcript_downloads(csv_text, audio_name)
 
@@ -963,8 +1072,7 @@ def _render_transcript_tab(gpu_name: str) -> None:
         key="ts_input_method",
     )
 
-    transcript_text = ""
-    has_speakers = False
+    base_segments = []
     source_label = "transcript"
 
     if input_method == "Upload transcript CSV (from Transcribe page)":
@@ -978,38 +1086,9 @@ def _render_transcript_tab(gpu_name: str) -> None:
             ),
         )
         if uploaded_csv is not None:
-            raw = uploaded_csv.read().decode("utf-8", errors="replace")
-            speaker_text = transcript_csv_to_speaker_text(raw)
-            unique_speakers = extract_unique_speakers(speaker_text)
-            has_speakers = bool(unique_speakers)
+            raw = uploaded_csv.getvalue().decode("utf-8", errors="replace")
+            base_segments = segments_from_table(raw)
             source_label = uploaded_csv.name
-
-            if has_speakers:
-                with st.expander(
-                    f"Name the speakers (optional) - {len(unique_speakers)} "
-                    "detected",
-                    expanded=False,
-                ):
-                    st.caption(
-                        "Assign readable names. These will appear in the "
-                        "summary."
-                    )
-                    n_cols = min(len(unique_speakers), 3)
-                    cols = st.columns(n_cols)
-                    label_map: dict[str, str] = {}
-                    for idx, spk in enumerate(unique_speakers):
-                        with cols[idx % n_cols]:
-                            label = st.text_input(
-                                spk,
-                                value=spk,
-                                key=f"ts_spk_{spk}",
-                            )
-                            label_map[spk] = label
-                    transcript_text = apply_speaker_labels(
-                        speaker_text, label_map
-                    )
-            else:
-                transcript_text = speaker_text
 
     elif input_method == "Upload text file":
         uploaded_txt = st.file_uploader(
@@ -1018,25 +1097,30 @@ def _render_transcript_tab(gpu_name: str) -> None:
             key="ts_txt_upload",
         )
         if uploaded_txt is not None:
-            transcript_text = uploaded_txt.read().decode(
-                "utf-8", errors="replace"
-            )
+            raw = uploaded_txt.getvalue().decode("utf-8", errors="replace")
+            base_segments = segments_from_text(raw)
             source_label = uploaded_txt.name
 
     else:  # Paste text
-        transcript_text = st.text_area(
+        pasted = st.text_area(
             "Transcript text",
             placeholder="Paste your transcript here...",
             height=250,
             key="ts_paste",
         )
+        base_segments = segments_from_text(pasted)
         source_label = "pasted_text"
 
-    if transcript_text:
-        word_count = len(transcript_text.split())
+    unique_speakers = speakers(base_segments)
+    label_map: dict[str, str] = {}
+    if unique_speakers:
+        label_map = _render_speaker_naming(unique_speakers, "ts")
+    segments = rename_speakers(base_segments, label_map)
+
+    if segments:
         st.caption(
-            f"{word_count:,} words | ~{estimate_tokens(transcript_text):,} "
-            "estimated tokens"
+            f"{word_count(segments):,} words | "
+            f"~{estimate_tokens(transcript_text(segments)):,} estimated tokens"
         )
 
     st.divider()
@@ -1056,27 +1140,22 @@ def _render_transcript_tab(gpu_name: str) -> None:
             type="primary",
             use_container_width=True,
             key="ts_run",
-            disabled=(not transcript_text.strip()),
+            disabled=not segments,
         )
 
     if run_ts:
-        if not transcript_text.strip():
+        if not segments:
             st.error("Please provide a transcript before running.")
             st.stop()
-
-        unique_spks = extract_unique_speakers(transcript_text)
-        speaker_context = (
-            build_speaker_context(unique_spks) if unique_spks else None
-        )
 
         st.divider()
         st.write("**Generating summary...**")
         try:
             summary = _run_summarization(
                 model_name=model_name,
-                transcript_text=transcript_text,
+                segments=segments,
                 mode_key=mode_key,
-                speaker_context=speaker_context,
+                speaker_context=_speaker_context(unique_speakers, label_map),
                 output_language=output_language,
             )
         except Exception as exc:
@@ -1088,12 +1167,11 @@ def _render_transcript_tab(gpu_name: str) -> None:
         # interactions; the rerun replaces the streamed text with the results.
         st.session_state["ts_result"] = {
             "summary": summary,
-            "transcript_text": transcript_text,
+            "segments": segments,
             "source_label": source_label,
             "mode_key": mode_key,
             "model_name": model_name,
             "output_language": output_language,
-            "word_count": len(transcript_text.split()),
         }
         st.rerun()
 
@@ -1101,7 +1179,7 @@ def _render_transcript_tab(gpu_name: str) -> None:
     if result is not None:
         st.divider()
         input_changed = (
-            result["transcript_text"] != transcript_text
+            result["segments"] != segments
             or result["mode_key"] != mode_key
             or result["model_name"] != model_name
             or result["output_language"] != output_language
@@ -1114,11 +1192,10 @@ def _render_transcript_tab(gpu_name: str) -> None:
             )
         _render_summary_results(
             summary=result["summary"],
-            transcript_text=result["transcript_text"],
+            segments=result["segments"],
             source_label=result["source_label"],
             mode_key=result["mode_key"],
             duration_str="",
-            word_count=result["word_count"],
             key_prefix="ts",
         )
 
