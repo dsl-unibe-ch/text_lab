@@ -30,13 +30,14 @@ Attach files in the sidebar under *Upload Context*. Attached files are included 
 | File type | What Chat does with it |
 |---|---|
 | **PDF** (`.pdf`) | Reads the text of the document |
-| **Text** (`.txt`) | Reads the text |
-| **CSV, Excel** (`.csv`, `.xlsx`, `.xls`) | Reads the first 100 rows as a table, and enables [data analysis](#analysing-data-in-chat) on the whole table |
-| **TSV, JSON** (`.tsv`, `.json`) | Enables [data analysis](#analysing-data-in-chat); not read as text |
+| **Text** (`.txt`) | Reads the text (UTF-8) |
+| **JSON** (`.json`) | Reads the text, and enables [data analysis](#analysing-data-in-chat) if it holds a table |
+| **CSV, TSV, Excel** (`.csv`, `.tsv`, `.xlsx`, `.xls`) | Reads the first 100 rows as a table, and enables [data analysis](#analysing-data-in-chat) on the whole table |
 
 * **Limits:** up to **4 files**, each up to **10 MB**. Larger files are skipped with a warning.
-* **Scanned PDFs** contain images of text rather than text, so Chat cannot read them. Convert them with [OCR](ocr.md) first.
-* **Long documents** are handled automatically. When a document is too long for the model to read at once (roughly 50,000 words), Chat splits it into parts, answers your question for each part, and then combines the answers. You see the progress as *Analyzing document part 2 of 5*. This takes longer, and questions about details spread across the whole document are answered less precisely than for shorter documents.
+* **Files Chat cannot read** are skipped with a warning above the answer, for example damaged or password-protected PDFs and text files that are not UTF-8.
+* **Scanned PDFs** contain images of text rather than text, so Chat cannot read them and says so. Convert them with [OCR](ocr.md) first.
+* **Long documents** are handled automatically. When a document is too long for the model to read at once (roughly 15,000 words, about 30 pages), Chat splits it into parts, answers your question for each part, and then combines the answers. You see the progress as *Analyzing document part 2 of 5*. This takes longer, and questions about details spread across the whole document are answered less precisely than for shorter documents.
 
 !!! tip "Ask specific questions"
     "Summarise the methods section of `study.pdf` in five bullet points" gives a better answer than "What is this about?". Name the file when you have attached several.
@@ -105,8 +106,11 @@ Click a problem to see what to do.
 ??? question "'File ... exceeds the 10MB limit. Skipped.'"
     Shorten the document or attach only the relevant part. To analyse a large table, use [Visualize Data](visualize_data.md), which accepts much larger files.
 
-??? question "The answer ignores my PDF"
-    The PDF is probably scanned and contains no text layer. Convert it with [OCR](ocr.md) and attach the result.
+??? question "'File ... contains no text, probably because it is scanned'"
+    The PDF holds images of pages rather than text. Convert it with [OCR](ocr.md) and attach the result.
+
+??? question "'File ... could not be read'"
+    The file is damaged, password-protected, or (for text and JSON files) not saved as UTF-8. Open it, save it again (as UTF-8 for text), and attach it again.
 
 ??? question "My request for a plot or statistic was answered as normal chat"
     Check that the sidebar shows *Data tools enabled* for your table. Then ask explicitly for the plot or test, for example "Make a histogram of age" or "Run a t-test of income by sex".

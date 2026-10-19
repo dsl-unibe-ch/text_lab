@@ -1,0 +1,119 @@
+"""Fitting chat requests into the model's context window.
+
+Ollama answers from a context window of ``num_ctx`` tokens. Without the
+option it uses its own default, often only a few thousand tokens, and a
+request that does not fit is cut silently: Ollama keeps the end of it, so a
+model asked to summarize a long document would see only its last pages.
+
+Every chat request therefore sets ``num_ctx`` to :func:`chat_context`, and
+callers keep requests within :func:`text_budget`: earlier turns are dropped
+oldest first (:func:`trim_history`) and documents that are too long are
+split. All chat requests use the same window, because Ollama reloads the
+model whenever ``num_ctx`` changes.
+"""
+
+from __future__ import annotations
+
+import os
+from collections.abc import Sequence
+from typing import Any
+
+from textlab.common.ollama import estimate_tokens
+
+#: Context window (tokens) of every chat request, unless
+#: ``TEXTLAB_CHAT_NUM_CTX`` sets another.
+DEFAULT_CHAT_CONTEXT = 32768
+#: Smallest window accepted from ``TEXTLAB_CHAT_NUM_CTX``.
+MIN_CHAT_CONTEXT = 8192
+#: Tokens kept free for the model's answer.
+RESPONSE_TOKENS = 4096
+#: Token estimates assume four characters per token, which undercounts many
+#: languages other than English, so estimates are multiplied by this factor.
+ESTIMATE_MARGIN = 1.3
+#: Tokens of instructions around the text (system prompt, part headers).
+PROMPT_OVERHEAD_TOKENS = 1000
+#: Share of the budget earlier turns may use while a long document is
+#: answered part by part; the rest is left for the document.
+HISTORY_SHARE = 0.25
+
+
+def chat_context() -> int:
+    """Return the context window, in tokens, of every chat request.
+
+    Returns:
+        ``TEXTLAB_CHAT_NUM_CTX`` if set to a number, otherwise
+        :data:`DEFAULT_CHAT_CONTEXT`; at least :data:`MIN_CHAT_CONTEXT`.
+    """
+    raw = os.environ.get("TEXTLAB_CHAT_NUM_CTX", "").strip()
+    try:
+        value = int(raw) if raw else DEFAULT_CHAT_CONTEXT
+    except ValueError:
+        value = DEFAULT_CHAT_CONTEXT
+    return max(value, MIN_CHAT_CONTEXT)
+
+
+def text_budget() -> int:
+    """Return how many estimated tokens of text one request can hold.
+
+    The text is everything the caller sends: earlier turns, documents and
+    the question. Room for the answer, the estimate margin and the prompt
+    overhead are already taken off.
+    """
+    usable = (chat_context() - RESPONSE_TOKENS) / ESTIMATE_MARGIN
+    return int(usable) - PROMPT_OVERHEAD_TOKENS
+
+
+def message_tokens(messages: Sequence[dict[str, Any]]) -> int:
+    """Return the estimated tokens of the messages' contents."""
+    return sum(estimate_tokens(m.get("content") or "") for m in messages)
+
+
+def trim_history(
+    history: Sequence[dict[str, Any]], budget: int
+) -> list[dict[str, Any]]:
+    """Keep the most recent messages that fit a token budget.
+
+    Args:
+        history: The conversation, oldest first.
+        budget: Token budget for the kept messages.
+
+    Returns:
+        The newest messages whose total fits ``budget``, oldest first;
+        empty if not even the last message fits.
+    """
+    kept: list[dict[str, Any]] = []
+    used = 0
+    for message in reversed(history):
+        used += message_tokens([message])
+        if used > budget:
+            break
+        kept.append(message)
+    kept.reverse()
+    return kept
+
+
+def group_by_budget(texts: Sequence[str], budget: int) -> list[list[str]]:
+    """Group texts in order so that each group fits a token budget.
+
+    A text larger than the budget forms a group of its own.
+
+    Args:
+        texts: The texts, e.g. partial answers.
+        budget: Token budget per group.
+
+    Returns:
+        The groups, in order.
+    """
+    groups: list[list[str]] = []
+    current: list[str] = []
+    used = 0
+    for text in texts:
+        tokens = estimate_tokens(text)
+        if current and used + tokens > budget:
+            groups.append(current)
+            current, used = [], 0
+        current.append(text)
+        used += tokens
+    if current:
+        groups.append(current)
+    return groups

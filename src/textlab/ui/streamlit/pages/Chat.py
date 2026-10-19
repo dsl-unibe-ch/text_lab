@@ -41,8 +41,10 @@ check_token()
 #: Most files a message can carry.
 MAX_FILES = 4
 
-#: Session-state keys of the attached table and a running analysis.
+#: Session-state keys of the read attachments, the attached table and a
+#: running analysis.
 DATA_KEYS = (
+    "chat_documents",
     "chat_data_file_id",
     "chat_data_path",
     "chat_data_name",
@@ -230,7 +232,7 @@ def _render_sidebar(available_models, gpu_badge):
     st.sidebar.subheader("Upload Context")
     uploaded_files = st.sidebar.file_uploader(
         f"Attach files (Max {MAX_FILES})",
-        type=["pdf", "txt", "csv", "tsv", "xls", "xlsx", "json"],
+        type=list(service.DOCUMENT_TYPES),
         accept_multiple_files=True,
     )
     if uploaded_files and len(uploaded_files) > MAX_FILES:
@@ -242,7 +244,7 @@ def _render_sidebar(available_models, gpu_badge):
 
 
 def _start_new_chat():
-    """Forget the conversation and remove its attached table and charts."""
+    """Forget the conversation, its read attachments, table and charts."""
     st.session_state["messages"] = []
     folder = st.session_state.pop("chat_data_dir", None)
     if folder:
@@ -264,16 +266,33 @@ def _ensure_model(model_name):
         st.error(f"Error pulling model '{model_name}': {e}")
 
 
+def _document_context(uploaded_files):
+    """Return the attachments' text and warnings, read once per file set.
+
+    The text is kept in the session while the same files stay attached, so
+    that each message does not read every file again.
+    """
+    key = tuple(
+        (f.name, f.size, getattr(f, "file_id", None)) for f in uploaded_files
+    )
+    cached = st.session_state.get("chat_documents")
+    if cached and cached[0] == key:
+        return cached[1], cached[2]
+    with st.spinner("Processing files..."):
+        context_text, warnings = service.read_documents(
+            [(f.name, f.getvalue()) for f in uploaded_files]
+        )
+    st.session_state["chat_documents"] = (key, context_text, warnings)
+    return context_text, warnings
+
+
 def _answer(model_name, user_text, uploaded_files):
     """Answer a message with the chat model, streaming the reply."""
     context_text = ""
     if uploaded_files:
-        with st.spinner("Processing files..."):
-            context_text, warnings = service.read_documents(
-                [(f.name, f.getvalue()) for f in uploaded_files]
-            )
-            for warning in warnings:
-                st.warning(warning)
+        context_text, warnings = _document_context(uploaded_files)
+        for warning in warnings:
+            st.warning(warning)
 
     if context_text:
         display_text = (

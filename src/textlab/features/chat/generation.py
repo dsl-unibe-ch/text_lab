@@ -2,6 +2,9 @@
 
 A long attachment that does not fit the model's context is answered part by
 part, and the partial answers are combined in a final, streamed answer.
+
+Every request passes ``num_ctx`` (see :mod:`.context_window`): without it,
+Ollama uses its small default window and silently cuts longer requests.
 """
 
 from __future__ import annotations
@@ -24,21 +27,20 @@ SYSTEM_PROMPT = (
 )
 
 
-def get_response_generator(
-    model_name: str, messages: list[dict[str, str]]
+def _with_system(messages: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Return the messages after the system prompt."""
+    return [{"role": "system", "content": SYSTEM_PROMPT}, *messages]
+
+
+def _stream(
+    model_name: str, messages: list[dict[str, str]], num_ctx: int
 ) -> Generator[str, None, None]:
-    """Stream responses from the Ollama chat endpoint.
-
-    Args:
-        model_name (str): The language model to use.
-        messages (list): The conversation history.
-
-    Yields:
-        str: Incremental text chunks from the language model.
-    """
-    system_message = {"role": "system", "content": SYSTEM_PROMPT}
+    """Stream a reply's text from the Ollama chat endpoint."""
     stream = ollama.chat(
-        model=model_name, messages=[system_message] + messages, stream=True
+        model=model_name,
+        messages=_with_system(messages),
+        stream=True,
+        options={"num_ctx": num_ctx},
     )
     for chunk in stream:
         text = message_text(
@@ -48,6 +50,38 @@ def get_response_generator(
             yield text
 
 
+def _complete(
+    model_name: str, messages: list[dict[str, str]], num_ctx: int
+) -> str:
+    """Return a whole reply from the Ollama chat endpoint (not streamed)."""
+    response = ollama.chat(
+        model=model_name,
+        messages=_with_system(messages),
+        stream=False,
+        options={"num_ctx": num_ctx},
+    )
+    return message_text(
+        response["message"] if isinstance(response, dict) else response.message
+    )
+
+
+def get_response_generator(
+    model_name: str, messages: list[dict[str, str]], num_ctx: int
+) -> Generator[str, None, None]:
+    """Stream responses from the Ollama chat endpoint.
+
+    Args:
+        model_name (str): The language model to use.
+        messages (list): The conversation history.
+        num_ctx (int): Context window in tokens; it must hold the whole
+            request and the answer, or Ollama drops part of the request.
+
+    Yields:
+        str: Incremental text chunks from the language model.
+    """
+    yield from _stream(model_name, messages, num_ctx)
+
+
 def get_chunk_answer(
     model_name: str,
     chunk: str,
@@ -55,6 +89,7 @@ def get_chunk_answer(
     total_chunks: int,
     user_question: str,
     chat_history: list[dict[str, str]],
+    num_ctx: int,
 ) -> str:
     """Answer a question from one part of a document (not streamed).
 
@@ -66,6 +101,7 @@ def get_chunk_answer(
         user_question (str): The user's original question.
         chat_history (list): Conversation history *excluding* the current user
             turn.
+        num_ctx (int): Context window in tokens.
 
     Returns:
         str: The model's partial answer for this chunk.
@@ -78,36 +114,16 @@ def get_chunk_answer(
         "Based only on the content above, provide a partial answer "
         f"to:\n{user_question}"
     )
-    system_message = {"role": "system", "content": SYSTEM_PROMPT}
-    messages = (
-        [system_message]
-        + chat_history
-        + [{"role": "user", "content": chunk_prompt}]
-    )
-    response = ollama.chat(model=model_name, messages=messages, stream=False)
-    return message_text(
-        response["message"] if isinstance(response, dict) else response.message
-    )
+    messages = chat_history + [{"role": "user", "content": chunk_prompt}]
+    return _complete(model_name, messages, num_ctx)
 
 
-def get_synthesis_generator(
-    model_name: str,
+def _synthesis_messages(
     partial_answers: list[str],
     user_question: str,
     chat_history: list[dict[str, str]],
-) -> Generator[str, None, None]:
-    """Stream one answer that combines the answers of every part.
-
-    Args:
-        model_name (str): The language model to use.
-        partial_answers (list): Collected answers from each chunk.
-        user_question (str): The user's original question.
-        chat_history (list): Conversation history *excluding* the current user
-            turn.
-
-    Yields:
-        str: Incremental text chunks of the synthesized answer.
-    """
+) -> list[dict[str, str]]:
+    """Return the request that combines partial answers into one."""
     parts = "\n\n".join(
         f"--- Answer from Part {i + 1} ---\n{ans}"
         for i, ans in enumerate(partial_answers)
@@ -120,16 +136,59 @@ def get_synthesis_generator(
         "Now synthesize all of the above into one comprehensive, "
         "well-structured final answer."
     )
-    system_message = {"role": "system", "content": SYSTEM_PROMPT}
-    messages = (
-        [system_message]
-        + chat_history
-        + [{"role": "user", "content": synthesis_prompt}]
+    return chat_history + [{"role": "user", "content": synthesis_prompt}]
+
+
+def get_combined_answer(
+    model_name: str,
+    partial_answers: list[str],
+    user_question: str,
+    chat_history: list[dict[str, str]],
+    num_ctx: int,
+) -> str:
+    """Combine some partial answers into one (not streamed).
+
+    Used when the partial answers of a very long document do not fit in
+    one request together: consecutive answers are combined first.
+
+    Args:
+        model_name (str): The language model to use.
+        partial_answers (list): Consecutive partial answers.
+        user_question (str): The user's original question.
+        chat_history (list): Conversation history *excluding* the current user
+            turn.
+        num_ctx (int): Context window in tokens.
+
+    Returns:
+        str: The combined answer.
+    """
+    messages = _synthesis_messages(
+        partial_answers, user_question, chat_history
     )
-    stream = ollama.chat(model=model_name, messages=messages, stream=True)
-    for chunk in stream:
-        text = message_text(
-            chunk["message"] if isinstance(chunk, dict) else chunk.message
-        )
-        if text:
-            yield text
+    return _complete(model_name, messages, num_ctx)
+
+
+def get_synthesis_generator(
+    model_name: str,
+    partial_answers: list[str],
+    user_question: str,
+    chat_history: list[dict[str, str]],
+    num_ctx: int,
+) -> Generator[str, None, None]:
+    """Stream one answer that combines the answers of every part.
+
+    Args:
+        model_name (str): The language model to use.
+        partial_answers (list): Collected answers from each chunk.
+        user_question (str): The user's original question.
+        chat_history (list): Conversation history *excluding* the current user
+            turn.
+        num_ctx (int): Context window in tokens.
+
+    Yields:
+        str: Incremental text chunks of the synthesized answer.
+    """
+    messages = _synthesis_messages(
+        partial_answers, user_question, chat_history
+    )
+    yield from _stream(model_name, messages, num_ctx)

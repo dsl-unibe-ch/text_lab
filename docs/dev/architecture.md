@@ -89,7 +89,8 @@ and 5 by `tests/test_data_footprint.py`. Rules 3 and 6 have shared modules in
 Requests that send long text to Ollama set its context window (`num_ctx`)
 to one that holds the prompt and the answer: Ollama's default window is
 small, and Ollama drops what does not fit without an error.
-`features/meeting_notes/README.md` describes how Meeting Notes sizes it.
+`features/meeting_notes/README.md` describes how Meeting Notes sizes it,
+`features/chat/README.md` how Chat does.
 
 ## Feature packages
 

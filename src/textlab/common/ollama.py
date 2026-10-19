@@ -27,9 +27,7 @@ DEFAULT_PORT = 11434
 
 #: Rough characters per token, for budgeting without a tokenizer.
 CHARS_PER_TOKEN = 4
-#: Texts above this many tokens are processed in chunks (about 300k chars).
-MAX_CONTEXT_TOKENS = 75_000
-#: Tokens per chunk when a text is split (about 56k characters).
+#: Default tokens per chunk when a text is split (about 56k characters).
 CHUNK_SIZE_TOKENS = 14_000
 
 #: Seconds to wait at most for Ollama to free a model's memory.

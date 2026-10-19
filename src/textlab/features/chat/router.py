@@ -9,12 +9,20 @@ from __future__ import annotations
 
 import json
 
-from textlab.common.ollama import chat_no_think
+from textlab.common.ollama import chat_no_think, estimate_tokens
+from textlab.features.chat.context_window import (
+    chat_context,
+    text_budget,
+    trim_history,
+)
 
 # The router makes a yes/no decision, which should be predictable: the same
 # question must not route to analysis one time and to plain chat the next.
 # Temperature does not affect speed and does not make Ollama reload the model.
 ROUTER_TEMPERATURE = 0.1
+
+#: Estimated tokens of the routing instructions and tool definition.
+ROUTER_OVERHEAD_TOKENS = 1000
 
 ROUTER_SYSTEM_PROMPT = (
     "You are a routing supervisor for a chat assistant. The user is chatting "
@@ -93,19 +101,16 @@ def decide_tool_use(
         instruction is an empty string. On any error, falls back to (False,
         "").
     """
-    history = chat_history or []
+    question = f"Dataset schema:\n{schema_text}\n\nUser message: {user_text}"
+    # The router uses the chat's context window, so that routing and
+    # answering do not make Ollama reload the model; earlier turns that do
+    # not fit are left out.
+    room = text_budget() - estimate_tokens(question) - ROUTER_OVERHEAD_TOKENS
+    history = trim_history(chat_history or [], room)
     router_messages = (
         [{"role": "system", "content": ROUTER_SYSTEM_PROMPT}]
         + history
-        + [
-            {
-                "role": "user",
-                "content": (
-                    f"Dataset schema:\n{schema_text}\n\n"
-                    f"User message: {user_text}"
-                ),
-            }
-        ]
+        + [{"role": "user", "content": question}]
     )
 
     try:
@@ -113,7 +118,10 @@ def decide_tool_use(
             model=model_name,
             messages=router_messages,
             tools=[ANALYZE_DATA_TOOL],
-            options={"temperature": ROUTER_TEMPERATURE},
+            options={
+                "temperature": ROUTER_TEMPERATURE,
+                "num_ctx": chat_context(),
+            },
         )
     except Exception:
         # Router failed (e.g. model lacks tool support) — fall back to plain

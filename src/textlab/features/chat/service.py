@@ -22,7 +22,6 @@ from typing import Any
 import ollama
 
 from textlab.common.ollama import (
-    MAX_CONTEXT_TOKENS,
     chunk_text,
     estimate_tokens,
     is_model_loaded,
@@ -30,7 +29,15 @@ from textlab.common.ollama import (
 )
 from textlab.common.progress import Progress, ProgressCallback, no_progress
 from textlab.common.storage import get_workspace, remove_tree
-from textlab.features.chat.documents import read_documents
+from textlab.features.chat.context_window import (
+    HISTORY_SHARE,
+    chat_context,
+    group_by_budget,
+    message_tokens,
+    text_budget,
+    trim_history,
+)
+from textlab.features.chat.documents import DOCUMENT_TYPES, read_documents
 from textlab.features.chat.exports import (
     format_chat_history,
     format_chat_history_html,
@@ -38,6 +45,7 @@ from textlab.features.chat.exports import (
 )
 from textlab.features.chat.generation import (
     get_chunk_answer,
+    get_combined_answer,
     get_response_generator,
     get_synthesis_generator,
 )
@@ -46,6 +54,7 @@ from textlab.features.visualization import service as visualization
 
 __all__ = [
     "ANALYSIS_TIMEOUT_SECONDS",
+    "DOCUMENT_TYPES",
     "answer",
     "conversation_folder",
     "decide_tool_use",
@@ -107,10 +116,11 @@ def answer(
 ) -> Iterator[str]:
     """Answer a message, with attached documents as context.
 
-    Context that fits the model is put in front of the question. Longer
-    context is split into parts that are answered one by one (reported to
-    ``on_progress``); the partial answers are then combined into the
-    streamed answer.
+    Context that fits the model's context window is put in front of the
+    question; earlier turns that no longer fit are left out, oldest first.
+    Longer context is split into parts that are answered one by one
+    (reported to ``on_progress``); the partial answers are then combined
+    into the streamed answer.
 
     Args:
         model: The Ollama model.
@@ -124,34 +134,100 @@ def answer(
         consumed (``ollama.ResponseError``).
     """
     history = plain_messages(history)
-    if context and estimate_tokens(context) > MAX_CONTEXT_TOKENS:
-        chunks = chunk_text(context)
-        total_tokens = estimate_tokens(context)
-        partial_answers = []
-        for index, chunk in enumerate(chunks, 1):
-            on_progress(
-                Progress(
-                    f"Analyzing document part {index} of {len(chunks)} "
-                    f"(~{total_tokens:,} tokens total)...",
-                    (index - 1) / len(chunks),
-                )
-            )
-            partial_answers.append(
-                get_chunk_answer(
-                    model, chunk, index, len(chunks), question, history
-                )
-            )
+    prompt = f"{context}\n\nUser Question: {question}" if context else question
+    room = text_budget() - estimate_tokens(prompt)
+    if context and room < 0:
+        return _answer_in_parts(model, history, question, context, on_progress)
+
+    messages = [
+        *trim_history(history, room),
+        {"role": "user", "content": prompt},
+    ]
+    return get_response_generator(model, messages, chat_context())
+
+
+def _answer_in_parts(
+    model: str,
+    history: list[dict[str, Any]],
+    question: str,
+    context: str,
+    on_progress: ProgressCallback,
+) -> Iterator[str]:
+    """Answer from a context too long for one request, part by part.
+
+    Each part, with the question and the most recent turns, fills one
+    request. Partial answers that do not fit in one request together are
+    combined in groups first.
+    """
+    budget = text_budget()
+    history = trim_history(history, int(budget * HISTORY_SHARE))
+    fixed_tokens = message_tokens(history) + estimate_tokens(question)
+    num_ctx = chat_context()
+
+    # A very long question leaves little room; parts then stay usable but
+    # may be cut by Ollama.
+    chunk_tokens = max(budget - fixed_tokens, budget // 4)
+    chunks = chunk_text(context, chunk_size_tokens=chunk_tokens)
+    total_tokens = estimate_tokens(context)
+    partial_answers = []
+    for index, chunk in enumerate(chunks, 1):
         on_progress(
-            Progress(f"Synthesizing responses from {len(chunks)} chunks...")
+            Progress(
+                f"Analyzing document part {index} of {len(chunks)} "
+                f"(~{total_tokens:,} tokens total)...",
+                (index - 1) / len(chunks),
+            )
         )
-        return get_synthesis_generator(
-            model, partial_answers, question, history
+        partial_answers.append(
+            get_chunk_answer(
+                model, chunk, index, len(chunks), question, history, num_ctx
+            )
         )
 
-    prompt = f"{context}\n\nUser Question: {question}" if context else question
-    return get_response_generator(
-        model, [*history, {"role": "user", "content": prompt}]
+    partial_answers = _combine_until_fitting(
+        model, partial_answers, question, history, on_progress
     )
+    on_progress(
+        Progress(f"Synthesizing responses from {len(chunks)} chunks...")
+    )
+    return get_synthesis_generator(
+        model, partial_answers, question, history, num_ctx
+    )
+
+
+def _combine_until_fitting(
+    model: str,
+    partial_answers: list[str],
+    question: str,
+    history: list[dict[str, Any]],
+    on_progress: ProgressCallback,
+) -> list[str]:
+    """Combine consecutive partial answers until all fit in one request.
+
+    Only needed for very long documents, whose partial answers do not fit
+    in the context window together.
+
+    Returns:
+        The answers, combined as far as needed.
+    """
+    budget = (
+        text_budget() - message_tokens(history) - estimate_tokens(question)
+    )
+    answers = list(partial_answers)
+    while sum(estimate_tokens(answer) for answer in answers) > budget:
+        groups = group_by_budget(answers, budget)
+        if len(groups) == len(answers):
+            break  # no two answers fit together; combining cannot help
+        on_progress(Progress(f"Combining {len(answers)} partial answers..."))
+        answers = [
+            group[0]
+            if len(group) == 1
+            else get_combined_answer(
+                model, group, question, history, chat_context()
+            )
+            for group in groups
+        ]
+    return answers
 
 
 def pull_model(model: str) -> None:
