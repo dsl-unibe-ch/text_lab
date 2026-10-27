@@ -1,54 +1,111 @@
 # Knowledge Graph
 
-The Knowledge Graph feature uses large language models (LLMs) to automatically extract key topics from the abstracts of your uploaded scientific papers. It then builds an interactive graph that reveals hidden connections across your literature collection — making it easy to explore themes, spot patterns, and navigate complex research landscapes.
+Explore connections between scientific papers, authors, research topics and
+citations. Create a project with one build action, or open saved results to
+continue exploring in a later session.
 
----
+## Create a project
 
-## Step 1 — Build Your Corpus
+1. Choose **Create a project**.
+2. Under **Add papers**, choose **Upload PDF or ZIP** (the default) or
+   **Use a folder on this cluster**.
+3. For uploads, select one PDF or a ZIP containing PDF papers and enter a
+   **Project name**. For a cluster folder, enter the folder containing PDFs.
+4. Choose **Save project in**: persistent storage on the cluster where you
+   want the extracted results to remain. This path refers to the cluster,
+   not your computer. The full project folder path is displayed below it.
+5. To change how topics are extracted, open **Advanced settings**. Under
+   **Topic extraction mode**, choose to run the language model in your Text Lab
+   session (Ollama, no API key needed) or use the university's GPUStack service
+   (API key required). The model reads paper titles and abstracts to identify
+   research topics. With GPUStack, these are sent to the university service;
+   with Ollama, they stay in your session. Session model choices follow the
+   same GPU-based configuration as the other Text Lab features; the first
+   configured model is selected by default.
+6. Click **Build knowledge graph**.
 
-Start by pointing the app to a folder containing your PDF collection. The app will scan the folder and list all detected PDFs so you can confirm you're working with the right files. Once ready, click **"Generate Corpus"** to kick off the extraction process.
+Text Lab extracts text, metadata and citations using Grobid, extracts research
+topics from titles and abstracts using the selected model, and opens the graph.
+Progress is shown while processing runs. The saved folder is
+`<project name>_project_corpus` for uploads or `<PDF folder name>_project_corpus`
+for cluster folders, under your chosen save location.
 
-Under the hood, this step uses [GROBID](https://grobid.readthedocs.io/en/latest/Introduction/) to parse each PDF and convert it into a structured XML format optimised for downstream processing. The output is saved to a new folder named `your_collection_project_corpus`.
+ZIPs may contain subfolders; only PDF papers are processed. Filenames are
+preserved, including in selectors such as `P0001 - Paper.pdf`. Each paper in a
+ZIP must have a unique filename, even across subfolders. Rename duplicates
+before uploading. Invalid archives and files without a PDF header show an error.
 
-> **Smart caching:** This step is computationally intensive, so the app only parses papers that are not in the corpus yet (it recognises them by file name), and tries again those that could not be parsed before. You can add PDFs to your folder and run the step again: it reports how many papers were processed, skipped and could not be parsed. A paper that is changed but keeps its file name is not parsed again; to parse it again, delete its `P0001`-style folder in the corpus.
+Uploaded PDFs are staged in the private job workspace and removed after the
+build attempt, including on failures. Extracted text, metadata, topics and
+graphs remain in your chosen project folder. To retry failed PDFs later, upload
+the original PDF or ZIP again using the same project name and save location.
+You do not need the original upload to open saved extractions or graphs.
 
-Once your corpus is built and nothing has changed, you can skip straight to Step 2 on future runs.
+PDF extractions are saved as processing progresses. Papers already extracted
+are recognised by PDF filename and reused; failed papers are retried. Changing
+a PDF without changing its filename does not trigger extraction again. Topic
+extraction processes all papers and replaces the saved topic table only when
+it completes. Papers without abstracts are included without research topics.
 
-A **CSV export** is also generated at this stage, giving you a human-readable summary of the extraction results. Use it to spot any issues with how GROBID processed individual papers.
+If processing fails, the saved extractions remain available for another attempt.
 
-> **Lost your CSV?** No problem — use **Step 1b: "Rebuild Corpus Table"** to regenerate it at any time. Just point to the folder containing your corpora; they'll be detected automatically so you can select the one you need.
+## Open an existing project
 
----
+Choose **Open an existing project** and enter either the project folder or a
+folder containing your saved projects. Select a project and click **Open
+project**. The source PDFs, Grobid server and topic model service are not needed
+to explore completed results.
 
-## Step 2 — Extract Topics
+Once a project is open, its save location is shown above the results. Use
+**Choose another project** to switch collections.
 
-With your corpus ready, the app uses an LLM to read each paper's abstract and extract **3 to 8 concise topics**. Each topic belongs to a broader category, which serves as a shared node when connecting papers in the graph.
+## Explore and download
 
-Point to the folder containing your project corpora — they'll appear automatically in the dropdown. Select the corpus you want to process and let the LLM do the work.
+The project has three views:
 
-The resulting topics are saved to a JSON file that feeds directly into Step 3. You can also download this file at any time for offline inspection or further analysis.
+- **Explore:** the whole collection graph, or the connections around one paper.
+  The graph updates automatically when you change the view, selected paper,
+  or graph options. Under **Advanced graph options**,
+  choose node types, filter papers, or set a minimum topic confidence for the
+  whole collection. Use **Recenter** inside the graph to fit all nodes back
+  into view without rebuilding it.
+- **Papers:** inspect extracted metadata and download the saved paper table as
+  CSV when available.
+- **Topics:** inspect saved research topics and download papers with topics as
+  JSON.
 
----
+The graph legend explains node colours and shapes. Hover over nodes for more
+information and use the graph's navigation controls to explore connections.
+Download the displayed graph as a standalone HTML file to open offline or share.
+The graph remains visible when other widgets cause the page to refresh.
 
-## Step 3 — Visualise Your Data
+## Update or repair a project
 
-If you've already completed topic extraction, you can jump straight here. Point to your corpora folder, choose a corpus from the dropdown, and start exploring your data through two complementary views:
+Open **Project tools** and enable **Show processing controls** when needed:
 
-### Ego Graphs
+- **Update graph:** supply the PDF folder and select a topic model. New and
+  previously failed PDFs are processed, successful extractions are reused,
+  and topics are generated for the collection with the selected model.
+- **Re-extract topics:** choose a different model without processing PDFs again.
+  This also completes a project whose paper extraction succeeded but whose
+  topic extraction failed.
+- **Rebuild paper table:** regenerate metadata tables from saved paper
+  extractions. This does not change the saved topics. If the set of papers has
+  changed, re-extract topics to bring the graph up to date.
 
-Ego graphs let you examine each paper individually. They show the topics, authors, and other metadata associated with a single paper as a local graph. Use the checkboxes to toggle which node types are displayed, then click **"Generate Ego Graph"** to refresh the view.
+If topic extraction fails during an update, the last completed topics remain
+available. The page warns when those topics cover a different set of papers
+from the current paper table.
 
-You can download any visualisation as an HTML file for offline use or sharing.
+## Data privacy and storage
 
-### Full Corpus Graph
-
-The Full Corpus Graph brings your entire collection together in one interactive view. Click **"Generate Full Corpus Graph"** to render the complete network of interconnections across all papers.
-
-If the graph feels overwhelming, open the **Advanced** panel to filter which papers are included — then regenerate the graph to focus on what matters most. Like the ego graph, you can export this view as HTML for offline exploration.
-
-## Data privacy and security
-
-* **Your papers stay where they are.** Text Lab reads the PDFs from the folder you enter and does not copy them anywhere else permanently.
-* **Output goes where you choose.** The corpus folder with the extracted metadata, tables and topics is saved in the location you pick in Step 1, and the graphs you generate are saved in it as HTML pages. It stays there until you delete it, so you can come back to it in a later session.
-* **Temporary files are deleted.** While Grobid parses a paper, it keeps a working copy in your session's private workspace on the compute node, which only your user account can open. The workspace is deleted when your Text Lab session ends.
-* **Choice of language model for topics.** With **Ollama (Local)**, the title and abstract of each paper are processed by a model running in your own session on the compute node. With **GPUStack**, they are sent to the University of Bern's GPUStack service: they leave your session, but stay on university infrastructure and are not sent to external providers. Choose Ollama for papers that must not leave your session.
+- For cluster folder input, original PDFs stay where they are. Uploaded PDFs
+  and ZIP contents are staged temporarily and are not copied permanently.
+- Extracted metadata, text, topics and generated graph HTML files stay in the
+  chosen project folder until you delete them. Choose persistent cluster
+  storage if you want to return in another session.
+- Grobid's temporary working copies use the session's private workspace and
+  are deleted when the session ends.
+- With the session model, titles and abstracts are processed in your own job.
+  With GPUStack, they are sent to the University of Bern's service, staying on
+  university infrastructure.
