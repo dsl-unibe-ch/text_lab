@@ -13,9 +13,16 @@ Pyvis and the OpenAI client are imported only when they are used.
 
 from __future__ import annotations
 
-import ollama
+from collections.abc import Iterator
+from contextlib import contextmanager
+from io import BytesIO
+from pathlib import Path, PurePosixPath
+from zipfile import BadZipFile, ZipFile
 
-from textlab.common.ollama import extract_model_name
+from textlab.common.gpu_manager import get_gpu_name
+from textlab.common.model_config import get_available_models
+from textlab.common.storage import get_workspace
+from textlab.common.upload_safety import safe_upload_name, safe_zip_members
 from textlab.features.knowledge_graph.corpus import (
     TABLE_CSV,
     TABLE_JSONL,
@@ -64,6 +71,8 @@ __all__ = [
     "ollama_client",
     "ollama_models",
     "read_records",
+    "project_folder_name",
+    "staged_papers",
     "save_graph_html",
     "topics_json",
     # Re-exported for interfaces
@@ -75,17 +84,98 @@ __all__ = [
 
 
 def ollama_models() -> list[str]:
-    """Return the models on the session's Ollama server, as it lists them.
+    """Return the configured Ollama model choices for the session's GPU.
+
+    Uses the shared models.json configuration and models.local.json
+    overrides, following the same GPU-based selection as the other pages.
+    Installed Ollama models do not define the choices offered here.
 
     Returns:
-        The model names.
+        Model names in their configured order for this session's GPU.
+    """
+    return get_available_models(get_gpu_name())
+
+
+def project_folder_name(name: str) -> str:
+    """Return a corpus folder name from a user-supplied project name.
+
+    Args:
+        name: A single folder name, without a path.
+
+    Returns:
+        The name with the corpus suffix appended.
 
     Raises:
-        Exception: If the server cannot be reached (the client's error).
+        ValueError: If the name is empty or contains path components.
     """
-    response = ollama.list()
-    if hasattr(response, "models"):
-        entries = response.models
-    else:
-        entries = response.get("models", [])
-    return [name for name in map(extract_model_name, entries) if name]
+    name = name.strip()
+    if not name or name in {".", ".."} or any(c in name for c in "/\\\0"):
+        raise ValueError("Enter a project name without slashes or a path.")
+    return f"{name}_project_corpus"
+
+
+def _write_pdf(path: Path, data: bytes) -> None:
+    """Write a PDF after checking its header."""
+    if b"%PDF-" not in data[:1024]:
+        raise ValueError(f"{path.name} does not contain a PDF header.")
+    path.write_bytes(data)
+
+
+@contextmanager
+def staged_papers(name: str, data: bytes) -> Iterator[Path]:
+    """Stage a PDF or ZIP in a private folder removed after processing.
+
+    ZIP subfolders are flattened, preserving PDF basenames for corpus reuse.
+    Duplicate basenames are refused to avoid overwriting or skipping papers.
+    Archive paths and expanded sizes use the shared upload safeguards.
+
+    Args:
+        name: The browser-supplied filename.
+        data: The uploaded PDF or ZIP bytes.
+
+    Yields:
+        A temporary folder containing the uploaded PDF papers.
+
+    Raises:
+        ValueError: If the input is invalid, unsafe, or contains no PDFs.
+    """
+    name = safe_upload_name(name)
+    extension = Path(name).suffix.lower()
+    if extension not in {".pdf", ".zip"}:
+        raise ValueError("Upload a PDF document or ZIP archive of PDFs.")
+    with get_workspace().temp_dir("knowledge_graph", prefix="upload-") as root:
+        if extension == ".pdf":
+            _write_pdf(root / name, data)
+        else:
+            try:
+                with ZipFile(BytesIO(data)) as archive:
+                    members = safe_zip_members(
+                        archive, allowed_extensions={".pdf"}
+                    )
+                    seen: set[str] = set()
+                    for member in members:
+                        relative = PurePosixPath(
+                            member.filename.replace("\\", "/")
+                        )
+                        if (
+                            "__MACOSX" in relative.parts
+                            or relative.name.startswith("._")
+                        ):
+                            continue
+                        filename = safe_upload_name(member.filename)
+                        if filename.casefold() in seen:
+                            raise ValueError(
+                                f"More than one PDF is named {filename}. "
+                                "Give each paper a unique filename."
+                            )
+                        seen.add(filename.casefold())
+                        _write_pdf(root / filename, archive.read(member))
+                    if not seen:
+                        raise ValueError(
+                            "The ZIP archive contains no PDF papers."
+                        )
+            except BadZipFile as exc:
+                raise ValueError(
+                    "The uploaded ZIP archive is not valid."
+                ) from exc
+        yield root

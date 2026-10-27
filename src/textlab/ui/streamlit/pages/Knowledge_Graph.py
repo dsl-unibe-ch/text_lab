@@ -1,666 +1,622 @@
-"""Knowledge Graph page: graphs of a collection of scientific papers.
-
-The page walks through the steps of
-:mod:`textlab.features.knowledge_graph.service`: parse a folder of PDFs
-into a corpus with Grobid, extract topics with an LLM, and draw ego and
-full corpus graphs. Each step reads the corpus folder, so a step can be
-started from a corpus made in an earlier session.
-"""
+"""Build and explore saved paper collections through one project interface."""
 
 import os
 import traceback
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 import streamlit as st
 import streamlit.components.v1 as components
-from PIL import Image
 
 from textlab.common import gpu_manager
-from textlab.common.progress import Progress
 from textlab.features.knowledge_graph import service
 from textlab.ui.streamlit.auth import check_token
 from textlab.ui.streamlit.components.gpu import free_gpu_for
+from textlab.ui.streamlit.components.progress import StatusBox
 
-current_dir = os.path.dirname(os.path.abspath(__file__))
-app_dir = os.path.dirname(current_dir)
-favicon_path = os.path.join(app_dir, "assets", "text_lab_logo.png")
-try:
-    favicon = Image.open(favicon_path)
-    st.set_page_config(
-        page_title="Knowledge Graph", page_icon=favicon, layout="wide"
-    )
-except FileNotFoundError:
-    st.set_page_config(page_title="Knowledge Graph", layout="wide")
-
-OLLAMA_BACKEND = "Ollama (Local)"
-GPUSTACK_BACKEND = "GPUStack (Remote)"
-
-ABOUT = """
-    This tool will:
-    1. Extract text and metadata from scientific papers using Grobid
-    2. Process the content to identify entities and relationships
-    3. Generate a knowledge graph visualization
-    4. Allow you to explore and export the results
-
-    **Requirements:**
-    - Papers must be in PDF format
-    - Place all papers in a single directory
-    - Ensure you have read access to the directory
-    """
-
-
-def show_progress(bar: Any, status: Any) -> Callable[[Progress], None]:
-    """Return a progress callback that updates a bar and a status line.
-
-    Args:
-        bar: A Streamlit progress bar.
-        status: A Streamlit placeholder for the message.
-
-    Returns:
-        The callback.
-    """
-
-    def update(progress: Progress) -> None:
-        if progress.fraction is not None:
-            bar.progress(progress.fraction)
-        status.text(progress.message)
-
-    return update
+OLLAMA_BACKEND = "In this Text Lab session (Ollama)"
+GPUSTACK_BACKEND = "University GPUStack service (API key required)"
 
 
 def show_failure(message: str, exc: Exception) -> None:
-    """Show an error with its traceback."""
+    """Show an actionable error with optional technical details."""
     st.error(f"{message}: {exc}")
-    st.code(traceback.format_exc())
+    with st.expander("Error details"):
+        st.code(traceback.format_exc())
 
 
-def select_corpus(
-    corpora: list[Path], label: str, help_text: str, key: str | None = None
-) -> Path:
-    """Let the user pick one of several corpus folders.
-
-    Args:
-        corpora: The corpus folders.
-        label: The select box label.
-        help_text: Its help text.
-        key: Its widget key.
-
-    Returns:
-        The selected folder.
-    """
-    options = {folder.name: folder for folder in corpora}
-    name = st.selectbox(
-        label, options=list(options.keys()), help=help_text, key=key
-    )
-    selected = options[name]
-    st.info(f"Selected: `{selected}`")
-    return selected
+def activate_project(corpus: Path) -> None:
+    """Select a project and isolate its graph and widget state."""
+    project = str(corpus.resolve())
+    st.session_state.kg_graph = None
+    st.session_state.kg_project = project
 
 
-def topics_download(corpus: Path, key: str | None = None) -> None:
-    """Offer the corpus table with topics as a JSON download."""
-    st.download_button(
-        label="Download Corpus with Topics (JSON)",
-        data=service.topics_json(corpus),
-        file_name="corpus_table.with_topics.json",
-        mime="application/json",
-        key=key,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Step 1: corpus
-# ---------------------------------------------------------------------------
-
-
-def generate_corpus_step(papers_dir: Path, pdf_files: list[Path]) -> None:
-    """Show step 1: parse the PDFs into a corpus folder."""
-    st.subheader("Output Configuration")
-    output_location = st.text_input(
-        "Output directory location",
-        value=str(papers_dir.parent),
-        help=(
-            "Directory where the output folder will be created. Default: "
-            "same level as input folder."
-        ),
-    )
-    output_path = Path(output_location) / service.corpus_folder_name(
-        papers_dir
-    )
-    st.info(f"Output will be saved to: `{output_path}`")
-
-    st.markdown("### Step 1: Generate Corpus")
-    st.markdown(
-        "Extract metadata and text from all PDFs. This will skip papers "
-        "already processed."
-    )
-    if not st.button("Generate Corpus", type="primary"):
-        return
-
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    try:
-        summary = service.build_corpus(
-            pdf_files,
-            output_path,
-            on_progress=show_progress(progress_bar, status_text),
-        )
-    except Exception as exc:
-        show_failure("Processing failed", exc)
-        return
-    progress_bar.progress(1.0)
-    status_text.empty()
-
-    st.success(f"""
-    **Corpus Generation Complete!**
-    - New papers processed: {summary.processed}
-    - Skipped (already processed): {summary.skipped}
-    - Errors: {summary.errors}
-    - Total papers in corpus: {len(summary.table)}
-    - Output saved to: `{output_path}`
-    """)
-    with st.expander("View Corpus Table Preview"):
-        st.dataframe(summary.table.head(10), use_container_width=True)
-    csv_path = output_path / service.TABLE_CSV
-    if csv_path.exists():
-        st.download_button(
-            label="Download Corpus Table (CSV)",
-            data=csv_path.read_bytes(),
-            file_name="corpus_table.csv",
-            mime="text/csv",
-        )
-
-
-def rebuild_table_step(papers_dir: Path) -> None:
-    """Show step 1b: rebuild the corpus table of an existing corpus."""
-    st.markdown("---")
-    st.markdown("### Step 1b: Rebuild Corpus Table")
-    st.markdown(
-        "Rebuild the corpus metadata table from existing processed papers. "
-        "Use this to update citation extraction."
-    )
-    location = st.text_input(
-        "Corpus location to rebuild",
-        value=str(papers_dir.parent),
-        help="Directory containing your *_project_corpus folder(s)",
-        key="rebuild_location",
-    )
-    if not location or not Path(location).is_dir():
-        return
-    corpora = service.find_corpora(location)
-    if not corpora:
-        st.warning("No corpus folders found in this location.")
-        return
-
-    st.success(f"Found {len(corpora)} corpus/corpora")
-    corpus = select_corpus(
-        corpora,
-        "Select corpus to rebuild",
-        "Choose corpus to rebuild metadata table",
-        key="rebuild_corpus_select",
-    )
-    if not st.button(
-        "Rebuild Corpus Table", type="secondary", key="rebuild_button"
-    ):
-        return
-    try:
-        with st.spinner("Rebuilding corpus metadata table..."):
-            table = service.build_corpus_table(corpus)
-            st.success(f"""
-            **Corpus Table Rebuilt!**
-            - Total papers: {len(table)}
-            - Updated: corpus_table.csv, corpus_table.jsonl
-            - Citations extracted (DOI-verified only)
-            """)
-            if table.empty:
-                return
-            with_dois = table["cited_dois"].str.len().gt(0).sum()
-            st.info(f"{with_dois} papers have citations with DOIs")
-            with st.expander("View Updated Corpus Table"):
-                st.dataframe(
-                    table[["paper_id", "title", "cited_dois"]].head(10),
-                    use_container_width=True,
-                )
-    except Exception as exc:
-        show_failure("Rebuild failed", exc)
-
-
-# ---------------------------------------------------------------------------
-# Step 2: topics
-# ---------------------------------------------------------------------------
-
-
-def choose_model(backend: str) -> str | None:
-    """Show the model choice for a backend.
+def model_settings(key: str) -> tuple[str, str | None, str]:
+    """Collect the topic model and show credentials only when needed.
 
     Args:
-        backend: :data:`OLLAMA_BACKEND` or :data:`GPUSTACK_BACKEND`.
+        key: Prefix for this settings panel's widget keys.
 
     Returns:
-        The model, or ``None`` if the backend is not ready.
+        Backend, model name if available, and optional API key.
     """
+    st.caption(
+        "A language model reads each paper's title and abstract to identify "
+        "research topics. Choose where to run this extraction."
+    )
+    backend = st.radio(
+        "Topic extraction mode",
+        [OLLAMA_BACKEND, GPUSTACK_BACKEND],
+        horizontal=True,
+        key=f"{key}_backend",
+    )
     if backend == GPUSTACK_BACKEND:
-        if not st.session_state.gpustack_api_key:
-            st.warning("Please enter your GPUStack API Key in the sidebar.")
-            return None
-        return service.GPUSTACK_MODEL
+        api_key = st.text_input(
+            "GPUStack API key",
+            type="password",
+            key=f"{key}_api_key",
+            help="Required to use the university's GPUStack service.",
+        )
+        st.caption(
+            "Your papers' titles and abstracts are sent to the university's "
+            "GPUStack service for topic extraction. They stay on university "
+            "infrastructure."
+        )
+        st.caption(f"Model for topic extraction: {service.GPUSTACK_MODEL}")
+        return backend, service.GPUSTACK_MODEL if api_key else None, api_key
+    st.caption(
+        "Uses the computing resources allocated to your Text Lab session. "
+        "No API key is needed; titles and abstracts stay in your session."
+    )
     try:
         models = service.ollama_models()
     except Exception as exc:
-        st.error(f"Could not connect to Ollama: {exc}")
-        return None
+        st.warning(f"The session model configuration could not be read: {exc}")
+        return backend, None, ""
     if not models:
-        st.error("No models found in Ollama. Please pull a model first.")
-        return None
-    return st.selectbox("Select Local Model", models, index=0)
-
-
-def extract_topics_step(default_location: str) -> None:
-    """Show step 2: extract topics for a corpus with an LLM."""
-    st.markdown("---")
-    st.markdown("### Step 2: Extract Topics with LLM")
-    st.markdown("Use AI to extract research topics from paper abstracts.")
-    location = st.text_input(
-        "Corpus directory location",
-        value=default_location,
-        help="Directory containing your *_project_corpus folder(s)",
-    )
-    if not location:
-        return
-    if not Path(location).is_dir():
-        st.error("Directory does not exist. Please check the path.")
-        return
-    corpora = service.find_corpora(location, required=service.TABLE_JSONL)
-    if not corpora:
-        st.warning(
-            "No valid corpus found in this location. Ensure corpus folders "
-            "contain `corpus_table.jsonl`."
+        st.info(
+            "No models are configured for this session. Contact Text Lab "
+            "support or choose the university GPUStack service."
         )
-        return
-
-    st.success(f"Found {len(corpora)} corpus/corpora")
-    corpus = select_corpus(
-        corpora,
-        "Select corpus for topic extraction",
-        "Choose which corpus to process",
+        return backend, None, ""
+    model_key = f"{key}_model"
+    if st.session_state.get(model_key) not in models:
+        st.session_state[model_key] = models[0]
+    model = st.selectbox(
+        "Model for topic extraction",
+        models,
+        key=model_key,
+        help="Model choices follow the configuration for this session's GPU.",
     )
-    if (corpus / service.TOPICS_JSONL).exists():
-        st.success("Topics file already exists for this corpus")
-        topics_download(corpus, key="download_existing_topics")
+    return backend, model, ""
 
-    st.markdown("#### Extraction Settings")
-    backend = st.radio(
-        "Select LLM Backend",
-        [OLLAMA_BACKEND, GPUSTACK_BACKEND],
-        help=(
-            "Use local resources (free, no key) or remote GPU cluster "
-            "(requires API key)."
-        ),
-    )
-    model = choose_model(backend)
-    if not st.button(
-        "Extract Topics", type="secondary", disabled=model is None
-    ):
-        return
 
+def extract_topics(
+    corpus: Path, backend: str, model: str, api_key: str, status: Any
+) -> service.TopicSummary:
+    """Run topic extraction with the chosen model through the service."""
     if backend == OLLAMA_BACKEND:
         free_gpu_for(gpu_manager.LLM, ollama_model=model)
-    topic_progress = st.progress(0)
-    topic_status = st.empty()
+        client = service.ollama_client()
+    else:
+        client = service.gpustack_client(api_key)
+    return service.extract_topics(corpus, client, model, on_progress=status)
+
+
+def build_project(
+    papers: Path, corpus: Path, backend: str, model: str, api_key: str
+) -> None:
+    """Prepare papers and topics, preserving reusable PDF extractions."""
     try:
-        if backend == OLLAMA_BACKEND:
-            client = service.ollama_client()
-        else:
-            client = service.gpustack_client(st.session_state.gpustack_api_key)
-        service.extract_topics(
-            corpus,
-            client,
-            model,
-            on_progress=show_progress(topic_progress, topic_status),
-        )
-    except Exception as exc:
-        show_failure("Topic extraction failed", exc)
-        return
-    topic_progress.progress(1.0)
-    topic_status.empty()
-    st.success("""
-    **Topic Extraction Complete!**
-    - Topics have been extracted and added to the corpus
-    - Output file: `corpus_table.with_topics.jsonl`
-    """)
-    topics_download(corpus)
-
-
-# ---------------------------------------------------------------------------
-# Step 3: graphs
-# ---------------------------------------------------------------------------
-
-
-def graph_step(default_location: str) -> None:
-    """Show step 3: ego graphs and the full corpus graph."""
-    st.markdown("---")
-    st.markdown("### Step 3: Build Knowledge Graph")
-    st.markdown(
-        "Generate network visualization from corpus with extracted topics."
-    )
-    location = st.text_input(
-        "Knowledge Graph corpus location",
-        value=default_location,
-        key="kg_location",
-        help=(
-            "Directory containing corpus with topics (*_project_corpus folder)"
-        ),
-    )
-    if not location:
-        return
-    if not Path(location).is_dir():
-        st.error("Directory does not exist. Please check the path.")
-        return
-    corpora = service.find_corpora(location, required=service.TOPICS_JSONL)
-    if not corpora:
-        st.warning(
-            "No corpus with topics found. Please complete Step 2 first."
-        )
-        return
-
-    st.success(f"Found {len(corpora)} corpus/corpora with topics")
-    corpus = select_corpus(
-        corpora,
-        "Select corpus for visualization",
-        "Choose corpus with extracted topics",
-        key="kg_corpus_select",
-    )
-    records = service.read_records(corpus / service.TOPICS_JSONL)
-    ego_graph_section(corpus, records)
-    full_graph_section(corpus, records)
-
-
-def ego_graph_section(corpus: Path, records: list[dict[str, Any]]) -> None:
-    """Show the ego graph of one paper."""
-    options = {
-        f"{rec.get('paper_id', 'unknown')} - "
-        f"{rec.get('pdf_filename', 'unknown.pdf')}": rec
-        for rec in records
-    }
-    label = st.selectbox(
-        "Select paper to visualize ego graph",
-        options=list(options.keys()),
-        help="Choose a paper to see its network neighborhood",
-        key="paper_select",
-    )
-    paper = options[label]
-    paper_id = paper.get("paper_id", "unknown")
-    st.write(f"**Selected:** {paper.get('title', 'Untitled')}")
-
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        include_authors = st.checkbox("Authors", value=True, key="ego_authors")
-    with col2:
-        include_topics = st.checkbox("Topics", value=True, key="ego_topics")
-    with col3:
-        include_cited_papers = st.checkbox(
-            "Cited Papers", value=True, key="ego_cited_papers"
-        )
-    with col4:
-        include_cited_authors = st.checkbox(
-            "Cited Authors", value=True, key="ego_cited_authors"
-        )
-
-    if not st.button("Generate Ego Graph", type="primary"):
-        return
-    try:
-        with st.spinner("Building ego graph..."):
-            graph, network = service.build_paper_ego_graph(
-                paper,
-                all_records=records,
-                include_topics=include_topics,
-                include_authors=include_authors,
-                include_cited_papers=include_cited_papers,
-                include_cited_authors=include_cited_authors,
-            )
-            file_name = f"{paper_id}_ego_graph.html"
-            html = service.save_graph_html(network, corpus / file_name)
-            st.success("Ego graph generated!")
-            components.html(html, height=650, scrolling=True)
-
-            st.markdown("**Graph Statistics:**")
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Nodes", graph.number_of_nodes())
-            with col2:
-                st.metric("Edges", graph.number_of_edges())
-            with col3:
-                st.metric("Authors", service.count_nodes(graph, "author"))
-            st.download_button(
-                label="Download HTML",
-                data=html,
-                file_name=file_name,
-                mime="text/html",
-            )
-    except Exception as exc:
-        show_failure("Error generating ego graph", exc)
-
-
-def paper_selection(records: list[dict[str, Any]]) -> None:
-    """Show the optional choice of papers for the full corpus graph.
-
-    The choice is kept in ``st.session_state.selected_papers`` (paper id
-    to included).
-    """
-    with st.expander(
-        "Advanced: Select Specific Papers (Optional)", expanded=False
-    ):
-        st.markdown(
-            "By default, all papers are included. Check boxes below to "
-            "select specific papers only."
-        )
-        col_a, col_b = st.columns(2)
-        with col_a:
-            select_all = st.button("Select All", key="select_all_papers")
-        with col_b:
-            deselect_all = st.button("Deselect All", key="deselect_all_papers")
-
-        if "selected_papers" not in st.session_state or select_all:
-            st.session_state.selected_papers = {
-                rec.get("paper_id"): True for rec in records
-            }
-        if deselect_all:
-            st.session_state.selected_papers = {
-                rec.get("paper_id"): False for rec in records
-            }
-
-        st.markdown("**Select papers to include:**")
-        num_cols = 3
-        cols = st.columns(num_cols)
-        for idx, rec in enumerate(records):
-            paper_id = rec.get("paper_id", "unknown")
-            title = rec.get("title", "Untitled")
-            if len(title) > 40:
-                display_text = f"{paper_id} - {title[:40]}..."
-            else:
-                display_text = f"{paper_id} - {title}"
-            with cols[idx % num_cols]:
-                st.session_state.selected_papers[paper_id] = st.checkbox(
-                    display_text,
-                    value=st.session_state.selected_papers.get(paper_id, True),
-                    key=f"paper_checkbox_{paper_id}",
+        pdfs = service.list_pdfs(papers)
+        if not papers.is_dir() or not pdfs:
+            st.error("Choose a cluster folder containing PDF papers.")
+            return
+        with StatusBox(
+            "Building your knowledge graph...",
+            complete_label="Your project is ready to explore.",
+            caption="Extracted papers are saved as processing progresses.",
+        ) as status:
+            service.ensure_grobid_server()
+            summary = service.build_corpus(pdfs, corpus, on_progress=status)
+            activate_project(corpus)
+            if summary.table.empty:
+                raise ValueError(
+                    "No papers could be extracted. Check the PDFs and try "
+                    "again; the saved project remains available."
                 )
-
-        selected_count = sum(st.session_state.selected_papers.values())
-        st.info(f"Selected: {selected_count} / {len(records)} papers")
-
-
-def full_graph_section(corpus: Path, records: list[dict[str, Any]]) -> None:
-    """Show the graph of all (or the selected) papers."""
-    st.markdown("---")
-    st.markdown("#### Full Corpus Graph")
-    st.markdown(
-        "Visualize all papers, authors, and topics together to see "
-        "collaboration patterns and topic clusters."
-    )
-    paper_selection(records)
-
-    col1, col2, col3, col4, col5 = st.columns(5)
-    with col1:
-        include_authors = st.checkbox(
-            "Authors", value=True, key="full_authors"
+            topics = extract_topics(corpus, backend, model, api_key, status)
+            st.session_state.kg_graph = None
+        st.success(
+            f"{summary.processed} papers extracted · "
+            f"{summary.skipped} reused · {summary.errors} failed"
         )
-    with col2:
-        include_topics = st.checkbox("Topics", value=True, key="full_topics")
-    with col3:
-        include_cited_papers = st.checkbox(
-            "Cited Papers", value=False, key="full_cited_papers"
-        )
-    with col4:
-        include_cited_authors = st.checkbox(
-            "Cited Authors", value=False, key="full_cited_authors"
-        )
-    with col5:
-        min_confidence = st.slider(
-            "Min Topic Confidence", 0.0, 1.0, 0.0, 0.1, key="min_conf"
-        )
-
-    if not st.button("Generate Full Corpus Graph", type="secondary"):
-        return
-    selected = st.session_state.get("selected_papers", {})
-    papers = [
-        rec for rec in records if selected.get(rec.get("paper_id"), True)
-    ]
-    if not papers:
-        st.warning("No papers selected. Please select at least one paper.")
-        return
-    try:
-        with st.spinner("Building full corpus graph..."):
-            graph, network = service.build_full_corpus_graph(
-                papers,
-                include_topics=include_topics,
-                include_authors=include_authors,
-                include_cited_papers=include_cited_papers,
-                include_cited_authors=include_cited_authors,
-                min_topic_confidence=min_confidence,
+        if summary.errors:
+            st.warning(
+                "Some PDFs could not be processed. You can explore the "
+                "successful papers and retry using Update graph."
             )
-            html = service.save_graph_html(
-                network, corpus / "full_corpus_graph.html"
-            )
-            st.success(
-                f"Full corpus graph generated with {len(papers)} papers!"
-            )
-            components.html(html, height=850, scrolling=True)
-
-            st.markdown("**Graph Statistics:**")
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("Total Nodes", graph.number_of_nodes())
-            with col2:
-                st.metric("Total Edges", graph.number_of_edges())
-            with col3:
-                st.metric("Papers", service.count_nodes(graph, "paper"))
-            with col4:
-                st.metric("Authors", service.count_nodes(graph, "author"))
-            st.download_button(
-                label="Download Full Graph HTML",
-                data=html,
-                file_name="full_corpus_graph.html",
-                mime="text/html",
+        if topics.skipped:
+            st.info(
+                f"{topics.skipped} papers have no abstract; they are included "
+                "without research topics."
             )
     except Exception as exc:
-        show_failure("Error generating full corpus graph", exc)
+        show_failure(
+            "The project could not be completed. Saved extractions can "
+            "be reused when you retry",
+            exc,
+        )
 
 
-# ---------------------------------------------------------------------------
-# Page
-# ---------------------------------------------------------------------------
-
-
-def papers_section(home: str) -> None:
-    """Show the papers folder input and, for a folder with PDFs, the steps."""
-    st.subheader("Paper Collection Directory")
-    st.markdown(
-        "Enter the path to the directory containing your scientific papers "
-        "(PDF format)."
+def new_project(home: Path) -> None:
+    """Choose uploaded papers or a cluster folder and save one project."""
+    source = st.radio(
+        "Add papers",
+        ["Upload PDF or ZIP", "Use a folder on this cluster"],
+        horizontal=True,
+        key="kg_paper_source",
     )
-    papers_path = st.text_input(
-        "Papers Directory Path",
-        value=str(Path(home) / "papers"),
-        help=(
-            "Enter the full path to the directory containing PDF files to "
-            "process"
-        ),
+    upload = None
+    papers = None
+    folder_name = None
+    ready = False
+    if source == "Upload PDF or ZIP":
+        upload = st.file_uploader(
+            "Upload a PDF or a ZIP of PDF papers",
+            type=["pdf", "zip"],
+            key="kg_paper_upload",
+            help=(
+                "ZIPs may contain subfolders. "
+                "Each PDF needs a unique filename. ZIP contents have "
+                "separate extraction limits. For larger collections, "
+                "use a folder on this cluster."
+            ),
+        )
+        project_name = st.text_input(
+            "Project name",
+            placeholder="Literature review",
+            key="kg_upload_name",
+        )
+        if project_name.strip():
+            try:
+                folder_name = service.project_folder_name(project_name)
+            except ValueError as exc:
+                st.error(str(exc))
+        ready = upload is not None and folder_name is not None
+    else:
+        papers_text = st.text_input(
+            "PDF folder on this cluster",
+            value=str(home / "papers"),
+            help=(
+                "Enter the full path to a folder containing your PDF "
+                "papers on this cluster."
+            ),
+        )
+        papers = Path(papers_text.strip()).expanduser()
+        folder_name = service.corpus_folder_name(papers)
+        ready = bool(papers_text.strip())
+        if ready and papers.is_dir():
+            st.caption(f"{len(service.list_pdfs(papers))} PDF papers found")
+    save_text = st.text_input(
+        "Save project in",
+        value=str(home),
+        key="kg_save_location",
+        help="Choose persistent cluster storage to reuse your work later.",
     )
-    if not papers_path:
-        return
-    papers_dir = Path(papers_path)
-    if not papers_dir.exists():
-        st.error("Directory does not exist. Please check the path.")
-        return
-    if not papers_dir.is_dir():
-        st.error("The path exists but is not a directory")
-        return
-    pdf_files = service.list_pdfs(papers_dir)
-    if not pdf_files:
-        st.warning("No PDF files found in this directory")
-        return
+    corpus = (
+        Path(save_text.strip()).expanduser() / folder_name
+        if folder_name
+        else None
+    )
+    if corpus is not None and save_text.strip():
+        st.caption(f"Project folder: {corpus}")
+    if source == "Upload PDF or ZIP":
+        st.caption(
+            "Uploaded PDFs are temporary. Extracted text, metadata, topics, "
+            "and graphs are saved in your project folder for future sessions."
+        )
+    with st.expander("Advanced settings", expanded=False):
+        backend, model, api_key = model_settings("new")
+    st.caption(
+        "Build extracts your PDFs, identifies research topics, and opens "
+        "the graph. Existing PDF extractions are reused automatically; "
+        "topics are generated with the selected model."
+    )
+    if st.button(
+        "Build knowledge graph",
+        type="primary",
+        disabled=not (ready and save_text.strip() and model),
+    ):
+        if upload is not None:
+            try:
+                with service.staged_papers(
+                    upload.name, upload.getvalue()
+                ) as staged:
+                    build_project(staged, corpus, backend, model, api_key)
+            except (ValueError, OSError) as exc:
+                show_failure("The uploaded papers could not be prepared", exc)
+        elif papers is not None:
+            build_project(papers, corpus, backend, model, api_key)
 
-    st.success(f"Found {len(pdf_files)} PDF file(s) in the directory")
-    with st.expander("View PDF files"):
-        for pdf in pdf_files:
-            st.write(f"- {pdf.name}")
 
-    generate_corpus_step(papers_dir, pdf_files)
-    rebuild_table_step(papers_dir)
-    default_location = str(papers_dir.parent)
-    extract_topics_step(default_location)
-    graph_step(default_location)
+def open_project(home: Path) -> None:
+    """Open saved results without starting Grobid or requiring source PDFs."""
+    location = st.text_input(
+        "Project folder or folder containing projects", value=str(home)
+    )
+    if not location.strip():
+        return
+    folder = Path(location.strip()).expanduser()
+    if not folder.is_dir():
+        st.info("Enter an existing folder on the cluster.")
+        return
+    if (folder / service.TABLE_JSONL).is_file():
+        corpora = [folder]
+    else:
+        corpora = service.find_corpora(folder)
+    if not corpora:
+        st.info("No saved projects found here. Choose another folder.")
+        return
+    corpus = st.selectbox(
+        "Saved project", corpora, format_func=lambda path: path.name
+    )
+    if st.button("Open project", type="primary"):
+        activate_project(corpus)
+
+
+def project_tools(corpus: Path) -> None:
+    """Offer optional updates and maintenance outside the main workflow."""
+    with st.expander("Project tools"):
+        if not st.toggle("Show processing controls", key=f"{corpus}_tools"):
+            st.caption(
+                "Update papers, change the topic model, or repair tables."
+            )
+            return
+        st.caption(
+            "Update the collection or choose a different model. Saved PDF "
+            "extractions are reused; topic extraction processes all papers "
+            "and replaces saved topics only after it completes."
+        )
+        papers_text = st.text_input(
+            "PDF folder for additions or retries",
+            key=f"{corpus}_update_papers",
+            help="Only needed for Update graph, not for opening saved work.",
+        )
+        backend, model, api_key = model_settings(f"{corpus}_update")
+        update, topics = st.columns(2)
+        if update.button(
+            "Update graph",
+            disabled=not (papers_text.strip() and model),
+        ):
+            build_project(
+                Path(papers_text.strip()).expanduser(),
+                corpus,
+                backend,
+                model,
+                api_key,
+            )
+        if topics.button(
+            "Re-extract topics",
+            disabled=model is None
+            or not (corpus / service.TABLE_JSONL).is_file(),
+        ):
+            try:
+                with StatusBox(
+                    "Extracting topics...",
+                    complete_label="Topics updated.",
+                    caption="Saved PDF extractions remain available.",
+                ) as status:
+                    extract_topics(corpus, backend, model, api_key, status)
+                st.session_state.kg_graph = None
+            except Exception as exc:
+                show_failure("Topic extraction could not be completed", exc)
+        if st.button("Rebuild paper table"):
+            try:
+                service.build_corpus_table(corpus)
+                st.success("Paper table rebuilt. Saved topics are unchanged.")
+            except Exception as exc:
+                show_failure("The paper table could not be rebuilt", exc)
+
+
+def build_graph(
+    corpus: Path,
+    records: list[dict[str, Any]],
+    *,
+    paper_id: str | None = None,
+    include_authors: bool = True,
+    include_topics: bool = True,
+    include_cited_papers: bool = False,
+    include_cited_authors: bool = False,
+    min_topic_confidence: float = 0.0,
+) -> None:
+    """Save a graph and retain its display independently of button reruns."""
+    try:
+        with st.spinner("Building graph..."):
+            options = {
+                "include_authors": include_authors,
+                "include_topics": include_topics,
+                "include_cited_papers": include_cited_papers,
+                "include_cited_authors": include_cited_authors,
+            }
+            if paper_id is not None:
+                paper = next(
+                    record
+                    for record in records
+                    if record["paper_id"] == paper_id
+                )
+                graph, network = service.build_paper_ego_graph(
+                    paper, all_records=records, **options
+                )
+                filename = f"{paper_id}_ego_graph.html"
+            else:
+                graph, network = service.build_full_corpus_graph(
+                    records,
+                    min_topic_confidence=min_topic_confidence,
+                    **options,
+                )
+                filename = "full_corpus_graph.html"
+            html = service.save_graph_html(network, corpus / filename)
+            st.session_state.kg_graph = {
+                "html": html,
+                "filename": filename,
+                "nodes": graph.number_of_nodes(),
+                "edges": graph.number_of_edges(),
+                "papers": service.count_nodes(graph, "paper"),
+                "label": "Single paper" if paper_id else "Whole collection",
+            }
+    except Exception as exc:
+        show_failure("The graph could not be built", exc)
+
+
+def explore(corpus: Path, records: list[dict[str, Any]]) -> None:
+    """Show one graph with compact controls and optional detailed filters."""
+    view = st.radio(
+        "Graph view",
+        ["Whole collection", "Single paper"],
+        horizontal=True,
+        key=f"{corpus}_graph_view",
+    )
+    papers = {record["paper_id"]: record for record in records}
+    paper_id = None
+    if view == "Single paper":
+        paper_id = st.selectbox(
+            "Paper",
+            list(papers),
+            format_func=lambda value: (
+                f"{value} - "
+                f"{papers[value].get('pdf_filename') or 'unknown.pdf'}"
+            ),
+            key=f"{corpus}_paper",
+        )
+    with st.expander("Advanced graph options"):
+        authors = st.checkbox("Authors", value=True, key=f"{corpus}_authors")
+        topics = st.checkbox("Topics", value=True, key=f"{corpus}_topics")
+        cited = st.checkbox("Cited papers", value=False, key=f"{corpus}_cited")
+        cited_authors = st.checkbox(
+            "Cited authors", value=False, key=f"{corpus}_cited_authors"
+        )
+        confidence = st.slider(
+            "Minimum topic confidence (whole collection)",
+            0.0,
+            1.0,
+            0.0,
+            0.1,
+            key=f"{corpus}_confidence",
+        )
+        included = st.multiselect(
+            "Papers in the whole collection view",
+            list(papers),
+            default=list(papers),
+            format_func=lambda value: (
+                f"{value} - "
+                f"{papers[value].get('pdf_filename') or 'unknown.pdf'}"
+            ),
+            key=f"{corpus}_included",
+        )
+    selected = (
+        records
+        if view == "Single paper"
+        else [record for record in records if record["paper_id"] in included]
+    )
+    if not selected:
+        st.info("Select at least one paper to show the graph.")
+        return
+    topic_file = (corpus / service.TOPICS_JSONL).stat()
+    selection = (
+        str(corpus),
+        topic_file.st_mtime_ns,
+        topic_file.st_size,
+        tuple(record["paper_id"] for record in selected),
+        paper_id,
+        authors,
+        topics,
+        cited,
+        cited_authors,
+        confidence if paper_id is None else 0.0,
+    )
+    previous = st.session_state.get("kg_graph")
+    if previous is None or previous.get("selection") != selection:
+        st.session_state.kg_graph = None
+        build_graph(
+            corpus,
+            selected,
+            paper_id=paper_id,
+            include_authors=authors,
+            include_topics=topics,
+            include_cited_papers=cited,
+            include_cited_authors=cited_authors,
+            min_topic_confidence=confidence,
+        )
+        if st.session_state.get("kg_graph") is not None:
+            st.session_state.kg_graph["selection"] = selection
+    result = st.session_state.get("kg_graph")
+    if result is None:
+        return
+    st.caption(f"Displayed graph: {result['label']}")
+    st.caption(
+        "Papers: blue circles · Authors: green triangles · "
+        "Categories: purple boxes · Topics: red ellipses · "
+        "External cited papers: orange circles · "
+        "Cited authors: gold triangles. "
+        "In a single-paper graph, cited collection papers are purple circles."
+    )
+    recenter = """
+    <button type="button" aria-label="Recenter graph"
+        title="Fit all nodes in view"
+        style="position:fixed;top:12px;left:12px;z-index:1000;
+               padding:8px 14px;border:1px solid #ccc;border-radius:6px;
+               background:white;color:#222;font:14px sans-serif;cursor:pointer"
+        onclick="network.fit({animation:{duration:300}})">Recenter</button>
+    """
+    display_html = result["html"].replace("</body>", recenter + "</body>")
+    components.html(display_html, height=750, scrolling=True)
+    nodes, edges, count = st.columns(3)
+    nodes.metric("Nodes", result["nodes"])
+    edges.metric("Connections", result["edges"])
+    count.metric("Papers", result["papers"])
+    st.download_button(
+        "Download graph (HTML)",
+        result["html"],
+        file_name=result["filename"],
+        mime="text/html",
+    )
+
+
+def project_results(corpus: Path) -> None:
+    """Read saved project data and expose exploration, papers and topics."""
+    st.subheader(corpus.name.removesuffix("_project_corpus"))
+    st.caption(f"Saved on the cluster: {corpus}")
+    project_tools(corpus)
+    source = corpus / service.TABLE_JSONL
+    topic_source = corpus / service.TOPICS_JSONL
+    try:
+        papers = service.read_records(source) if source.is_file() else []
+        records = (
+            service.read_records(topic_source)
+            if topic_source.is_file()
+            else []
+        )
+        if not papers:
+            st.info(
+                "This project has no paper table yet. Use Project tools to "
+                "rebuild the table or retry processing your PDF folder."
+            )
+            return
+        st.caption(
+            f"{len(papers)} saved papers · "
+            + ("Topics available" if records else "Topic extraction needed")
+        )
+        if records and {p["paper_id"] for p in papers} != {
+            p["paper_id"] for p in records
+        }:
+            st.warning(
+                "The saved topics cover a different set of papers from the "
+                "current paper table. Re-extract topics in Project tools "
+                "to include the updated collection. The graph below uses "
+                "the last completed topic results."
+            )
+        graph_tab, paper_tab, topic_tab = st.tabs(
+            ["Explore", "Papers", "Topics"]
+        )
+        with graph_tab:
+            if records:
+                explore(corpus, records)
+            else:
+                st.info(
+                    "Your extracted papers are saved. Open Project tools "
+                    "and choose Re-extract topics to prepare the graph."
+                )
+        with paper_tab:
+            columns = [
+                "paper_id",
+                "title",
+                "authors",
+                "publication_date",
+                "pdf_filename",
+            ]
+            st.dataframe(
+                [
+                    {name: paper.get(name, "") for name in columns}
+                    for paper in papers
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+            csv = corpus / service.TABLE_CSV
+            if csv.is_file():
+                st.download_button(
+                    "Download papers (CSV)",
+                    csv.read_bytes(),
+                    file_name=csv.name,
+                    mime="text/csv",
+                )
+        with topic_tab:
+            if records:
+                rows = [
+                    {"Paper": record.get("title", ""), **topic}
+                    for record in records
+                    for topic in record.get("topics", [])
+                ]
+                if rows:
+                    st.dataframe(
+                        rows, use_container_width=True, hide_index=True
+                    )
+                else:
+                    st.info("No topics were found in the saved results.")
+                st.download_button(
+                    "Download papers and topics (JSON)",
+                    service.topics_json(corpus),
+                    file_name="papers_with_topics.json",
+                    mime="application/json",
+                )
+            else:
+                st.info("Topics have not been extracted yet.")
+    except Exception as exc:
+        show_failure("Saved project data could not be read", exc)
 
 
 def main() -> None:
-    """Render the Knowledge Graph page."""
+    """Render the project entry point and any selected saved results."""
+    st.set_page_config(page_title="Knowledge Graph", layout="wide")
     check_token()
-    if "gpustack_api_key" not in st.session_state:
-        st.session_state.gpustack_api_key = ""
-
-    st.title("Knowledge Graph Generator")
-    st.markdown(
-        "Process scientific papers and generate a knowledge graph from them."
+    st.title("Knowledge Graph")
+    st.write(
+        "Explore connections between scientific papers, authors, and "
+        "research topics."
     )
-    with st.sidebar:
-        st.header("API Configuration")
-        api_key = st.text_input(
-            "GPUStack API Key",
-            value=st.session_state.gpustack_api_key,
-            type="password",
-            help="Required ONLY if you select 'GPUStack' as your backend.",
+    st.caption(
+        "Projects are saved in a cluster folder for reuse across sessions. "
+        "Your original PDFs stay where they are."
+    )
+    home = Path(os.environ.get("HOME", "."))
+    if not st.session_state.get("kg_project") or st.toggle(
+        "Choose another project"
+    ):
+        workflow = st.radio(
+            "Project",
+            ["Create a project", "Open an existing project"],
+            horizontal=True,
         )
-        if api_key:
-            st.session_state.gpustack_api_key = api_key
-            st.success("API Key set.")
-
-    try:
-        service.ensure_grobid_server()
-        grobid_available = True
-    except service.GrobidError as exc:
-        st.error(f"**Grobid Server Error:** {exc}")
-        st.warning(
-            "The Knowledge Graph feature requires Grobid to be properly "
-            "configured. Please contact support."
+        if workflow == "Create a project":
+            new_project(home)
+        else:
+            open_project(home)
+    if st.session_state.get("kg_project"):
+        project_results(Path(st.session_state.kg_project))
+    with st.expander("About Knowledge Graph"):
+        st.write(
+            "Grobid extracts paper metadata, text, and citations. A language "
+            "model identifies topics from titles and abstracts. Graphs "
+            "connect papers through authors, topics, categories, "
+            "and citations."
         )
-        grobid_available = False
-
-    home = os.environ.get("HOME")
-    if not home:
-        st.error(
-            "**Configuration Error:** `HOME` environment variable is not set."
+        st.caption(
+            "PDFs already extracted are recognised by filename and reused. "
+            "Changing a PDF without changing its filename does not trigger "
+            "new extraction. Saved projects remain until you delete them."
         )
-        st.stop()
-    if not grobid_available:
-        return
-
-    papers_section(home)
-    st.markdown("---")
-    st.subheader("About Knowledge Graph Generation")
-    st.markdown(ABOUT)
 
 
 if __name__ == "__main__":
