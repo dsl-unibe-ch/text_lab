@@ -10,12 +10,16 @@ callers keep requests within :func:`text_budget`: earlier turns are dropped
 oldest first (:func:`trim_history`) and documents that are too long are
 split. All chat requests use the same window, because Ollama reloads the
 model whenever ``num_ctx`` changes.
+
+:func:`context_usage` reports how full the window is, so that interfaces
+can show it and suggest a new chat before the conversation gets too long.
 """
 
 from __future__ import annotations
 
 import os
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from textlab.common.ollama import estimate_tokens
@@ -35,6 +39,9 @@ PROMPT_OVERHEAD_TOKENS = 1000
 #: Share of the budget earlier turns may use while a long document is
 #: answered part by part; the rest is left for the document.
 HISTORY_SHARE = 0.25
+#: Share of the budget from which the window counts as nearly full. Models
+#: answer less reliably as the window fills, well before it is full.
+NEARLY_FULL_SHARE = 0.75
 
 
 def chat_context() -> int:
@@ -90,6 +97,89 @@ def trim_history(
         kept.append(message)
     kept.reverse()
     return kept
+
+
+@dataclass(frozen=True)
+class ContextUsage:
+    """How much of the context window the next message would use.
+
+    Attributes:
+        used_tokens: Estimated tokens of the conversation and the attached
+            documents, which are sent again with every message.
+        budget_tokens: Tokens of text one request can hold
+            (:func:`text_budget`).
+        window_tokens: The context window (:func:`chat_context`).
+        document_tokens: Estimated tokens of the attached documents.
+    """
+
+    used_tokens: int
+    budget_tokens: int
+    window_tokens: int
+    document_tokens: int
+
+    @property
+    def fraction(self) -> float:
+        """Return the used share of the budget; above 1 when it is full."""
+        return self.used_tokens / self.budget_tokens
+
+    @property
+    def history_tokens(self) -> int:
+        """Return the estimated tokens of the conversation alone."""
+        return self.used_tokens - self.document_tokens
+
+    @property
+    def documents_split(self) -> bool:
+        """Return True if the documents are too long for one request."""
+        return self.document_tokens > self.budget_tokens
+
+    @property
+    def history_trimmed(self) -> bool:
+        """Return True if the oldest messages no longer reach the model.
+
+        Mirrors the answer: with documents read in parts, the conversation
+        may use :data:`HISTORY_SHARE` of the budget, otherwise what the
+        documents leave free.
+        """
+        if self.documents_split:
+            return self.history_tokens > self.budget_tokens * HISTORY_SHARE
+        return self.used_tokens > self.budget_tokens
+
+    @property
+    def suggest_new_chat(self) -> bool:
+        """Return True if a new chat would give the model more room.
+
+        That is the case when the conversation (not the documents, which a
+        new chat sends again) fills the window from
+        :data:`NEARLY_FULL_SHARE` on or pushes old messages out.
+        """
+        if self.history_tokens <= 0:
+            return False
+        if self.history_trimmed:
+            return True
+        return not self.documents_split and (
+            self.fraction >= NEARLY_FULL_SHARE
+        )
+
+
+def context_usage(
+    history: Sequence[dict[str, Any]], context: str = ""
+) -> ContextUsage:
+    """Estimate how much of the context window the next message uses.
+
+    Args:
+        history: The conversation so far.
+        context: The attached documents' text, sent with every message.
+
+    Returns:
+        The usage; the new message itself is not counted.
+    """
+    document_tokens = estimate_tokens(context) if context else 0
+    return ContextUsage(
+        used_tokens=message_tokens(history) + document_tokens,
+        budget_tokens=text_budget(),
+        window_tokens=chat_context(),
+        document_tokens=document_tokens,
+    )
 
 
 def group_by_budget(texts: Sequence[str], budget: int) -> list[list[str]]:

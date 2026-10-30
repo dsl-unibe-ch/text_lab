@@ -36,3 +36,11 @@ If you encounter issues, need any data science, research IT support, or have que
 
 If you'd like to be informed about updates and changes to Text Lab, please subscribe to the following [Mailing List](https://listserv.unibe.ch/mailman/listinfo/text-lab-announcement.dsl)
 
+## General Disclaimer (Applies to All Features)
+
+The use of Text Lab and its featured tools is provided "AS IS."
+
+While we strive for accuracy, most of the results are AI-generated and are intended for informational and drafting purposes only.
+
+Users are solely responsible for verifying all data, transcripts, translations, and summaries before relying on them for critical decisions, legal action, or professional reporting.
+

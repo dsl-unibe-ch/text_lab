@@ -42,6 +42,7 @@ from textlab.ui.streamlit.components.audio_player import (
     build_player_html,
     create_wavesurfer_preview,
 )
+from textlab.ui.streamlit.components.disclaimer import render_disclaimer
 from textlab.ui.streamlit.components.gpu import free_gpu_for
 from textlab.ui.streamlit.components.progress import StatusBox
 
@@ -60,6 +61,7 @@ def main():
     """Render the page."""
     st.set_page_config(page_title="Transcribe", layout="wide")
     check_token()
+    render_disclaimer()
     st.title("Transcribe")
 
     workflow_mode = st.radio(

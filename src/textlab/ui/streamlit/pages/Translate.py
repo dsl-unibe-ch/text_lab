@@ -49,6 +49,9 @@ from textlab.common.language_mappings import (  # noqa: E402
 )
 from textlab.features.translation import service  # noqa: E402
 from textlab.ui.streamlit.auth import check_token  # noqa: E402
+from textlab.ui.streamlit.components.disclaimer import (  # noqa: E402
+    render_disclaimer,
+)
 from textlab.ui.streamlit.components.gpu import free_gpu_for  # noqa: E402
 
 # ---------------------------------------------------------------------------
@@ -59,6 +62,7 @@ GLOSSARY_MAX_ROWS = 50
 
 
 check_token()
+render_disclaimer()
 st.title("Translate")
 st.caption(
     "Neural machine translation — all inference runs locally in your session."

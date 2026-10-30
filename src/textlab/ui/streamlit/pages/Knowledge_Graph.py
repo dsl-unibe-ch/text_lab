@@ -21,6 +21,7 @@ from textlab.common import gpu_manager
 from textlab.common.progress import Progress
 from textlab.features.knowledge_graph import service
 from textlab.ui.streamlit.auth import check_token
+from textlab.ui.streamlit.components.disclaimer import render_disclaimer
 from textlab.ui.streamlit.components.gpu import free_gpu_for
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -618,6 +619,7 @@ def papers_section(home: str) -> None:
 def main() -> None:
     """Render the Knowledge Graph page."""
     check_token()
+    render_disclaimer()
     if "gpustack_api_key" not in st.session_state:
         st.session_state.gpustack_api_key = ""
 

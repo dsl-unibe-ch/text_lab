@@ -21,6 +21,7 @@ from textlab.common.model_config import (
 from textlab.common.ollama import check_ollama_server
 from textlab.features.visualization import service
 from textlab.ui.streamlit.auth import check_token
+from textlab.ui.streamlit.components.disclaimer import render_disclaimer
 from textlab.ui.streamlit.components.gpu import free_gpu_for
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -317,6 +318,7 @@ def _render_column_selection(preview_df, file_id, is_running):
 def main() -> None:
     """Draw the page."""
     check_token()
+    render_disclaimer()
 
     if not check_ollama_server():
         st.error("Could not connect to Ollama server.")

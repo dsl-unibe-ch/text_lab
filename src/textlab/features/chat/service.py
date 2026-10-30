@@ -31,7 +31,9 @@ from textlab.common.progress import Progress, ProgressCallback, no_progress
 from textlab.common.storage import get_workspace, remove_tree
 from textlab.features.chat.context_window import (
     HISTORY_SHARE,
+    ContextUsage,
     chat_context,
+    context_usage,
     group_by_budget,
     message_tokens,
     text_budget,
@@ -55,7 +57,9 @@ from textlab.features.visualization import service as visualization
 __all__ = [
     "ANALYSIS_TIMEOUT_SECONDS",
     "DOCUMENT_TYPES",
+    "ContextUsage",
     "answer",
+    "context_usage",
     "conversation_folder",
     "decide_tool_use",
     "discard_conversation_folder",

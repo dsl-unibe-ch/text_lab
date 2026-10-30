@@ -155,6 +155,41 @@ def test_history_keeps_the_newest_messages_that_fit():
     assert context_window.trim_history(history, 50) == []
 
 
+def usage(monkeypatch, history_tokens, document_tokens, budget=1000):
+    monkeypatch.setattr(context_window, "text_budget", lambda: budget)
+    history = [{"role": "user", "content": "h" * 4 * history_tokens}]
+    return service.context_usage(
+        history if history_tokens else [], "d" * 4 * document_tokens
+    )
+
+
+def test_the_usage_counts_the_conversation_and_the_documents(monkeypatch):
+    result = usage(monkeypatch, 300, 200)
+    assert (result.used_tokens, result.budget_tokens) == (500, 1000)
+    assert result.history_tokens == 300
+    assert result.fraction == 0.5
+    assert result.window_tokens == context_window.chat_context()
+    assert not (result.documents_split or result.history_trimmed)
+    assert not result.suggest_new_chat
+
+
+def test_a_nearly_full_conversation_suggests_a_new_chat(monkeypatch):
+    assert usage(monkeypatch, 800, 0).suggest_new_chat
+    trimmed = usage(monkeypatch, 800, 400)
+    assert trimmed.history_trimmed and trimmed.suggest_new_chat
+
+
+def test_long_documents_alone_do_not_suggest_a_new_chat(monkeypatch):
+    # A new chat would send the documents again: it cannot help.
+    assert not usage(monkeypatch, 0, 900).suggest_new_chat
+    split = usage(monkeypatch, 100, 5000)
+    assert split.documents_split
+    assert not (split.history_trimmed or split.suggest_new_chat)
+    # Read in parts, the conversation may use a quarter of the budget.
+    crowded = usage(monkeypatch, 300, 5000)
+    assert crowded.history_trimmed and crowded.suggest_new_chat
+
+
 def test_texts_are_grouped_by_budget():
     texts = ["a" * 40, "b" * 40, "c" * 40, "d" * 400]  # 10, 10, 10, 100
     assert context_window.group_by_budget(texts, 25) == [

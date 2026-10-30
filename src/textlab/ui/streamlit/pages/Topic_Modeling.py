@@ -29,6 +29,7 @@ from textlab.features.topic_modeling.service import (
     TopicModelingConfig,
 )
 from textlab.ui.streamlit.auth import check_token
+from textlab.ui.streamlit.components.disclaimer import render_disclaimer
 from textlab.ui.streamlit.components.gpu import free_gpu_for
 from textlab.ui.streamlit.components.progress import StatusBox
 
@@ -1028,6 +1029,7 @@ def main() -> None:
     """Render and run the Topic Modeling Streamlit page."""
     st.set_page_config(page_title="Topic Modeling", layout="wide")
     check_token()
+    render_disclaimer()
 
     if "topic_results" not in st.session_state:
         st.session_state.topic_results = None
