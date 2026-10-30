@@ -34,6 +34,9 @@ st.set_page_config(page_title="OCR", page_icon=favicon, layout="wide")
 from textlab.common import gpu_manager  # noqa: E402
 from textlab.features.ocr import service  # noqa: E402
 from textlab.ui.streamlit.auth import check_token  # noqa: E402
+from textlab.ui.streamlit.components.disclaimer import (  # noqa: E402
+    render_disclaimer,
+)
 from textlab.ui.streamlit.components.gpu import free_gpu_for  # noqa: E402
 from textlab.ui.streamlit.ocr.manual import (  # noqa: E402
     manual_engines_expander,
@@ -49,6 +52,7 @@ from textlab.ui.streamlit.ocr.state import (  # noqa: E402
 )
 
 check_token()
+render_disclaimer()
 
 st.title("Document & Image OCR")
 

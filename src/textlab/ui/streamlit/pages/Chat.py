@@ -22,6 +22,7 @@ from textlab.common.model_config import (
 from textlab.common.ollama import check_ollama_server
 from textlab.features.chat import service
 from textlab.ui.streamlit.auth import check_token
+from textlab.ui.streamlit.components.disclaimer import render_disclaimer
 from textlab.ui.streamlit.components.gpu import free_gpu_for
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -37,6 +38,7 @@ st.set_page_config(
 )
 
 check_token()
+render_disclaimer()
 
 #: Most files a message can carry.
 MAX_FILES = 4
@@ -348,6 +350,52 @@ def _answer(model_name, user_text, uploaded_files):
         progress.empty()
 
 
+def _render_context_usage(box, uploaded_files):
+    """Show how much of the model's context window the next message uses.
+
+    Args:
+        box: Sidebar placeholder, filled after the answer so the meter
+            includes it.
+        uploaded_files: The attached files, sent with every message.
+    """
+    messages = st.session_state["messages"]
+    if not messages and not uploaded_files:
+        box.empty()
+        return
+    context_text = (
+        _document_context(uploaded_files)[0] if uploaded_files else ""
+    )
+    usage = service.context_usage(messages, context_text)
+    with box.container():
+        st.progress(
+            min(usage.fraction, 1.0),
+            text=(
+                f"Context used: ~{usage.used_tokens:,} of "
+                f"~{usage.budget_tokens:,} tokens ({usage.fraction:.0%})"
+            ),
+        )
+        st.caption(
+            "Estimate of what the model reads with your next message: the "
+            "conversation and the attached files."
+        )
+        if usage.documents_split:
+            st.info(
+                "The attached files are longer than the model can read at "
+                "once, so they are read in parts. Answers take longer."
+            )
+        if usage.history_trimmed:
+            st.warning(
+                "The model no longer sees the oldest messages of this "
+                "conversation. Start a new chat to keep answers accurate."
+            )
+        elif usage.suggest_new_chat:
+            st.warning(
+                "The conversation fills most of the model's context window, "
+                "and answers get less reliable as it fills. Consider "
+                "starting a new chat."
+            )
+
+
 def _render_downloads():
     """Offer the conversation as Markdown and, with charts, as HTML."""
     messages = st.session_state["messages"]
@@ -411,19 +459,10 @@ def main():
         )
 
     st.sidebar.markdown("---")
+    usage_box = st.sidebar.empty()
     if st.sidebar.button("Start New Chat"):
         _start_new_chat()
         st.rerun()
-
-    st.sidebar.markdown(
-        """
-        ---
-        **Disclaimer**
-        The selected AI models may produce inaccurate, misleading, or
-        inappropriate responses.
-        """,
-        unsafe_allow_html=True,
-    )
 
     _ensure_model(model_name)
 
@@ -439,6 +478,7 @@ def main():
 
     # While an analysis runs, poll it instead of taking new input.
     if "chat_tool_run" in st.session_state:
+        _render_context_usage(usage_box, uploaded_files)
         _render_tool_run_section()
         return
 
@@ -472,6 +512,8 @@ def main():
 
     if user_text:
         _answer(model_name, user_text, uploaded_files)
+
+    _render_context_usage(usage_box, uploaded_files)
 
     if st.session_state["messages"]:
         _render_downloads()

@@ -93,10 +93,14 @@ from textlab.features.transcription.whisper_models import (  # noqa: E402
     default_model,
 )
 from textlab.ui.streamlit.auth import check_token  # noqa: E402
+from textlab.ui.streamlit.components.disclaimer import (  # noqa: E402
+    render_disclaimer,
+)
 from textlab.ui.streamlit.components.gpu import free_gpu_for  # noqa: E402
 from textlab.ui.streamlit.components.progress import StatusBox  # noqa: E402
 
 check_token()
+render_disclaimer()
 
 # ---------------------------------------------------------------------------
 # Helper: Streamlit write_stream compatible generator wrapper

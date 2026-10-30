@@ -14,6 +14,14 @@ Your messages and files never leave the university network. Nothing is sent to e
 
 Click **Start New Chat** to clear the conversation and begin again. Download anything you want to keep first: a cleared conversation cannot be restored.
 
+## How much the model can read
+
+A model reads a limited amount of text at once, its *context window*. Your whole conversation and your attached files are sent with every message, so a conversation fills the window as it grows. The sidebar shows how full it is, for example *Context used: ~6,200 of ~21,000 tokens (30%)*. A token is a piece of a word; 1,000 tokens are roughly 750 English words. The number is an estimate.
+
+* **Answers get less reliable as the window fills**, well before it is full: the model pays less attention to details in a long conversation. From 75% on, the sidebar suggests starting a new chat.
+* **When the window is full**, the model no longer sees the oldest messages, and the sidebar says so. Start a new chat; if you need earlier results, paste a short summary of them into your first message.
+* **Long attached files** are read in parts (see below), so they do not fill the window on their own. A new chat does not help with those, so the sidebar does not suggest it for them.
+
 ## Choosing a model
 
 The models available depend on the GPU your Text Lab session runs on. The sidebar shows the mode:

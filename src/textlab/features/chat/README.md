@@ -46,6 +46,13 @@ languages. With the default window that is about 21,000 tokens (roughly
 that size, less the question and the most recent turns (at most a quarter
 of the budget).
 
+`context_window.context_usage(history, context)` estimates how much of the
+budget the next message uses (the conversation plus the attachments, which
+are sent with every message). The page shows it as a meter in the sidebar
+and suggests a new chat when the conversation fills 75% of the budget or
+its oldest messages no longer fit. Long attachments alone do not trigger
+the suggestion, as a new chat would send them again.
+
 All chat requests use the same window because Ollama reloads the model
 whenever `num_ctx` changes. The Visualization agents use their own window
 (`TEXTLAB_AGENT_NUM_CTX`), so the model is reloaded when a data analysis
@@ -59,6 +66,7 @@ Interfaces use `service.py`:
 |---|---|
 | `read_documents(files)` | Context block and warnings from `(name, bytes)` pairs |
 | `DOCUMENT_TYPES` | File extensions the page accepts as attachments |
+| `context_usage(history, context)` | `ContextUsage`: estimated share of the context window the next message uses |
 | `answer(model, history, question, context, on_progress=)` | The streamed answer |
 | `decide_tool_use(model, text, schema, chat_history=)` | `(use_tools, instruction)` |
 | `prepare_data_file`, `start_data_analysis` | Keep the attached table; answer with the agents |
@@ -107,7 +115,8 @@ comes from `OLLAMA_HOST`.
 In `tests/`, without a model:
 
 - `test_service.py`: reading attachments (PDF, scanned PDF, TSV, JSON,
-  unreadable files), the context window and text budget, answers with
+  unreadable files), the context window, text budget and usage meter,
+  answers with
   short and long context, routing, exports, conversation folders, starting
   an analysis.
 - `test_chat_page.py`: the page imports only the service.

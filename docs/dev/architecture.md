@@ -80,7 +80,10 @@ These rules apply to all code in `src/textlab/`.
 7. **Heavy libraries are imported lazily** (inside functions), so modules can
    be imported and tested without a GPU or the full image.
 8. **Pages stay thin.** A page holds layout, widgets, session state and calls
-   to the backend; anything else belongs in the backend.
+   to the backend; anything else belongs in the backend. Every page calls
+   `check_token()` and then `render_disclaimer()`
+   (`ui/streamlit/components/disclaimer.py`), which shows the disclaimer
+   about AI output in the sidebar.
 
 Rules 1, 4 and 5 are checked automatically: rule 1 by import-linter, rules 4
 and 5 by `tests/test_data_footprint.py`. Rules 3 and 6 have shared modules in

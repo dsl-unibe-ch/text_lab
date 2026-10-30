@@ -15,6 +15,7 @@ st.set_page_config(
 )
 
 from textlab.ui.streamlit.auth import check_token
+from textlab.ui.streamlit.components.disclaimer import render_disclaimer
 
 def get_img_as_base64(file_path):
     """Read an image file and return its base64 encoded string."""
@@ -25,6 +26,7 @@ def get_img_as_base64(file_path):
 def main():
     
     check_token()
+    render_disclaimer()
     st.title("TEXT LAB")
     
     # Custom CSS for styling the logos.
