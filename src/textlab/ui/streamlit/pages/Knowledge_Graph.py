@@ -199,11 +199,16 @@ def new_project(home: Path) -> None:
         folder_name = service.corpus_folder_name(papers)
         ready = bool(papers_text.strip())
         if ready and papers.is_dir():
-            st.caption(f"{len(service.list_pdfs(papers))} PDF papers found")
+            pdf_count = len(service.list_pdfs(papers))
+            if pdf_count:
+                st.caption(f":green[{pdf_count} PDF papers found]")
+            else:
+                st.info("No PDF papers found in this folder.")
+    default_save = papers.parent if papers is not None and ready else home
     save_text = st.text_input(
         "Save project in",
-        value=str(home),
-        key="kg_save_location",
+        value=str(default_save),
+        key=f"kg_save_location:{source}:{default_save}",
         help="Choose persistent cluster storage to reuse your work later.",
     )
     corpus = (
@@ -471,8 +476,21 @@ def explore(corpus: Path, records: list[dict[str, Any]]) -> None:
                background:white;color:#222;font:14px sans-serif;cursor:pointer"
         onclick="network.fit({animation:{duration:300}})">Recenter</button>
     """
-    display_html = result["html"].replace("</body>", recenter + "</body>")
-    components.html(display_html, height=750, scrolling=True)
+    frame_style = """
+    <style>
+        html, body { margin: 0; overflow: hidden; }
+        #mynetwork {
+            position: fixed;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            box-sizing: border-box;
+        }
+    </style>
+    """
+    display_html = result["html"].replace("</head>", frame_style + "</head>")
+    display_html = display_html.replace("</body>", recenter + "</body>")
+    components.html(display_html, height=750, scrolling=False)
     nodes, edges, count = st.columns(3)
     nodes.metric("Nodes", result["nodes"])
     edges.metric("Connections", result["edges"])

@@ -161,8 +161,8 @@ def test_single_build_saves_papers_before_topic_failure_and_reuses_them(
     next(r for r in app.radio if r.label == "Add papers").set_value(
         "Use a folder on this cluster"
     ).run()
-    app.text_input[0].set_value(str(papers))
-    app.text_input[1].set_value(str(tmp_path))
+    app.text_input[0].set_value(str(papers)).run()
+    assert app.text_input[1].value == str(papers.parent)
     button(app, "Build knowledge graph").click().run()
     assert not app.exception
     corpus = tmp_path / service.corpus_folder_name(papers)
@@ -176,8 +176,8 @@ def test_single_build_saves_papers_before_topic_failure_and_reuses_them(
     next(r for r in app.radio if r.label == "Add papers").set_value(
         "Use a folder on this cluster"
     ).run()
-    app.text_input[0].set_value(str(papers))
-    app.text_input[1].set_value(str(tmp_path))
+    app.text_input[0].set_value(str(papers)).run()
+    assert app.text_input[1].value == str(papers.parent)
     button(app, "Build knowledge graph").click().run()
     assert not app.exception
     assert parser.call_count == 1
@@ -252,7 +252,10 @@ def test_uploaded_project_builds_and_reopens_after_temporary_pdfs_are_removed(
         return service.TopicSummary(len(rows), 0, target)
 
     monkeypatch.setattr(service, "extract_topics", complete_topics)
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
     app.run()
+    assert app.text_input[1].value == str(home)
     assert not button(app, "Build knowledge graph").value
     assert button(app, "Build knowledge graph").disabled
     next(t for t in app.text_input if t.label == "Project name").set_value(

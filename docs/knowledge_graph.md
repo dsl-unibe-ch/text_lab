@@ -13,7 +13,9 @@ continue exploring in a later session.
    **Project name**. For a cluster folder, enter the folder containing PDFs.
 4. Choose **Save project in**: persistent storage on the cluster where you
    want the extracted results to remain. This path refers to the cluster,
-   not your computer. The full project folder path is displayed below it.
+   not your computer. By default, projects are saved beside the selected
+   papers folder, or in your home directory for uploads. You can change
+   either location. The full project folder path is displayed below it.
 5. To change how topics are extracted, open **Advanced settings**. Under
    **Topic extraction mode**, choose to run the language model in your Text Lab
    session (Ollama, no API key needed) or use the university's GPUStack service
