@@ -45,9 +45,11 @@ You do not need the original upload to open saved extractions or graphs.
 
 PDF extractions are saved as processing progresses. Papers already extracted
 are recognised by PDF filename and reused; failed papers are retried. Changing
-a PDF without changing its filename does not trigger extraction again. Topic
-extraction processes all papers and replaces the saved topic table only when
-it completes. Papers without abstracts are included without research topics.
+a PDF without changing its filename does not trigger PDF extraction again.
+When you build or update a graph, topic extraction runs again for every paper
+with an abstract, including reused papers. The saved topic table is replaced
+only when extraction completes. Papers without abstracts are included without
+research topics.
 
 If processing fails, the saved extractions remain available for another attempt.
 
@@ -61,25 +63,107 @@ to explore completed results.
 Once a project is open, its save location is shown above the results. Use
 **Choose another project** to switch collections.
 
-## Explore and download
+## How the graph is built
 
-The project has three views:
+| Stage | Method | What it gives you |
+|---|---|---|
+| Read the PDFs | Grobid extracts metadata, text and references from each PDF. | Paper titles, authors, abstracts and citations, when available. |
+| Extract topics | The selected language model reads each paper's title and abstract. It is asked for 3–8 specific topics, each with a broader category and a confidence score. | Research themes for individual papers. Papers without an abstract skip this stage. |
+| Build and display the network | NetworkX builds a directed graph from the extracted data. Pyvis uses a Barnes–Hut force layout to spread out nodes and draw connected nodes together. | An interactive view of authorship, topics and citations. |
 
-- **Explore:** the whole collection graph, or the connections around one paper.
-  The graph updates automatically when you change the view, selected paper,
-  or graph options. Under **Advanced graph options**,
-  choose node types, filter papers, or set a minimum topic confidence for the
-  whole collection. Use **Recenter** inside the graph to fit all nodes back
-  into view without rebuilding it.
-- **Papers:** inspect extracted metadata and download the saved paper table as
-  CSV when available.
-- **Topics:** inspect saved research topics and download papers with topics as
-  JSON.
+Topic extraction works **paper by paper**. To discover groups of documents
+across a corpus using BERTopic, Top2Vec or LDA, use
+[Topic Modeling](topic_modeling.md). The distances between nodes in the
+Knowledge Graph are a result of the layout; they do not measure similarity.
 
-The graph legend explains node colours and shapes. Hover over nodes for more
-information and use the graph's navigation controls to explore connections.
-Download the displayed graph as a standalone HTML file to open offline or share.
-The graph remains visible when other widgets cause the page to refresh.
+## Understanding the results
+
+The saved project has three tabs: **Explore**, **Papers**, and **Topics**.
+Use them together: find a connection in the graph, identify the papers behind
+it, and check the topics the model assigned.
+
+### Explore: the interactive graph
+
+Use **Whole collection** to see links across your papers, or **Single paper**
+to focus on one paper and its connections. In **Advanced graph options**, you
+can choose node types to show, select papers for the whole collection view,
+and set a minimum topic confidence. The graph updates as you change these
+controls.
+
+Hover over nodes for details. Drag the background to pan, zoom in or out
+within the graph, or use **Recenter** to fit all nodes back into view. The
+graph stays visible when unrelated controls cause the page to refresh.
+
+In **Whole collection**, click any node to highlight the nodes one connection
+away and the links to them. For example, click a topic to see which papers
+are assigned to it. Other nodes fade. Click empty space to clear the highlight.
+
+Below the graph, **Nodes** counts all displayed entities, **Connections**
+counts the links between them, and **Papers** counts the blue paper nodes.
+Separate citation nodes do not count towards **Papers**. These numbers
+describe the current view, so they can change when you apply filters.
+
+#### Colours, shapes, and connections
+
+Each shape is a **node**. The same colour can mean different things when paired
+with different shapes, so look at both.
+
+| Node | Colour and shape | What it means |
+|---|---|---|
+| Paper in your collection | Blue circle | A paper you added. The label is its project ID, such as `P0001`. Hover to see its title and DOI, if available. |
+| Author | Green triangle | An author of a paper in your collection. A shared author can connect several papers. |
+| Category | Purple rectangle | A broad research area, such as *Computer Vision*. |
+| Topic | Red ellipse | A specific theme within a category, such as *Object Detection Networks*. Topics are the more specific level; categories are the broader level. |
+| Cited paper in your collection | Purple circle in **Single paper** | A reference matched to a paper in your collection by title. In **Whole collection**, the citation connects to the paper's existing blue node. |
+| External cited paper | Orange circle | A reference that was not matched to a paper in the collection shown. |
+| Cited author | Gold triangle | An author whose work is cited by a paper in the graph. A citation does not imply co-authorship. |
+
+Read the labels on the connections to see why two nodes are linked:
+
+- `authored` or `authored_by`: an author wrote the paper.
+- `has_topic`: the model assigned this topic to the paper.
+- `belongs_to`: the specific topic belongs to the broader category.
+- `in_category`: the paper has a topic in that category.
+- `cites`: the paper references another paper.
+- `cites_work_by`: the paper references work by that author.
+
+For example, if `P0001` and `P0002` both connect to the red topic *Object
+Detection Networks*, the model assigned the same topic label to both papers.
+If they only share the purple category *Computer Vision*, they share a broader
+research area and may have different specific topics. Neither connection means
+that one paper cites the other; look for a `cites` connection for that.
+
+In **Single paper**, a larger topic node indicates higher model confidence.
+In **Whole collection**, topics grow with the number of times they appear;
+hover over a topic to see its average confidence.
+
+### Papers: extracted metadata
+
+The **Papers** tab lists each paper's project ID, title, authors, publication
+date, and PDF filename. Use the ID to match a graph node such as `P0001` to
+its source file. If you need the extracted abstract, DOI, or references,
+download the paper table as CSV.
+
+### Topics: labels assigned to each paper
+
+The **Topics** tab lists one row per topic assigned to a paper. The same
+topic can appear on multiple rows if it was assigned to multiple papers.
+
+| Field | How to read it |
+|---|---|
+| **Paper** | The title of the paper the model read. |
+| **Label** | The specific topic assigned to the paper, shown as a red ellipse in the graph. |
+| **Category** | The broader research area containing the topic, shown as a purple rectangle. |
+| **Confidence** | The model's estimate of the match on a scale from 0 to 1. Use it to filter suggestions, and check the abstract before relying on a label. It is not a validated accuracy score. |
+| **Rationale** | A short explanation generated by the model for why it assigned the topic. Check it against the paper. |
+
+## Downloading the results
+
+| Download | Where | What you get |
+|---|---|---|
+| **Download graph (HTML)** | **Explore** | The current graph view as an interactive HTML file you can open offline. |
+| **Download papers (CSV)** | **Papers** | The extracted paper table, including metadata, abstracts, and references when available. |
+| **Download papers and topics (JSON)** | **Topics** | The paper records with their saved topic labels, categories, confidence scores, and rationales. |
 
 ## Update or repair a project
 
@@ -98,6 +182,42 @@ Open **Project tools** and enable **Show processing controls** when needed:
 If topic extraction fails during an update, the last completed topics remain
 available. The page warns when those topics cover a different set of papers
 from the current paper table.
+
+## Troubleshooting
+
+Click a problem to see what to do.
+
+??? question "A paper has no topics"
+    Under **Papers**, use **Download papers (CSV)** and check the
+    `abstract` column. Text Lab skips topic extraction if there is no
+    abstract. Also check that **Topics** is enabled in **Advanced graph
+    options**. In **Whole collection**, try lowering **Minimum topic
+    confidence** to see whether topics were filtered out.
+
+??? question "I expected to see a citation between two papers"
+    Turn on **Cited papers** in **Advanced graph options**. If the connection
+    is still missing, download the paper table from **Papers** and check
+    the citing paper's `cited_titles` column. Grobid may have missed the
+    reference, or its extracted title may differ from the title in your
+    collection.
+
+??? question "The graph is too crowded or I lost track of a node"
+    Use **Recenter** to fit the nodes back into view. Switch to **Single paper**
+    to focus on one paper, or use **Advanced graph options** to show fewer
+    papers or hide node types you do not need.
+
+??? question "Related papers have different topic labels"
+    Compare their broader categories and read the titles and abstracts to
+    confirm the relationship. Text Lab connects matching topic labels; the
+    model can describe similar ideas with different words. Use **Topics** to
+    compare the saved labels. If needed, try another model with **Re-extract
+    topics**.
+
+??? question "I changed a PDF, but the graph still shows old information"
+    Check the filename. Text Lab reuses successful PDF extractions by name.
+    To compare the updated paper with the original, give the new PDF a
+    different filename. To build a collection with only the updated version,
+    create a new project with the revised PDF.
 
 ## Data privacy and storage
 
