@@ -51,7 +51,14 @@ def list_pdfs(folder: str | Path) -> list[Path]:
     Returns:
         The PDF paths.
     """
-    return sorted(Path(folder).glob("*.pdf"))
+    folder = Path(folder)
+    if not folder.is_dir():
+        return []
+    return sorted(
+        path
+        for path in folder.iterdir()
+        if path.is_file() and path.suffix.lower() == ".pdf"
+    )
 
 
 def corpus_folder_name(papers_folder: str | Path) -> str:
