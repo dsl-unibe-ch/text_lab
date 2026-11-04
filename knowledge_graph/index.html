@@ -1,0 +1,1636 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Documentation for the Text Lab NLP Service at University of Bern">
+      
+      
+      
+        <link rel="canonical" href="https://text-lab.dsl.unibe.ch/knowledge_graph/">
+      
+      
+        <link rel="prev" href="../meeting_notes/">
+      
+      
+        <link rel="next" href="../topic_modeling/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/icon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Knowledge Graph - Text Lab Guide</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="red" data-md-color-accent="red">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#knowledge-graph" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Text Lab Guide" class="md-header__button md-logo" aria-label="Text Lab Guide" data-md-component="logo">
+      
+  <img src="../assets/text_lab_logo.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Text Lab Guide
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Knowledge Graph
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="red" data-md-color-accent="red"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="red" data-md-color-accent="red"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/dsl-unibe-ch/text_lab" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    dsl-unibe-ch/text_lab
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../launch/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Launching Text Lab
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../transcription/" class="md-tabs__link">
+          
+  
+  
+  Features
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../dev/" class="md-tabs__link">
+          
+  
+  
+  Developer Guide
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Text Lab Guide" class="md-nav__button md-logo" aria-label="Text Lab Guide" data-md-component="logo">
+      
+  <img src="../assets/text_lab_logo.png" alt="logo">
+
+    </a>
+    Text Lab Guide
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/dsl-unibe-ch/text_lab" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    dsl-unibe-ch/text_lab
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../launch/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Launching Text Lab
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Features
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Features
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../transcription/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Transcription
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ocr/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OCR
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../translate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Translate
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../meeting_notes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Meeting Notes Generator
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Knowledge Graph
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Knowledge Graph
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#create-a-project" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Create a project
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#open-an-existing-project" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Open an existing project
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-the-graph-is-built" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How the graph is built
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#understanding-the-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Understanding the results
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Understanding the results">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#explore-the-interactive-graph" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Explore: the interactive graph
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Explore: the interactive graph">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#colours-shapes-and-connections" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Colours, shapes, and connections
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#papers-extracted-metadata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Papers: extracted metadata
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#topics-labels-assigned-to-each-paper" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Topics: labels assigned to each paper
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#downloading-the-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Downloading the results
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#update-or-repair-a-project" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Update or repair a project
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-privacy-and-storage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data privacy and storage
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../topic_modeling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Topic Modeling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../chat/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Chat
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../visualize_data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Visualize Data
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dev/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dev/architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dev/testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dev/deployment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dev/data-handling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Handling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#create-a-project" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Create a project
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#open-an-existing-project" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Open an existing project
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-the-graph-is-built" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How the graph is built
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#understanding-the-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Understanding the results
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Understanding the results">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#explore-the-interactive-graph" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Explore: the interactive graph
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Explore: the interactive graph">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#colours-shapes-and-connections" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Colours, shapes, and connections
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#papers-extracted-metadata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Papers: extracted metadata
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#topics-labels-assigned-to-each-paper" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Topics: labels assigned to each paper
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#downloading-the-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Downloading the results
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#update-or-repair-a-project" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Update or repair a project
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-privacy-and-storage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data privacy and storage
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="knowledge-graph">Knowledge Graph</h1>
+<p>Explore connections between scientific papers, authors, research topics and
+citations. Create a project with one build action, or open saved results to
+continue exploring in a later session.</p>
+<h2 id="create-a-project">Create a project</h2>
+<ol>
+<li>Choose <strong>Create a project</strong>.</li>
+<li>Under <strong>Add papers</strong>, choose <strong>Upload PDF or ZIP</strong> (the default) or
+   <strong>Use a folder on this cluster</strong>.</li>
+<li>For uploads, select one PDF or a ZIP containing PDF papers and enter a
+   <strong>Project name</strong>. For a cluster folder, enter the folder containing PDFs.</li>
+<li>Choose <strong>Save project in</strong>: persistent storage on the cluster where you
+   want the extracted results to remain. This path refers to the cluster,
+   not your computer. By default, projects are saved beside the selected
+   papers folder, or in your home directory for uploads. You can change
+   either location. The full project folder path is displayed below it.</li>
+<li>To change how topics are extracted, open <strong>Advanced settings</strong>. Under
+   <strong>Topic extraction mode</strong>, choose to run the language model in your Text Lab
+   session (Ollama, no API key needed) or use the university's GPUStack service
+   (API key required). The model reads paper titles and abstracts to identify
+   research topics. With GPUStack, these are sent to the university service;
+   with Ollama, they stay in your session. Session model choices follow the
+   same GPU-based configuration as the other Text Lab features; the first
+   configured model is selected by default.</li>
+<li>Click <strong>Build knowledge graph</strong>.</li>
+</ol>
+<p>Text Lab extracts text, metadata and citations using Grobid, extracts research
+topics from titles and abstracts using the selected model, and opens the graph.
+Progress is shown while processing runs. The saved folder is
+<code>&lt;project name&gt;_project_corpus</code> for uploads or <code>&lt;PDF folder name&gt;_project_corpus</code>
+for cluster folders, under your chosen save location.</p>
+<p>ZIPs may contain subfolders; only PDF papers are processed. Filenames are
+preserved, including in selectors such as <code>P0001 - Paper.pdf</code>. Each paper in a
+ZIP must have a unique filename, even across subfolders. Rename duplicates
+before uploading. Invalid archives and files without a PDF header show an error.</p>
+<p>Uploaded PDFs are staged in the private job workspace and removed after the
+build attempt, including on failures. Extracted text, metadata, topics and
+graphs remain in your chosen project folder. To retry failed PDFs later, upload
+the original PDF or ZIP again using the same project name and save location.
+You do not need the original upload to open saved extractions or graphs.</p>
+<p>PDF extractions are saved as processing progresses. Papers already extracted
+are recognised by PDF filename and reused; failed papers are retried. Changing
+a PDF without changing its filename does not trigger PDF extraction again.
+When you build or update a graph, topic extraction runs again for every paper
+with an abstract, including reused papers. The saved topic table is replaced
+only when extraction completes. Papers without abstracts are included without
+research topics.</p>
+<p>If processing fails, the saved extractions remain available for another attempt.</p>
+<h2 id="open-an-existing-project">Open an existing project</h2>
+<p>Choose <strong>Open an existing project</strong> and enter either the project folder or a
+folder containing your saved projects. Select a project and click <strong>Open
+project</strong>. The source PDFs, Grobid server and topic model service are not needed
+to explore completed results.</p>
+<p>Once a project is open, its save location is shown above the results. Use
+<strong>Choose another project</strong> to switch collections.</p>
+<h2 id="how-the-graph-is-built">How the graph is built</h2>
+<table>
+<thead>
+<tr>
+<th>Stage</th>
+<th>Method</th>
+<th>What it gives you</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Read the PDFs</td>
+<td>Grobid extracts metadata, text and references from each PDF.</td>
+<td>Paper titles, authors, abstracts and citations, when available.</td>
+</tr>
+<tr>
+<td>Extract topics</td>
+<td>The selected language model reads each paper's title and abstract. It is asked for 3–8 specific topics, each with a broader category and a confidence score.</td>
+<td>Research themes for individual papers. Papers without an abstract skip this stage.</td>
+</tr>
+<tr>
+<td>Build and display the network</td>
+<td>NetworkX builds a directed graph from the extracted data. Pyvis uses a Barnes–Hut force layout to spread out nodes and draw connected nodes together.</td>
+<td>An interactive view of authorship, topics and citations.</td>
+</tr>
+</tbody>
+</table>
+<p>Topic extraction works <strong>paper by paper</strong>. To discover groups of documents
+across a corpus using BERTopic, Top2Vec or LDA, use
+<a href="../topic_modeling/">Topic Modeling</a>. The distances between nodes in the
+Knowledge Graph are a result of the layout; they do not measure similarity.</p>
+<h2 id="understanding-the-results">Understanding the results</h2>
+<p>The saved project has three tabs: <strong>Explore</strong>, <strong>Papers</strong>, and <strong>Topics</strong>.
+Use them together: find a connection in the graph, identify the papers behind
+it, and check the topics the model assigned.</p>
+<h3 id="explore-the-interactive-graph">Explore: the interactive graph</h3>
+<p>Use <strong>Whole collection</strong> to see links across your papers, or <strong>Single paper</strong>
+to focus on one paper and its connections. In <strong>Advanced graph options</strong>, you
+can choose node types to show, select papers for the whole collection view,
+and set a minimum topic confidence. The graph updates as you change these
+controls.</p>
+<p>Hover over nodes for details. Drag the background to pan, zoom in or out
+within the graph, or use <strong>Recenter</strong> to fit all nodes back into view. The
+graph stays visible when unrelated controls cause the page to refresh.</p>
+<p>In <strong>Whole collection</strong>, click any node to highlight the nodes one connection
+away and the links to them. For example, click a topic to see which papers
+are assigned to it. Other nodes fade. Click empty space to clear the highlight.</p>
+<p>Below the graph, <strong>Nodes</strong> counts all displayed entities, <strong>Connections</strong>
+counts the links between them, and <strong>Papers</strong> counts the blue paper nodes.
+Separate citation nodes do not count towards <strong>Papers</strong>. These numbers
+describe the current view, so they can change when you apply filters.</p>
+<h4 id="colours-shapes-and-connections">Colours, shapes, and connections</h4>
+<p>Each shape is a <strong>node</strong>. The same colour can mean different things when paired
+with different shapes, so look at both.</p>
+<table>
+<thead>
+<tr>
+<th>Node</th>
+<th>Colour and shape</th>
+<th>What it means</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Paper in your collection</td>
+<td>Blue circle</td>
+<td>A paper you added. The label is its project ID, such as <code>P0001</code>. Hover to see its title and DOI, if available.</td>
+</tr>
+<tr>
+<td>Author</td>
+<td>Green triangle</td>
+<td>An author of a paper in your collection. A shared author can connect several papers.</td>
+</tr>
+<tr>
+<td>Category</td>
+<td>Purple rectangle</td>
+<td>A broad research area, such as <em>Computer Vision</em>.</td>
+</tr>
+<tr>
+<td>Topic</td>
+<td>Red ellipse</td>
+<td>A specific theme within a category, such as <em>Object Detection Networks</em>. Topics are the more specific level; categories are the broader level.</td>
+</tr>
+<tr>
+<td>Cited paper in your collection</td>
+<td>Purple circle in <strong>Single paper</strong></td>
+<td>A reference matched to a paper in your collection by title. In <strong>Whole collection</strong>, the citation connects to the paper's existing blue node.</td>
+</tr>
+<tr>
+<td>External cited paper</td>
+<td>Orange circle</td>
+<td>A reference that was not matched to a paper in the collection shown.</td>
+</tr>
+<tr>
+<td>Cited author</td>
+<td>Gold triangle</td>
+<td>An author whose work is cited by a paper in the graph. A citation does not imply co-authorship.</td>
+</tr>
+</tbody>
+</table>
+<p>Read the labels on the connections to see why two nodes are linked:</p>
+<ul>
+<li><code>authored</code> or <code>authored_by</code>: an author wrote the paper.</li>
+<li><code>has_topic</code>: the model assigned this topic to the paper.</li>
+<li><code>belongs_to</code>: the specific topic belongs to the broader category.</li>
+<li><code>in_category</code>: the paper has a topic in that category.</li>
+<li><code>cites</code>: the paper references another paper.</li>
+<li><code>cites_work_by</code>: the paper references work by that author.</li>
+</ul>
+<p>For example, if <code>P0001</code> and <code>P0002</code> both connect to the red topic <em>Object
+Detection Networks</em>, the model assigned the same topic label to both papers.
+If they only share the purple category <em>Computer Vision</em>, they share a broader
+research area and may have different specific topics. Neither connection means
+that one paper cites the other; look for a <code>cites</code> connection for that.</p>
+<p>In <strong>Single paper</strong>, a larger topic node indicates higher model confidence.
+In <strong>Whole collection</strong>, topics grow with the number of times they appear;
+hover over a topic to see its average confidence.</p>
+<h3 id="papers-extracted-metadata">Papers: extracted metadata</h3>
+<p>The <strong>Papers</strong> tab lists each paper's project ID, title, authors, publication
+date, and PDF filename. Use the ID to match a graph node such as <code>P0001</code> to
+its source file. If you need the extracted abstract, DOI, or references,
+download the paper table as CSV.</p>
+<h3 id="topics-labels-assigned-to-each-paper">Topics: labels assigned to each paper</h3>
+<p>The <strong>Topics</strong> tab lists one row per topic assigned to a paper. The same
+topic can appear on multiple rows if it was assigned to multiple papers.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>How to read it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Paper</strong></td>
+<td>The title of the paper the model read.</td>
+</tr>
+<tr>
+<td><strong>Label</strong></td>
+<td>The specific topic assigned to the paper, shown as a red ellipse in the graph.</td>
+</tr>
+<tr>
+<td><strong>Category</strong></td>
+<td>The broader research area containing the topic, shown as a purple rectangle.</td>
+</tr>
+<tr>
+<td><strong>Confidence</strong></td>
+<td>The model's estimate of the match on a scale from 0 to 1. Use it to filter suggestions, and check the abstract before relying on a label. It is not a validated accuracy score.</td>
+</tr>
+<tr>
+<td><strong>Rationale</strong></td>
+<td>A short explanation generated by the model for why it assigned the topic. Check it against the paper.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="downloading-the-results">Downloading the results</h2>
+<table>
+<thead>
+<tr>
+<th>Download</th>
+<th>Where</th>
+<th>What you get</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Download graph (HTML)</strong></td>
+<td><strong>Explore</strong></td>
+<td>The current graph view as an interactive HTML file you can open offline.</td>
+</tr>
+<tr>
+<td><strong>Download papers (CSV)</strong></td>
+<td><strong>Papers</strong></td>
+<td>The extracted paper table, including metadata, abstracts, and references when available.</td>
+</tr>
+<tr>
+<td><strong>Download papers and topics (JSON)</strong></td>
+<td><strong>Topics</strong></td>
+<td>The paper records with their saved topic labels, categories, confidence scores, and rationales.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="update-or-repair-a-project">Update or repair a project</h2>
+<p>Open <strong>Project tools</strong> and enable <strong>Show processing controls</strong> when needed:</p>
+<ul>
+<li><strong>Update graph:</strong> supply the PDF folder and select a topic model. New and
+  previously failed PDFs are processed, successful extractions are reused,
+  and topics are generated for the collection with the selected model.</li>
+<li><strong>Re-extract topics:</strong> choose a different model without processing PDFs again.
+  This also completes a project whose paper extraction succeeded but whose
+  topic extraction failed.</li>
+<li><strong>Rebuild paper table:</strong> regenerate metadata tables from saved paper
+  extractions. This does not change the saved topics. If the set of papers has
+  changed, re-extract topics to bring the graph up to date.</li>
+</ul>
+<p>If topic extraction fails during an update, the last completed topics remain
+available. The page warns when those topics cover a different set of papers
+from the current paper table.</p>
+<h2 id="troubleshooting">Troubleshooting</h2>
+<p>Click a problem to see what to do.</p>
+<details class="question">
+<summary>A paper has no topics</summary>
+<p>Under <strong>Papers</strong>, use <strong>Download papers (CSV)</strong> and check the
+<code>abstract</code> column. Text Lab skips topic extraction if there is no
+abstract. Also check that <strong>Topics</strong> is enabled in <strong>Advanced graph
+options</strong>. In <strong>Whole collection</strong>, try lowering <strong>Minimum topic
+confidence</strong> to see whether topics were filtered out.</p>
+</details>
+<details class="question">
+<summary>I expected to see a citation between two papers</summary>
+<p>Turn on <strong>Cited papers</strong> in <strong>Advanced graph options</strong>. If the connection
+is still missing, download the paper table from <strong>Papers</strong> and check
+the citing paper's <code>cited_titles</code> column. Grobid may have missed the
+reference, or its extracted title may differ from the title in your
+collection.</p>
+</details>
+<details class="question">
+<summary>The graph is too crowded or I lost track of a node</summary>
+<p>Use <strong>Recenter</strong> to fit the nodes back into view. Switch to <strong>Single paper</strong>
+to focus on one paper, or use <strong>Advanced graph options</strong> to show fewer
+papers or hide node types you do not need.</p>
+</details>
+<details class="question">
+<summary>Related papers have different topic labels</summary>
+<p>Compare their broader categories and read the titles and abstracts to
+confirm the relationship. Text Lab connects matching topic labels; the
+model can describe similar ideas with different words. Use <strong>Topics</strong> to
+compare the saved labels. If needed, try another model with <strong>Re-extract
+topics</strong>.</p>
+</details>
+<details class="question">
+<summary>I changed a PDF, but the graph still shows old information</summary>
+<p>Check the filename. Text Lab reuses successful PDF extractions by name.
+To compare the updated paper with the original, give the new PDF a
+different filename. To build a collection with only the updated version,
+create a new project with the revised PDF.</p>
+</details>
+<h2 id="data-privacy-and-storage">Data privacy and storage</h2>
+<ul>
+<li>For cluster folder input, original PDFs stay where they are. Uploaded PDFs
+  and ZIP contents are staged temporarily and are not copied permanently.</li>
+<li>Extracted metadata, text, topics and generated graph HTML files stay in the
+  chosen project folder until you delete them. Choose persistent cluster
+  storage if you want to return in another session.</li>
+<li>Grobid's temporary working copies use the session's private workspace and
+  are deleted when the session ends.</li>
+<li>With the session model, titles and abstracts are processed in your own job.
+  With GPUStack, they are sent to the University of Bern's service, staying on
+  university infrastructure.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
