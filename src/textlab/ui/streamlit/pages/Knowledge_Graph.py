@@ -19,6 +19,65 @@ OLLAMA_BACKEND = "In this Text Lab session (Ollama)"
 GPUSTACK_BACKEND = "University GPUStack service (API key required)"
 
 
+# This runs inside the Pyvis frame, where the graph data is already loaded.
+_NODE_FOCUS_SCRIPT = """
+<script>
+(() => {
+    const originalNodes = nodes.get();
+    const originalEdges = edges.get();
+    const links = new Map(originalNodes.map(node => [node.id, []]));
+    for (const edge of originalEdges) {
+        if (edge.hidden) continue;
+        links.get(edge.from).push([edge.to, edge.id]);
+        links.get(edge.to).push([edge.from, edge.id]);
+    }
+
+    function neighbourhood(start, maxSteps) {
+        const nearbyNodes = new Set([start]);
+        const nearbyEdges = new Set();
+        let frontier = [start];
+
+        for (let step = 0; step < maxSteps && frontier.length; step++) {
+            const next = [];
+            for (const id of frontier) {
+                for (const [neighbour, edgeId] of links.get(id)) {
+                    nearbyEdges.add(edgeId);
+                    if (!nearbyNodes.has(neighbour)) {
+                        nearbyNodes.add(neighbour);
+                        next.push(neighbour);
+                    }
+                }
+            }
+            frontier = next;
+        }
+        return {nearbyNodes, nearbyEdges};
+    }
+
+    const focusSteps = 1;
+    let focus = null;
+    network.on("click", ({nodes: selected, edges: clickedEdges}) => {
+        if (!selected.length && clickedEdges.length) return;
+        if (!selected.length && focus === null) return;
+
+        focus = selected.length ? neighbourhood(selected[0], focusSteps)
+            : null;
+        nodes.update(originalNodes.map(node => ({
+            id: node.id,
+            opacity: focus === null || focus.nearbyNodes.has(node.id)
+                ? (node.opacity ?? 1) : 0.16,
+        })));
+        edges.update(originalEdges.map(edge => ({
+            id: edge.id,
+            hidden: Boolean(edge.hidden) || (
+                focus !== null && !focus.nearbyEdges.has(edge.id)
+            ),
+        })));
+    });
+})();
+</script>
+"""
+
+
 def show_failure(message: str, exc: Exception) -> None:
     """Show an actionable error with optional technical details."""
     st.error(f"{message}: {exc}")
@@ -489,7 +548,14 @@ def explore(corpus: Path, records: list[dict[str, Any]]) -> None:
     </style>
     """
     display_html = result["html"].replace("</head>", frame_style + "</head>")
-    display_html = display_html.replace("</body>", recenter + "</body>")
+    controls = recenter
+    if result["label"] == "Whole collection":
+        st.caption(
+            "Click a node to highlight its direct connections. "
+            "Click empty space to clear the highlight."
+        )
+        controls += _NODE_FOCUS_SCRIPT
+    display_html = display_html.replace("</body>", controls + "</body>")
     components.html(display_html, height=750, scrolling=False)
     nodes, edges, count = st.columns(3)
     nodes.metric("Nodes", result["nodes"])
