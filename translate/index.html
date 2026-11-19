@@ -1,0 +1,1977 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Documentation for the Text Lab NLP Service at University of Bern">
+      
+      
+      
+        <link rel="canonical" href="https://text-lab.dsl.unibe.ch/translate/">
+      
+      
+        <link rel="prev" href="../ocr/">
+      
+      
+        <link rel="next" href="../meeting_notes/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/icon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Translate - Text Lab Guide</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="red" data-md-color-accent="red">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#translate" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Text Lab Guide" class="md-header__button md-logo" aria-label="Text Lab Guide" data-md-component="logo">
+      
+  <img src="../assets/text_lab_logo.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Text Lab Guide
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Translate
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="red" data-md-color-accent="red"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="red" data-md-color-accent="red"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/dsl-unibe-ch/text_lab" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    dsl-unibe-ch/text_lab
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../launch/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Launching Text Lab
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../transcription/" class="md-tabs__link">
+          
+  
+  
+  Features
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../dev/" class="md-tabs__link">
+          
+  
+  
+  Developer Guide
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Text Lab Guide" class="md-nav__button md-logo" aria-label="Text Lab Guide" data-md-component="logo">
+      
+  <img src="../assets/text_lab_logo.png" alt="logo">
+
+    </a>
+    Text Lab Guide
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/dsl-unibe-ch/text_lab" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    dsl-unibe-ch/text_lab
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../launch/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Launching Text Lab
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Features
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Features
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../transcription/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Transcription
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ocr/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OCR
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Translate
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Translate
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#quick-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quick start
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#choosing-a-translation-backend" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Choosing a translation backend
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Choosing a translation backend">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#formality" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Formality
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#languages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Languages
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#glossary-term-lock" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Glossary (term lock)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#translating-text" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Translating text
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Translating text">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#entering-text" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Entering text
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#detecting-the-source-language" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Detecting the source language
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#loading-the-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Loading the model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#translating" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Translating
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-stays-unchanged" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What stays unchanged
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#translating-documents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Translating documents
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Translating documents">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#supported-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Supported files
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#uploading" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Uploading
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Options
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdf-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDF files
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#running-the-translation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Running the translation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#downloading-the-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Downloading the results
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Downloading the results">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#file-names" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        File names
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reviewing-a-translation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reviewing a translation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-privacy-security" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data Privacy &amp; Security
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tips-for-good-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tips for good results
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../meeting_notes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Meeting Notes Generator
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../knowledge_graph/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Knowledge Graph
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../topic_modeling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Topic Modeling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../chat/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Chat
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../visualize_data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Visualize Data
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dev/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dev/architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dev/testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dev/deployment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dev/data-handling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Handling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#quick-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quick start
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#choosing-a-translation-backend" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Choosing a translation backend
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Choosing a translation backend">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#formality" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Formality
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#languages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Languages
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#glossary-term-lock" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Glossary (term lock)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#translating-text" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Translating text
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Translating text">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#entering-text" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Entering text
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#detecting-the-source-language" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Detecting the source language
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#loading-the-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Loading the model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#translating" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Translating
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-stays-unchanged" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What stays unchanged
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#translating-documents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Translating documents
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Translating documents">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#supported-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Supported files
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#uploading" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Uploading
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Options
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pdf-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PDF files
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#running-the-translation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Running the translation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#downloading-the-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Downloading the results
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Downloading the results">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#file-names" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        File names
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reviewing-a-translation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reviewing a translation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-privacy-security" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data Privacy &amp; Security
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tips-for-good-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tips for good results
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="translate">Translate</h1>
+<p>Translate turns text and documents from one language into another. You can paste a short text and see the translation next to it, or upload whole files (Word, PowerPoint, Excel, PDF, Markdown, plain text and subtitles) and download them translated, in the same format and layout as the original.</p>
+<p>Typical uses are reading foreign-language articles and reports, preparing a translated version of a presentation or handout, translating survey answers or interview transcripts, and checking how a technical term is rendered in another language.</p>
+<p>All processing runs on the university cluster. Your texts and documents are never sent to an external translation service such as DeepL or Google Translate.</p>
+<h2 id="quick-start">Quick start</h2>
+<p><strong>Translating a short text</strong></p>
+<ol>
+<li>Choose a <strong>Translation backend</strong>. If you are unsure, keep the default, <strong>NLLB-200 Distilled</strong>.</li>
+<li>Select the <strong>Source language</strong> and <strong>Target language</strong>.</li>
+<li>Open the <strong>Text</strong> tab and paste your text into the left panel.</li>
+<li>Click <strong>Load model</strong> and wait until the green "ready" message appears.</li>
+<li>Click <strong>Translate</strong>. The translation appears in the right panel. Use <strong>Copy translation</strong> to copy it.</li>
+</ol>
+<p><strong>Translating documents</strong></p>
+<ol>
+<li>Choose a <strong>Translation backend</strong> and the <strong>Target language</strong>.</li>
+<li>Open the <strong>Document</strong> tab and drop one or more files (or a ZIP archive) into the upload area.</li>
+<li>Keep <strong>Detect each document's language</strong> and <strong>Add side-by-side review file</strong> ticked.</li>
+<li>Click <strong>Translate document(s)</strong>.</li>
+<li>Click the <strong>Download</strong> button to save the result.</li>
+</ol>
+<p>The model is loaded automatically for documents, so there is no <em>Load model</em> step in the Document tab.</p>
+<h2 id="choosing-a-translation-backend">Choosing a translation backend</h2>
+<p>The backend is the translation model that does the work. The choice applies to both tabs.</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th><strong>NLLB-200 Distilled (600M)</strong></th>
+<th><strong>NLLB-200 (3.3B)</strong></th>
+<th><strong>MADLAD-400 (3B)</strong></th>
+<th><strong>OPUS-MT</strong></th>
+<th><strong>LLM (Ollama)</strong></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Best for</strong></td>
+<td>Everyday use; the default</td>
+<td>Higher quality, long technical text</td>
+<td>Less widely spoken languages</td>
+<td>Fast translation between common European language pairs</td>
+<td>Dialects, informal text, control over tone</td>
+</tr>
+<tr>
+<td><strong>Speed</strong></td>
+<td>Fast</td>
+<td>Slower</td>
+<td>Slower</td>
+<td>Very fast</td>
+<td>Depends on the model</td>
+</tr>
+<tr>
+<td><strong>Languages</strong></td>
+<td>All languages in the list</td>
+<td>All languages in the list</td>
+<td>All languages in the list</td>
+<td>Only some pairs</td>
+<td>All languages in the list</td>
+</tr>
+<tr>
+<td><strong>GPU memory</strong></td>
+<td>Small</td>
+<td>Needs a larger GPU</td>
+<td>Needs a larger GPU</td>
+<td>Small</td>
+<td>Depends on the model</td>
+</tr>
+<tr>
+<td><strong>Formality control</strong></td>
+<td>No</td>
+<td>No</td>
+<td>No</td>
+<td>No</td>
+<td>Yes</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>NLLB-200 Distilled</strong> is a good starting point for almost everything.</li>
+<li><strong>NLLB-200 (3.3B)</strong> gives noticeably better results on long or specialised sentences. If it fails to load, your session's GPU is too small; relaunch Text Lab with a larger GPU or use the distilled version.</li>
+<li><strong>MADLAD-400</strong> is worth trying when the result from NLLB is poor for a less common language.</li>
+<li><strong>OPUS-MT</strong> uses a separate small model for each language pair. If no model exists for your pair, Text Lab tells you so and you should switch to NLLB.</li>
+<li><strong>LLM (Ollama)</strong> uses a general-purpose language model (the same kind used by Chat) instead of a dedicated translation model. When you select it, an extra <strong>LLM model</strong> menu appears; the models offered depend on the GPU of your session. LLMs cope better with dialects, colloquial language and unusual phrasing, and accept much longer passages in one piece, but they are slower and occasionally paraphrase more freely.</li>
+</ul>
+<h3 id="formality">Formality</h3>
+<p>When you use the <strong>LLM (Ollama)</strong> backend, a <strong>Formality</strong> option appears:</p>
+<ul>
+<li><strong>default</strong>: the model follows the tone of the source text.</li>
+<li><strong>formal</strong>: a polite, professional register (for example <em>Sie</em> in German, <em>vous</em> in French).</li>
+<li><strong>informal</strong>: a relaxed, conversational register with informal forms of address.</li>
+</ul>
+<p>The other backends do not support this option, so it is hidden for them.</p>
+<h2 id="languages">Languages</h2>
+<p>The language menus offer 59 languages, including all major European languages, Arabic, Hebrew, Persian, Hindi, Urdu, Bengali, Chinese (Simplified and Traditional), Japanese, Korean, and many others.</p>
+<ul>
+<li>Source and target must be different.</li>
+<li>Click the <strong>⇄</strong> button between the two menus to swap source and target. In the Text tab this also swaps the text in the two panels, so you can translate your result back.</li>
+</ul>
+<h2 id="glossary-term-lock">Glossary (term lock)</h2>
+<p>The glossary makes sure that specific words or phrases are always translated the way you want: names of institutes, product names, technical terms, or words that should not be translated at all.</p>
+<ol>
+<li>Open <strong>Glossary / term lock</strong> above the tabs.</li>
+<li>In each row, enter the term as it appears in your source text in the <strong>Source</strong> column, and the exact wording you want in the translation in the <strong>Target</strong> column. To keep a term untranslated, enter it identically in both columns.</li>
+<li>Add more rows as needed (up to 50 terms).</li>
+</ol>
+<p>The heading of the section shows how many terms are active. Rows with an empty source or target are ignored.</p>
+<ul>
+<li>The glossary applies to both the Text and the Document tab.</li>
+<li>Longer terms take priority, so an entry for <code>University of Bern</code> is used instead of an entry for <code>Bern</code> where both match.</li>
+<li>Matching ignores upper and lower case by default, so <code>Bern</code> also matches <code>BERN</code>. Tick <strong>Case-sensitive matching</strong> to match only the exact spelling.</li>
+<li>In languages written with Latin, Cyrillic or Greek letters, terms are matched as whole words, so <code>art</code> does not match inside <code>article</code>. In other scripts (for example Chinese or Arabic) a term also matches inside longer words.</li>
+<li>The target term is inserted exactly as you typed it. It is not adapted to grammar (for example plural or case endings), so prefer the form that fits most sentences.</li>
+</ul>
+<h2 id="translating-text">Translating text</h2>
+<p>The Text tab is a split-screen editor: your text on the left, the translation on the right.</p>
+<h3 id="entering-text">Entering text</h3>
+<ul>
+<li>Paste or type your text into the left panel. Below it you see the number of characters and words.</li>
+<li>Texts up to <strong>5,000 characters</strong> are recommended. Longer texts still work, but the counter turns red and translation takes longer; for long material, the Document tab is more convenient.</li>
+<li>Text copied from a PDF or an email often has line breaks in the middle of sentences. Text Lab joins these lines before translating, so the model sees complete sentences. Breaks after a finished sentence and blank lines between paragraphs are kept.</li>
+</ul>
+<h3 id="detecting-the-source-language">Detecting the source language</h3>
+<p>If you do not know the language of a text, click <strong>Detect</strong>. A badge shows the detected language and how certain the detection is:</p>
+<ul>
+<li><strong>green</strong> (85% or more): reliable.</li>
+<li><strong>yellow</strong> (60–84%): probably right, but check.</li>
+<li><strong>red</strong> (below 60%): uncertain; choose the language yourself.</li>
+</ul>
+<p>If the detected language differs from the selected source language, click <strong>Use ... as source</strong> to switch. Detection recognises 20 common languages; for other languages, select the source language manually.</p>
+<h3 id="loading-the-model">Loading the model</h3>
+<p>Before the first translation, click <strong>Load model</strong>. This loads the translation model onto the GPU of your session.</p>
+<ul>
+<li>The first time a model is used it may need to be downloaded, which can take one to two minutes. Afterwards loading takes only seconds.</li>
+<li>You need to load again whenever you change the backend, the LLM model or the language pair. The <em>Translate</em> button stays disabled until the selected model is ready.</li>
+</ul>
+<h3 id="translating">Translating</h3>
+<p>Click <strong>Translate</strong>. A progress bar is shown for longer texts. When the translation is ready:</p>
+<ul>
+<li>Select text in the right panel to copy part of it, or click <strong>Copy translation</strong> to copy everything.</li>
+<li>Below the panel you see the character and word count and the backend used.</li>
+</ul>
+<h3 id="what-stays-unchanged">What stays unchanged</h3>
+<p>Some parts of a text should never be translated. Text Lab protects them automatically, so the model cannot alter them:</p>
+<ul>
+<li>web addresses (URLs), email addresses and file paths</li>
+<li>Markdown links and images (the visible link text is translated, the address is not)</li>
+<li>inline code and code blocks</li>
+<li>LaTeX formulas such as <code>$E = mc^2$</code></li>
+<li>HTML tags</li>
+<li>placeholders such as <code>{name}</code> or <code>%s</code></li>
+</ul>
+<p>If the model damages one of these protected parts, Text Lab retries the affected passage in smaller pieces. If that also fails, it shows an error instead of giving you a silently broken translation.</p>
+<h2 id="translating-documents">Translating documents</h2>
+<h3 id="supported-files">Supported files</h3>
+<table>
+<thead>
+<tr>
+<th>Format</th>
+<th>What is translated</th>
+<th>What is kept</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Word</strong> (<code>.docx</code>)</td>
+<td>Body text, tables, headers and footers, footnotes and endnotes, comments</td>
+<td>Paragraph styles, headings, lists, tables, images, hyperlinks</td>
+</tr>
+<tr>
+<td><strong>PowerPoint</strong> (<code>.pptx</code>)</td>
+<td>Text in all shapes, text boxes, tables and grouped shapes, speaker notes</td>
+<td>Slide layout, positions, images, colours, tables</td>
+</tr>
+<tr>
+<td><strong>Excel</strong> (<code>.xlsx</code>)</td>
+<td>Text cells and cell comments</td>
+<td>Numbers, dates, formulas, sheet names, column widths, merged cells, styles</td>
+</tr>
+<tr>
+<td><strong>PDF</strong> (<code>.pdf</code>)</td>
+<td>All text, including scanned pages (see <a href="#pdf-files">PDF files</a>)</td>
+<td>Layout (PDF output), or structure and figures (Markdown output)</td>
+</tr>
+<tr>
+<td><strong>Markdown</strong> (<code>.md</code>)</td>
+<td>Headings, paragraphs, lists, tables, block quotes</td>
+<td>Code blocks, links, formulas, HTML</td>
+</tr>
+<tr>
+<td><strong>Plain text</strong> (<code>.txt</code>)</td>
+<td>All text</td>
+<td>Paragraph structure</td>
+</tr>
+<tr>
+<td><strong>Subtitles</strong> (<code>.srt</code>, <code>.vtt</code>)</td>
+<td>The subtitle text</td>
+<td>One line per line, so the subtitle structure is not merged</td>
+</tr>
+<tr>
+<td><strong>ZIP</strong> (<code>.zip</code>)</td>
+<td>Any mix of the formats above</td>
+<td>Files are translated one by one</td>
+</tr>
+</tbody>
+</table>
+<p>Older formats (<code>.doc</code>, <code>.ppt</code>, <code>.xls</code>) are not supported. Open them in Office and save them in the newer format first. Files of other types inside a ZIP archive are skipped with a warning.</p>
+<p><strong>Known limitations</strong></p>
+<ul>
+<li><strong>Word and PowerPoint</strong>: each paragraph is translated as a whole, because word order changes between languages. As a consequence, formatting of single words inside a paragraph (for example one bold word in a sentence) is lost; the paragraph takes the formatting of its first word. Paragraph styles, headings and lists are kept.</li>
+<li><strong>Excel</strong>: sheet names are not translated, because formulas refer to them. Text inside charts and images is not translated.</li>
+<li><strong>Text in images</strong> is not translated in any format.</li>
+</ul>
+<h3 id="uploading">Uploading</h3>
+<p>Drop your files into the upload area or click it to browse. You can select several files at once, upload a ZIP archive, or combine both. All files are translated into the same target language with the same backend and glossary.</p>
+<p>If your session has no GPU, Text Lab shows a note: translation then runs on the CPU, which is much slower, and scanned PDFs cannot be processed.</p>
+<h3 id="options">Options</h3>
+<ul>
+<li><strong>Detect each document's language</strong> (on by default): Text Lab reads several paragraphs spread across each document and determines its language. This lets you upload documents in different source languages in one batch. If the language cannot be identified with confidence, the <strong>Source language</strong> selected above is used. Turn this off to use the selected source language for every file.</li>
+<li><strong>Add side-by-side review file</strong> (on by default): adds a file showing the original and the translation paragraph by paragraph, as a web page (<code>.html</code>) and a Word document. This is the easiest way to check a translation. See <a href="#reviewing-a-translation">Reviewing a translation</a>.</li>
+</ul>
+<h3 id="pdf-files">PDF files</h3>
+<p>PDF is a format for printing, not for editing, so Text Lab offers two kinds of output. When you upload a PDF, a <strong>PDF outputs</strong> menu appears:</p>
+<ul>
+<li><strong>Markdown</strong> (text, tables and figures; best for reading): the content is extracted as a structured text document with headings, tables and the figures saved as images, then translated. This is usually the most readable and reliable result.</li>
+<li><strong>PDF</strong> (same layout as the original): the translated text is placed back into the original pages, in the same position. Images, lines and the page design are kept.</li>
+</ul>
+<p>Both are selected by default. Select only what you need: each output takes extra time. Text that appears in both is translated only once.</p>
+<p><strong>Things to know about the PDF output</strong></p>
+<ul>
+<li>Translations are often longer than the original. When a translation does not fit into its original space, the font is made smaller so that nothing is cut off. In tight layouts text can become very small; the validation report tells you where.</li>
+<li>Equations are kept as they are, untranslated.</li>
+<li>Labels inside figures and text drawn on top of images are not translated.</li>
+<li>The PDF output is created only if every page has real, selectable text. Scanned pages cannot be rebuilt as a PDF; use the Markdown output instead (see below).</li>
+</ul>
+<p><strong>Scanned PDFs</strong></p>
+<p>Scanned pages (photographs or scans of paper documents) contain no text, only images. For the Markdown output, Text Lab first reads these pages with text recognition (OCR) and then translates the result. This needs a suitable GPU. If your session's GPU is not eligible, the Markdown output is blocked with a message rather than silently skipping pages; relaunch Text Lab with a larger GPU.</p>
+<p><strong>Equations in Markdown</strong></p>
+<p>By default, equations in the Markdown output are copied from the PDF as they are. Tick <strong>Convert equations to LaTeX in the Markdown (slower)</strong> to have pages with equations read by OCR so that formulas appear as proper LaTeX. Use this for scientific documents where you need the formulas to be editable.</p>
+<p><strong>Validation report</strong></p>
+<p>Every translated PDF comes with a <code>.translation-report.json</code> file. It lists, page by page, how each page was processed, which outputs were created, which were blocked and why, and any warnings (for example shrunk text or untranslated figure labels). The same information appears on the page under <strong>PDF validation reports</strong> after the run. If one output fails its checks, the other is still delivered.</p>
+<h3 id="running-the-translation">Running the translation</h3>
+<p>Click <strong>Translate document(s)</strong>. A progress panel shows:</p>
+<ul>
+<li>which file is being translated (for example <code>[2/5] report.docx</code>),</li>
+<li>the current stage (detecting language, translating sentences, reconstructing the file),</li>
+<li>the elapsed time and, during translation, an estimate of the time left.</li>
+</ul>
+<p>Translating large documents can take several minutes. Text Lab warns you when the upload is larger than 5 MB. Click <strong>Cancel</strong> to stop; no files are produced in that case.</p>
+<p>If a document is already in the target language, it is skipped with a message.</p>
+<h2 id="downloading-the-results">Downloading the results</h2>
+<p>When the run is finished, a summary shows the elapsed time and the detected language of each file.</p>
+<ul>
+<li><strong>One output file</strong>: a <strong>Download</strong> button for that file.</li>
+<li><strong>Several output files</strong>: a <strong>Download translated ZIP</strong> button. If you uploaded several documents, each gets its own folder in the ZIP.</li>
+</ul>
+<p>The results stay on the page until you start a new translation, so you can download them more than once.</p>
+<h3 id="file-names">File names</h3>
+<p>Translated files keep the original name with the target language code added, for example for a German translation:</p>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Content</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>report.deu_Latn.docx</code></td>
+<td>The translated document, same format as the original</td>
+</tr>
+<tr>
+<td><code>report.deu_Latn.side-by-side.html</code></td>
+<td>Review file, opens in any web browser</td>
+</tr>
+<tr>
+<td><code>report.deu_Latn.side-by-side.docx</code></td>
+<td>Review file as a Word table</td>
+</tr>
+<tr>
+<td><code>paper.deu_Latn.md</code> or <code>paper.deu_Latn.md.zip</code></td>
+<td>Markdown output of a PDF; a ZIP with an <code>assets/</code> folder when the PDF contains figures</td>
+</tr>
+<tr>
+<td><code>paper.deu_Latn.pdf</code></td>
+<td>PDF output with the original layout</td>
+</tr>
+<tr>
+<td><code>paper.deu_Latn.translation-report.json</code></td>
+<td>Validation report for a PDF</td>
+</tr>
+<tr>
+<td><code>notes.txt.ERROR.txt</code></td>
+<td>Explanation for a file that could not be translated</td>
+</tr>
+</tbody>
+</table>
+<p>In the ZIP download, a Markdown bundle from a PDF is unpacked, so the <code>.md</code> file and its <code>assets/</code> folder sit next to each other and the figures display correctly in a Markdown viewer.</p>
+<h2 id="reviewing-a-translation">Reviewing a translation</h2>
+<p>Machine translation is very good but not perfect. Always review translations before you publish or share them, especially for legal, medical or official texts.</p>
+<p>The <strong>side-by-side review file</strong> shows a numbered table with the original on the left and the translation on the right, paragraph by paragraph. It works for every input format and does not depend on the layout, so it is the quickest way to:</p>
+<ul>
+<li>spot sentences that were translated incorrectly or left out,</li>
+<li>check that names and technical terms are consistent (add them to the <a href="#glossary-term-lock">glossary</a> and translate again if not),</li>
+<li>hand the translation to a native speaker for proofreading. The Word version can be edited and commented on directly.</li>
+</ul>
+<h2 id="data-privacy-security">Data Privacy &amp; Security</h2>
+<ul>
+<li><strong>Local processing:</strong> All translation runs in your own Text Lab session, on the compute node it was started on. The translation models run on your session's GPU, and the LLM backend uses the Ollama server of your session. Your texts and documents are never sent to an online translation service.</li>
+<li><strong>No files left behind:</strong> Uploaded documents and their translations are kept in your session's memory, not written to disk. The one exception is a PDF with scanned pages: the pages that need text recognition are written to your session's private workspace on the compute node, which only your user account can open, and deleted as soon as recognition is finished. The whole workspace is deleted when your session ends.</li>
+<li><strong>Results last as long as your session:</strong> Translations stay on the page until you start a new translation, reload the page or end your session. Download what you want to keep; nothing is saved to your home directory.</li>
+<li><strong>No AI training:</strong> The models only translate. They do not learn from your texts, and your data is never used to train or improve them.</li>
+</ul>
+<h2 id="tips-for-good-results">Tips for good results</h2>
+<ul>
+<li><strong>Choose the right source language</strong>, or keep language detection on. A wrong source language is the most common cause of poor translations.</li>
+<li><strong>Use the glossary</strong> for names, institutions, abbreviations and field-specific terms. It is the most effective way to get consistent terminology.</li>
+<li><strong>Try another backend</strong> if the result is unsatisfying: NLLB-200 (3.3B) for long technical sentences, MADLAD-400 for less common languages, LLM (Ollama) for dialects and informal language.</li>
+<li><strong>Prefer Word over PDF</strong> when you have both. Word files contain the real document structure, so the translated file is cleaner.</li>
+<li><strong>For PDFs, read the Markdown output first.</strong> It is usually more reliable than the rebuilt PDF; use the PDF output when you need the original look.</li>
+</ul>
+<h2 id="troubleshooting">Troubleshooting</h2>
+<p>Click a problem to see what to do.</p>
+<details class="question">
+<summary>The Translate button is greyed out</summary>
+<p>Click <strong>Load model</strong> first, and wait for the green "ready" message. You need to load again after changing the backend, the LLM model or the languages. The button is also disabled when the source panel is empty or the source and target languages are the same.</p>
+</details>
+<details class="question">
+<summary>'OPUS-MT does not support direct translation between ...'</summary>
+<p>OPUS-MT only has models for some language pairs. Switch to NLLB-200 or MADLAD-400, which support all languages in the list.</p>
+</details>
+<details class="question">
+<summary>The model fails to load or 'CUDA out of memory'</summary>
+<p>The selected model is too large for your session's GPU. Choose a smaller backend (NLLB-200 Distilled or OPUS-MT) or a smaller LLM, or relaunch Text Lab with a larger GPU.</p>
+</details>
+<details class="question">
+<summary>'Part of the text is too long for the selected model to translate in one piece'</summary>
+<p>A single sentence or passage exceeds what the model can process at once. Split very long sentences, or switch to the LLM (Ollama) backend, which accepts much longer input.</p>
+</details>
+<details class="question">
+<summary>'The model could not finish translating part of the text'</summary>
+<p>The translation of a passage was longer than the model can produce. Try NLLB-200 (3.3B), or the LLM (Ollama) backend if you already use it.</p>
+</details>
+<details class="question">
+<summary>'The model did not keep the document's formatting (links, code, tables) intact'</summary>
+<p>The model damaged protected content such as links or code even after retrying. Try the LLM (Ollama) backend, or a larger LLM model if you already use it.</p>
+</details>
+<details class="question">
+<summary>Detection shows a language code 'outside the dropdown'</summary>
+<p>The detected language is not available for translation, or detection was not confident. Select the source language yourself.</p>
+</details>
+<details class="question">
+<summary>A document was skipped as 'already in' the target language</summary>
+<p>Language detection found that the file is already in the target language. If this is wrong, untick <strong>Detect each document's language</strong> and select the source language manually.</p>
+</details>
+<details class="question">
+<summary>Only the Markdown version of my PDF was created</summary>
+<p>The PDF contains scanned or image-only pages, or uses a font that cannot display the translated characters. These cannot be rebuilt as a PDF. Use the Markdown output; the validation report names the affected pages.</p>
+</details>
+<details class="question">
+<summary>'Scanned pages could not be read' or the Markdown output is blocked</summary>
+<p>The scanned pages need text recognition (OCR), which requires a suitable GPU. Relaunch Text Lab with a larger GPU and try again.</p>
+</details>
+<details class="question">
+<summary>'This PDF is password-protected'</summary>
+<p>Remove the password (for example by saving an unprotected copy in your PDF reader) and upload the file again.</p>
+</details>
+<details class="question">
+<summary>Text in the translated PDF is very small</summary>
+<p>The translation was longer than the original and had to be shrunk to fit. Use the Markdown output or the side-by-side review file for reading, or translate the original Word file if you have it.</p>
+</details>
+<details class="question">
+<summary>Bold or italic words inside a sentence are lost in Word or PowerPoint</summary>
+<p>Each paragraph is translated as a whole, so formatting of single words cannot be carried over reliably. Reapply it in the translated file where needed.</p>
+</details>
+<details class="question">
+<summary>Translation is very slow</summary>
+<p>Check whether the Document tab says <em>No GPU detected</em>; translation on the CPU is much slower. Large batches and the 3B models also take longer. Select only the PDF outputs you need, and leave <em>Convert equations to LaTeX</em> off unless you need it.</p>
+</details>
+<p>For help with translating material for your project, contact the Data Science Lab (DSL).</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

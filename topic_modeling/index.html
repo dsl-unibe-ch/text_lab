@@ -1,0 +1,1760 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Documentation for the Text Lab NLP Service at University of Bern">
+      
+      
+      
+        <link rel="canonical" href="https://text-lab.dsl.unibe.ch/topic_modeling/">
+      
+      
+        <link rel="prev" href="../knowledge_graph/">
+      
+      
+        <link rel="next" href="../chat/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/icon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Topic Modeling - Text Lab Guide</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="red" data-md-color-accent="red">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#topic-modeling" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Text Lab Guide" class="md-header__button md-logo" aria-label="Text Lab Guide" data-md-component="logo">
+      
+  <img src="../assets/text_lab_logo.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Text Lab Guide
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Topic Modeling
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="red" data-md-color-accent="red"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="red" data-md-color-accent="red"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/dsl-unibe-ch/text_lab" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    dsl-unibe-ch/text_lab
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../launch/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Launching Text Lab
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../transcription/" class="md-tabs__link">
+          
+  
+  
+  Features
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../dev/" class="md-tabs__link">
+          
+  
+  
+  Developer Guide
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Text Lab Guide" class="md-nav__button md-logo" aria-label="Text Lab Guide" data-md-component="logo">
+      
+  <img src="../assets/text_lab_logo.png" alt="logo">
+
+    </a>
+    Text Lab Guide
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/dsl-unibe-ch/text_lab" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    dsl-unibe-ch/text_lab
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../launch/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Launching Text Lab
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Features
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Features
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../transcription/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Transcription
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ocr/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OCR
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../translate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Translate
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../meeting_notes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Meeting Notes Generator
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../knowledge_graph/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Knowledge Graph
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Topic Modeling
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Topic Modeling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#quick-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quick start
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#preparing-your-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Preparing your data
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Preparing your data">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tables-recommended" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tables (recommended)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#zip-archives" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ZIP archives
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tips-for-good-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tips for good results
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#choosing-an-algorithm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Choosing an algorithm
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Settings
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Settings">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#settings-for-all-algorithms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Settings for all algorithms
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bertopic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BERTopic
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#top2vec" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Top2Vec
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lda" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        LDA
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#topics-over-time-bertopic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Topics over time (BERTopic)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#understanding-the-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Understanding the results
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Understanding the results">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#evaluation-metrics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Evaluation metrics
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#topic-dictionary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Topic Dictionary
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#interactive-charts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Interactive charts
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#downloading-the-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Downloading the results
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../chat/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Chat
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../visualize_data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Visualize Data
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dev/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dev/architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dev/testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dev/deployment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dev/data-handling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Handling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#quick-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quick start
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#preparing-your-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Preparing your data
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Preparing your data">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tables-recommended" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tables (recommended)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#zip-archives" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ZIP archives
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tips-for-good-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tips for good results
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#choosing-an-algorithm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Choosing an algorithm
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Settings
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Settings">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#settings-for-all-algorithms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Settings for all algorithms
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bertopic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BERTopic
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#top2vec" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Top2Vec
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lda" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        LDA
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#topics-over-time-bertopic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Topics over time (BERTopic)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#understanding-the-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Understanding the results
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Understanding the results">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#evaluation-metrics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Evaluation metrics
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#topic-dictionary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Topic Dictionary
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#interactive-charts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Interactive charts
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#downloading-the-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Downloading the results
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="topic-modeling">Topic Modeling</h1>
+<p>Topic Modeling finds the main themes in a collection of texts automatically. You upload your documents, and Text Lab groups documents that talk about similar things into <strong>topics</strong>, describes each topic with its most characteristic keywords, and tells you which topic every document belongs to.</p>
+<p>Typical uses are exploring survey answers, interview transcripts, news articles, social media posts, abstracts, or any other collection that is too large to read in full.</p>
+<p>All processing runs on the university cluster. Your documents are never sent to an external service.</p>
+<h2 id="quick-start">Quick start</h2>
+<ol>
+<li><strong>Upload your data</strong> as a table (CSV or Excel) or as a ZIP archive of text files.</li>
+<li><strong>Pick the column</strong> that contains the text (tables only).</li>
+<li><strong>Choose an algorithm.</strong> If you are unsure, start with <strong>BERTopic</strong> and the default settings.</li>
+<li><strong>Select the primary language</strong> of your texts.</li>
+<li>Click <strong>Run Topic Extraction</strong>. A status box shows each step; to cancel, refresh the page. Notes about the run, such as skipped rows or long documents, appear when it finishes.</li>
+<li><strong>Explore the results</strong> on the page and click <strong>Download Extraction Package (.zip)</strong> to keep them.</li>
+</ol>
+<p>Running again with different settings replaces the previous results on the page, so download anything you want to keep first.</p>
+<h2 id="preparing-your-data">Preparing your data</h2>
+<p>Each <strong>document</strong> is one unit that gets assigned to a topic: one table row or one text file.</p>
+<h3 id="tables-recommended">Tables (recommended)</h3>
+<ul>
+<li>Formats: <strong>CSV</strong> (<code>.csv</code>) or <strong>Excel</strong> (<code>.xlsx</code>). Older <code>.xls</code> files are not supported; open them in Excel and save them as <code>.xlsx</code> or <code>.csv</code>.</li>
+<li>Use <strong>one row per document</strong> and one column for the text. All other columns (author, date, category, ...) are kept and appear in the exported results next to the assigned topic, so you can analyse topics by group later.</li>
+<li>CSV files may use commas, semicolons, tabs or pipes as separators, and may be saved by Excel on Windows. Text Lab detects both automatically.</li>
+<li>Rows with an empty text cell are skipped.</li>
+</ul>
+<h3 id="zip-archives">ZIP archives</h3>
+<ul>
+<li>Put <strong>plain text files</strong> (<code>.txt</code>) into a ZIP archive, one document per file. Up to 1,000 files are accepted.</li>
+<li>The file name is kept and appears in the exported results.</li>
+<li>Use this when your documents are separate files; use a table if you also have metadata.</li>
+</ul>
+<h3 id="tips-for-good-results">Tips for good results</h3>
+<ul>
+<li><strong>Choose a sensible document size.</strong> Topic models work best when each document is about one thing: an answer, a paragraph, an abstract or an article. A whole book as one document usually mixes many themes; consider splitting it into chapters or paragraphs.</li>
+<li><strong>More is better.</strong> At least 5 documents are required, but meaningful topics usually need a few hundred. For small collections, use LDA.</li>
+<li><strong>Remove boilerplate</strong> such as email signatures, page headers or legal notices, or add the words as custom stopwords (see below).</li>
+</ul>
+<h2 id="choosing-an-algorithm">Choosing an algorithm</h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th><strong>BERTopic</strong></th>
+<th><strong>Top2Vec</strong></th>
+<th><strong>LDA</strong></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>How it works</strong></td>
+<td>Uses a language model to understand the meaning of each document, then groups similar documents</td>
+<td>Learns word and document meanings together, then groups similar documents</td>
+<td>Counts which words occur together in documents</td>
+</tr>
+<tr>
+<td><strong>Best for</strong></td>
+<td>Most use cases; short and medium texts; many languages</td>
+<td>Medium to large collections</td>
+<td>Small collections; when you want a classic, well-known method</td>
+</tr>
+<tr>
+<td><strong>Number of topics</strong></td>
+<td>Found automatically, or set by you</td>
+<td>Found automatically, or set by you</td>
+<td>Always set by you</td>
+</tr>
+<tr>
+<td><strong>Documents that fit no topic</strong></td>
+<td>Marked as <em>Outlier</em> (HDBSCAN)</td>
+<td>Always assigned to the closest topic</td>
+<td>Always assigned to the most likely topic</td>
+</tr>
+<tr>
+<td><strong>Topics over time</strong></td>
+<td>Yes</td>
+<td>No</td>
+<td>No</td>
+</tr>
+<tr>
+<td><strong>Speed</strong></td>
+<td>Fast; the language model runs on the GPU</td>
+<td>Slower, especially with <em>deep-learn</em></td>
+<td>Fast for small and medium collections</td>
+</tr>
+</tbody>
+</table>
+<div class="admonition tip">
+<p class="admonition-title">Not sure? Start with BERTopic</p>
+<p>BERTopic with the default settings gives good topics for most collections. If it reports that it could not find any topics, your collection is probably too small: switch to LDA.</p>
+</div>
+<h2 id="settings">Settings</h2>
+<h3 id="settings-for-all-algorithms">Settings for all algorithms</h3>
+<ul>
+<li><strong>Primary Language</strong> decides which built-in list of common words (stopwords such as "the", "and", "der", "und") is removed, and which language model BERTopic uses by default.<ul>
+<li>English, German and French: full support, including word base forms for LDA (for example "studies" and "studied" both count as "study").</li>
+<li>Spanish, Italian, Dutch, Portuguese, Russian and Arabic: built-in stopword lists.</li>
+<li>Chinese: use <strong>BERTopic</strong>, which splits Chinese text into words. LDA and Top2Vec do not handle Chinese well.</li>
+<li>Other / Mixed: uses a multilingual model, without a built-in stopword list.</li>
+</ul>
+</li>
+<li><strong>Custom Stopwords</strong> (BERTopic and LDA): a comma-separated list of words that should never appear as topic keywords, for example words that occur everywhere in your collection (<code>patient, report, interview</code>). Not available for Top2Vec.</li>
+<li><strong>Evaluate Topic Stability / Reproducibility</strong> (in <em>Academic Evaluation Metrics</em>): runs the model three times and measures how similar the topics are. Useful to check whether your topics are robust, but the run takes about three times as long.</li>
+</ul>
+<h3 id="bertopic">BERTopic</h3>
+<p><strong>Core settings</strong></p>
+<ul>
+<li><strong>Clustering Engine</strong><ul>
+<li><strong>HDBSCAN</strong> (default) finds the number of topics itself and sets aside documents that do not fit any topic as <em>Outlier</em>.</li>
+<li><strong>KMeans</strong> puts every document into exactly the number of topics you choose. There are no outliers.</li>
+</ul>
+</li>
+<li><strong>Auto-detect optimal number of topics</strong> (HDBSCAN): keep this on to let BERTopic merge very similar topics automatically. Turn it off to ask for a target number of topics.</li>
+<li><strong>Minimum Documents per Topic</strong> (HDBSCAN): the smallest group of documents that counts as a topic. Lower it to get more, smaller topics; raise it to get fewer, broader ones.</li>
+</ul>
+<p><strong>Embedding Model</strong></p>
+<p>The embedding model is the language model that reads your documents. The defaults work well and are already available on the cluster:</p>
+<ul>
+<li>English: <code>all-MiniLM-L6-v2</code>, which reads up to 256 tokens (roughly 190 words) per document.</li>
+<li>Other languages: <code>paraphrase-multilingual-MiniLM-L12-v2</code>, which reads up to 128 tokens (roughly 95 words) per document.</li>
+</ul>
+<p>If your documents are longer than this, Text Lab shows a warning, because by default the model only reads the beginning of each document. You have two options:</p>
+<ul>
+<li><strong>Embed long documents in chunks</strong>: tick this box to have each long document split into pieces that fit the model, read piece by piece, and combined. The whole document then shapes its topic. This takes longer for long documents.</li>
+<li><strong>Use a model with a larger context window</strong>: choose <em>Custom HuggingFace model</em> and enter a model ID such as <code>jinaai/jina-embeddings-v2-base-en</code>, <code>BAAI/bge-m3</code> or <code>nomic-ai/nomic-embed-text-v1.5</code> (about 8,000 tokens each). The model is downloaded to your home directory the first time.<ul>
+<li>Some models (Jina, Nomic) need <strong>Allow custom code from this model repository</strong>. Only tick it for models from sources you trust, because their code runs under your account.</li>
+</ul>
+</li>
+</ul>
+<p><strong>Text Extraction &amp; Vocabulary</strong></p>
+<ul>
+<li><strong>Extract Phrases (N-grams)</strong>: also consider two-word phrases such as "climate change" as keywords.</li>
+<li><strong>Minimum Topic Frequency (min_df)</strong>: a word is only used as a keyword if it appears in at least this many topics. Keep it at 1 unless the run runs out of memory on a very large collection; higher values remove the words that make topics distinctive.</li>
+<li><strong>Auto-penalize frequent words</strong>: reduces the weight of words that appear in almost every topic. Keep it on.</li>
+</ul>
+<p><strong>Dimensionality Reduction</strong></p>
+<p>Leave <strong>UMAP</strong> selected unless you have a reason to change it. <strong>Lock Seed for Reproducibility</strong> (on by default) makes repeated runs with the same settings give the same topics.</p>
+<p><strong>Clustering &amp; Outliers (HDBSCAN)</strong></p>
+<ul>
+<li><strong>Outlier Sensitivity (min_samples)</strong>: lower values put fewer documents into <em>Outlier</em>.</li>
+<li><strong>Force-assign outliers to nearest topics</strong>: assigns every outlier to its closest topic, so no document is left without a topic. Topic sizes and keywords are updated accordingly.</li>
+</ul>
+<h3 id="top2vec">Top2Vec</h3>
+<ul>
+<li><strong>Auto-detect optimal number of topics</strong>: keep this on, or turn it off and choose a target number. If you ask for more topics than Top2Vec finds, it keeps the topics it found.</li>
+<li><strong>Embedding Backend</strong><ul>
+<li><strong>Transformer (Pre-trained)</strong>: uses a ready-made language model. Faster, and works well for general language.</li>
+<li><strong>Doc2Vec (Train from scratch)</strong>: learns from your documents only. Can capture specialised vocabulary but needs a larger collection.</li>
+</ul>
+</li>
+<li><strong>Training Depth</strong>: <em>fast-learn</em>, <em>learn</em> or <em>deep-learn</em>. Deeper training can give better topics with Doc2Vec but takes longer.</li>
+<li><strong>Minimum Word Count (min_count)</strong>: words that appear fewer times than this in the whole collection are ignored. Lower it for small collections or if Top2Vec finds no topics; raise it to ignore rare words in large collections.</li>
+</ul>
+<p>Top2Vec results can differ slightly between runs, even with the same settings.</p>
+<h3 id="lda">LDA</h3>
+<ul>
+<li><strong>Number of Topics</strong>: LDA always produces exactly this many topics. Try a few values (for example 5, 10 and 20) and compare the results.</li>
+<li><strong>Extract Phrases (Bigrams)</strong>: also consider frequent two-word phrases, which appear as keywords joined by an underscore (<code>climate_change</code>).</li>
+<li><strong>Training Passes</strong>: more passes give more stable topics but take longer. The default of 10 is fine for most collections.</li>
+</ul>
+<h3 id="topics-over-time-bertopic">Topics over time (BERTopic)</h3>
+<p>To see how topics rise and fall over time, upload a table, tick <strong>Analyze Topics Over Time</strong> next to the text column, then:</p>
+<ul>
+<li><strong>Timestamp Column</strong>: a column with dates (<code>2021-03-15</code>), date-times, or whole years (<code>2021</code>).</li>
+<li><strong>Number of Time Bins</strong>: how many time intervals to split the period into. If your data has fewer distinct dates than that (for example five years), each date is shown as its own point.</li>
+</ul>
+<p>Rows whose date cannot be read are skipped, and Text Lab tells you how many.</p>
+<h2 id="understanding-the-results">Understanding the results</h2>
+<h3 id="evaluation-metrics">Evaluation metrics</h3>
+<p>The scores at the top help you <strong>compare runs on the same data</strong>, for example two numbers of topics. They are not absolute quality grades, and they never replace reading the topics yourself.</p>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th>What it tells you</th>
+<th>Better</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Topic Diversity</strong></td>
+<td>How different the topics' keywords are from each other</td>
+<td>Higher</td>
+</tr>
+<tr>
+<td><strong>Coherence (C_v)</strong></td>
+<td>How often a topic's keywords appear together in your documents; the measure that best matches human judgement</td>
+<td>Higher (0 to 1)</td>
+</tr>
+<tr>
+<td><strong>Coherence (C_npmi)</strong></td>
+<td>A related co-occurrence measure</td>
+<td>Higher (-1 to 1)</td>
+</tr>
+<tr>
+<td><strong>Coherence (U_mass)</strong></td>
+<td>A co-occurrence measure based on document counts</td>
+<td>Closer to 0</td>
+</tr>
+<tr>
+<td><strong>LDA Perplexity</strong> (LDA only)</td>
+<td>How well the model predicts the documents it was trained on</td>
+<td>Lower</td>
+</tr>
+<tr>
+<td><strong>Topic Stability</strong> (if enabled)</td>
+<td>How similar the topics are across three runs</td>
+<td>Higher (100% = identical)</td>
+</tr>
+</tbody>
+</table>
+<p>A metric shows <strong>N/A</strong> when it cannot be computed for a run, for example when too few keywords occur in the documents. Expand <strong>How are these scores computed?</strong> on the page for details.</p>
+<h3 id="topic-dictionary">Topic Dictionary</h3>
+<p>The table lists every topic with:</p>
+<ul>
+<li><strong>Topic</strong>: the topic number. The same numbers are used in all charts and in the exported files.</li>
+<li><strong>Count</strong>: how many documents belong to the topic (BERTopic and Top2Vec).</li>
+<li><strong>Keywords</strong>: the ten words that best characterise the topic. Read them together to give the topic a name.</li>
+</ul>
+<p>Documents marked as <em>Outlier</em> (BERTopic with HDBSCAN) are not listed as a topic, but they appear in the exported document table.</p>
+<h3 id="interactive-charts">Interactive charts</h3>
+<ul>
+<li><strong>BERTopic</strong><ul>
+<li><em>Intertopic Distance</em>: each circle is a topic, larger circles hold more documents, and topics close to each other are similar. Use the slider to highlight a topic.</li>
+<li><em>Word Scores</em>: the most important keywords of the largest topics.</li>
+<li><em>Similarity Heatmap</em>: how similar every pair of topics is. Dark squares away from the diagonal point to topics you might merge.</li>
+<li><em>Topics Over Time</em>: how often each topic appears in each time interval, if you enabled it.</li>
+</ul>
+</li>
+<li><strong>Top2Vec</strong>: the most characteristic words of the largest topics.</li>
+<li><strong>LDA</strong>: an interactive map of topics on the left and the keywords of the selected topic on the right. Move the relevance slider towards 0 to see words that are specific to the selected topic.</li>
+</ul>
+<h2 id="downloading-the-results">Downloading the results</h2>
+<p><strong>Download Extraction Package (.zip)</strong> contains:</p>
+<ul>
+<li><code>document_topics.csv</code>: your original data with two new columns at the front.<ul>
+<li><strong>Dominant_Topic</strong>: the topic of each document, or <em>Outlier</em>.</li>
+<li><strong>Topic_Confidence</strong>: how strongly the document belongs to that topic; higher means a clearer match. It is empty when BERTopic uses KMeans or force-assigned outliers.</li>
+</ul>
+</li>
+<li><code>topic_keywords.csv</code>: the Topic Dictionary.</li>
+<li><code>run_configuration.txt</code>: every setting and score of the run. Keep it with your results so that you can report and reproduce your analysis.</li>
+<li>The interactive charts as <code>.html</code> files, which open in any web browser. They need an internet connection to display.</li>
+</ul>
+<p>The CSV files use commas as separators. If Excel shows everything in one column, import the file with <em>Data &gt; From Text/CSV</em> instead of double-clicking it. If you used topics over time, the rows are sorted by date, and rows without a valid date are left out.</p>
+<h2 id="troubleshooting">Troubleshooting</h2>
+<p>Click a problem to see what to do.</p>
+<details class="question">
+<summary>'BERTopic/Top2Vec could not find any topics in these documents'</summary>
+<p>The collection is too small or too uniform to form groups. Add more documents or switch to LDA.</p>
+</details>
+<details class="question">
+<summary>Many documents are marked as Outlier</summary>
+<p>Lower <em>Minimum Documents per Topic</em> or <em>Outlier Sensitivity</em>, tick <em>Force-assign outliers to nearest topics</em>, or switch the clustering engine to KMeans.</p>
+</details>
+<details class="question">
+<summary>Too many or too few topics</summary>
+<p>BERTopic: change <em>Minimum Documents per Topic</em>, or turn off auto-detection and set a target number. LDA: change <em>Number of Topics</em>.</p>
+</details>
+<details class="question">
+<summary>Keywords are full of generic words</summary>
+<p>Add them to <em>Custom Stopwords</em>, keep <em>Auto-penalize frequent words</em> on, and check that the <em>Primary Language</em> matches your texts.</p>
+</details>
+<details class="question">
+<summary>'No topic keywords could be extracted with a Minimum Topic Frequency ...'</summary>
+<p>Set <em>Minimum Topic Frequency (min_df)</em> back to 1.</p>
+</details>
+<details class="question">
+<summary>Top2Vec finds no topics on a small collection</summary>
+<p>Lower <em>Minimum Word Count (min_count)</em>, use the <em>Transformer</em> backend, or switch to LDA.</p>
+</details>
+<details class="question">
+<summary>Warning that documents exceed the context window</summary>
+<p>Tick <em>Embed long documents in chunks</em>, or choose a model with a larger context window (see <a href="#bertopic">Embedding Model</a>).</p>
+</details>
+<details class="question">
+<summary>'The timestamp column contains numbers that are not years'</summary>
+<p>Number columns are only read as whole years (<code>2021</code>). Use a column with real dates, or convert numeric dates such as <code>20210315</code> to <code>2021-03-15</code>.</p>
+</details>
+<details class="question">
+<summary>The embedding model cannot be loaded</summary>
+<p>Check the model ID on huggingface.co. If the message mentions custom code, tick <em>Allow custom code from this model repository</em> (for trusted models only).</p>
+</details>
+<details class="question">
+<summary>Results change between runs</summary>
+<p>For BERTopic, keep <em>Lock Seed for Reproducibility</em> on. LDA always uses a fixed seed. Top2Vec cannot be fixed, so small differences are expected.</p>
+</details>
+<p>For help choosing settings for your project, contact the Data Science Lab (DSL).</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
