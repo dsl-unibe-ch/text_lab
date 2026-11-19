@@ -39,6 +39,7 @@ text_lab/
 │   │   ├── transcription/
 │   │   ├── meeting_notes/
 │   │   ├── ocr/
+│   │   ├── handwriting/
 │   │   ├── survey/
 │   │   ├── translation/
 │   │   ├── topic_modeling/
@@ -208,14 +209,22 @@ test checks both). The OCR feature has two such workers: PaddleOCR-VL for
 the automatic pipeline, which stays running for a whole batch
 (`ocr.vl_session.VLWorkerSession`) because loading its weights takes longer
 than recognizing a short document, and PaddleOCR 2 for manual engine
-selection (`ocr.engines.paddle_ocr`).
+selection (`ocr.engines.paddle_ocr`). Historic Handwriting runs its line
+detection the same way, in the `paddle_backend` environment
+(`handwriting.detect_worker`, started through `common.jobs`, which imports
+only the standard library), and its recognition in a second worker in the
+app's environment (`handwriting.worker`).
 
 ### A large page
 
 A page too large for one file keeps the Streamlit script in `pages/` and
 moves its parts to a package of the same name in `ui/streamlit/`: the OCR
 page has `ui/streamlit/ocr/` with the result tabs, the response review and
-its session state. These modules are UI code like the page itself.
+its session state. These modules are UI code like the page itself. The OCR
+page also hosts a second feature: an expander below the legacy engines
+draws historic handwriting from `ui/streamlit/handwriting/`, a package of
+its own because it uses `features/handwriting/` rather than the OCR
+feature.
 
 ## Migration status
 
@@ -230,6 +239,7 @@ feature follows the rules above. Every feature is now refactored.
 | Transcription | `features/transcription/` | `Transcribe.py` | Refactored |
 | Meeting Notes | `features/meeting_notes/` | `Meeting_Notes_Generator.py` | Refactored |
 | OCR | `features/ocr/` | `OCR.py` | Refactored |
+| Historic Handwriting | `features/handwriting/` | part of `OCR.py` (expander below the legacy engines; `ui/streamlit/handwriting/`) | New, follows the rules |
 | Survey | `features/survey/` | part of `OCR.py` (partly hidden) | Refactored |
 | Translation | `features/translation/` | `Translate.py` | Refactored |
 | Topic Modeling | `features/topic_modeling/` | `Topic_Modeling.py` | Refactored |

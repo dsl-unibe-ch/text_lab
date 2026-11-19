@@ -152,9 +152,9 @@ read files from outside `TEXT_LAB_BASE`, also set in `site.env`.
 | `models/ollama` | Ollama models | Chat, Visualize Data, Meeting Notes, Translation (LLM), OCR enrichments and GLM-OCR, surveys, Knowledge Graph (local) | `common/models.json`; `TEXTLAB_VISION_MODEL`, `TEXTLAB_APPROVED_SURVEY_MODELS`, `TEXTLAB_GLM_OCR_MODEL` in `site.env` |
 | `models/whisper` | Whisper checkpoints (`large-v3-turbo.pt`, ...) | Transcription, Meeting Notes | `transcription/whisper_models.py` |
 | `models/whisperx`, `models/torch` | WhisperX and PyTorch caches | Transcription | WhisperX defaults |
-| `models/huggingface` | Hugging Face cache: alignment models, diarization, translation models, olmOCR, Topic Modeling embeddings | Transcription, Translation, OCR (olmOCR), Topic Modeling | `transcription/service.py`, `translation/engine.py`, `topic_modeling/models.py` |
+| `models/huggingface` | Hugging Face cache: alignment models, diarization, translation models, olmOCR, Topic Modeling embeddings, handwriting models (Qwen3-VL and dh-unibe adapters) | Transcription, Translation, OCR (olmOCR), Topic Modeling, Historic Handwriting | `transcription/service.py`, `translation/engine.py`, `topic_modeling/models.py`; `handwriting_models` in `common/models.json` |
 | `models/easyocr` | EasyOCR detection and recognition models | OCR (EasyOCR) | `ocr/engines/easy_ocr.py` |
-| `models/paddleocr`, `models/paddlex` | PaddleOCR and PaddleX models, including PaddleOCR-VL | OCR (automatic pipeline, PaddleOCR) | `ocr/` |
+| `models/paddleocr`, `models/paddlex` | PaddleOCR and PaddleX models, including PaddleOCR-VL | OCR (automatic pipeline, PaddleOCR), Historic Handwriting (line detection, `PP-OCRv5_server_det`) | `ocr/`, `handwriting/models.py` |
 | `TEXT_LAB_CUSTOM_WHISPER_DIR` | Swiss German Whisper models | Transcription (Swiss German) | `transcription/whisper_models.py` |
 | `TEXT_LAB_HF_TOKEN_FILE` | Hugging Face token for the gated diarization model | Transcription (speakers) | `site.env` |
 
@@ -176,7 +176,8 @@ permissions are opened (step 3 below).
 ### Adding or updating a model
 
 1. Add the model to the code or configuration that offers it (for Ollama,
-   `common/models.json` or a setting in `site.env`).
+   `common/models.json` or a setting in `site.env`; for Historic
+   Handwriting, `handwriting_models` in `common/models.json`).
 2. As a user who can write to the store, download it:
     - Ollama: start a Text Lab session and choose the model in Chat, which
       pulls it; or run `ollama pull <model>` inside the image with

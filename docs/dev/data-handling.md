@@ -61,7 +61,9 @@ the run ends; the transcription feature stages uploads the same way
 (`staged_uploads`, `staged_zip`), translation writes the PDF pages it
 sends to OCR to `translation/ocr-*`, OCR keeps each run in `ocr/job-*`,
 `ocr/batch-*` or, for manual engine selection, `ocr/manual-*`, Survey
-writes the blank form's images and rebuilt exports to `survey/*`, and Topic
+writes the blank form's images and rebuilt exports to `survey/*`, Historic
+Handwriting keeps each run's upload, page images and line crops in
+`handwriting/run-*` or `handwriting/batch-*`, and Topic
 Modeling writes the table it hands to its worker, and the result ZIP, to
 `topic_modeling/run-*`. Visualize Data keeps each run's table and charts in
 `visualization/run-*`, and Chat a conversation's table and charts in
