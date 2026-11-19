@@ -16,5 +16,25 @@
     "llama4:16x17b",
     "mistral-medium-3.5:latest",
     "nemotron-3-super:latest"
+  ],
+  "handwriting_models": [
+    {
+      "key": "german-kurrent-xix",
+      "label": "German Kurrent, 19th century",
+      "description": "Handwritten German in Kurrent script, 19th century. Trained mainly on Swiss records such as Federal Council minutes and parliamentary protocols. Character error rate 7.7% on unseen hands (Federal Council minutes 1848-1903).",
+      "base_model": "Qwen/Qwen3-VL-4B-Instruct",
+      "adapter": "dh-unibe/qwen3vl-german-xix-v2",
+      "prompt": "Transcribe the handwritten text in this image exactly as written.",
+      "max_pixels": 262144
+    },
+    {
+      "key": "medieval-german",
+      "label": "Medieval German, 14th-17th century",
+      "description": "Handwritten medieval and early modern German. Trained on the Rats- und Richtebuecher, the Bullinger correspondence, the Koenigsfelden charters and the AAEB collections. Character error rate about 14%.",
+      "base_model": "Qwen/Qwen3-VL-4B-Instruct",
+      "adapter": "dh-unibe/qwen3vl-medieval-german-v3",
+      "prompt": "Transcribe the handwritten text in this image exactly as written.",
+      "max_pixels": 262144
+    }
   ]
 }

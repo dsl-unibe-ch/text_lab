@@ -73,6 +73,110 @@ The downloads of a single document are the whole text (`.txt`), the engine's res
 
 > *Warning:* Do not close the tab while a "Running" indicator is active.
 
+## Historic German handwriting
+
+The **"Historic German handwriting (Kurrent / medieval manuscripts)"**
+expander, below the legacy engines, transcribes **handwritten historical
+German documents** such as letters, minutes and charters. It uses
+handwriting recognition models of the Digital Humanities group of the
+University of Bern ([dh-unibe](https://huggingface.co/dh-unibe)), trained
+specifically on such material. The rest of the OCR page is unaffected, and
+the two keep their results apart.
+
+### Models
+
+Choose the model trained on material closest to your documents. The
+**Models used** box under the model choice shows, before you upload
+anything, which models will process your documents, with links to their
+pages on Hugging Face.
+
+| Choice in Text Lab | Model | Trained on | Character error rate |
+|---|---|---|---|
+| **German Kurrent, 19th century** | [`dh-unibe/qwen3vl-german-xix-v2`](https://huggingface.co/dh-unibe/qwen3vl-german-xix-v2) | Handwritten German in Kurrent script, 19th century, mainly Swiss records such as Federal Council minutes and parliamentary protocols | 7.7% on hands it has not seen (Federal Council minutes 1848-1903) |
+| **Medieval German, 14th-17th century** | [`dh-unibe/qwen3vl-medieval-german-v3`](https://huggingface.co/dh-unibe/qwen3vl-medieval-german-v3) | Medieval and early modern German hands: the Rats- und Richtebücher, the Bullinger correspondence, the Königsfelden charters and the AAEB collections | about 14% |
+
+Both are fine-tuned versions (LoRA adapters) of the vision-language model
+[`Qwen/Qwen3-VL-4B-Instruct`](https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct).
+The text lines are found by PaddleOCR's text detector
+(`PP-OCRv5_server_det`).
+
+A character error rate of 7.7% means that about one character in thirteen
+is wrong; 14% is about one in seven.
+
+### How it works
+
+1. **Find the lines.** The text detector finds the text on each page.
+   Pieces of text side by side at the same height are joined into lines,
+   and the lines are put in reading order: top to bottom, and left to right
+   for lines next to each other.
+2. **Read each line.** The chosen model reads every line separately. The
+   models were trained on single lines and cannot read a whole page at
+   once, which is why the page is split first.
+
+### Use
+
+* **Input:** PDF (rendered at 300 DPI), PNG, JPG, JPEG, TIFF (every page of
+  a multi-page TIFF) and BMP, or a ZIP of these. Scans at 300 DPI or more
+  give the best results.
+* **Single document:** upload a file and press **Transcribe**. The result
+  shows, page by page, the image with the detected lines outlined and
+  numbered, next to the numbered transcription.
+* **Batch (ZIP):** upload a `.zip` and press **Transcribe batch**. The
+  result ZIP mirrors your folders, with one folder per file.
+
+### Downloads
+
+* **Text (.txt):** one line per detected line, pages separated by a blank
+  line.
+* **JSON:** every line with its position on the page (in pixels of the page
+  image).
+* **All files with PAGE XML (.zip):** the text and JSON, plus one PAGE XML
+  file per page in `page_xml/`, which can be imported into
+  [eScriptorium](https://escriptorium.inria.fr/) or Transkribus to correct
+  the transcription against the image. For a PDF or a multi-page TIFF the
+  page images the positions refer to are included next to the XML; for a
+  single image the XML refers to your uploaded file.
+* **Citation:** `models_used.txt` in the ZIP, and **Models used (for
+  citation)** under the downloads, name the line detector and the
+  recognition model with the base model it adapts, for example
+  `dh-unibe/qwen3vl-german-xix-v2 (LoRA adapter on Qwen/Qwen3-VL-4B-Instruct)`.
+
+### Limitations
+
+Treat the result as a draft to correct, not as an edition.
+
+* **Errors are expected.** The error rates above were measured on the
+  models' test material; on hands, scribes or periods unlike the training
+  data they are higher. The models are language models, so a wrong reading
+  can still look like fluent, plausible German. Check names, numbers and
+  dates against the image in particular.
+* **German historical handwriting only.** The models were trained on
+  19th-century Kurrent and on medieval and early modern German hands. They
+  are not meant for print, modern handwriting or other languages; use the
+  automatic mode above for those.
+* **Line detection is the weak point.** The text detector is a general one,
+  not trained on manuscripts. It can miss faint or very short lines, split
+  a line in two, or join lines that touch, and it can struggle with dense,
+  strongly slanted or curved writing. A missed line is missing from the
+  text, and two lines detected as one are read as one, so compare the
+  outlined lines with the page.
+* **Simple reading order, no layout.** Lines are ordered top to bottom and
+  left to right. Two-column pages can come out interleaved, and marginal
+  notes and interlinear additions are placed by their position, not by
+  where they belong in the text. Paragraphs, tables, headings and figures
+  are not recognised.
+* **No context between lines.** Each line is read on its own, so a word
+  hyphenated across two lines is not joined, and the model cannot use the
+  previous line to resolve an unclear word.
+* **Transcription conventions.** Abbreviations, special characters and
+  spelling follow the conventions of the training transcriptions, which may
+  differ from your editorial guidelines.
+* **No confidence scores and no searchable PDF.** Unlike the automatic
+  mode, there is no per-word confidence and no searchable PDF export.
+* **Speed.** Every run first loads the model onto the GPU, which takes
+  about a minute; after that, a page takes a few seconds. A large batch can
+  take a long time.
+
 ---
 
 ##  Data Privacy & Security
@@ -82,7 +186,7 @@ Text Lab is designed to handle highly sensitive, confidential, and proprietary d
 Here is exactly what happens to your data when you use the OCR tool:
 
 * **100% Local Processing:** Your documents are **never** sent to external cloud services or APIs (like Adobe, Google Cloud Vision, or AWS). All text extraction is performed entirely on the University of Bern's secure UBELIX high-performance computing nodes.
-* **Private session workspace:** The automatic pipeline, advanced AI vision models (like OlmOCR), and Batch ZIP processing all need to read files from disk (uploads, rasterised pages, cropped regions). Text Lab keeps these in a private workspace that is created for your session on the compute node and that only your user account can open. Nothing is written to your home directory.
+* **Private session workspace:** The automatic pipeline, advanced AI vision models (like OlmOCR), historic German handwriting, and Batch ZIP processing all need to read files from disk (uploads, rasterised pages, cropped regions and line crops). Text Lab keeps these in a private workspace that is created for your session on the compute node and that only your user account can open. Nothing is written to your home directory.
 * **Automatic deletion:** As soon as the extraction finishes, or fails, the working folder of that run is deleted, including your original documents, intermediate images and raw data files. If a run is interrupted, for example because the session ends, the whole session workspace is deleted when the session ends.
 * **Results in your browser session:** The extracted text and tables shown on the page are kept only in your open session (Streamlit's `st.session_state`). When you close the tab, reload the page, or your Text Lab session ends, they are gone. Download anything you want to keep.
 * **No AI Training:** The vision models only perform *inference* (looking at the image to extract text). They do not learn from your documents, and your data is never used to train or improve the AI.

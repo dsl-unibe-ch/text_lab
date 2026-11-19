@@ -41,6 +41,7 @@ LOGGER = logging.getLogger(__name__)
 #: Owner names used by the features. A feature keeps its own owner (and any
 #: extra ``keep`` owners) and releases all others.
 OCR = "ocr"
+HANDWRITING = "handwriting"
 TRANSCRIBE = "transcribe"
 TRANSLATION = "translation"
 TOPIC_MODELING = "topic_modeling"
@@ -55,6 +56,8 @@ LLM = "llm"
 _WORKER_SCRIPTS = {
     "textlab.features.ocr.paddle_vl_worker": OCR,
     "textlab.features.ocr.engines.paddle_ocr_worker": OCR,
+    "textlab.features.handwriting.detect_worker": HANDWRITING,
+    "textlab.features.handwriting.worker": HANDWRITING,
     "textlab.features.transcription.worker": TRANSCRIBE,
     "textlab.features.topic_modeling.worker": TOPIC_MODELING,
 }

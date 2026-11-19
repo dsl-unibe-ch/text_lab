@@ -22,6 +22,7 @@ The application features a modular, secure architecture offering the following t
 - **Audio Transcription:** Highly accurate multi-lingual transcription using Whisper. Includes **Speaker Diarization**, VAD pre-filtering, and dedicated support for Swiss German.
 - **AI Chat:** A private AI assistant (powered by Ollama) that allows you to upload and interact directly with your own documents (PDFs, text, datasets).
 - **Advanced OCR:** Extract text, complex tables, and layouts from images and PDFs using a choice of state-of-the-art vision models (GLM-OCR, olmOCR, PaddleOCR, EasyOCR).
+  - **Historic German handwriting** (a section of the OCR page): Transcribe handwritten historical German (Kurrent, medieval hands) line by line with the handwriting models of the University of Bern's Digital Humanities group, with PAGE XML export for eScriptorium and Transkribus.
 - **AI Data Visualiser:** Upload your tabular data and instruct an AI agent (via an internal MCP server) to automatically write Python code and generate interactive plots.
 - **Knowledge Graph Generator:** Process collections of scientific papers using Grobid to automatically extract metadata, citations, and research topics via LLMs, visualizing them as an interactive network graph.
 - **Topic Modeling:** Extract topics from raw text data using SOTA models.

@@ -83,6 +83,7 @@ def main():
         - **Transcribe** audio files using Whisper (Including support for Swiss-german).
         - **Chat** with a basic AI chatbot and upload documents to interact with them.
         - **OCR**: Extract text from images using OLMOCR, easyOCR and other models.
+          Its **Historic German handwriting** section transcribes Kurrent and medieval manuscripts line by line.
         - **Translate**: Neural machine translation across 200+ languages (NLLB / OPUS-MT / LLM).
         - **Visualize Data**: Create plots from data using LLMs.
         - **Knowledge Graph**: Extract topics from research papers using LLMs.
