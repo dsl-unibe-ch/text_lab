@@ -1,0 +1,4 @@
+# Constraints of kraken_backend. Not yet locked to a tested image: only the
+# Torch family is pinned. See ../README.md.
+torch==2.9.1+cu128
+torchvision==0.24.1+cu128

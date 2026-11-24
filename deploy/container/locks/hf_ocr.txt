@@ -1,0 +1,3 @@
+# Constraints of hf_ocr_backend. Not yet locked to a tested image: only the
+# Torch family is pinned. See ../README.md.
+torch==2.10.0+cu128
