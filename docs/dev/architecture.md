@@ -29,7 +29,7 @@ text_lab/
 ├── template/                  # Open OnDemand job scripts (+ dev.env.example)
 ├── deploy/
 │   ├── site.env               # site configuration (reference copy)
-│   ├── container/             # Apptainer definition (text_lab.def)
+│   ├── container/             # Apptainer definition (text_lab.def, locks/)
 │   └── sbatch/                # batch job templates (planned)
 ├── scripts/                   # developer scripts (test_on_node.sbatch)
 ├── pyproject.toml             # tool configuration: ruff, pytest, import-linter

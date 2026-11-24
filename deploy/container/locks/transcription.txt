@@ -1,0 +1,6 @@
+# Constraints of transcription_backend. Not yet locked to a tested image: only the
+# Torch family is pinned. See ../README.md.
+torch==2.8.0+cu126
+torchvision==0.23.0+cu126
+torchaudio==2.8.0+cu126
+huggingface_hub<1.0.0

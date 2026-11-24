@@ -1,9 +1,16 @@
 Bootstrap: docker
 From: nvidia/cuda:12.8.0-cudnn-devel-ubuntu22.04
 
+# Build from a folder that holds this file and locks/ (see README.md).
+# locks/<env>.txt pins each environment's package versions; they stay in the
+# image under /opt/textlab/locks as a record of what was built.
+
+%files
+    locks /opt/textlab/locks
+
 %environment
     export DEBIAN_FRONTEND=noninteractive
-    
+
     # External model locations (bind-mount at runtime)
     export WHISPER_CACHE=/opt/whisper
     export WHISPERX_CACHE=/opt/whisperx
@@ -21,35 +28,41 @@ From: nvidia/cuda:12.8.0-cudnn-devel-ubuntu22.04
     # Pyannote/WhisperX checkpoints include trusted non-tensor objects. PyTorch
     # 2.6+ defaults torch.load(weights_only=True), which rejects those files.
     export TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1
-    
-    # --- NLTK Data Path for offline Topic Modeling ---
+
+    # NLTK data for offline topic modeling
     export NLTK_DATA=/opt/nltk_data
-    
+
     # Certs & Libs
     export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
     export SSL_CERT_DIR=/etc/ssl/certs
     export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
     export LD_LIBRARY_PATH=/usr/local/lib/ollama:$LD_LIBRARY_PATH:/opt/conda/lib
 
-    # DEFAULT TO MAIN ENVIRONMENT
+    # Default to the main environment; workers find the others here.
     export PATH="/opt/conda/envs/text_lab_main/bin:/opt/conda/bin:$PATH"
     export TEXT_LAB_PYTHON=/opt/conda/envs/text_lab_main/bin/python
     export PADDLE_BACKEND_PYTHON=/opt/conda/envs/paddle_backend/bin/python
     export PADDLE_VL_BACKEND_PYTHON=/opt/conda/envs/paddle_vl_backend/bin/python
     export OLMOCR_BACKEND_PYTHON=/opt/conda/envs/olmocr_backend/bin/python
+    export KRAKEN_BACKEND_PYTHON=/opt/conda/envs/kraken_backend/bin/python
+    export TRANSCRIPTION_BACKEND_PYTHON=/opt/conda/envs/transcription_backend/bin/python
+    export HF_OCR_BACKEND_PYTHON=/opt/conda/envs/hf_ocr_backend/bin/python
 
 %post
     set -e
     export DEBIAN_FRONTEND=noninteractive
+    LOCKS=/opt/textlab/locks
+    PADDLE_INDEX=https://www.paddlepaddle.org.cn/packages/stable/cu126/
 
-    # 1. Create Shared Model/Cache Directories
+    # 1. Shared model/cache directories
     mkdir -p \
         /opt/whisper /opt/ollama/models /opt/whisperx /opt/torch \
         /opt/huggingface /opt/huggingface/hub /opt/huggingface/transformers \
         /opt/easyocr /opt/paddleocr /opt/paddlex
-    chmod -R a+rX /opt/whisper /opt/ollama /opt/whisperx /opt/torch /opt/huggingface /opt/easyocr /opt/paddleocr /opt/paddlex
+    chmod -R a+rX /opt/whisper /opt/ollama /opt/whisperx /opt/torch \
+        /opt/huggingface /opt/easyocr /opt/paddleocr /opt/paddlex /opt/textlab
 
-    # 2. Install OS dependencies
+    # 2. OS dependencies
     apt-get update
     echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" | debconf-set-selections
     apt-get install -y --no-install-recommends \
@@ -58,63 +71,57 @@ From: nvidia/cuda:12.8.0-cudnn-devel-ubuntu22.04
         msttcorefonts fonts-crosextra-caladea fonts-crosextra-carlito gsfonts \
         lcdf-typetools wget bzip2 gnupg
 
-    # Tesseract supplies word-level bounding boxes (image_to_data), which neither
-    # PaddleOCR-VL (block-level) nor PaddleOCR (text-line polygons) provide. It is
-    # used as a geometry-only second pass for the searchable-PDF text layer; the
-    # authoritative transcription still comes from the VL lane. Language packs are
-    # a targeted European set — `tesseract-ocr-all` would add several GB for
-    # scripts this pass does not currently align.
+    # Tesseract: word boxes for the searchable-PDF text layer (geometry only).
     apt-get install -y --no-install-recommends \
         tesseract-ocr tesseract-ocr-osd \
         tesseract-ocr-eng tesseract-ocr-deu tesseract-ocr-fra \
         tesseract-ocr-ita tesseract-ocr-spa
 
-    # Apptainer is needed so Text Lab can auto-start the separate Grobid SIF.
-    add-apt-repository -y ppa:apptainer/ppa
-    apt-get update
+    # Apptainer, so Text Lab can start the Grobid SIF. The PPA is added by
+    # hand: add-apt-repository has no timeout and once hung a build for hours.
+    APPTAINER_PPA_KEY=F6B0F5193D4F3301EF491FF0AFE36534FC6218AE
+    curl -fsSL --max-time 120 --retry 3 \
+        "https://keyserver.ubuntu.com/pks/lookup?op=get&options=mr&search=0x${APPTAINER_PPA_KEY}" \
+        | gpg --dearmor > /usr/share/keyrings/apptainer-ppa.gpg
+    gpg --show-keys --with-colons /usr/share/keyrings/apptainer-ppa.gpg \
+        | grep -q "^fpr:::::::::${APPTAINER_PPA_KEY}:" || {
+            echo "Error: the Apptainer PPA key does not match its fingerprint." >&2
+            exit 1
+        }
+    echo "deb [signed-by=/usr/share/keyrings/apptainer-ppa.gpg] https://ppa.launchpadcontent.net/apptainer/ppa/ubuntu jammy main" \
+        > /etc/apt/sources.list.d/apptainer-ppa.list
+    timeout 600 apt-get update
     apt-get install -y --no-install-recommends apptainer
 
-    # 3. Install Ollama backend
+    # 3. Ollama
     export OLLAMA_VERSION="0.32.13"
     curl -fsSL https://ollama.com/install.sh | OLLAMA_VERSION=${OLLAMA_VERSION} sh
 
-    # 4. Install Miniconda
-    mkdir -p /opt
+    # 4. Miniconda
     wget -qO /tmp/miniconda.sh https://repo.anaconda.com/miniconda/Miniconda3-py311_24.3.0-0-Linux-x86_64.sh
     bash /tmp/miniconda.sh -b -p /opt/conda
     rm -f /tmp/miniconda.sh
     export PATH="/opt/conda/bin:$PATH"
-    
     conda config --set auto_update_conda false
 
+    # new_env NAME: create a Python 3.11 environment and point $PIP at it.
+    new_env() {
+        conda create -y -n "$1" python=3.11
+        PIP="/opt/conda/envs/$1/bin/python -m pip"
+        $PIP install --no-cache-dir "pip>=25" "setuptools<82" "wheel>=0.47.0"
+    }
+
     # ===================================================================
-    # ENVIRONMENT 1: TEXT LAB MAIN
-    # Streamlit, WhisperX, EasyOCR, topic modeling, embeddings, data tools.
-    #
-    # Keep this on the Torch 2.8 family. Torchaudio 2.9 removed APIs still used
-    # by pyannote-audio 3.x, which WhisperX 3.7.x imports at load time.
+    # 1: text_lab_main -- Streamlit and web UI, WhisperX 3.7, EasyOCR,
+    # translation, topic modeling, data tools. Torch 2.8: torchaudio 2.9
+    # removed APIs that pyannote-audio 3 (WhisperX 3.7) still uses.
     # ===================================================================
-    conda create -y -n text_lab_main python=3.11
-    export MAIN_PIP="/opt/conda/envs/text_lab_main/bin/python -m pip"
-    
-    $MAIN_PIP install --no-cache-dir "pip>=25" "setuptools<82" "wheel>=0.47.0"
-    
-    $MAIN_PIP install --no-cache-dir \
+    new_env text_lab_main
+    $PIP install --no-cache-dir \
         torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0 \
         --index-url https://download.pytorch.org/whl/cu126
 
-    cat > /tmp/main_constraints.txt <<'EOF'
-torch==2.8.0+cu126
-torchvision==0.23.0+cu126
-torchaudio==2.8.0+cu126
-pyannote-audio>=3.3.2,<4.0.0
-huggingface_hub<1.0.0
-transformers>=4.49.0,<5
-ctranslate2>=4.5.0
-EOF
-
-    # Core UI, OCR, transcription, topic modeling, visualization, and data tools.
-    $MAIN_PIP install --no-cache-dir \
+    $PIP install --no-cache-dir \
         streamlit requests openai openai-whisper whisperx silero_vad easyocr \
         sentence-transformers \
         scikit-learn umap-learn matplotlib numpy pandas seaborn plotly \
@@ -124,82 +131,54 @@ EOF
         pymupdf pymupdf4llm "unstructured[all-docs]" ollama \
         gensim pyLDAvis spacy nltk wordcloud bertopic top2vec keybert stopwordsiso \
         jieba scipy statsmodels pingouin arch \
-        --constraint /tmp/main_constraints.txt
+        --constraint $LOCKS/main.txt
 
-    # ------------------------------------------------------------------
-    # Translation feature dependencies.
-    #
-    #   sentencepiece  -- required by NLLB-200 and MarianMT tokenizers
-    #                     (usually pulled transitively but pinned here
-    #                     so a slim transformers upgrade cannot drop it).
-    #   python-docx    -- .docx fallback reader in translate_engine.py
-    #                     and future intra-run styling improvements in
-    #                     translate_format.py.
-    #   python-pptx    -- required by core.translate_format.translate_pptx.
-    #   unbabel-comet  -- reference-free MT quality estimation
-    #                     (CometKiwi wmt22-cometkiwi-da) for the target-
-    #                     pane confidence badge.
-    # ------------------------------------------------------------------
-    $MAIN_PIP install --no-cache-dir \
-        sentencepiece \
-        python-docx \
-        python-pptx \
-        unbabel-comet \
-        --constraint /tmp/main_constraints.txt
+    # Translation: tokenizers (NLLB, MarianMT), .docx/.pptx, CometKiwi.
+    $PIP install --no-cache-dir \
+        sentencepiece python-docx python-pptx unbabel-comet \
+        --constraint $LOCKS/main.txt
+
+    # Web UI (FastAPI + HTMX). mcp is listed again so starlette resolves for
+    # both; fastapi 0.164+ needs a newer starlette than the lock's 1.3.1.
+    $PIP install --no-cache-dir \
+        "fastapi>=0.115,<0.164" "uvicorn[standard]" jinja2 python-multipart \
+        sse-starlette itsdangerous httpx "mcp[cli]>=1.28,<2" \
+        --constraint $LOCKS/main.txt
 
     # Offline NLP assets.
-    /opt/conda/envs/text_lab_main/bin/python -m spacy download en_core_web_sm
-    /opt/conda/envs/text_lab_main/bin/python -m spacy download de_core_news_sm
-    /opt/conda/envs/text_lab_main/bin/python -m spacy download fr_core_news_sm
-
-    mkdir -p /opt/nltk_data
-    chmod -R a+rX /opt/nltk_data
-    # NLTK >= 3.9 refuses to write to a directory not already on nltk.data.path,
-    # and NLTK_DATA is only exported at runtime, not during this build.
-    # raise_on_error fails the build instead of hitting the interactive retry
-    # prompt, which EOFErrors on a closed stdin.
-    export NLTK_DATA=/opt/nltk_data
-    /opt/conda/envs/text_lab_main/bin/python -c "import nltk; [nltk.download(p, download_dir='/opt/nltk_data', quiet=True, raise_on_error=True) for p in ('stopwords', 'punkt', 'punkt_tab')]"
-
-    # ===================================================================
-    # ENVIRONMENT 2: PADDLE OCR BACKEND (Paddle CUDA 12.6 wheel family)
-    # ===================================================================
-    conda create -y -n paddle_backend python=3.11
-    export PADDLE_PIP="/opt/conda/envs/paddle_backend/bin/python -m pip"
-
-    $PADDLE_PIP install --no-cache-dir "pip>=25" "setuptools<82" "wheel>=0.47.0"
-
-    # Paddle does not publish a cu128 wheel. Keep its cu126 runtime isolated.
-    $PADDLE_PIP install --no-cache-dir paddlepaddle-gpu==3.3.1 \
-        -i https://www.paddlepaddle.org.cn/packages/stable/cu126/
-    $PADDLE_PIP install --no-cache-dir paddleocr==3.3.3 paddlex==3.3.13
+    MAIN_PY=/opt/conda/envs/text_lab_main/bin/python
+    for model in en_core_web_sm de_core_news_sm fr_core_news_sm; do
+        $MAIN_PY -m spacy download $model
+    done
+    # NLTK only trusts a data folder that is not group- or world-writable.
+    (
+        umask 022
+        install -d -m 0755 /opt/nltk_data
+        export NLTK_DATA=/opt/nltk_data
+        $MAIN_PY -c "import nltk; [nltk.download(p, download_dir='/opt/nltk_data', quiet=True, raise_on_error=True) for p in ('stopwords', 'punkt', 'punkt_tab')]"
+    )
+    chmod -R a+rX,go-w /opt/nltk_data
+    NLTK_DATA=/opt/nltk_data $MAIN_PY -c "import nltk; [nltk.data.find(r) for r in ('corpora/stopwords', 'tokenizers/punkt', 'tokenizers/punkt_tab')]; print('NLTK data OK')"
 
     # ===================================================================
-    # ENVIRONMENT 2B: PADDLEOCR-VL DOC-PARSER BACKEND (automatic OCR)
-    # Powers the default "Parse document" flow: PP-DocLayoutV3 layout +
-    # PaddleOCR-VL 0.9B recognition (tables, formulas, charts, checkboxes).
-    # Kept in its own env so the legacy paddle_backend above stays pinned.
+    # 2: paddle_backend -- legacy PaddleOCR engine. Paddle has no cu128
+    # wheel; the cu126 build runs on the CUDA 12.8 base.
     # ===================================================================
-    conda create -y -n paddle_vl_backend python=3.11
-    export PADDLE_VL_PIP="/opt/conda/envs/paddle_vl_backend/bin/python -m pip"
+    new_env paddle_backend
+    $PIP install --no-cache-dir paddlepaddle-gpu==3.3.1 -i $PADDLE_INDEX
+    $PIP install --no-cache-dir -r $LOCKS/paddle.txt
+    $PIP check
 
-    $PADDLE_VL_PIP install --no-cache-dir "pip>=25" "setuptools<82" "wheel>=0.47.0"
-
-    # Same cu126 Paddle runtime family; the CUDA 12.8 base/driver runs it.
-    $PADDLE_VL_PIP install --no-cache-dir paddlepaddle-gpu==3.3.1 \
-        -i https://www.paddlepaddle.org.cn/packages/stable/cu126/
-    # PaddleOCR-VL is a PaddleX pipeline in the "ocr" plugin group. Installing
-    # paddleocr[doc-parser] alone pulls paddlex but NOT its [ocr] extra, so the
-    # pipeline fails at init with:
-    #   DependencyError: `PaddleOCR-VL` requires additional dependencies ...
-    #   run `pip install "paddlex[ocr]==<PADDLEX_VERSION>"`
-    # Install the paddlex[ocr] plugin explicitly (resolved jointly for a
-    # consistent paddlex version).
-    $PADDLE_VL_PIP install --no-cache-dir "paddleocr[doc-parser]>=3.6" "paddlex[ocr]"
-
-    # Pre-stage the PP-DocLayoutV3 + PaddleOCR-VL weights (~2-3 GB) into the
-    # shared model cache so the runtime is fully offline. Best-effort: if the
-    # build host has no GPU the weights are fetched on first use instead.
+    # ===================================================================
+    # 2B: paddle_vl_backend -- automatic OCR (PP-DocLayoutV3 + PaddleOCR-VL).
+    # paddlex[ocr] is needed explicitly, or the pipeline fails at start.
+    # ===================================================================
+    new_env paddle_vl_backend
+    $PIP install --no-cache-dir paddlepaddle-gpu==3.3.1 -i $PADDLE_INDEX
+    $PIP install --no-cache-dir "paddleocr[doc-parser]>=3.6" "paddlex[ocr]" \
+        -r $LOCKS/paddle_vl.txt
+    $PIP check
+    # Pre-stage the weights (~2-3 GB); best-effort, else fetched on first use.
     PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True DISABLE_MODEL_SOURCE_CHECK=True \
     PADDLE_PDX_CACHE_HOME=/opt/paddlex CUDA_VISIBLE_DEVICES="" \
         /opt/conda/envs/paddle_vl_backend/bin/python -c \
@@ -207,28 +186,52 @@ EOF
         || echo "PaddleOCR-VL weight pre-stage skipped (will download on first run)"
 
     # ===================================================================
-    # ENVIRONMENT 3: OLMOCR BACKEND
-    # Latest OlmOCR GPU depends on vLLM 0.11.2, which pins Torch 2.9,
-    # Torchaudio 2.9, Torchvision 0.24, and Transformers <5.
+    # 3: olmocr_backend -- olmOCR on vLLM 0.11.2 (Torch 2.9, cu126).
     # ===================================================================
-    conda create -y -n olmocr_backend python=3.11
-    export OLM_PIP="/opt/conda/envs/olmocr_backend/bin/python -m pip"
-    
-    $OLM_PIP install --no-cache-dir "pip>=25" "setuptools<82" "wheel>=0.47.0"
-
-    # Use the cu126 PyTorch index because vLLM 0.11.2 currently resolves to the
-    # Torch 2.9 CUDA 12.6 wheel family. The CUDA 12.8 base image/driver can run it.
-    $OLM_PIP install --no-cache-dir "olmocr[gpu]" \
+    new_env olmocr_backend
+    $PIP install --no-cache-dir "olmocr[gpu]" "flashinfer-python>=0.5.2" \
+        -r $LOCKS/olmocr.txt \
         --extra-index-url https://download.pytorch.org/whl/cu126
-    $OLM_PIP install --no-cache-dir "flashinfer-python>=0.5.2"
+    $PIP check
 
     # ===================================================================
-    # FINAL CLEANUP
+    # 4: kraken_backend -- line finding for historic handwriting. kraken
+    # 7.1 needs Torch >= 2.9 and exact pins that clash with other envs.
     # ===================================================================
+    new_env kraken_backend
+    $PIP install --no-cache-dir torch==2.9.1 torchvision==0.24.1 \
+        --index-url https://download.pytorch.org/whl/cu128
+    $PIP install --no-cache-dir "kraken==7.1.1" --constraint $LOCKS/kraken.txt
+    /opt/conda/envs/kraken_backend/bin/python -c "import kraken; from kraken import blla; print('kraken OK')"
+
+    # ===================================================================
+    # 5: transcription_backend -- WhisperX 3.8 + pyannote 4 (diarization
+    # community-1). Needs numpy >= 2.1; the main env must stay on numpy 1.
+    # ===================================================================
+    new_env transcription_backend
+    $PIP install --no-cache-dir \
+        torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0 \
+        --index-url https://download.pytorch.org/whl/cu126
+    $PIP install --no-cache-dir \
+        "whisperx==3.8.6" "pyannote-audio>=4.0,<5" silero_vad soundfile ollama \
+        --constraint $LOCKS/transcription.txt
+    /opt/conda/envs/transcription_backend/bin/python -c "import whisperx, pyannote.audio; print('whisperx OK')"
+
+    # ===================================================================
+    # 6: hf_ocr_backend -- custom Hugging Face OCR models (Transformers 5).
+    # ===================================================================
+    new_env hf_ocr_backend
+    $PIP install --no-cache-dir torch==2.10.0 torchvision \
+        --index-url https://download.pytorch.org/whl/cu128
+    $PIP install --no-cache-dir \
+        "transformers>=5,<6" accelerate safetensors pillow numpy pymupdf \
+        --constraint $LOCKS/hf_ocr.txt
+    /opt/conda/envs/hf_ocr_backend/bin/python -c "import transformers, torch; print('transformers', transformers.__version__)"
+
+    # Cleanup
     conda clean -a -y
     apt-get clean
     rm -rf /var/lib/apt/lists/*
-    rm -f /tmp/main_constraints.txt
 
 %runscript
     exec "$@"

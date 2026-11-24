@@ -250,8 +250,9 @@ back needs them as well: they redeploy the files of the previous tag.
 
 ### A new image
 
-1. Change `deploy/container/text_lab.def` and build the image on a compute
-   node.
+1. Change `deploy/container/text_lab.def` (dependencies) or
+   `deploy/container/locks/` (package versions) and build the image on a
+   compute node from inside `deploy/container/` (see its README).
 2. Copy it to `$TEXT_LAB_BASE/container/` under a new name (keep the old
    image: running sessions use it).
 3. Run the tests with the new image (`TL_CONTAINER` in
