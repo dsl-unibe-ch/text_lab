@@ -51,3 +51,36 @@ def test_a_short_recording_is_transcribed_in_a_worker(workspace):
     assert transcript.name == "tone.wav"
     assert transcript.duration_seconds == pytest.approx(seconds, abs=0.1)
     assert updates[-1].message == "Transcription complete."
+
+
+def _hf_token_configured() -> bool:
+    token_file = get_settings().hf_token_file
+    return token_file is not None and token_file.is_file()
+
+
+@pytest.mark.skipif(
+    not (os.path.isdir(HF_HUB) and os.listdir(HF_HUB)),
+    reason="the Hugging Face model store is not mounted",
+)
+@pytest.mark.skipif(
+    not _hf_token_configured(),
+    reason="no Hugging Face token configured (TEXT_LAB_HF_TOKEN_FILE)",
+)
+def test_speaker_diarization_runs_in_the_worker(workspace):
+    # Loads pyannote's community-1 pipeline in the transcription
+    # environment. The first run downloads it into the shared Hugging Face
+    # store, which fails if the token's account has not accepted the
+    # model's conditions on Hugging Face.
+    seconds = 3
+    time = np.arange(audio.SAMPLE_RATE * seconds) / audio.SAMPLE_RATE
+    tone = (0.1 * np.sin(2 * np.pi * 440 * time)).astype(np.float32)
+    with service.staged_uploads(
+        [("tone.wav", audio.to_wav_bytes(tone))]
+    ) as files:
+        result = service.run_transcription(
+            files,
+            TranscriptionOptions(model="tiny", language="en", diarize=True),
+        )
+    (transcript,) = result.transcripts
+    assert transcript.has_speakers
+    assert service.NO_TOKEN_NOTE not in result.notes

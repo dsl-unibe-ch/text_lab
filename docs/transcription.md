@@ -44,6 +44,7 @@ The model (Flurin17/whisper-large-v3-turbo-swiss-german) is also available on Te
   * Check this to filter out silence before processing. 
   * *Max Pause:* Determines how much silence is allowed between words before splitting a segment.
 * **Speaker Diarization (Who is speaking?):**
+  * Text Lab labels each speaker (`SPEAKER_00`, `SPEAKER_01`, ...) with pyannote's *speaker-diarization-community-1* model, the newer successor of the 3.1 model used before November 2026 and better at telling voices apart.
   * **Min/Max Speakers (Optional):** If you know how many people are in the recording, set these numbers to help the AI distinguish between voices (e.g., for an interview, set Min=2, Max=2). 
 
 ## Results & Export

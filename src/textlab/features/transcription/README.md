@@ -19,8 +19,10 @@ One pipeline serves every caller (`service.transcribe_files`):
    timeline.
 4. **Align** words to the audio. Swiss German is aligned as German; the
    alignment model is loaded once per language.
-5. **Diarize** when `TEXT_LAB_HF_TOKEN_FILE` points at a Hugging Face token;
-   otherwise this step is skipped with a note.
+5. **Diarize** with pyannote's `speaker-diarization-community-1` pipeline
+   when `TEXT_LAB_HF_TOKEN_FILE` points at a Hugging Face token; otherwise
+   this step is skipped with a note. The model is gated: the token's
+   account must have accepted its conditions on Hugging Face.
 
 The Whisper and diarization models are loaded once per run, so a ZIP batch
 does not reload them for every file.
@@ -30,12 +32,20 @@ Interfaces never run the pipeline in their own process. They call
 `textlab.common.jobs`; when the worker exits, all GPU memory is released for
 the next feature (for example Ollama in Meeting Notes).
 
+The worker runs in the image's `transcription_backend` environment
+(WhisperX 3.8, pyannote-audio 4, numpy 2), not in the app's `text_lab_main`,
+which must stay on numpy 1 for Translation. `TRANSCRIPTION_BACKEND_PYTHON`
+or the `backend_python` argument points it at another interpreter.
+Everything the worker imports must be installed in that environment:
+WhisperX, torch, numpy, silero_vad, soundfile and ollama (through
+`common.gpu_manager`).
+
 ## Public API
 
 | Name | Module | Purpose |
 |---|---|---|
-| `run_transcription(files, options, on_progress=, cancel=)` | `service` | Run the pipeline in a worker process |
-| `transcribe_files(...)` | `service` | The pipeline itself, in the calling process |
+| `run_transcription(files, options, on_progress=, cancel=, backend_python=)` | `service` | Run the pipeline in a worker process |
+| `transcribe_files(...)` | `service` | The pipeline itself, in the calling process (needs the transcription environment) |
 | `staged_uploads(uploads)`, `staged_zip(archive)` | `service` | Write uploads to the workspace for the worker; removed afterwards |
 | `TranscriptionOptions`, `AudioFile`, `Transcript`, `TranscriptionResult` | `models` | Inputs and outputs; convert to and from JSON |
 | `default_model(language)`, `alignment_language(language)`, `converted_model_missing(...)` | `whisper_models` | Model choice per language |
@@ -81,6 +91,9 @@ which offers them as downloads.
 
 The standard Whisper, alignment and diarization models come from the model
 stores the launch script mounts (`HF_HOME`, `/opt/whisper`, `/opt/torch`).
+The diarization model is downloaded into the shared Hugging Face store on
+first use, once for all users. (pyannote 3, before November 2026, cached
+`speaker-diarization-3.1` in each user's `~/.cache/torch/pyannote`.)
 
 ## Tests
 
@@ -89,14 +102,17 @@ In `tests/`:
 - `test_formats.py`: exact output of every export, and the readers.
 - `test_service.py`: the pipeline with WhisperX, torch and ffmpeg faked:
   language handling, model loading, diarization, VAD offsets, skipped
-  files, progress and cancellation.
+  files, progress and cancellation, and the worker's interpreter.
 - `test_staging.py`: uploads and ZIP batches in the workspace.
 - `test_models_and_settings.py`: JSON round trips and model choice.
 - `test_integration.py` (`container`, `slow`): the real pipeline in a
-  worker on generated audio; skipped when the model store is not mounted.
+  worker on generated audio, with and without diarization; skipped when
+  the model store is not mounted, the diarization test also when no token
+  is configured.
 
 ## Batch use (planned)
 
 `cli.py` is a placeholder for a `textlab transcribe` command for Slurm batch
 jobs. It will call `transcribe_files` directly, since a batch job already
-runs in its own process.
+runs in its own process; it must run with the transcription environment's
+interpreter.
