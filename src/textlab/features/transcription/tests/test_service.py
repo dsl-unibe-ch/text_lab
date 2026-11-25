@@ -255,9 +255,7 @@ def worker_calls(monkeypatch):
 
 def test_the_worker_runs_in_the_transcription_environment(worker_calls):
     service.run_transcription(files("a.wav"), TranscriptionOptions(model="m"))
-    assert worker_calls == [
-        "/opt/conda/envs/transcription_backend/bin/python"
-    ]
+    assert worker_calls == ["/opt/conda/envs/transcription_backend/bin/python"]
 
 
 def test_the_worker_interpreter_can_be_overridden(worker_calls, monkeypatch):
