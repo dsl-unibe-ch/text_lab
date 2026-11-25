@@ -25,7 +25,12 @@ SECONDS = 2
 
 
 class FakeWhisperX:
-    """Records calls and returns small, predictable results."""
+    """Records calls and returns small, predictable results.
+
+    Mirrors the interface of WhisperX 3.8: the diarization pipeline is
+    imported from ``whisperx.diarize`` and takes ``model_name`` and
+    ``token``.
+    """
 
     def __init__(self):
         self.loaded_align = []
@@ -33,6 +38,7 @@ class FakeWhisperX:
         self.alignment = SimpleNamespace(DEFAULT_ALIGN_MODELS_HF={})
         self.diarize = SimpleNamespace(DiarizationPipeline=self._diarizer)
         self.diarizers = 0
+        self.diarizer_kwargs = None
 
     def load_model(self, name, device, compute_type):
         return SimpleNamespace(transcribe=self._transcribe)
@@ -62,8 +68,9 @@ class FakeWhisperX:
             ]
         }
 
-    def _diarizer(self, use_auth_token, device):
+    def _diarizer(self, model_name, token, device):
         self.diarizers += 1
+        self.diarizer_kwargs = {"model_name": model_name, "token": token}
         return lambda samples, min_speakers, max_speakers: "turns"
 
     def assign_word_speakers(self, turns, aligned):
@@ -82,6 +89,7 @@ def fakes(monkeypatch, tmp_path):
     monkeypatch.setitem(sys.modules, "torch", torch)
     monkeypatch.setitem(sys.modules, "whisperx", whisperx)
     monkeypatch.setitem(sys.modules, "whisperx.alignment", whisperx.alignment)
+    monkeypatch.setitem(sys.modules, "whisperx.diarize", whisperx.diarize)
 
     def load_audio(path):
         if "broken" in Path(path).name:
@@ -117,6 +125,16 @@ def test_one_recording_end_to_end(fakes):
     assert type(word["start"]) is float  # NumPy numbers are converted
     assert fakes.transcribed == [(audio.SAMPLE_RATE * SECONDS, "de")]
     assert result.notes == [] and result.skipped == []
+
+
+def test_diarization_uses_community_1_with_the_token(fakes):
+    service.transcribe_files(
+        files("a.wav"), TranscriptionOptions(model="m", language="en")
+    )
+    assert fakes.diarizer_kwargs == {
+        "model_name": "pyannote/speaker-diarization-community-1",
+        "token": "hf_secret",
+    }
 
 
 def test_ukrainian_alignment_model_is_registered(fakes):
@@ -219,3 +237,34 @@ def test_cancel_stops_before_the_next_file(fakes):
             TranscriptionOptions(model="m", language="en"),
             cancel=cancel,
         )
+
+
+@pytest.fixture
+def worker_calls(monkeypatch):
+    """Replace the worker with a stub; return the interpreters it got."""
+    calls = []
+
+    def run_worker(module, request, **kwargs):
+        calls.append(kwargs["python"])
+        return {"transcripts": [], "skipped": [], "notes": []}
+
+    monkeypatch.setattr(service, "run_worker", run_worker)
+    monkeypatch.delenv("TRANSCRIPTION_BACKEND_PYTHON", raising=False)
+    return calls
+
+
+def test_the_worker_runs_in_the_transcription_environment(worker_calls):
+    service.run_transcription(files("a.wav"), TranscriptionOptions(model="m"))
+    assert worker_calls == [
+        "/opt/conda/envs/transcription_backend/bin/python"
+    ]
+
+
+def test_the_worker_interpreter_can_be_overridden(worker_calls, monkeypatch):
+    monkeypatch.setenv("TRANSCRIPTION_BACKEND_PYTHON", "/env/bin/python")
+    options = TranscriptionOptions(model="m")
+    service.run_transcription(files("a.wav"), options)
+    service.run_transcription(
+        files("a.wav"), options, backend_python="/other/bin/python"
+    )
+    assert worker_calls == ["/env/bin/python", "/other/bin/python"]

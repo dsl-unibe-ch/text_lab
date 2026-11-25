@@ -156,7 +156,7 @@ read files from outside `TEXT_LAB_BASE`, also set in `site.env`.
 | `models/easyocr` | EasyOCR detection and recognition models | OCR (EasyOCR) | `ocr/engines/easy_ocr.py` |
 | `models/paddleocr`, `models/paddlex` | PaddleOCR and PaddleX models, including PaddleOCR-VL | OCR (automatic pipeline, PaddleOCR), Historic Handwriting (line detection, `PP-OCRv5_server_det`) | `ocr/`, `handwriting/models.py` |
 | `TEXT_LAB_CUSTOM_WHISPER_DIR` | Swiss German Whisper models | Transcription (Swiss German) | `transcription/whisper_models.py` |
-| `TEXT_LAB_HF_TOKEN_FILE` | Hugging Face token for the gated diarization model | Transcription (speakers) | `site.env` |
+| `TEXT_LAB_HF_TOKEN_FILE` | Hugging Face token for the gated diarization model `pyannote/speaker-diarization-community-1`; its account must have accepted the model's conditions | Transcription (speakers) | `site.env`; the model in `transcription/service.py` |
 
 ### Who can write
 

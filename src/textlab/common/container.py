@@ -21,6 +21,8 @@ PADDLE_VL_ENV = "paddle_vl_backend"
 PADDLE_ENV = "paddle_backend"
 #: olmOCR (the OlmOCR engine of manual engine selection).
 OLMOCR_ENV = "olmocr_backend"
+#: WhisperX 3.8 and pyannote 4 (the transcription worker).
+TRANSCRIPTION_ENV = "transcription_backend"
 
 
 def env_python(env: str, *overrides: str) -> str:

@@ -22,10 +22,10 @@ interpreters are exported as `PADDLE_BACKEND_PYTHON`,
 `TRANSCRIPTION_BACKEND_PYTHON` and `HF_OCR_BACKEND_PYTHON`.
 
 The last three were added in November 2026 ahead of the code that uses them,
-so one image build serves several feature branches. Until that code is
-merged, the app does not start them: transcription still runs in
-`text_lab_main` with WhisperX 3.7, which stays installed there, so the new
-image also runs the current code.
+so one image build serves several feature branches. The transcription
+worker runs in `transcription_backend`. `kraken_backend` and
+`hf_ocr_backend` are not used by the app yet. WhisperX 3.7 is still
+installed in `text_lab_main`, but no feature uses it there any more.
 
 Why the environments are split: the main environment is held at Torch 2.8
 (torchaudio 2.9 removed APIs pyannote-audio 3 uses) and numpy 1.x

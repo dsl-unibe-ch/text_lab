@@ -157,7 +157,8 @@ What happens when a user transcribes a recording on the Transcribe page:
    `status` is a `StatusBox` from `ui/streamlit/components/progress.py`.
 3. `run_transcription` hands the request to `common.jobs.run_worker`, which
    starts `python -m textlab.features.transcription.worker` with a job
-   folder in the workspace.
+   folder in the workspace, using the interpreter of the image's
+   `transcription_backend` environment (WhisperX 3.8, pyannote 4).
 4. The worker runs `transcribe_files()`, the WhisperX pipeline, and reports
    progress through a file the parent polls and passes to `status`.
 5. The worker writes its result and exits, which releases all GPU memory.

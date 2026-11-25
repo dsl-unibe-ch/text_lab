@@ -12,9 +12,10 @@ Transcribe page, a ZIP batch or the Meeting Notes Generator:
 
 Interfaces call :func:`run_transcription`, which runs the pipeline in a
 worker process (see :mod:`textlab.common.jobs`) so all GPU memory is
-released afterwards. :func:`transcribe_files` is the pipeline itself; the
-worker calls it, and so can a batch job that already runs in its own
-process.
+released afterwards. The worker runs in the image's transcription
+environment (WhisperX 3.8, pyannote-audio 4), not in the app's own.
+:func:`transcribe_files` is the pipeline itself; the worker calls it, and
+so can a batch job that already runs in that environment.
 
 Uploaded recordings are first written to the job workspace with
 :func:`staged_uploads` or :func:`staged_zip`, which remove them again.
@@ -34,6 +35,7 @@ from typing import Any, BinaryIO
 
 import numpy as np
 
+from textlab.common import container
 from textlab.common.config import get_settings
 from textlab.common.jobs import run_worker
 from textlab.common.progress import (
@@ -74,6 +76,11 @@ FALLBACK_LANGUAGE = "en"
 #: Alignment model for a language WhisperX has none for by default.
 EXTRA_ALIGN_MODELS = {"uk": "Yehor/w2v-xls-r-uk"}
 
+#: pyannote pipeline that identifies the speakers. Gated on Hugging Face:
+#: the account of the configured token must have accepted its conditions.
+#: Named here, not left to WhisperX's default, so an upgrade cannot swap it.
+DIARIZATION_MODEL = "pyannote/speaker-diarization-community-1"
+
 NO_TOKEN_NOTE = "HuggingFace token not found - skipping diarization."
 
 
@@ -88,6 +95,7 @@ def run_transcription(
     *,
     on_progress: ProgressCallback = no_progress,
     cancel: threading.Event | None = None,
+    backend_python: str | None = None,
 ) -> TranscriptionResult:
     """Transcribe recordings in a worker process.
 
@@ -96,6 +104,9 @@ def run_transcription(
         options: How to transcribe them.
         on_progress: Receives progress updates.
         cancel: Stops the worker when set.
+        backend_python: The worker's interpreter; by default the one of the
+            image's transcription environment, or
+            ``TRANSCRIPTION_BACKEND_PYTHON``.
 
     Returns:
         The transcripts, the files that could not be decoded, and notes.
@@ -108,6 +119,9 @@ def run_transcription(
         "files": [{"path": str(f.path), "name": f.name} for f in files],
         "options": options.to_dict(),
     }
+    python = backend_python or container.env_python(
+        container.TRANSCRIPTION_ENV, "TRANSCRIPTION_BACKEND_PYTHON"
+    )
     on_progress(Progress("Starting transcription worker..."))
     result = run_worker(
         WORKER_MODULE,
@@ -115,6 +129,7 @@ def run_transcription(
         area=WORKSPACE_AREA,
         on_progress=on_progress,
         cancel=cancel,
+        python=python,
     )
     return TranscriptionResult.from_dict(result)
 
@@ -148,6 +163,7 @@ def transcribe_files(
     import torch
     import whisperx
     from whisperx import alignment
+    from whisperx.diarize import DiarizationPipeline
 
     alignment.DEFAULT_ALIGN_MODELS_HF.update(EXTRA_ALIGN_MODELS)
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -168,8 +184,8 @@ def transcribe_files(
         token = _read_hf_token()
         if token:
             on_progress(Progress("Loading diarization model...", 0.0))
-            diarizer = whisperx.diarize.DiarizationPipeline(
-                use_auth_token=token, device=device
+            diarizer = DiarizationPipeline(
+                model_name=DIARIZATION_MODEL, token=token, device=device
             )
         else:
             result.notes.append(NO_TOKEN_NOTE)
