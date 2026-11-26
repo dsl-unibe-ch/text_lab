@@ -154,8 +154,9 @@ read files from outside `TEXT_LAB_BASE`, also set in `site.env`.
 | `models/whisperx`, `models/torch` | WhisperX and PyTorch caches | Transcription | WhisperX defaults |
 | `models/huggingface` | Hugging Face cache: alignment models, diarization, translation models, olmOCR, Topic Modeling embeddings, handwriting models (Qwen3-VL and dh-unibe adapters) | Transcription, Translation, OCR (olmOCR), Topic Modeling, Historic Handwriting | `transcription/service.py`, `translation/engine.py`, `topic_modeling/models.py`; `handwriting_models` in `common/models.json` |
 | `models/easyocr` | EasyOCR detection and recognition models | OCR (EasyOCR) | `ocr/engines/easy_ocr.py` |
-| `models/paddleocr`, `models/paddlex` | PaddleOCR and PaddleX models, including PaddleOCR-VL | OCR (automatic pipeline, PaddleOCR), Historic Handwriting (line detection, `PP-OCRv5_server_det`) | `ocr/`, `handwriting/models.py` |
+| `models/paddleocr`, `models/paddlex` | PaddleOCR and PaddleX models, including PaddleOCR-VL | OCR (automatic pipeline, PaddleOCR) | `ocr/` |
 | `TEXT_LAB_CUSTOM_WHISPER_DIR` | Swiss German Whisper models | Transcription (Swiss German) | `transcription/whisper_models.py` |
+| `~/.cache/textlab/hf_ocr_models` (each user's home; `TEXT_LAB_HF_OCR_DIR`) | The Hugging Face models a user chooses in the Hugging Face OCR models tool; not a shared store, nothing to fill | Hugging Face OCR models | named by the user; `hf_ocr/store.py` |
 | `TEXT_LAB_HF_TOKEN_FILE` | Hugging Face token for the gated diarization model `pyannote/speaker-diarization-community-1`; its account must have accepted the model's conditions | Transcription (speakers) | `site.env`; the model in `transcription/service.py` |
 
 ### Who can write

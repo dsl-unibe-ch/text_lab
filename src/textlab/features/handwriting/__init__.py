@@ -1,6 +1,6 @@
 """Historic handwriting: line-by-line transcription of manuscripts.
 
-Pages are split into text lines by a text detector, and each line is read
+Pages are split into text lines by kraken's segmenter, and each line is read
 by a handwriting recognition model. Interfaces use :mod:`.service`; see
 ``README.md`` in this folder for the pipeline.
 

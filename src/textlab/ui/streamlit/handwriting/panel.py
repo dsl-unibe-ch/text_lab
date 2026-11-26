@@ -19,6 +19,7 @@ from textlab.ui.streamlit.components.gpu import free_gpu_for
 RESULT_KEYS = ("hw_run", "hw_batch", "hw_error", "hw_error_details")
 INPUT_TYPES = [extension[1:] for extension in service.INPUT_EXTENSIONS]
 HUGGING_FACE = "https://huggingface.co"
+KRAKEN_DOCS = "https://kraken.re"
 
 
 def clear_results():
@@ -94,6 +95,11 @@ def _repo_link(repo):
     return f"[`{repo}`]({HUGGING_FACE}/{repo})"
 
 
+def _kraken_link():
+    """A Markdown link to kraken, the line segmenter."""
+    return f"[kraken]({KRAKEN_DOCS})'s baseline segmenter (`blla`)"
+
+
 def _models_panel(model):
     """Show, before a run, which models will process the documents."""
     with st.container(border=True):
@@ -105,9 +111,9 @@ def _models_panel(model):
                 f"{recognition}"
             )
         st.markdown(
-            "1. **Line detection:** PaddleOCR text detector "
-            f"`{service.LINE_DETECTOR}` finds the text lines on each "
-            "page.\n"
+            f"1. **Line detection:** {_kraken_link()}, a segmenter "
+            "trained on historical manuscripts, finds the text lines on "
+            "each page, in reading order.\n"
             f"2. **Text recognition:** {recognition} reads each line."
         )
         st.caption(model.description)

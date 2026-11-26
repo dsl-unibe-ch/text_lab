@@ -17,7 +17,7 @@ def test_the_configured_models_are_complete():
 def test_a_model_names_what_it_runs_before_a_run():
     plain = models.HandwritingModel("k", "L", "", "org/base", None, "Read.")
     assert plain.models_used() == {
-        "line_detection": f"PaddleOCR {models.LINE_DETECTOR}",
+        "line_detection": models.LINE_DETECTOR,
         "recognition": "org/base",
     }
 
@@ -56,7 +56,7 @@ def test_a_document_reports_its_text_and_models():
     assert document.text == "a\n\n\na\n"
     assert document.line_count == 4
     assert document.models_used() == {
-        "line_detection": f"PaddleOCR {models.LINE_DETECTOR}",
+        "line_detection": models.LINE_DETECTOR,
         "recognition": "org/adapter (LoRA adapter on org/base)",
     }
     data = document.to_dict()

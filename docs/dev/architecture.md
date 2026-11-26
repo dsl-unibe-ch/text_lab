@@ -40,6 +40,7 @@ text_lab/
 │   │   ├── meeting_notes/
 │   │   ├── ocr/
 │   │   ├── handwriting/
+│   │   ├── hf_ocr/
 │   │   ├── survey/
 │   │   ├── translation/
 │   │   ├── topic_modeling/
@@ -211,10 +212,12 @@ the automatic pipeline, which stays running for a whole batch
 (`ocr.vl_session.VLWorkerSession`) because loading its weights takes longer
 than recognizing a short document, and PaddleOCR 2 for manual engine
 selection (`ocr.engines.paddle_ocr`). Historic Handwriting runs its line
-detection the same way, in the `paddle_backend` environment
+detection the same way, with kraken in the `kraken_backend` environment
 (`handwriting.detect_worker`, started through `common.jobs`, which imports
 only the standard library), and its recognition in a second worker in the
-app's environment (`handwriting.worker`).
+app's environment (`handwriting.worker`). The Hugging Face OCR models tool
+runs its worker in the `hf_ocr_backend` environment (`hf_ocr.worker`), and
+Transcription in `transcription_backend`.
 
 ### A large page
 
@@ -222,10 +225,12 @@ A page too large for one file keeps the Streamlit script in `pages/` and
 moves its parts to a package of the same name in `ui/streamlit/`: the OCR
 page has `ui/streamlit/ocr/` with the result tabs, the response review and
 its session state. These modules are UI code like the page itself. The OCR
-page also hosts a second feature: an expander below the legacy engines
-draws historic handwriting from `ui/streamlit/handwriting/`, a package of
-its own because it uses `features/handwriting/` rather than the OCR
-feature.
+page also hosts two more features: expanders below the legacy engines
+draw historic handwriting from `ui/streamlit/handwriting/` and the
+Hugging Face OCR models tool from `ui/streamlit/hf_ocr/`, packages of
+their own because they use `features/handwriting/` and `features/hf_ocr/`
+rather than the OCR feature. The page helpers both tools need (PDF
+rendering, ZIP in and out) are in `common/pages.py`.
 
 ## Migration status
 
@@ -241,6 +246,7 @@ feature follows the rules above. Every feature is now refactored.
 | Meeting Notes | `features/meeting_notes/` | `Meeting_Notes_Generator.py` | Refactored |
 | OCR | `features/ocr/` | `OCR.py` | Refactored |
 | Historic Handwriting | `features/handwriting/` | part of `OCR.py` (expander below the legacy engines; `ui/streamlit/handwriting/`) | New, follows the rules |
+| Hugging Face OCR models | `features/hf_ocr/` | part of `OCR.py` (expander below historic handwriting; `ui/streamlit/hf_ocr/`) | New, follows the rules |
 | Survey | `features/survey/` | part of `OCR.py` (partly hidden) | Refactored |
 | Translation | `features/translation/` | `Translate.py` | Refactored |
 | Topic Modeling | `features/topic_modeling/` | `Topic_Modeling.py` | Refactored |

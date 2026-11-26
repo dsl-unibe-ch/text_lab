@@ -1,4 +1,4 @@
-"""Joining detected text pieces into lines, reading order and crops."""
+"""From detected line polygons to boxes and crops."""
 
 import pytest
 
@@ -12,40 +12,28 @@ def test_polygon_box_is_the_bounding_box():
         lines.polygon_box([])
 
 
-def test_pieces_on_one_line_are_joined():
-    pieces = [(200, 10, 300, 40), (10, 12, 180, 42), (320, 11, 400, 39)]
-    assert lines.group_lines(pieces) == [(10, 10, 400, 42)]
+def square(left, top, right, bottom):
+    return [[left, top], [right, top], [right, bottom], [left, bottom]]
 
 
-def test_lines_above_each_other_stay_apart_and_are_ordered():
-    pieces = [(10, 100, 300, 130), (10, 10, 300, 40), (10, 55, 300, 85)]
-    assert lines.group_lines(pieces) == [
-        (10, 10, 300, 40),
-        (10, 55, 300, 85),
+def test_line_boxes_keep_the_detectors_reading_order():
+    # kraken sorts the lines; a marginal note may come before a lower line.
+    polygons = [
+        square(10, 100, 300, 130),
+        square(900, 12, 1000, 40),
+        square(10, 10, 300, 40),
+    ]
+    assert lines.line_boxes(polygons) == [
         (10, 100, 300, 130),
-    ]
-
-
-def test_a_slanted_line_joins_piece_by_piece():
-    # Each piece is a little lower than the one before; the first and the
-    # last do not overlap, but neighbours do.
-    pieces = [(0, 0, 100, 30), (110, 10, 210, 40), (220, 20, 320, 50)]
-    assert lines.group_lines(pieces) == [(0, 0, 320, 50)]
-
-
-def test_a_wide_gap_starts_a_new_line_read_left_to_right():
-    # A marginal note far to the right of the body text, at its height.
-    pieces = [(900, 12, 1000, 40), (10, 10, 300, 40)]
-    assert lines.group_lines(pieces) == [
-        (10, 10, 300, 40),
         (900, 12, 1000, 40),
+        (10, 10, 300, 40),
     ]
 
 
-def test_tiny_boxes_are_dropped():
-    pieces = [(10, 10, 300, 40), (500, 500, 503, 502)]
-    assert lines.group_lines(pieces) == [(10, 10, 300, 40)]
-    assert lines.group_lines([]) == []
+def test_tiny_and_empty_lines_are_dropped():
+    polygons = [square(10, 10, 300, 40), square(500, 500, 503, 502), []]
+    assert lines.line_boxes(polygons) == [(10, 10, 300, 40)]
+    assert lines.line_boxes([]) == []
 
 
 def test_crop_box_adds_a_margin_within_the_page():

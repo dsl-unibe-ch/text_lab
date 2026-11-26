@@ -4,11 +4,10 @@ A transcription runs in four steps, for one document or a whole batch:
 
 1. **Pages** (:mod:`.documents`): PDFs are rendered at 300 DPI, every frame
    of an image file becomes a page.
-2. **Line detection** (:mod:`.detect_worker`): PaddleOCR's text detector
-   finds the text on every page, in a worker in the image's
-   ``paddle_backend`` environment. The pieces it finds are joined into
-   lines and put into reading order (:mod:`.lines`), and each line is
-   cropped.
+2. **Line detection** (:mod:`.detect_worker`): kraken's baseline
+   segmenter finds the text lines on every page, in reading order, in a
+   worker in the image's ``kraken_backend`` environment. Each line is
+   cropped (:mod:`.lines`).
 3. **Recognition** (:mod:`.worker`): the chosen model reads every line
    crop, in a worker in the app's environment that loads the model once.
 4. **Exports** (:mod:`.documents`): text, JSON and PAGE XML per document.
@@ -35,7 +34,7 @@ from textlab.common.upload_safety import (
 )
 from textlab.features.handwriting import documents
 from textlab.features.handwriting.documents import INPUT_EXTENSIONS
-from textlab.features.handwriting.lines import group_lines, polygon_box
+from textlab.features.handwriting.lines import line_boxes
 from textlab.features.handwriting.models import (
     LINE_DETECTOR,
     BatchRun,
@@ -251,7 +250,7 @@ def _transcribe(
         zip(pages, polygons, strict=True), start=1
     ):
         page.width, page.height = documents.image_size(page.image)
-        page.lines = group_lines(polygon_box(polygon) for polygon in found)
+        page.lines = line_boxes(found)
         page.crops = documents.write_crops(
             page.image,
             documents.line_crops(page.lines, page.width, page.height),
@@ -304,24 +303,25 @@ def detect_lines(
     on_progress: ProgressCallback = no_progress,
     backend_python: str | None = None,
 ) -> list[list[list[list[float]]]]:
-    """Find the text pieces on page images, in the line-detection worker.
+    """Find the text lines on page images, in the line-detection worker.
 
     Args:
         images: The page images.
         on_progress: Receives the worker's progress.
         backend_python: The worker's interpreter; by default the one of the
-            image's PaddleOCR environment, or ``PADDLE_BACKEND_PYTHON``.
+            image's kraken environment, or ``KRAKEN_BACKEND_PYTHON``.
 
     Returns:
-        Per image, the polygons found, as lists of ``[x, y]`` points.
+        Per image, the boundary polygon of every line in reading order, as
+        lists of ``[x, y]`` points.
     """
     python = backend_python or container.env_python(
-        container.PADDLE_ENV, "PADDLE_BACKEND_PYTHON"
+        container.KRAKEN_ENV, "KRAKEN_BACKEND_PYTHON"
     )
     on_progress(Progress("Starting line detection...", None))
     result = jobs.run_worker(
         DETECT_WORKER,
-        {"images": [str(image) for image in images], "model": LINE_DETECTOR},
+        {"images": [str(image) for image in images]},
         area=WORKSPACE_AREA,
         on_progress=on_progress,
         python=python,

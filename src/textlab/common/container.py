@@ -23,6 +23,10 @@ PADDLE_ENV = "paddle_backend"
 OLMOCR_ENV = "olmocr_backend"
 #: WhisperX 3.8 and pyannote 4 (the transcription worker).
 TRANSCRIPTION_ENV = "transcription_backend"
+#: kraken (line detection of the Historic German handwriting tool).
+KRAKEN_ENV = "kraken_backend"
+#: Transformers 5 (the Hugging Face OCR models tool).
+HF_OCR_ENV = "hf_ocr_backend"
 
 
 def env_python(env: str, *overrides: str) -> str:

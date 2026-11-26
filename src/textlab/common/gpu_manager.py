@@ -42,6 +42,7 @@ LOGGER = logging.getLogger(__name__)
 #: extra ``keep`` owners) and releases all others.
 OCR = "ocr"
 HANDWRITING = "handwriting"
+HF_OCR = "hf_ocr"
 TRANSCRIBE = "transcribe"
 TRANSLATION = "translation"
 TOPIC_MODELING = "topic_modeling"
@@ -58,6 +59,7 @@ _WORKER_SCRIPTS = {
     "textlab.features.ocr.engines.paddle_ocr_worker": OCR,
     "textlab.features.handwriting.detect_worker": HANDWRITING,
     "textlab.features.handwriting.worker": HANDWRITING,
+    "textlab.features.hf_ocr.worker": HF_OCR,
     "textlab.features.transcription.worker": TRANSCRIBE,
     "textlab.features.topic_modeling.worker": TOPIC_MODELING,
 }

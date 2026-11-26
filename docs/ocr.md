@@ -97,18 +97,19 @@ pages on Hugging Face.
 
 Both are fine-tuned versions (LoRA adapters) of the vision-language model
 [`Qwen/Qwen3-VL-4B-Instruct`](https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct).
-The text lines are found by PaddleOCR's text detector
-(`PP-OCRv5_server_det`).
+The text lines are found by the baseline segmenter of
+[kraken](https://kraken.re) (`blla`, its default model), which was trained
+on historical manuscripts.
 
 A character error rate of 7.7% means that about one character in thirteen
 is wrong; 14% is about one in seven.
 
 ### How it works
 
-1. **Find the lines.** The text detector finds the text on each page.
-   Pieces of text side by side at the same height are joined into lines,
-   and the lines are put in reading order: top to bottom, and left to right
-   for lines next to each other.
+1. **Find the lines.** kraken finds every text line on each page, also
+   slanted or curved ones, and puts the lines in reading order. It first
+   finds the text regions, such as columns and marginal notes, and orders
+   the lines region by region.
 2. **Read each line.** The chosen model reads every line separately. The
    models were trained on single lines and cannot read a whole page at
    once, which is why the page is split first.
@@ -154,17 +155,16 @@ Treat the result as a draft to correct, not as an edition.
   19th-century Kurrent and on medieval and early modern German hands. They
   are not meant for print, modern handwriting or other languages; use the
   automatic mode above for those.
-* **Line detection is the weak point.** The text detector is a general one,
-  not trained on manuscripts. It can miss faint or very short lines, split
-  a line in two, or join lines that touch, and it can struggle with dense,
-  strongly slanted or curved writing. A missed line is missing from the
-  text, and two lines detected as one are read as one, so compare the
-  outlined lines with the page.
-* **Simple reading order, no layout.** Lines are ordered top to bottom and
-  left to right. Two-column pages can come out interleaved, and marginal
-  notes and interlinear additions are placed by their position, not by
-  where they belong in the text. Paragraphs, tables, headings and figures
-  are not recognised.
+* **Check the detected lines.** kraken was trained on manuscripts, but it
+  can still miss faint or very short lines, split a line in two, or join
+  lines that touch, most often in dense writing. A missed line is missing
+  from the text, and two lines detected as one are read as one, so compare
+  the outlined, numbered lines with the page.
+* **Reading order, no further layout.** Lines are ordered region by
+  region, which usually keeps columns and marginal notes apart. On unusual
+  layouts the order can still be wrong, and interlinear additions are
+  placed by their position, not by where they belong in the text.
+  Paragraphs, tables, headings and figures are not recognised.
 * **No context between lines.** Each line is read on its own, so a word
   hyphenated across two lines is not joined, and the model cannot use the
   previous line to resolve an unclear word.
@@ -177,6 +177,85 @@ Treat the result as a draft to correct, not as an edition.
   about a minute; after that, a page takes a few seconds. A large batch can
   take a long time.
 
+## Hugging Face OCR models (choose your own model)
+
+The **Hugging Face OCR models** expander, below historic handwriting, reads
+documents with a vision-language model **you choose** from
+[Hugging Face](https://huggingface.co/models?pipeline_tag=image-text-to-text),
+for example a model fine-tuned on a script, a language or a kind of
+document that the built-in tools do not cover. It is separate from the
+rest of the OCR page and does not change it.
+
+### Use
+
+1. **Enter the model** as `owner/name` (for example
+   `Qwen/Qwen2.5-VL-3B-Instruct`) or paste the link to its page. A link to
+   the model's page appears below; read its model card.
+2. **Prompt:** the instruction sent with every page. A model trained with a
+   specific prompt reads best with that one; its model card usually names
+   it. Leave the field empty for models that take no instruction.
+3. **Most tokens per page:** the upper limit of the text generated for one
+   page. A dense page needs about 1,000 to 2,000; lower it if a model keeps
+   repeating itself.
+4. Upload a PDF or image (**Single document**) or a ZIP of them (**Batch
+   (ZIP)**) and press **Read document** or **Read batch**. The model reads
+   each page as a whole.
+
+The first run with a model downloads it, which can take several minutes for
+a large one; later runs only load it onto the GPU.
+
+### Which models work
+
+* **Vision-language models that Transformers supports directly**, listed on
+  Hugging Face under *Image-Text-to-Text*: for example the Qwen2.5-VL and
+  Qwen3-VL families and models fine-tuned from them (such as olmOCR), or
+  SmolVLM. Text Lab treats every model the same way, so how well a model
+  reads depends on the model; try it on a few pages first.
+* **Not supported**, with a message before anything is downloaded or
+  loaded:
+    * models that need code from their own repository (the model card asks
+      for `trust_remote_code=True`), because Text Lab does not run code
+      from model repositories;
+    * gated models, which require accepting conditions with a Hugging Face
+      account, and private models: Text Lab downloads only public models,
+      without an account;
+    * adapters (LoRA) published without their base model merged in: Text
+      Lab loads full models only;
+    * models too large for the GPU of your session. A model needs about
+      2 GB of GPU memory per billion parameters, so on a 24 GB GPU models
+      up to about 9 billion parameters fit.
+* Some models need Python packages that Text Lab's image does not have
+  yet; the error message then names the package. Tell the Text Lab team,
+  who can add it.
+
+### Your downloaded models
+
+Models are downloaded into your own folder, `~/.cache/textlab/hf_ocr_models`
+in your home directory, not into Text Lab's shared model store. They count
+towards your storage quota and can take several GB each. **Your downloaded
+models** lists them with their size; delete one you no longer need, and it
+is downloaded again on its next use.
+
+### Downloads
+
+* **Text (.txt):** the text of every page, pages separated by a blank line.
+* **JSON:** the text page by page, with the model and the prompt.
+* **All files (.zip):** both, plus `model_used.txt`. A batch gives one
+  folder per file, mirroring the ZIP.
+* **Citation:** **Model used (for citation)** and `model_used.txt` name the
+  model with the exact revision that was downloaded, and the prompt.
+
+### Limitations
+
+* **Check the output.** A vision-language model can leave out text, repeat
+  it or invent plausible text that is not on the page, more so for
+  handwriting, damaged pages or scripts it was not trained on.
+* **Text only.** The result is the text the model writes, often in
+  Markdown or HTML for tables. There are no positions on the page, no
+  PAGE XML, no confidence scores and no searchable PDF.
+* **The model's license applies.** You are responsible for using the model
+  and its output as its license allows.
+
 ---
 
 ##  Data Privacy & Security
@@ -186,7 +265,7 @@ Text Lab is designed to handle highly sensitive, confidential, and proprietary d
 Here is exactly what happens to your data when you use the OCR tool:
 
 * **100% Local Processing:** Your documents are **never** sent to external cloud services or APIs (like Adobe, Google Cloud Vision, or AWS). All text extraction is performed entirely on the University of Bern's secure UBELIX high-performance computing nodes.
-* **Private session workspace:** The automatic pipeline, advanced AI vision models (like OlmOCR), historic German handwriting, and Batch ZIP processing all need to read files from disk (uploads, rasterised pages, cropped regions and line crops). Text Lab keeps these in a private workspace that is created for your session on the compute node and that only your user account can open. Nothing is written to your home directory.
+* **Private session workspace:** The automatic pipeline, advanced AI vision models (like OlmOCR), historic German handwriting, and Batch ZIP processing all need to read files from disk (uploads, rasterised pages, cropped regions and line crops). Text Lab keeps these in a private workspace that is created for your session on the compute node and that only your user account can open. Your documents are never written to your home directory; the only thing stored there is a model you choose in the Hugging Face OCR models tool.
 * **Automatic deletion:** As soon as the extraction finishes, or fails, the working folder of that run is deleted, including your original documents, intermediate images and raw data files. If a run is interrupted, for example because the session ends, the whole session workspace is deleted when the session ends.
 * **Results in your browser session:** The extracted text and tables shown on the page are kept only in your open session (Streamlit's `st.session_state`). When you close the tab, reload the page, or your Text Lab session ends, they are gone. Download anything you want to keep.
 * **No AI Training:** The vision models only perform *inference* (looking at the image to extract text). They do not learn from your documents, and your data is never used to train or improve the AI.

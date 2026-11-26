@@ -69,10 +69,10 @@ def test_a_document_is_detected_cropped_and_read(workspace, workers):
         on_progress=updates.append,
     )
     page = run.document.pages[0]
-    # Lines in reading order: the upper one first.
+    # Lines in the detector's order, which is kraken's reading order.
     assert [line.box for line in page.lines] == [
-        (10, 10, 300, 40),
         (10, 60, 300, 90),
+        (10, 10, 300, 40),
     ]
     assert run.text == "line-000000\nline-000001"
     assert run.text_name == "letter.txt"
