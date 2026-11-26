@@ -1,6 +1,10 @@
 ---
 batch_connect:
   template: "basic"
+  # Set in template/before.sh.erb and passed to view.html.erb, besides
+  # host, port and password: the interface the session runs.
+  conn_params:
+    - text_lab_ui
 
 
 script:

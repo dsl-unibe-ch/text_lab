@@ -1,0 +1,3 @@
+{#- An error for an htmx request: app.js puts it into the page's notices. -#}
+{% from "components/macros.html" import notice %}
+{% call notice("error", title, details=details, dismissible=true) %}{{ message }}{% endcall %}

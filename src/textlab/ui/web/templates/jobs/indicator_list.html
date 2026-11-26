@@ -1,0 +1,12 @@
+<ul class="jobs-menu__list" id="job-list"{% if oob %} hx-swap-oob="true"{% endif %}>
+  {% for job in session_jobs | reverse %}
+  <li>
+    <a class="jobs-menu__item" href="{{ root }}{{ page_path(job.page) }}#job-{{ job.id }}">
+      <span class="jobs-menu__name">{{ job.title }}</span>
+      <span class="status status--{{ job.state }}">{{ job.state.label }}</span>
+    </a>
+  </li>
+  {% else %}
+  <li class="jobs-menu__empty">No jobs yet. Jobs you start on any page show up here.</li>
+  {% endfor %}
+</ul>

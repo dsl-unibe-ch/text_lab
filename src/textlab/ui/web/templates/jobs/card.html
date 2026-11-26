@@ -1,0 +1,66 @@
+{#- A job as a record: its status, what it works on, when, its result.
+
+  The record is replaced whenever the job changes, from the page's event
+  stream (oob: out of band) or as the answer to Cancel. While the job is
+  active the record carries data-job-active, which keeps the page's stream
+  open (app.js). -#}
+{% from "components/macros.html" import notice %}
+{% set state = job.state %}
+{% set fraction = job.progress.fraction if job.progress and job.progress.fraction is not none else none %}
+<article class="record record--{{ state }}" id="job-{{ job.id }}"{% if job.active %} data-job-active{% endif %}{% if oob %} hx-swap-oob="true"{% endif %} aria-labelledby="job-{{ job.id }}-title">
+  <div class="record__state">
+    <span class="status status--{{ state }}">{{ "Stopping" if job.cancelling else state.label }}</span>
+  </div>
+
+  <div class="record__main">
+    <div>
+      <h3 class="record__title" id="job-{{ job.id }}-title">{{ job.title }}</h3>
+      <p class="record__meta">
+        {% if state == "waiting" %}
+        submitted {{ job.submitted | clock_time }}
+        {% elif state == "running" %}
+        started {{ job.started | clock_time }} · running for <span data-elapsed="{{ job.elapsed(now) | int }}">{{ job.elapsed(now) | duration }}</span>
+        {% elif job.started %}
+        {{ state.label | lower }} {{ job.finished | clock_time }} · took {{ job.elapsed() | duration }}
+        {% else %}
+        {{ state.label | lower }} {{ job.finished | clock_time }}
+        {% endif %}
+      </p>
+    </div>
+
+    {% if state == "waiting" %}
+    <p class="record__line" role="status">
+      {% if ahead == 1 %}Waits for 1 job ahead of it.{% elif ahead %}Waits for {{ ahead }} jobs ahead of it.{% else %}Starts in a moment.{% endif %}
+      Jobs run one at a time, so they never compete for the GPU.
+    </p>
+    {% elif state == "running" %}
+    <div class="meter">
+      <progress class="meter__bar" max="1"{% if fraction is not none %} value="{{ '%.3f' | format(fraction) }}"{% endif %} aria-labelledby="job-{{ job.id }}-step"></progress>
+      <p class="meter__line" id="job-{{ job.id }}-step" role="status">
+        <span>{{ job.progress.message if job.progress else "Starting" }}</span>
+        {% if fraction is not none %}<span class="meter__value">{{ (fraction * 100) | round | int }}%</span>{% endif %}
+      </p>
+    </div>
+    {% if job.cancelling %}<p class="record__line">Stopping after the current step.</p>{% endif %}
+    {% elif state == "done" %}
+    <div class="record__result">
+      {% if job.result_template %}{% include job.result_template %}{% endif %}
+      {% if job.downloads %}{% include "jobs/downloads.html" %}{% endif %}
+    </div>
+    {% elif state == "failed" %}
+    {% call notice("error", "The job failed", details=job.error_details) %}{{ job.error }}{% endcall %}
+    {% elif state == "cancelled" %}
+    <p class="record__line">Cancelled. Its uploads were deleted and nothing was kept.</p>
+    {% endif %}
+  </div>
+
+  {% if job.active and not job.cancelling and (state == "waiting" or job.cancellable) %}
+  <div class="record__actions">
+    <button class="text-button text-button--danger" type="button" hx-post="{{ root }}/jobs/{{ job.id }}/cancel" hx-target="closest .record" hx-swap="outerHTML" hx-disabled-elt="this">Cancel</button>
+  </div>
+  {% elif not job.active %}
+  <div class="record__actions">
+    <button class="text-button" type="button" hx-post="{{ root }}/jobs/{{ job.id }}/remove" hx-target="closest .record" hx-swap="outerHTML" hx-disabled-elt="this"{% if state == "done" %} hx-confirm="Remove this job and its results? They cannot be downloaded afterwards."{% endif %}>Remove</button>
+  </div>
+  {% endif %}
+</article>

@@ -1,8 +1,10 @@
 # Deployment
 
 Text Lab is an Open OnDemand interactive app. A session is a Slurm job that
-runs `template/script.sh.erb`, which starts Ollama and the Streamlit app
-inside an Apptainer image.
+runs `template/script.sh.erb`, which starts Ollama and the app inside an
+Apptainer image. The app's interface is the Streamlit app, or the web UI
+that replaces it (see the [Web UI Plan](web-ui-plan.md)): `TEXT_LAB_UI` in
+the site configuration chooses.
 
 ## What lives where
 
@@ -37,21 +39,30 @@ text_lab/
 1. The user fills in the launch form (`form.yml`) and Open OnDemand submits
    a Slurm job (`submit.yml.erb`).
 2. On the compute node, Open OnDemand copies `template/` into the session's
-   job folder in the user's home directory and runs `before.sh.erb` (port
-   and session token) and then `script.sh.erb`.
-3. The launch script loads `dev.env` if one is next to it (sandbox apps
-   only), then the site configuration, and checks that the release, the
-   image and the model stores it names exist.
+   job folder in the user's home directory and runs `before.sh.erb` (port,
+   session password `TOKEN`, and `text_lab_ui`, the interface the
+   configuration names) and then `script.sh.erb`.
+3. The launch script loads the configuration with `config.sh`: `dev.env`
+   if one is next to it (sandbox apps only), then the site configuration.
+   It checks that the release, the image and the model stores it names
+   exist.
 4. It resolves `current` to the release folder once, so the session keeps
    the version it started with even if `current` changes meanwhile.
 5. It creates the private job workspace, with a trap that deletes it when
    the job ends, and picks random ports for Ollama and Grobid.
 6. It starts the image with the model stores and the workspace bound, runs
-   `ollama serve` and, once Ollama answers, the Streamlit app
-   (`textlab/ui/streamlit/Home.py`) from the release folder.
+   `ollama serve` and, once Ollama answers, the launcher
+   (`python -m textlab.ui.launch`) from the release folder. The launcher
+   starts the interface `TEXT_LAB_UI` names: the Streamlit app
+   (`textlab/ui/streamlit/Home.py`, the default) or the web UI
+   (`textlab.ui.web`, served by uvicorn). Releases from before the
+   launcher start Streamlit directly.
 7. `after.sh` waits for the app's port; the session card then shows
-   **Connect**. The app checks the session token on every page
-   (`auth.py`).
+   **Connect** (`view.html.erb`). Both interfaces require the session
+   password. For the web UI the button posts it to the app's login, so the
+   user does not copy it; for Streamlit the card shows it to copy into the
+   app's login form (`ui/streamlit/auth.py`). Only the session's owner sees
+   the card.
 
 The top of `output.log` in the job folder lists the site configuration,
 source tree, image, workspace and ports the session used.
@@ -65,9 +76,10 @@ source tree, image, workspace and ports the session used.
 | Use a new image | Build it, copy it to `container/`, set `TL_CONTAINER` in `site.env` | No |
 | Add or update a model | The model store (see [Model stores](#model-stores)) | No |
 | Change a setting (paths, endpoints, approved models) | `site.env` | No |
+| Switch between Streamlit and the web UI | `TEXT_LAB_UI` in `site.env` | No |
 | Change the launch form (GPU types, partitions, QoS, time limits) | `form.yml`, `submit.yml.erb` | Yes |
 | Change how a session starts (binds, ports, Ollama options) | `template/` | Yes |
-| Move the site configuration | `TEXT_LAB_SITE_ENV` in `template/script.sh.erb` | Yes |
+| Move the site configuration | `TEXT_LAB_SITE_ENV` in `template/config.sh` | Yes |
 
 Changes the HPC team deploys should be rare; prefer a setting in
 `site.env` that the launch script reads.
@@ -112,8 +124,8 @@ this, and that every setting the app reads is exported by the file.
    stores, and fill the stores (see [Model stores](#model-stores)).
 3. Copy `deploy/site.env`, change the locations and settings, and put it
    where the deployed launch script expects it (or change
-   `TEXT_LAB_SITE_ENV` at the top of `template/script.sh.erb` before
-   handing the app to the HPC team).
+   `TEXT_LAB_SITE_ENV` in `template/config.sh` before handing the app to
+   the HPC team).
 4. Adjust `form.yml` (cluster name, partitions, QoS and GPU types) for the
    cluster. If `$TMPDIR` is not set per job, or is too small, set
    `TEXT_LAB_WORKDIR_BASE`.
@@ -132,10 +144,11 @@ in your sandbox checkout and set what you want to test:
 | Your code and a changed `site.env` | `TEXT_LAB_SRC`, `TEXT_LAB_SITE_ENV` (the repository's `deploy/site.env`) | |
 | A new image with the released code | `TL_CONTAINER` | `TEXT_LAB_SRC` |
 | A new image with your code | `TEXT_LAB_SRC`, `TL_CONTAINER` | |
+| The web UI | `TEXT_LAB_UI=web`, and `export TEXT_LAB_WEB_DEV=1` for its developer pages (component gallery, mockups, demo job) | |
 | Exactly what production runs (before a release goes live) | Nothing: remove `dev.env` | Everything |
 
-Open OnDemand copies `template/` into the session's job folder, and the
-launch script loads `dev.env` from there. Check the top of `output.log` to
+Open OnDemand copies `template/` into the session's job folder, and
+`config.sh` loads `dev.env` from there. Check the top of `output.log` to
 confirm which source tree, configuration and image the session used.
 
 The sandbox runs whatever is checked out in the working tree, so stay on the
@@ -196,8 +209,10 @@ A single command that downloads everything the code names is planned (see
 
 ## Logs
 
-Each session writes `streamlit.log` and `ollama.log` next to Open OnDemand's
-`output.log`, in the session's job folder in the user's home directory. Users
+Each session writes the app's log and `ollama.log` next to Open OnDemand's
+`output.log`, in the session's job folder in the user's home directory. The
+app's log is `streamlit.log` for the Streamlit app and `textlab.log` for
+the web UI; the launcher names it (`textlab.ui.launch`). Users
 find the folder through the **Session ID** link on their session card and
 send the logs with a problem report (see the user guide,
 [Reporting a Problem](../launch.md#reporting-a-problem)).
@@ -261,6 +276,43 @@ back needs them as well: they redeploy the files of the previous tag.
    in `dev.env`).
 4. Set `TL_CONTAINER` in `site.env`, commit, and copy `site.env` to its live
    location. Rolling back means restoring the previous value.
+
+## The launcher and the Connect button
+
+The first release with the launcher (`textlab/ui/launch.py`) needs one
+redeployment of the Open OnDemand files, for the web UI. Afterwards the
+switch between the interfaces is `TEXT_LAB_UI` in `site.env`, without the
+HPC team. The redeployment changes:
+
+| File | Change |
+|---|---|
+| `template/config.sh` (new) | Loads `dev.env` and the site configuration, for both scripts below; it now holds `TEXT_LAB_SITE_ENV` |
+| `template/script.sh.erb` | Starts the launcher instead of Streamlit, unless the release has none |
+| `template/before.sh.erb` | Sets `text_lab_ui`, the interface the configuration names |
+| `submit.yml.erb` | Passes `text_lab_ui` to the session card (`conn_params`) |
+| `view.html.erb` | For the web UI, *Connect* posts the password to the app's login; for Streamlit, the card is as before |
+
+With `TEXT_LAB_UI` unset or `streamlit`, users see no difference: the same
+Streamlit app with the same options, the same card, the same
+`streamlit.log`. The order:
+
+1. Release the version with the launcher and switch `current` to it, as
+   usual. The deployed launch script still starts Streamlit directly, which
+   that release still has.
+2. Rehearse in a sandbox app without `dev.env`, then with
+   `TEXT_LAB_UI=web` in `dev.env`.
+3. Ask the HPC team to deploy the Open OnDemand files from the release's
+   tag. The redeployed launch script falls back to starting Streamlit
+   directly for releases without the launcher, so rolling `current` back
+   to one keeps working.
+4. Start a session on the production app and check that `output.log` names
+   the interface (`Interface: streamlit`) and that Streamlit works as
+   before.
+
+For the HPC team: the session stays protected by its password, as they
+require. What changes is who types it: for the web UI the dashboard posts
+it, from the card only the session's owner can see. The app also refuses
+requests that the proxy marks as another user's (`X-Forwarded-User`).
 
 ## First release of this layout (3.0.0)
 

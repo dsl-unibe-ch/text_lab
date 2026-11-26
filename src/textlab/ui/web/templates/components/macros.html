@@ -1,0 +1,83 @@
+{#- Shared components. Import them with
+    {% from "components/macros.html" import notice, masthead with context %}
+  ("with context" for the ones that build links from root). -#}
+
+{% set notice_labels = {"info": "Note", "success": "Done", "warning": "Warning", "error": "Error"} %}
+
+{#- The head of a page: a kicker (the tool's number and group), the title,
+  one sentence about the page, and a link to its guide. -#}
+{% macro masthead(title, lead="", number="", kicker="", guide="") %}
+<header class="masthead">
+  <div>
+    {% if number or kicker %}
+    <p class="label masthead__kicker">
+      {% if number %}<span class="masthead__num">{{ number }}</span>{% endif %}
+      {% if kicker %}<span>{{ kicker }}</span>{% endif %}
+    </p>
+    {% endif %}
+    <h1 class="masthead__title">{{ title }}</h1>
+    {% if lead %}<p class="masthead__lead">{{ lead }}</p>{% endif %}
+  </div>
+  {% if guide %}
+  <a class="label masthead__aside" href="{{ guide }}" target="_blank" rel="noopener">Guide {{ icon("arrow-up-right", size="sm") }}</a>
+  {% endif %}
+</header>
+{% endmacro %}
+
+{#- The head of a section: a heavy rule, the title, a note on the right. -#}
+{% macro section_head(title, note="", id="") %}
+<div class="section-head">
+  <h2 class="section-head__title"{% if id %} id="{{ id }}"{% endif %}>{{ title }}</h2>
+  {% if note %}<p class="label">{{ note }}</p>{% endif %}
+</div>
+{% endmacro %}
+
+{#- A message in the page: info, success, warning or error. The text comes
+  from the call block; details (a traceback, a log line) are folded away
+  with a button to copy them for a problem report. -#}
+{% macro notice(level, title="", details="", dismissible=false) %}
+<div class="notice notice--{{ level }}" role="{{ 'alert' if level == 'error' else 'status' }}">
+  <p class="label notice__label">{{ notice_labels[level] }}</p>
+  <div class="notice__body">
+    {% if title %}<p class="notice__title">{{ title }}</p>{% endif %}
+    {% if caller is defined %}{% set text = caller() %}{% if text | trim %}<div class="notice__text">{{ text }}</div>{% endif %}{% endif %}
+    {% if details %}
+    <details class="notice__details">
+      <summary>Details for a problem report</summary>
+      <pre>{{ details }}</pre>
+      <button class="text-button" type="button" data-copy>Copy</button>
+    </details>
+    {% endif %}
+  </div>
+  {% if dismissible %}
+  <button class="icon-button" type="button" data-dismiss aria-label="Dismiss">{{ icon("x", size="sm") }}</button>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{#- A file input as a drop zone. Dropping files on it or clicking it fills
+  the input; app.js lists the chosen files and checks their size and
+  type. formats names the accepted types, for people. -#}
+{% macro dropzone(name, label, formats, accept="", multiple=false, required=true) %}
+<div class="dropzone" data-dropzone data-max-bytes="{{ settings.upload_limit }}">
+  <input class="dropzone__input" id="{{ name }}" name="{{ name }}" type="file"{% if accept %} accept="{{ accept }}"{% endif %}{% if multiple %} multiple{% endif %}{% if required %} required{% endif %} aria-describedby="{{ name }}-formats">
+  <div>
+    <label class="dropzone__title" for="{{ name }}">{{ label }}</label>
+    <p class="dropzone__hint">or click to choose {{ "files" if multiple else "a file" }}</p>
+    <p class="label" id="{{ name }}-formats">{{ formats }} · up to {{ settings.upload_limit | file_size }}</p>
+  </div>
+  <span class="dropzone__icon">{{ icon("arrow-down", size="lg") }}</span>
+</div>
+<ul class="file-list" data-file-list="{{ name }}" aria-live="polite"></ul>
+<p class="field__error" data-file-error="{{ name }}" hidden></p>
+{% endmacro %}
+
+{#- A list of name and value pairs: the models a result was made with, the
+  facts of a session. mono sets the values in the monospaced face. -#}
+{% macro spec(items, mono=false) %}
+<dl class="spec{% if mono %} spec--mono{% endif %}">
+  {% for name, value in items %}
+  <dt class="label">{{ name }}</dt><dd>{{ value }}</dd>
+  {% endfor %}
+</dl>
+{% endmacro %}

@@ -1,0 +1,4 @@
+{#- A finished demo job's result, inside its card. -#}
+<ul class="plain-list">
+  {% for line in job.result["lines"] %}<li>{{ line }}</li>{% endfor %}
+</ul>

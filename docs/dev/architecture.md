@@ -1,8 +1,10 @@
 # Architecture
 
-Text Lab is a Streamlit app started by an Open OnDemand job inside an
-Apptainer image. This page describes how the code is organized and the rules
-that keep it maintainable.
+Text Lab is a web app started by an Open OnDemand job inside an Apptainer
+image. Its interface is a Streamlit app, which a web UI built with FastAPI
+and htmx replaces page by page (see the [Web UI Plan](web-ui-plan.md)). This
+page describes how the code is organized and the rules that keep it
+maintainable.
 
 ## Layers
 
@@ -12,12 +14,14 @@ The code is split into a backend and user interfaces:
   It takes plain inputs (file paths, bytes, option objects) and returns plain
   results. It never renders anything and never reads Streamlit's session
   state.
-- **User interfaces** (`textlab.ui`): today the Streamlit app. The pages
-  collect input, call the backend and display the result.
+- **User interfaces** (`textlab.ui`): the Streamlit app
+  (`textlab.ui.streamlit`) and the web UI that replaces it
+  (`textlab.ui.web`). The pages collect input, call the backend and display
+  the result. `textlab.ui.launch` starts the one that `TEXT_LAB_UI` names.
 
-Because the backend does not depend on Streamlit, the same functions can
-later serve a web frontend (for example one built with HTMX) or command-line
-tools that run as Slurm batch jobs, without copying any logic.
+Because the backend does not depend on Streamlit, the same functions serve
+both interfaces, and later command-line tools that run as Slurm batch jobs,
+without copying any logic.
 
 ## Repository layout
 
@@ -49,7 +53,10 @@ text_lab/
 │   │   └── knowledge_graph/
 │   ├── cli.py                 # `textlab` command (planned)
 │   └── ui/
-│       └── streamlit/         # Home.py, pages/, components/, assets/
+│       ├── launch.py          # starts the interface TEXT_LAB_UI names
+│       ├── streamlit/         # Home.py, pages/, components/, assets/
+│       └── web/               # web UI: app, auth, jobs, pages/, templates/,
+│                              #   static/ (see its README.md)
 ├── tests/                     # cross-cutting tests only
 └── docs/                      # user guide and developer guide
 ```
@@ -82,10 +89,12 @@ These rules apply to all code in `src/textlab/`.
 7. **Heavy libraries are imported lazily** (inside functions), so modules can
    be imported and tested without a GPU or the full image.
 8. **Pages stay thin.** A page holds layout, widgets, session state and calls
-   to the backend; anything else belongs in the backend. Every page calls
-   `check_token()` and then `render_disclaimer()`
+   to the backend; anything else belongs in the backend. Every Streamlit
+   page calls `check_token()` and then `render_disclaimer()`
    (`ui/streamlit/components/disclaimer.py`), which shows the disclaimer
-   about AI output in the sidebar.
+   about AI output in the sidebar. In the web UI, the login protects every
+   route and the page layout shows the disclaimer
+   (`ui/web/README.md`).
 
 Rules 1, 4 and 5 are checked automatically: rule 1 by import-linter, rules 4
 and 5 by `tests/test_data_footprint.py`. Rules 3 and 6 have shared modules in

@@ -1,0 +1,111 @@
+{#- The layout of every page after login: the index of pages on the left,
+  the status bar on top, the footer with the disclaimer.
+
+  Pages extend it and fill the blocks "title" and "content"; they set
+  page_id, which names the page's jobs in the event stream. -#}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="htmx-config" content='{"includeIndicatorStyles": false, "allowEval": false, "allowScriptTags": false, "historyCacheSize": 0}'>
+  <title>{% block title %}{% endblock %} · Text Lab</title>
+  {% include "partials/head.html" %}
+  <script src="{{ static('vendor/htmx-2.0.11.min.js') }}" defer></script>
+  <script src="{{ static('js/app.js') }}" defer></script>
+</head>
+<body data-root="{{ root }}" data-page="{{ page_id | default('') }}" hx-headers='{"X-CSRF-Token": "{{ csrf_token }}"}'>
+  <a class="skip-link" href="#main">Skip to the content</a>
+  <div class="app">
+    <aside class="sidebar" id="sidebar" aria-label="Text Lab">
+      <a class="wordmark" href="{{ root }}/">
+        {% include "partials/brand_mark.html" %}
+        <span class="wordmark__text">
+          <span class="wordmark__name">Text Lab</span>
+          <span class="wordmark__by">Data Science Lab</span>
+        </span>
+      </a>
+      <nav class="index" aria-label="Pages">
+        <ul class="index__list">
+          <li>
+            <a class="index__link" href="{{ root }}/"{% if current_path == "/" %} aria-current="page"{% endif %}>
+              <span class="index__num">00</span><span class="index__name">Home</span>
+            </a>
+          </li>
+        </ul>
+        {% for group, items in tool_groups %}
+        <p class="label index__group">{{ group }}</p>
+        <ul class="index__list">
+          {% for tool in items %}
+          <li>
+            <a class="index__link" href="{{ root }}{{ tool.path }}"{% if current_path.startswith(tool.path) %} aria-current="page"{% endif %}>
+              <span class="index__num">{{ tool.number }}</span><span class="index__name">{{ tool.label }}</span>
+              {% if not tool.ready %}<span class="index__soon">Soon</span>{% endif %}
+            </a>
+          </li>
+          {% endfor %}
+        </ul>
+        {% endfor %}
+        {% if settings.dev %}
+        <p class="label index__group">Developer</p>
+        <ul class="index__list">
+          {% for label, path in [("Overview", "/dev"), ("Components", "/dev/components"), ("Mockup: Home", "/dev/mockups/home"), ("Mockup: Transcription", "/dev/mockups/transcription"), ("Demo job", "/dev/demo")] %}
+          <li>
+            <a class="index__link" href="{{ root }}{{ path }}"{% if current_path == path %} aria-current="page"{% endif %}>
+              <span class="index__num">D{{ loop.index }}</span><span class="index__name">{{ label }}</span>
+            </a>
+          </li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+      </nav>
+      <div class="sidebar__foot">
+        <a href="https://text-lab.dsl.unibe.ch/" target="_blank" rel="noopener">Guide {{ icon("arrow-up-right", size="sm") }}</a>
+        <a href="mailto:support.dsl@unibe.ch">Support {{ icon("arrow-up-right", size="sm") }}</a>
+      </div>
+    </aside>
+    <div class="backdrop" data-menu-close hidden></div>
+
+    <div class="main-col">
+      <header class="statusbar">
+        <button class="statusbar__button statusbar__menu" type="button" data-menu-toggle aria-controls="sidebar" aria-expanded="false">
+          {{ icon("menu", size="sm") }} Menu
+        </button>
+        <a class="statusbar__brand" href="{{ root }}/">
+          {% include "partials/brand_mark.html" %}<span>TEXT LAB</span>
+        </a>
+        {% if session_left is not none %}
+        <p class="statusbar__session" data-session-left="{{ session_left | int }}">
+          <span class="statusbar__key">Session ends</span> {{ settings.session_end | clock_time }}
+          <span class="statusbar__key">/</span> <span data-session-countdown>{{ session_left | time_left }}</span> left
+        </p>
+        {% endif %}
+        <div class="statusbar__spacer"></div>
+        {% include "jobs/indicator.html" %}
+        <button class="statusbar__button" type="button" data-theme-toggle data-current="system" aria-label="Colour theme: as the system">
+          <span class="statusbar__key statusbar__key--wide">Theme</span> <span data-theme-name>Auto</span>
+        </button>
+        <form class="statusbar__form" method="post" action="{{ root }}/logout">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button class="statusbar__button" type="submit">Sign out</button>
+        </form>
+      </header>
+
+      <main class="main" id="main" tabindex="-1">
+        {% block content %}{% endblock %}
+      </main>
+
+      <footer class="footer">
+        <p class="footer__note">AI models can produce inaccurate or misleading output. Please review all results before you use them in your research.</p>
+        <p class="footer__meta label">
+          Text Lab{% if version %} {{ version }}{% endif %} · Data Science Lab, University of Bern ·
+          <a href="https://text-lab.dsl.unibe.ch/" target="_blank" rel="noopener">Guide</a> ·
+          <a href="mailto:support.dsl@unibe.ch">support.dsl@unibe.ch</a>
+        </p>
+      </footer>
+    </div>
+  </div>
+  <div class="toasts" id="notices" aria-live="polite"></div>
+</body>
+</html>

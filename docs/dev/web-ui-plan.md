@@ -1,0 +1,379 @@
+# Web UI migration plan
+
+!!! note "Status"
+    Plan agreed on 26 November 2026; phase 0 done the same day (see
+    [Phase 0 results](#phase-0-results)). Phase 1 started the same day: the
+    foundation, the launcher and the redeployment files are built, and the
+    mockups of Home and Transcription wait for agreement (see
+    [Phase 1 progress](#phase-1-progress)). The work happens on the branch
+    `feat/web-ui` and the branches that follow it, one per phase or page.
+    Update this page when a phase ends or a decision changes.
+
+Text Lab's user interface moves from Streamlit to a web UI built with
+[FastAPI](https://fastapi.tiangolo.com/), Jinja2 templates and
+[HTMX](https://htmx.org/), with a fresh, modern and responsive design. The
+backend (`features/`, `common/`) stays as it is: since version 3.0.0 every
+page calls only its feature's `service.py`, and the new pages do the same.
+
+## Why
+
+- **Long runs tie up the page.** A Streamlit page runs a transcription or
+  an OCR batch inside the page script: the tab has to stay open until the
+  run ends, and reloading the page loses its result.
+- **Two runs can break each other.** Starting a feature releases the GPU
+  for it (`gpu_manager.prepare_gpu`), which stops the GPU workers of other
+  features, including a run still going in another browser tab.
+- **Every click reruns the page script**, which makes pages slow and their
+  state fragile (session-state keys, `st.rerun`).
+- **The look is Streamlit's.** Layout, components and behaviour on small
+  screens can hardly be changed beyond what Streamlit offers.
+- **Pages cannot be tested.** Tests can only read the page sources; the
+  routes of a web app can be called and checked with FastAPI's test client.
+
+## Decisions
+
+| Question | Decision | Reason |
+|---|---|---|
+| How users switch | **At once**, when every page exists in the new UI. Streamlit stays selectable for one release as a rollback, then it is removed | A fresh design next to Streamlit pages would feel like two apps, and keeping two UIs doubles every UI change |
+| How it is built | **Page by page, merged into `main`** behind a launch switch, not on one long-lived branch | Each page is reviewed, tested and merged on its own; production runs Streamlit until the switch |
+| Design | **Fresh**: modern, responsive, easy to use, accessible | |
+| Long runs | **Background jobs**, one GPU job at a time, results kept for the session | Users can leave or reload a page, and runs can no longer take the GPU from each other |
+| First pages | **Home and Transcription** | Transcription has the cleanest service: a worker process, progress reports and cancelling |
+
+Considered and rejected:
+
+- **Both UIs in one server.** Streamlit 1.61's `st.App` can mount other
+  routes, so FastAPI pages could replace Streamlit pages one at a time. That
+  only helps a page-by-page switch, which mixes two designs.
+- **Streamlit as a permanent second option**: two UIs to keep working for
+  every change.
+
+During the migration the Streamlit pages get bug fixes only. New behaviour
+goes into the services, where both UIs use it, or into the new pages.
+
+## Architecture
+
+```
+src/textlab/ui/
+├── launch.py          # starts the UI that TEXT_LAB_UI names
+├── streamlit/         # the current UI, removed after the switch
+└── web/
+    ├── app.py         # app factory: routes, middleware, static files
+    ├── auth.py        # login with the session password, cookie, CSRF
+    ├── jobs.py        # job queue, progress, cancelling, SSE
+    ├── uploads.py     # streams uploads into the job workspace
+    ├── render.py      # templates, icons, links from the base path
+    ├── settings.py    # the server's settings
+    ├── server.py      # uvicorn, started by the launcher
+    ├── pages/         # one module per page: its routes; the navigation
+    ├── templates/     # Jinja2: base layout, components, one folder per page
+    ├── static/
+    │   ├── css/       # design system: tokens, layout, components
+    │   ├── js/        # app.js (live updates, forms), theme.js
+    │   └── vendor/    # htmx, icons, later plotly.js (pinned)
+    ├── tests/
+    └── README.md      # how a page is built
+```
+
+### How a page works
+
+1. `GET /transcription` returns the whole page: the base layout
+   (navigation, header, job indicator) around the page's template.
+2. The form is sent with HTMX (`hx-post`, multipart). The route checks the
+   options, streams the upload into the workspace, submits a job and returns
+   a job card for the page's result area.
+3. The page follows its jobs over server-sent events (SSE), in one stream
+   for all of them (`/events?page=<id>`; [phase 0](#phase-0-results) shows
+   why). `static/js/app.js` opens it while one of the session's jobs waits
+   or runs, and closes it when the server says that none does. Each event
+   carries the changed job cards and the job indicator as out-of-band
+   fragments; the card of a finished job holds its result.
+4. Downloads are plain links (`/jobs/<id>/files/<name>`).
+
+Rules, checked by tests as for the Streamlit pages today:
+
+- A page module imports only the features' `service` modules, and uses
+  only the names they export in `__all__`. What a page needs beyond that
+  goes into the service.
+- No processing in routes or templates.
+- No inline scripts: JavaScript lives in files under `static/`.
+
+### Server
+
+- uvicorn with one worker process: logins, jobs and results live in
+  memory, and each Open OnDemand session has one user.
+- Routes that call services are plain `def` functions, which FastAPI runs
+  in a thread pool. The heavy work already runs in worker processes or in
+  Ollama.
+
+## Design
+
+- **A design system in plain CSS**, typographic rather than boxy: ink on
+  paper, structure from rules and a grid instead of cards and shadows,
+  the red of the Text Lab logo as the one accent. IBM Plex Sans carries
+  the text (condensed for titles) and IBM Plex Mono the labels, numbers,
+  times and file names; both are vendored (SIL Open Font License), so no
+  fonts are loaded from elsewhere. Custom properties for colours, type,
+  spacing; light and dark themes that follow the system setting, with a
+  switch. The first draft used system fonts and rounded cards, and looked
+  like every other web app; the second (27 November 2026) gave the UI a
+  character of its own.
+- **Responsive layout**: the navigation is a numbered index of the tools,
+  grouped by what they work on (audio, documents, text, data), on the
+  left on wide screens and behind a menu button on narrow ones. A status
+  bar on top shows when the session ends (Slurm's `SLURM_JOB_END_TIME`),
+  the jobs, the theme and signing out. Text keeps a readable width; pages
+  work from a phone to a wide monitor.
+- **Shared components**: page masthead, forms as sheets of numbered
+  steps, file drop zone (drag and drop, the chosen files with their
+  sizes), options with their explanations, job records with status and
+  progress (current step, elapsed time, cancel), result tabs, file
+  listings for downloads, notices (information, warning, error with
+  details for support), "Models used" lists, job indicator.
+- **Icons**: few, from a vendored open-source SVG set (Lucide, ISC
+  licence), for arrows, downloads, playing and closing. No emojis.
+- **Accessibility**: WCAG 2.1 AA contrast, everything usable with the
+  keyboard, visible focus, labelled fields, progress announced to screen
+  readers, reduced motion respected.
+- **No build step and no CDN.** htmx 2.0.11 (the current release on npm,
+  where htmx 4 is tagged `next`, not `latest`), the Lucide icons (1.71.0,
+  only those used), the IBM Plex fonts (5.3.0) and later plotly.js are
+  vendored in `static/vendor/`.
+  Each is pinned and checked against the registry's checksum, with its
+  version, source and licence in `static/vendor/README.md`. Browsers fetch
+  nothing from outside the cluster. htmx's SSE extension is not used: the
+  page's one stream opens and closes with the session's active jobs, which
+  a few lines of `app.js` handle.
+- **Mockups first.** Static mockups of Home and Transcription are agreed
+  before the pilot pages are built.
+
+## Jobs and the GPU
+
+- **A job is one run**: a recording or a ZIP batch to transcribe, a
+  document or a batch to read, a topic model to fit. A page submits it and
+  shows its progress; the user can leave the page or reload it and find the
+  result again.
+- **One GPU job at a time.** Further jobs wait in order, and their card
+  says so ("waiting, 1 job ahead"). The runner calls
+  `gpu_manager.prepare_gpu(<feature>)` when a job starts, not when it is
+  submitted, so a waiting job never stops a running one.
+- **Short GPU requests** (a chat message, the translation editor, a meeting
+  summary) also wait for a running job; the page says which job is running
+  and offers to cancel it. If this proves too strict, measure whether a
+  small LLM fits on the GPU next to a running job.
+- **Progress** comes from the services' `on_progress` callbacks and reaches
+  the page over SSE, in the page's one event stream, which is open only
+  while one of its jobs runs or waits. After a reload, the page reconnects
+  to its jobs.
+- **Cancelling**: a waiting job is removed; a running one gets its
+  service's `cancel` event. Only Transcription and Topic Modeling take
+  `cancel` today; the other services get it when their page is built
+  (`common.jobs.run_worker` already stops workers).
+- **Results** stay in memory in the job, as they stay in Streamlit's
+  session state today, until the user removes them or the session ends.
+  Uploads are staged in the workspace and removed when the job ends, so
+  the privacy promises of the user guide stay true.
+- **The job indicator** in the header lists running and waiting jobs and
+  recent results, on every page.
+
+## Security
+
+- **Login** with the session password shown on the Open OnDemand dashboard
+  (`TOKEN`), compared in constant time, then a signed session cookie
+  (itsdangerous): `HttpOnly`, `Secure`, `SameSite=Strict`, limited to the
+  session's path (`/node/<host>/<port>/`).
+- **The user named by the proxy** (`X-Forwarded-User`) is checked too: a
+  request naming another user is refused. The header cannot replace the
+  password: the server listens on the node's network so that the proxy
+  reaches it, and a direct connection can send any header.
+- **Connect without copying the password** (decided in phase 1): for the
+  web UI, the dashboard's *Connect* button posts the password to the login
+  route; only the session's owner sees the card that holds it. The card
+  needs to know the interface, which `before.sh.erb` reads from the
+  configuration (`template/config.sh`) and passes as `text_lab_ui`
+  (`conn_params`). Streamlit sessions show the password to copy, as now.
+  A login posted from another origin than the portal is refused.
+- **A CSRF token** on every request that changes something (HTMX sends it
+  as a header). All Open OnDemand apps share one origin, so the browser
+  alone does not keep other pages from sending requests to Text Lab.
+- **A Content Security Policy**: scripts only from the app's static files,
+  no inline scripts, htmx's `eval` turned off.
+- **Uploads**: a size limit (10 GB, as now), safe file names
+  (`common.upload_safety`), streamed to the workspace, never held in memory
+  whole.
+- **Output**: templates escape everything; text from models (Markdown,
+  HTML) is shown as text or sanitized (`common.html_safety`).
+
+## Deployment and the switch
+
+- **One HPC redeploy, in phase 1.** `template/script.sh.erb` starts
+  `python -m textlab.ui.launch` instead of Streamlit. The launcher starts
+  the UI that `TEXT_LAB_UI` names (`streamlit` by default, or `web`), with
+  today's port, base path and upload limit, so production behaves as
+  before, and names its log (`streamlit.log` or `textlab.log`). For
+  releases without the launcher the script starts Streamlit directly, so
+  rollbacks keep working. The *Connect* change goes into the same
+  redeploy; [Deployment](deployment.md#the-launcher-and-the-connect-button)
+  lists the files and the order.
+- **Sandbox**: `TEXT_LAB_UI=web` in `template/dev.env` shows the new UI,
+  and `export TEXT_LAB_WEB_DEV=1` its developer pages under `/dev`: the
+  component gallery, the mockups and a demo job.
+- **The switch**: `TEXT_LAB_UI=web` in the live `site.env`, without an HPC
+  redeploy. Rolling back means setting it back.
+- **Removal**: one release later, the launcher starts only the web UI, and
+  Streamlit leaves the image at its next rebuild (`locks/main.txt` and
+  `text_lab.def`).
+
+## Phases
+
+| Phase | Content | Done when |
+|---|---|---|
+| 0. Spike (done) | A minimal FastAPI app in the sandbox, behind the Open OnDemand proxy: base path, login cookie, SSE progress, a 2 GB upload streamed to the workspace, a download | All of it works, or a fallback is chosen (HTMX polling every second instead of SSE) |
+| 1. Foundation (in progress) | The launcher and the HPC redeploy (production unchanged). In `ui/web/`: app factory, login, CSRF, CSP, layout, design system and components, job runner (queue, SSE, cancelling), upload and download helpers, error pages, test harness. Mockups of Home and Transcription | An empty app with login, navigation and a demo job runs in the sandbox, with tests, and the mockups are agreed |
+| 2. Pilot | Home and Transcription: a recording or a ZIP batch, language and model, voice activity detection, speaker identification with speaker counts, the audio player with word highlighting, every download | Everything the Streamlit page does works, with tests, and the UI test passes |
+| 3. Pages | One PR each, in this order: Meeting Notes, Translation, OCR (automatic mode, legacy engines, historic handwriting, Hugging Face models), Topic Modeling, Chat, Visualize Data, Knowledge Graph | As in phase 2, with the page's user guide drafted |
+| 4. Switch | `TEXT_LAB_UI=web` in production; the new user guide replaces the old one; a release | Users work in the new UI; Streamlit can still be selected as a rollback |
+| 5. Removal | `ui/streamlit/` and its tests are removed; Streamlit leaves the image | One release after the switch, without a rollback |
+
+### What is rebuilt
+
+The Streamlit code to replace, about 8,400 lines in all:
+
+| Page | Lines | Notes |
+|---|---|---|
+| Home | 120 | |
+| Transcription | 900 | with the audio player |
+| Meeting Notes | 1,270 | transcribes first, then summarizes with citations |
+| Translation | 900 | text editor with a model kept loaded, documents |
+| OCR | 2,310 | automatic mode, results, review, legacy engines, historic handwriting, Hugging Face models |
+| Topic Modeling | 1,060 | charts, editable tables |
+| Chat | 520 | streamed answers, documents, charts |
+| Visualize Data | 420 | analysis in the background, charts |
+| Knowledge Graph | 710 | Grobid, graph view |
+| Shared | 200 | login, disclaimer, GPU notices, progress box |
+
+## Phase 0 results
+
+On 26 November 2026 the spike (`scripts/web_ui_spike/`, kept until
+phase 1 replaces it) ran in a Slurm job on a GPU node and was tested in
+Chrome through the Open OnDemand proxy. Everything the plan depends on
+works; one finding changes the design.
+
+| Check | Result |
+|---|---|
+| Base path | Pages, scripts and style sheets work under `/node/<host>/<port>/`, with the app mounted under that path and every link built from it |
+| Login | The session cookie works behind the proxy with `HttpOnly`, `Secure`, `SameSite=Strict` and the session's path, and scripts cannot read it. A plain form posts through the proxy, so *Connect* can post the password too |
+| CSRF and CSP | Requests without the token are refused. The strict Content Security Policy causes no violations with htmx 2.0.11 (`includeIndicatorStyles` and `allowEval` off) |
+| Live progress | The proxy does not buffer server-sent events: 40 events in 20 seconds arrived on time (spread 0.05 s). With keep-alive comments every 15 seconds, streams lasted over 3 minutes through 50-second gaps without reconnecting. A job reattached after a page reload. Polling works as well |
+| Closed pages | The server notices a closed page at its next write to the stream, within 15 seconds with the keep-alive comments, so no stream is left open |
+| Uploads | 100 MB, 1,100 MB and 2,200 MB passed the proxy at 50 to 120 MB/s, so no limit applies up to at least 2.2 GB. The server's memory stayed at about 80 MB: uploads go to disk |
+| Downloads | A streamed 1,100 MB download arrived complete (68 MB/s); a file name with umlauts was saved correctly |
+
+The proxy forwards the backend's own host and scheme
+(`Host: gnode35.hpc.unibe.ch:47983`, `http`), with the original ones in
+`X-Forwarded-Host` (`ondemand.hpc.unibe.ch`) and `X-Forwarded-Proto`
+(`https`), and the logged-in user in `X-Forwarded-User`.
+
+Consequences, already worked into the sections above:
+
+- **The browser speaks HTTP/1.1 to the proxy**, so it opens at most 6
+  connections to `ondemand.hpc.unibe.ch` at a time, for all its tabs on
+  the site together, other Open OnDemand apps included. An open event
+  stream holds one for as long as it is open. In the spike, three streams,
+  two uploads and a download held all six, and polling requests waited:
+  the 10-second polling job made 8 requests, against 11 when it ran
+  alone. Nothing failed. So each page has **one
+  event stream** for all its jobs and the job indicator, open only while a
+  job runs or waits, and uploads run one at a time.
+- **Links are built from the base path**, never from the request's host
+  and scheme, which are the backend's.
+- **`X-Forwarded-User` is an extra check**, not a replacement for the
+  password (see [Security](#security)).
+- **Uploads** are spooled to `TMPDIR`, which the launch script already
+  places in the private workspace, then copied to their job's folder
+  (1.6 seconds for 2.2 GB).
+
+## Phase 1 progress
+
+Built on 26 November 2026, with tests (`src/textlab/ui/web/tests/`,
+`tests/test_launch.py`):
+
+- The launcher and the redeployment files (see
+  [Deployment](deployment.md#the-launcher-and-the-connect-button)).
+- The app factory under the base path, with the Content Security Policy,
+  the check of `X-Forwarded-User` and the upload limit (also for uploads
+  that do not announce their size).
+- Login with the session password (*Connect* posts it), the session
+  cookie, CSRF tokens; every route but the login requires a session.
+- The layout (the index of tools, the status bar with the session's end,
+  the job indicator and the theme switch, the footer with the
+  disclaimer), the design system and the shared components; light and
+  dark; narrow and wide screens. The design was redone on 27 November
+  after the first review (see [Design](#design)).
+- The job runner: a queue, one job at a time, `prepare_gpu` at the start,
+  cancelling, progress, results and downloads; short GPU requests
+  (`exclusive()`); the event stream and the job cards.
+- Error pages and notices, with an error id for unexpected errors.
+- Developer pages under `/dev`: the component gallery, the mockups of Home
+  and Transcription, and a demo job.
+
+Still to do in phase 1:
+
+1. Agree the mockups (`/dev/mockups/home`, `/dev/mockups/transcription`).
+   Choices in them to confirm: the language is detected in the job, from
+   the recording's first 30 seconds, instead of when the file is chosen
+   (the web page uploads the file only when the job is submitted); the
+   result shows the player and the transcript together, with the plain
+   text and the models in tabs; every output file downloads on its own,
+   besides the ZIP of all of them.
+2. Try the foundation in the sandbox: with `TEXT_LAB_UI=web` (login through
+   *Connect*, the demo job with an upload, cancelling, downloads, a
+   reload while a job runs, narrow screens) and without it (Streamlit as
+   before).
+3. Release, and ask the HPC team for the redeployment.
+4. Remove `scripts/web_ui_spike/`.
+
+## Testing
+
+- **Page tests** with FastAPI's test client (httpx is in the image), in
+  `src/textlab/ui/web/tests/`: every route renders, forms refuse bad input,
+  a job runs from submission to download with a fake service, nothing is
+  reachable without logging in, and requests without the CSRF token are
+  refused.
+- **Import rules**: pages use only the feature services; import-linter
+  already keeps the backend from importing any UI.
+- **Manual checks**: each page's PR lists what to try in the sandbox, taken
+  from the features of the Streamlit page it replaces.
+- Browser tests (Playwright) are not planned: the image has no browser.
+
+## Documentation
+
+- The developer guide and the feature READMEs change with each PR, as
+  usual.
+- The user guide describes what production runs. Each new page's guide is
+  written in its PR under `docs/next/`, which the published site leaves out
+  (`exclude_docs` in `mkdocs.yml`), and replaces the current guide at the
+  switch.
+
+## Risks
+
+| Risk | Mitigation |
+|---|---|
+| The browser opens at most 6 connections to the proxy at a time (HTTP/1.1), for all its tabs on the site together | One event stream per page, open only while jobs are active; one upload at a time |
+| Features are lost on the way | A checklist per page, from the Streamlit page; the switch waits for every page |
+| New widgets are needed: editable tables (OCR review, Topic Modeling), charts, streamed chat, the graph view, the audio player | HTML tables with inputs, or a vendored grid library; plotly.js vendored; SSE; pyvis output in a frame; the player's own JavaScript ported |
+| Most services cannot be cancelled yet | Added with each page |
+| Features change in the Streamlit pages during the migration | Streamlit pages get bug fixes only |
+
+## Out of scope
+
+- The command-line and batch tools (`cli.py`, `deploy/sbatch/`) stay
+  placeholders.
+- More than one user per server: each Open OnDemand session keeps its own
+  app.
+- Translating the interface: English only, as now.
+
+## Open questions
+
+- Survey extraction is hidden on the OCR page today: port it, or leave it
+  out?

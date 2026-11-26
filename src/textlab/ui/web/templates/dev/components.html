@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+{% from "components/macros.html" import notice, masthead, section_head, dropzone, spec with context %}
+{% block title %}Components{% endblock %}
+{% block content %}
+{{ masthead("Components", "The shared components of the web UI in their variants. Pages build on these; change them here, not per page.", number="D2", kicker="Developer") }}
+
+<section class="section" aria-labelledby="type-title">
+  {{ section_head("Type", "IBM Plex Sans and Mono", id="type-title") }}
+  <div class="stack-lg">
+    <p class="masthead__title">Page title, condensed</p>
+    <p class="section-head__title">Section title</p>
+    <p class="masthead__lead">A lead sentence says what a page is for, in one or two lines.</p>
+    <p>Body text for explanations and results. It keeps to a readable width and a calm rhythm.</p>
+    <p class="label">Label: metadata, times, file names</p>
+  </div>
+</section>
+
+<section class="section" aria-labelledby="buttons-title">
+  {{ section_head("Buttons", id="buttons-title") }}
+  <div class="cluster">
+    <button class="btn btn--primary" type="button">Primary {{ icon("arrow-right", size="sm") }}</button>
+    <button class="btn btn--secondary" type="button">Secondary</button>
+    <button class="btn btn--danger" type="button">Danger</button>
+    <button class="btn btn--primary" type="button" disabled>Disabled</button>
+    <button class="btn btn--primary btn--sm" type="button">Small</button>
+    <button class="btn btn--primary btn--lg" type="button">Large</button>
+    <button class="text-button" type="button">Text button</button>
+    <button class="text-button text-button--danger" type="button">Cancel</button>
+    <button class="icon-button" type="button" aria-label="Close">{{ icon("x", size="sm") }}</button>
+  </div>
+</section>
+
+<section class="section" aria-labelledby="sheet-title">
+  {{ section_head("Form sheet", "Numbered steps", id="sheet-title") }}
+  <form class="sheet" data-switch="g-mode">
+    <div class="switcher" role="radiogroup" aria-label="Mode">
+      <label class="switcher__option"><input type="radio" name="g-mode" value="a" checked><span>First mode</span></label>
+      <label class="switcher__option"><input type="radio" name="g-mode" value="b"><span>Second mode</span></label>
+    </div>
+    <ol class="steps">
+      <li class="step">
+        <div>
+          <span class="label step__num">01</span>
+          <h3 class="step__title">Fields</h3>
+          <p class="step__hint">Text, choice, number.</p>
+        </div>
+        <div class="step__body">
+          <div class="form-grid">
+            <div class="field">
+              <label class="field__label" for="g-text">Text</label>
+              <input class="input" id="g-text" placeholder="A placeholder">
+              <p class="field__help">Help text says what the field is for.</p>
+            </div>
+            <div class="field">
+              <label class="field__label" for="g-select">Choice</label>
+              <div class="select-wrap">
+                <select class="select" id="g-select"><option>First</option><option>Second</option></select>
+                {{ icon("chevron-down", size="sm") }}
+              </div>
+            </div>
+            <div class="field">
+              <label class="field__label" for="g-number">Number</label>
+              <div class="input-group">
+                <input class="input" id="g-number" type="number" value="4">
+                <span class="input-group__suffix">speakers</span>
+              </div>
+            </div>
+          </div>
+          <div class="field">
+            <span class="field__label">Read-out</span>
+            <p class="readout">large-v3-turbo</p>
+          </div>
+        </div>
+      </li>
+      <li class="step">
+        <div>
+          <span class="label step__num">02</span>
+          <h3 class="step__title">Options</h3>
+          <p class="step__hint">Check boxes that reveal settings.</p>
+        </div>
+        <div class="step__body options">
+          <div class="option">
+            <input class="checkbox" type="checkbox" id="g-opt" data-reveal="g-opt-more">
+            <label class="option__title" for="g-opt">An option that reveals more</label>
+            <p class="option__text">Its settings appear when it is checked.</p>
+            <div class="option__more" id="g-opt-more" hidden>
+              <label class="field__label" for="g-range">A value: <output for="g-range" data-output-of="g-range">0.5</output></label>
+              <input class="range" id="g-range" type="range" min="0" max="1" step="0.05" value="0.5">
+            </div>
+          </div>
+          <div class="option">
+            <input class="checkbox" type="checkbox" id="g-opt2" checked>
+            <label class="option__title" for="g-opt2">A checked option</label>
+            <p class="option__text">Check boxes are square and turn red when checked.</p>
+          </div>
+        </div>
+      </li>
+      <li class="step">
+        <div>
+          <span class="label step__num">03</span>
+          <h3 class="step__title">Files</h3>
+          <p class="step__hint">The drop zone.</p>
+        </div>
+        <div class="step__body">
+          {{ dropzone("g-file", "Drop files here", "Any type", required=false, multiple=true) }}
+        </div>
+      </li>
+    </ol>
+    <div class="sheet__submit">
+      <p class="sheet__note">A note next to the main action.</p>
+      <button class="btn btn--primary btn--lg" type="button">Run {{ icon("arrow-right", size="sm") }}</button>
+    </div>
+  </form>
+</section>
+
+<section class="section" aria-labelledby="notices-title">
+  {{ section_head("Notices", id="notices-title") }}
+  <div class="stack">
+    {% call notice("info", "Information") %}Something worth knowing about this page.{% endcall %}
+    {% call notice("success", "Success") %}The model is ready.{% endcall %}
+    {% call notice("warning", "Warning") %}The preview shows the first 10 minutes only.{% endcall %}
+    {% call notice("error", "Error", details="Traceback (most recent call last):\n  File \"worker.py\", line 12\nRuntimeError: example") %}What went wrong, and what to do about it.{% endcall %}
+  </div>
+</section>
+
+<section class="section" aria-labelledby="states-title">
+  {{ section_head("Status and progress", id="states-title") }}
+  <div class="stack-lg">
+    <div class="cluster">
+      {% for state in ["waiting", "running", "done", "failed", "cancelled"] %}
+      <span class="status status--{{ state }}">{{ state | capitalize }}</span>
+      {% endfor %}
+    </div>
+    <div class="meter">
+      <progress class="meter__bar" max="1" value="0.42" aria-label="Determinate progress"></progress>
+      <p class="meter__line"><span>A step of the work</span><span class="meter__value">42%</span></p>
+    </div>
+    <div class="meter">
+      <progress class="meter__bar" max="1" aria-label="Indeterminate progress"></progress>
+      <p class="meter__line"><span>A step whose length is not known</span></p>
+    </div>
+    <ul class="facts"><li>German</li><li>12:40 of audio</li><li>3 speakers</li></ul>
+  </div>
+</section>
+
+<section class="section" aria-labelledby="jobs-title">
+  {{ section_head("Job records", "Every state", id="jobs-title") }}
+  <div class="records">
+    {% for name in ["waiting", "running", "done", "failed", "cancelled"] %}
+    {% with job = sample_jobs[name], ahead = 2 if name == "waiting" else 0, oob = false %}{% include "jobs/card.html" %}{% endwith %}
+    {% endfor %}
+  </div>
+</section>
+
+<section class="section" aria-labelledby="misc-title">
+  {{ section_head("Lists and empty state", id="misc-title") }}
+  <div class="stack-lg">
+    {{ spec([("Transcription", "large-v3-turbo"), ("Speakers", "pyannote/speaker-diarization-community-1")], mono=true) }}
+    <div class="empty">
+      <p class="label">Empty</p>
+      <p class="empty__title">No results yet</p>
+      <p class="empty__text">Results of the jobs you start appear here.</p>
+    </div>
+  </div>
+</section>
+{% endblock %}

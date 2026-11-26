@@ -1,0 +1,17 @@
+{#- An error as a whole page: in the layout after login, alone before. -#}
+{% extends "base.html" if csrf_token else "auth/layout.html" %}
+{% from "components/macros.html" import notice %}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+<div class="error-page">
+  <p class="error-page__code" aria-hidden="true">{{ status }}</p>
+  <h1 class="error-page__title">{{ title }}</h1>
+  {% if message %}<p class="error-page__text">{{ message }}</p>{% endif %}
+  {% if details %}
+  {% call notice("info", "Details for a problem report", details=details) %}{% endcall %}
+  {% endif %}
+  {% if csrf_token %}
+  <p><a class="btn btn--secondary" href="{{ root }}/">Back to Home {{ icon("arrow-right", size="sm") }}</a></p>
+  {% endif %}
+</div>
+{% endblock %}

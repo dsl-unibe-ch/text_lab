@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% from "components/macros.html" import notice, masthead, section_head with context %}
+{% block title %}Home{% endblock %}
+{% block content %}
+{{ masthead("Text Lab", "AI tools for research data, run on the University's computers: your files never leave them.", kicker="Data Science Lab · University of Bern") }}
+
+{% call notice("info", "The new Text Lab, under construction") %}
+<p>This interface replaces the current one page by page. Until every page is
+here, users keep working in the current interface; pages marked
+<em>Soon</em> are not built yet.</p>
+{% endcall %}
+
+<section class="section" aria-labelledby="tools-title">
+  {{ section_head("Tools", id="tools-title") }}
+  {% include "partials/catalog.html" %}
+</section>
+
+{% if settings.dev %}
+<section class="section" aria-labelledby="dev-title">
+  {{ section_head("Developer pages", "TEXT_LAB_WEB_DEV is set", id="dev-title") }}
+  <p class="muted">The component gallery, the mockups and a demo job: see the <a href="{{ root }}/dev">overview</a>.</p>
+</section>
+{% endif %}
+{% endblock %}

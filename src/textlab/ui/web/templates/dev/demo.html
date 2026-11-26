@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% from "components/macros.html" import masthead, section_head, dropzone with context %}
+{% block title %}Demo job{% endblock %}
+{% block content %}
+{{ masthead("Demo job", "Runs a job without a model, to try the job runner: the queue, live progress, cancelling, an upload and downloads.", number="D5", kicker="Developer") }}
+
+<form class="sheet" hx-post="{{ root }}/dev/demo" hx-encoding="multipart/form-data" hx-target="#jobs" hx-swap="afterbegin" hx-disabled-elt="find button[type=submit]" data-upload-form>
+  <ol class="steps">
+    <li class="step">
+      <div>
+        <span class="label step__num">01</span>
+        <h2 class="step__title">A file</h2>
+        <p class="step__hint">Optional. The job reports its size and checksum.</p>
+      </div>
+      <div class="step__body">
+        {{ dropzone("file", "Drop a file here", "Any file", required=false) }}
+        <div class="upload-progress" data-upload-progress hidden>
+          <progress class="meter__bar" max="1" value="0"></progress>
+          <p class="label" data-upload-progress-text>Uploading</p>
+        </div>
+      </div>
+    </li>
+    <li class="step">
+      <div>
+        <span class="label step__num">02</span>
+        <h2 class="step__title">The run</h2>
+        <p class="step__hint">How long it takes and how it ends.</p>
+      </div>
+      <div class="step__body">
+        <div class="form-grid">
+          <div class="field">
+            <label class="field__label" for="seconds">Duration</label>
+            <div class="input-group">
+              <input class="input" id="seconds" name="seconds" type="number" min="1" max="{{ max_seconds }}" value="20" required>
+              <span class="input-group__suffix">seconds</span>
+            </div>
+            <p class="field__help">The job reports progress twice a second.</p>
+          </div>
+          <fieldset class="field">
+            <legend class="field__label">Outcome</legend>
+            <div class="switcher switcher--inline">
+              <label class="switcher__option"><input type="radio" name="outcome" value="done" checked><span>Finishes</span></label>
+              <label class="switcher__option"><input type="radio" name="outcome" value="failed"><span>Fails</span></label>
+            </div>
+          </fieldset>
+        </div>
+        <div class="option">
+          <input class="checkbox" type="checkbox" id="gpu" name="gpu" value="1" aria-describedby="gpu-text">
+          <label class="option__title" for="gpu">Release the GPU first</label>
+          <p class="option__text" id="gpu-text">Calls <code>prepare_gpu</code> when the job starts, as feature jobs do.</p>
+        </div>
+      </div>
+    </li>
+  </ol>
+  <div class="sheet__submit">
+    <p class="sheet__note">Jobs run one at a time. You can leave this page and come back.</p>
+    <button class="btn btn--primary btn--lg" type="submit">Start {{ icon("arrow-right", size="sm") }}</button>
+  </div>
+</form>
+
+<section class="section" aria-labelledby="jobs-title">
+  {{ section_head("Demo jobs", "Kept until you remove them or the session ends", id="jobs-title") }}
+  <div class="records" id="jobs">
+    {{ cards }}
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% from "components/macros.html" import masthead with context %}
+{% block title %}{{ tool.label }}{% endblock %}
+{% block content %}
+{{ masthead(tool.label, tool.summary, number=tool.number, kicker=tool.group) }}
+<div class="empty">
+  <p class="label">Not built yet</p>
+  <p class="empty__title">This page is being rebuilt</p>
+  <p class="empty__text">Until it is here, use {{ tool.label }} in the current interface.</p>
+</div>
+{% endblock %}
