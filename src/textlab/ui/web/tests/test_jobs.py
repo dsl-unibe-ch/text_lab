@@ -222,7 +222,7 @@ def test_short_gpu_requests_are_refused_while_a_job_runs(runner):
 
 
 def test_closing_cancels_jobs_and_removes_their_folders(released, workspace):
-    runner = JobRunner(prepare_gpu=released.append, workspace=workspace)
+    runner = JobRunner(prepare_gpu=released, workspace=workspace)
     work = Gate()
     job = start(runner, work)
     assert work.started.wait(5)
@@ -272,7 +272,7 @@ def test_work_with_the_gpu_always_waits_in_the_queue(runner):
 
 
 def test_closing_waits_for_work_beside_the_queue(released, workspace):
-    runner = JobRunner(prepare_gpu=released.append, workspace=workspace)
+    runner = JobRunner(prepare_gpu=released, workspace=workspace)
     work = Gate()
     job = runner.create(title="quick", page="test")
     runner.submit(job, work, at_once=True)
@@ -304,3 +304,52 @@ def test_a_job_that_stops_early_keeps_no_files(runner):
     wait_for(lambda: job.state is JobState.FAILED)
     assert job.downloads == []
     assert not job.outputs.exists()
+
+
+def test_a_jobs_language_model_stays_loaded(runner, released):
+    job = start(runner, lambda context: None, gpu="llm", ollama_model="m:7b")
+    wait_for(lambda: job.state is JobState.DONE)
+    assert released == ["llm:m:7b"]
+
+
+def test_work_can_switch_the_gpu_between_its_steps(runner, released):
+    def work(context):
+        context.use_gpu("llm", "m:7b")
+
+    job = start(runner, work, gpu="transcribe")
+    wait_for(lambda: job.state is JobState.DONE)
+    assert released == ["transcribe", "llm:m:7b"]
+
+
+def test_work_without_the_gpu_cannot_take_it(runner, released):
+    job = start(runner, lambda context: context.use_gpu("llm"))
+    wait_for(lambda: job.state is JobState.FAILED)
+    assert "not created to use the GPU" in job.error
+    assert released == []
+
+
+def test_a_preview_reaches_the_card_at_most_once_a_second(runner, monkeypatch):
+    from textlab.ui.web import jobs
+
+    clock = iter([100.0, 100.4, 101.2, 101.3])
+    monkeypatch.setattr(jobs, "_preview_clock", lambda: next(clock))
+    seen = []
+
+    def work(context):
+        for text in ("a", "ab", "abc", "abcd"):
+            context.preview(text)
+            seen.append(job.preview)
+
+    job = runner.create(title="t", page="test")
+    runner.submit(job, work)
+    wait_for(lambda: job.state is JobState.DONE)
+    assert seen == ["a", "a", "abc", "abc"]
+    assert job.preview == ""
+
+
+def test_a_long_preview_shows_its_end(runner):
+    from textlab.ui.web.jobs import PREVIEW_CHARS, Job
+
+    job = Job(id="x", title="t", page="p", folder=None)
+    job.preview = "a" * 10 + "b" * PREVIEW_CHARS
+    assert job.preview_tail == "…" + "b" * PREVIEW_CHARS

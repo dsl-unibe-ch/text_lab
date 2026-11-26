@@ -577,6 +577,72 @@ legend {
   cursor: pointer;
 }
 
+/* Round radio buttons, filled in red. */
+.radio {
+  flex: none;
+  width: 1.125rem;
+  height: 1.125rem;
+  margin: 0.2rem 0 0;
+  border: 1.5px solid var(--ink);
+  border-radius: 50%;
+  background: var(--sheet);
+  appearance: none;
+  cursor: pointer;
+}
+
+.radio:checked {
+  border-color: var(--red);
+  background: radial-gradient(circle, var(--red) 0 38%, var(--sheet) 42%);
+}
+
+/* A choice among a few, such as a summary type: a radio button, its name
+   and what it does, one row each. */
+.choices {
+  display: grid;
+  border-top: var(--hairline) solid var(--rule);
+}
+
+.choice {
+  display: grid;
+  grid-template-columns: 1.125rem minmax(0, 1fr);
+  gap: var(--space-1) var(--space-3);
+  padding: var(--space-3) var(--space-2);
+  border-bottom: var(--hairline) solid var(--rule);
+  cursor: pointer;
+}
+
+.choice:hover {
+  background: var(--tint);
+}
+
+.choice__title {
+  font-weight: 600;
+}
+
+.choice__text {
+  grid-column: 2;
+  color: var(--ink-3);
+  font-size: var(--text-sm);
+}
+
+.textarea {
+  width: 100%;
+  min-height: 10rem;
+  padding: var(--space-3);
+  border: var(--hairline) solid var(--rule-strong);
+  border-radius: var(--radius);
+  background: var(--sheet);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 0.9375rem;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.textarea:hover {
+  border-color: var(--ink-2);
+}
+
 /* An option: a check box or a heading, its explanation, its settings. */
 .option {
   display: grid;
@@ -1057,6 +1123,26 @@ p.option__title {
   margin: 0;
   color: var(--ink-2);
   font-size: 0.9375rem;
+}
+
+/* What a running job has written so far, such as a summary: the end of
+   it, the newest line at the bottom. */
+.record__preview {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.record__preview-text {
+  display: flex;
+  flex-direction: column-reverse;
+  max-height: 12rem;
+  overflow: hidden;
+  padding: var(--space-3) var(--space-4);
+  border-left: 3px solid var(--rule-strong);
+  background: var(--sheet);
+  color: var(--ink-2);
+  font-size: var(--text-sm);
+  white-space: pre-wrap;
 }
 
 .record__result {
@@ -1828,6 +1914,96 @@ p.option__title {
 
 .plain-text .speaker {
   margin-right: var(--space-2);
+}
+
+/* Text a model wrote, rendered from Markdown: a summary. */
+.prose {
+  max-width: 72ch;
+  font-size: 1.0625rem;
+  line-height: 1.6;
+}
+
+.prose h1,
+.prose h2,
+.prose h3,
+.prose h4 {
+  margin: var(--space-5) 0 var(--space-2);
+  font-size: var(--text-lg);
+}
+
+.prose > :first-child {
+  margin-top: 0;
+}
+
+.prose ul,
+.prose ol {
+  margin: 0 0 var(--space-3);
+  padding-left: 1.3rem;
+}
+
+.prose li + li {
+  margin-top: var(--space-1);
+}
+
+.prose li > p {
+  margin: 0;
+}
+
+.prose table {
+  margin: 0 0 var(--space-3);
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.prose th,
+.prose td {
+  padding: var(--space-1) var(--space-3) var(--space-1) 0;
+  border-bottom: var(--hairline) solid var(--rule);
+  text-align: left;
+}
+
+.prose blockquote {
+  margin: 0 0 var(--space-3);
+  padding-left: var(--space-4);
+  border-left: 3px solid var(--rule-strong);
+  color: var(--ink-2);
+}
+
+/* Citations: the times of the passages a point comes from. They play the
+   passage, or show it in the transcript. */
+.cites {
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.cite {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--red-text);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-decoration: underline dotted;
+  text-underline-offset: 0.2em;
+  cursor: pointer;
+}
+
+.cite:hover {
+  text-decoration-style: solid;
+}
+
+.cite--none {
+  margin-left: var(--space-1);
+  color: var(--amber);
+  text-decoration: none;
+  cursor: default;
+}
+
+/* A transcript line a citation showed, marked for a moment. */
+.turn.is-target {
+  background: var(--red-wash);
 }
 
 /* A table of results, such as the recordings of a batch. */

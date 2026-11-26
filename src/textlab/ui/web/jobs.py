@@ -57,6 +57,16 @@ WORKSPACE_AREA = "web-jobs"
 #: streams open through quiet periods with them (phase 0 of the plan).
 PING_SECONDS = 15
 
+#: Least seconds between two previews of a job's output (``JobContext.
+#: preview``), so a model writing many words a second sends few updates.
+PREVIEW_SECONDS = 1.0
+
+#: Characters of a preview the card shows: the end of the output so far.
+PREVIEW_CHARS = 1500
+
+#: The clock previews are timed with; tests replace it.
+_preview_clock = time.monotonic
+
 
 class JobState(enum.StrEnum):
     """Where a job is in its life."""
@@ -124,12 +134,16 @@ class Job:
         folder: The job's private folder in the workspace.
         gpu: The ``gpu_manager`` owner of the job's feature, or ``None``
             for work that does not use the GPU.
+        ollama_model: The Ollama model the job uses, which stays loaded
+            when the GPU is released for it; ``None`` for other jobs.
         cancellable: Whether a running job stops when cancelled. Waiting
             jobs can always be cancelled.
         result_template: Template that shows a finished job's result on
             its card, or ``None`` for the downloads only.
         state: Where the job is in its life.
         progress: The work's latest progress update.
+        preview: The work's output so far, such as a summary being
+            written, shown while it runs.
         submitted: When the job was submitted (seconds since the epoch).
         started: When the work started.
         finished: When the work ended.
@@ -147,10 +161,12 @@ class Job:
     page: str
     folder: Path
     gpu: str | None = None
+    ollama_model: str | None = None
     cancellable: bool = True
     result_template: str | None = None
     state: JobState = JobState.WAITING
     progress: Progress | None = None
+    preview: str = ""
     submitted: float | None = None
     started: float | None = None
     finished: float | None = None
@@ -198,6 +214,13 @@ class Job:
         return end - self.started
 
     @property
+    def preview_tail(self) -> str:
+        """The end of the preview the card shows, at most PREVIEW_CHARS."""
+        if len(self.preview) <= PREVIEW_CHARS:
+            return self.preview
+        return "\u2026" + self.preview[-PREVIEW_CHARS:]
+
+    @property
     def listed_downloads(self) -> list[Download]:
         """The downloads the card lists."""
         return [item for item in self.downloads if item.listed]
@@ -228,6 +251,7 @@ class JobContext:
         """
         self._runner = runner
         self._job = job
+        self._previewed = float("-inf")
 
     @property
     def inputs(self) -> Path:
@@ -253,6 +277,42 @@ class JobContext:
             progress: The update.
         """
         self._runner._update(self._job, progress=progress)
+
+    def preview(self, text: str) -> None:
+        """Show the work's output so far on the job's card.
+
+        For output that grows while the work runs, such as a summary a
+        model writes. Updates reach the card at most every
+        :data:`PREVIEW_SECONDS`; the result replaces the preview when the
+        job ends.
+
+        Args:
+            text: The whole output so far.
+        """
+        now = _preview_clock()
+        if now - self._previewed < PREVIEW_SECONDS:
+            return
+        self._previewed = now
+        self._runner._update(self._job, preview=text)
+
+    def use_gpu(self, feature: str, ollama_model: str | None = None) -> None:
+        """Release the GPU for another step of the work.
+
+        A job's GPU is released for its own feature when it starts. Work
+        with two steps on the GPU, such as transcribing and then
+        summarizing, releases it again before the second. The job holds
+        the GPU throughout, so nothing else runs in between.
+
+        Args:
+            feature: The ``gpu_manager`` owner of the next step.
+            ollama_model: The Ollama model it uses, which stays loaded.
+
+        Raises:
+            RuntimeError: If the job was not created to use the GPU.
+        """
+        if not self._job.gpu:
+            raise RuntimeError("This job was not created to use the GPU.")
+        self._runner._prepare_gpu(feature, ollama_model)
 
     def check_cancelled(self) -> None:
         """Stop the work here if the user cancelled the job.
@@ -297,11 +357,11 @@ class GpuBusyError(RuntimeError):
         self.job = job
 
 
-def _prepare_gpu(feature: str) -> None:
+def _prepare_gpu(feature: str, ollama_model: str | None = None) -> None:
     """Release the GPU for a feature (``gpu_manager.prepare_gpu``)."""
     from textlab.common import gpu_manager
 
-    gpu_manager.prepare_gpu(feature)
+    gpu_manager.prepare_gpu(feature, ollama_model=ollama_model)
 
 
 class JobRunner:
@@ -314,14 +374,15 @@ class JobRunner:
     def __init__(
         self,
         *,
-        prepare_gpu: Callable[[str], Any] = _prepare_gpu,
+        prepare_gpu: Callable[[str, str | None], Any] = _prepare_gpu,
         workspace: Workspace | None = None,
     ):
         """Set up an empty runner; its thread starts with the first job.
 
         Args:
             prepare_gpu: Releases the GPU for a feature when a job of it
-                starts; tests pass a fake.
+                starts, keeping an Ollama model loaded if one is named;
+                tests pass a fake.
             workspace: Where the jobs' folders go; defaults to the session's
                 workspace.
         """
@@ -349,6 +410,7 @@ class JobRunner:
         title: str,
         page: str,
         gpu: str | None = None,
+        ollama_model: str | None = None,
         cancellable: bool = True,
         result_template: str | None = None,
     ) -> Job:
@@ -362,6 +424,8 @@ class JobRunner:
             page: Id of the page the job belongs to.
             gpu: The ``gpu_manager`` owner of the job's feature, or
                 ``None``.
+            ollama_model: The Ollama model the job uses, if any; it stays
+                loaded when the GPU is released for the job.
             cancellable: Whether the work stops when the job is cancelled.
             result_template: Template for the finished job's result.
 
@@ -379,6 +443,7 @@ class JobRunner:
             page=page,
             folder=folder,
             gpu=gpu,
+            ollama_model=ollama_model,
             cancellable=cancellable,
             result_template=result_template,
         )
@@ -699,10 +764,10 @@ class JobRunner:
 
     def _run(self, job: Job, work: Work) -> None:
         """Run one job's work and record how it ended."""
-        changes: dict[str, Any] = {}
+        changes: dict[str, Any] = {"preview": ""}
         try:
             if job.gpu:
-                self._prepare_gpu(job.gpu)
+                self._prepare_gpu(job.gpu, job.ollama_model)
             changes["result"] = work(JobContext(self, job))
             changes["state"] = JobState.DONE
         except CancelledError:

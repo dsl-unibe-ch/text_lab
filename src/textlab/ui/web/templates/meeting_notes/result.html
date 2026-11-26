@@ -1,0 +1,151 @@
+{#- Notes inside their record (job.result is a Notes): the summary with its
+  citations, the passages it cites, the transcript and, for a recording,
+  the player. Citations play the passage they cite (data-seek) or show
+  its line in the transcript (data-goto). Below, the form to summarize
+  the transcript again. -#}
+{% from "components/macros.html" import notice %}
+{% import "components/player.html" as player with context %}
+{% set notes = job.result %}
+{% set first = "summary" if notes.summary else "transcript" %}
+<div class="result"{% if notes.listening %} data-player data-duration="{{ '%.2f' | format(notes.listening.duration) }}"{% endif %}>
+  <ul class="facts" aria-label="About the result">
+    <li>{{ notes.mode_label }}</li>
+    <li>{{ notes.model }}</li>
+    {% if notes.duration is not none %}<li>{{ notes.duration | media_time }} of audio</li>{% endif %}
+    <li>{{ "{:,}".format(notes.words) }} word{{ "s" if notes.words != 1 }}</li>
+    {% if notes.labels %}<li>{{ notes.labels | length }} speaker{{ "s" if notes.labels | length != 1 }}</li>{% endif %}
+    <li>{{ "In English" if notes.output_language else "As spoken" }}</li>
+  </ul>
+
+  {% for remark in notes.remarks %}
+  {% call notice("info") %}<p>{{ remark }}</p>{% endcall %}
+  {% endfor %}
+  {% if notes.error %}
+  {% call notice("error", "The summary failed", details=notes.error_details) %}
+  <p>{{ notes.error }}</p>
+  <p>The transcript is kept: summarize it again below, perhaps with another model.</p>
+  {% endcall %}
+  {% endif %}
+
+  {% if notes.listening %}{{ player.controls(job, notes.listening) }}{% endif %}
+
+  <div class="tabs">
+    <div class="tabs__list" role="tablist" aria-label="Notes of {{ job.title }}">
+      {% if notes.summary %}
+      <button class="tabs__tab" type="button" role="tab" id="{{ job.id }}-tab-summary" aria-selected="true" aria-controls="{{ job.id }}-summary">Summary</button>
+      <button class="tabs__tab" type="button" role="tab" id="{{ job.id }}-tab-sources" aria-selected="false" aria-controls="{{ job.id }}-sources" tabindex="-1">Sources ({{ notes.summary.sources | length }})</button>
+      {% endif %}
+      <button class="tabs__tab" type="button" role="tab" id="{{ job.id }}-tab-transcript" aria-selected="{{ 'true' if first == 'transcript' else 'false' }}" aria-controls="{{ job.id }}-transcript"{% if first != "transcript" %} tabindex="-1"{% endif %}>Transcript</button>
+    </div>
+
+    {% if notes.summary %}
+    {% set cited = notes.summary %}
+    <div class="tabs__panel stack" role="tabpanel" id="{{ job.id }}-summary" aria-labelledby="{{ job.id }}-tab-summary">
+      {% if not cited.sources %}
+      {% call notice("warning", "No sources") %}<p>This summary cites no passages, so its points cannot be traced back. Check it against the transcript, or summarize again with another model.</p>{% endcall %}
+      {% else %}
+      <p class="muted">
+        Each point cites the passages it comes from: click a time to {{ "listen to it" if notes.playable else "see it in the transcript" }}.
+        {{ cited.sources | length }} passage{{ "s are" if cited.sources | length != 1 else " is" }} cited.
+        {% if cited.uncited_points %}{{ cited.uncited_points }} point{{ "s cite" if cited.uncited_points != 1 else " cites" }} nothing: check {{ "these" if cited.uncited_points != 1 else "it" }} first.{% endif %}
+        {% if cited.invalid_citations %}{{ cited.invalid_citations }} citation{{ "s" if cited.invalid_citations != 1 }} of passages that do not exist {{ "were" if cited.invalid_citations != 1 else "was" }} removed.{% endif %}
+      </p>
+      {% endif %}
+      <div class="prose">{{ notes.html }}</div>
+    </div>
+
+    <div class="tabs__panel" role="tabpanel" id="{{ job.id }}-sources" aria-labelledby="{{ job.id }}-tab-sources" hidden>
+      {% if cited.sources %}
+      <div class="table-wrap">
+        <table class="table">
+          <caption class="visually-hidden">Passages the summary cites</caption>
+          <thead>
+            <tr>
+              <th scope="col">Cited as</th>
+              {% if notes.labels %}<th scope="col">Speaker</th>{% endif %}
+              <th scope="col">Passage</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for segment in cited.sources %}
+            <tr>
+              <td class="table__mono">{{ notes.link(segment) }}</td>
+              {% if notes.labels %}<td>{{ segment.speaker or "" }}</td>{% endif %}
+              <td>{{ segment.text }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="muted">The summary cites no passages.</p>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    <div class="tabs__panel" role="tabpanel" id="{{ job.id }}-transcript" aria-labelledby="{{ job.id }}-tab-transcript"{% if first != "transcript" %} hidden{% endif %}>
+      {% if notes.listening %}
+      {{ player.transcript(notes.listening, notes.names) }}
+      {% else %}
+      <ol class="transcript">
+        {% for segment in notes.segments %}
+        {% set label = notes.base_segments[loop.index0].speaker %}
+        <li class="turn" data-line="{{ segment.id }}">
+          <div class="turn__who">
+            {% if segment.speaker %}<span class="speaker speaker--{{ notes.labels.index(label) % 4 + 1 if label in notes.labels else 0 }}">{{ segment.speaker }}</span>{% endif %}
+            <span class="turn__time">{{ notes.label(segment) }}</span>
+          </div>
+          <p class="turn__text">{{ segment.text }}</p>
+        </li>
+        {% endfor %}
+      </ol>
+      {% endif %}
+    </div>
+  </div>
+
+  <details class="disclosure"{% if notes.error %} open{% endif %}>
+    <summary>Summarize again</summary>
+    <form class="again stack-lg" hx-post="{{ root }}/meeting-notes/{{ job.id }}/again" hx-target="#jobs" hx-swap="afterbegin" hx-disabled-elt="find button[type=submit]" aria-label="Summarize {{ job.title }} again">
+      <p class="muted">Without transcribing again: with names for the speakers, another type, model or language.</p>
+      {% if notes.labels %}
+      <fieldset class="field">
+        <legend class="field__label">Names of the speakers</legend>
+        <div class="form-grid">
+          {% for label in notes.labels %}
+          <div class="field">
+            <label class="field__label" for="{{ job.id }}-name-{{ loop.index }}">Speaker {{ loop.index }}</label>
+            <input class="input" id="{{ job.id }}-name-{{ loop.index }}" name="name_{{ label }}" value="{{ notes.names.get(label, '') }}" maxlength="80" autocomplete="off">
+          </div>
+          {% endfor %}
+        </div>
+        <p class="field__help">The summary, its sources and the transcript use these names.</p>
+      </fieldset>
+      {% endif %}
+      <fieldset class="field">
+        <legend class="field__label">Type</legend>
+        {% with name = "mode", chosen = notes.mode, modes = notes.modes %}{% include "meeting_notes/modes.html" %}{% endwith %}
+      </fieldset>
+      <div class="form-grid">
+        <div class="field">
+          <label class="field__label" for="{{ job.id }}-llm">Language model</label>
+          <div class="select-wrap">
+            <select class="select" id="{{ job.id }}-llm" name="llm">
+              {% for model in notes.models %}<option{% if model == notes.model %} selected{% endif %}>{{ model }}</option>{% endfor %}
+            </select>
+            {{ icon("chevron-down", size="sm") }}
+          </div>
+        </div>
+        <fieldset class="field">
+          <legend class="field__label">Language of the summary</legend>
+          <div class="switcher switcher--inline">
+            <label class="switcher__option"><input type="radio" name="output_language" value="English"{% if notes.output_language %} checked{% endif %}><span>English</span></label>
+            <label class="switcher__option"><input type="radio" name="output_language" value="transcript"{% if not notes.output_language %} checked{% endif %}><span>As spoken</span></label>
+          </div>
+        </fieldset>
+      </div>
+      <div>
+        <button class="btn btn--primary" type="submit">Summarize again {{ icon("arrow-right", size="sm") }}</button>
+      </div>
+    </form>
+  </details>
+</div>

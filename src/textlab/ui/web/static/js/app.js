@@ -12,6 +12,8 @@
  *   that follow a choice, tabs.
  * - The audio player of transcripts: plays the recording, marks the
  *   passage and the word being spoken, jumps to a passage or word.
+ * - Citations in a summary without a recording show their line in the
+ *   transcript.
  * - Error notices for failed htmx requests, copying error details.
  *
  * There are no inline scripts (the Content Security Policy forbids them):
@@ -826,6 +828,38 @@
     },
     true
   );
+
+  /* ---- Citations ------------------------------------------------------ */
+
+  /* A citation with data-goto shows the transcript line with that
+     data-line in the same result: its tab is selected, the line scrolled
+     into view and marked for a moment. (Citations with a recording play
+     it instead, through data-seek.) */
+  var calm = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  document.addEventListener("click", function (event) {
+    var link = event.target instanceof Element ? event.target.closest("[data-goto]") : null;
+    var result = link ? link.closest(".result") : null;
+    if (!result) {
+      return;
+    }
+    var line = result.querySelector("[data-line='" + link.getAttribute("data-goto") + "']");
+    if (!line) {
+      return;
+    }
+    var panel = line.closest("[role='tabpanel']");
+    if (panel && panel.hidden) {
+      var tab = result.querySelector("[role='tab'][aria-controls='" + panel.id + "']");
+      if (tab) {
+        selectTab(tab);
+      }
+    }
+    line.scrollIntoView({ block: "center", behavior: calm ? "auto" : "smooth" });
+    line.classList.add("is-target");
+    window.setTimeout(function () {
+      line.classList.remove("is-target");
+    }, 2000);
+  });
 
   /* ---- Start ---------------------------------------------------------- */
 

@@ -7,7 +7,13 @@ from fastapi.testclient import TestClient
 
 from textlab.ui.web.app import SECURITY_HEADERS, create_app, create_pages
 from textlab.ui.web.pages import TOOLS
-from textlab.ui.web.render import NOTICE_HEADER, duration, file_size, time_left
+from textlab.ui.web.render import (
+    NOTICE_HEADER,
+    duration,
+    file_size,
+    markdown,
+    time_left,
+)
 from textlab.ui.web.settings import WebSettings
 from textlab.ui.web.tests.conftest import BASE, PASSWORD, UPLOAD_LIMIT
 
@@ -197,3 +203,22 @@ def test_durations_read_well(seconds, text):
 )
 def test_the_time_left_reads_well(seconds, text):
     assert time_left(seconds) == text
+
+
+def test_model_output_is_rendered_as_safe_markdown():
+    html = markdown(
+        "# Notes\n\n<script>alert(1)</script> **bold** "
+        "![a picture](https://example.org/a.png) "
+        "[bad](javascript:alert(1)) [good](https://example.org)\n\n"
+        "| a | b |\n|---|---|\n| 1 | 2 |\n"
+    )
+    assert "<script>" not in html
+    assert "&lt;script&gt;" in html
+    assert "<strong>bold</strong>" in html
+    assert "<img" not in html
+    assert 'href="javascript' not in html
+    assert (
+        '<a href="https://example.org" target="_blank" '
+        'rel="noopener noreferrer">good</a>'
+    ) in html
+    assert "<table>" in html

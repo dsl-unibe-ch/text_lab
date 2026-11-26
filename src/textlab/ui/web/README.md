@@ -31,10 +31,10 @@ port, base path (`/node/<host>/<port>/`) and the portal's host name;
 | `auth.py` | Login with the session password, the session cookie, CSRF tokens; `LoggedIn`, `Checked` and `protected_router()` for routes |
 | `jobs.py` | The job runner (one job at a time, GPU release at start, cancelling), job cards, downloads, the event stream |
 | `uploads.py` | Reading forms with files, checking them, saving them into a job |
-| `render.py` | Templates, icons, links from the base path, number formats |
+| `render.py` | Templates, icons, links from the base path, number formats, Markdown from models (`markdown()`: raw HTML escaped, no images) |
 | `settings.py` | The server's settings (`TOKEN`, `USER`, `TEXT_LAB_WEB_DEV`) |
-| `pages/` | One module per page (`home`, `transcription`, `placeholder` for the tools not built yet, `dev`), and `TOOLS`, the navigation |
-| `templates/` | `base.html` (layout), `components/macros.html`, `jobs/`, one folder per page (`pages/` for Home and the placeholders, `transcription/`); `mockups/` and `dev/` for the developer pages |
+| `pages/` | One module per page (`home`, `transcription`, `meeting_notes`, `placeholder` for the tools not built yet, `dev`), and `TOOLS`, the navigation |
+| `templates/` | `base.html` (layout), `components/macros.html` and `components/player.html` (the audio player), `jobs/`, one folder per page (`pages/` for Home and the placeholders, `transcription/`, `meeting_notes/`); `mockups/` and `dev/` for the developer pages |
 | `static/` | `css/` (`fonts.css`, `tokens.css`, `layout.css`, `components.css`), `js/` (`app.js`, `theme.js`), `vendor/` (htmx, IBM Plex fonts, Lucide icons; see its README) |
 
 ### Links
@@ -91,6 +91,14 @@ and swaps in the cards and the job indicator as they change (on Home also
 its list of jobs). Short GPU requests outside jobs (a chat message) use
 `runner.exclusive()`.
 
+Work with two steps on the GPU releases it again between them with
+`context.use_gpu(feature, ollama_model)` (Meeting Notes: transcribing,
+then summarizing). A job that uses an Ollama model names it in
+`runner.create(..., ollama_model=...)`, so the release keeps it loaded.
+Output that grows while the work runs, such as a summary, is shown on the
+card with `context.preview(text_so_far)`; updates reach the card at most
+once a second.
+
 Short work without the GPU, which should not wait for an hour-long job,
 starts at once beside the queue: `runner.submit(job, work, at_once=True)`
 (the review of a transcript). Files a result uses but the card should not
@@ -110,7 +118,8 @@ Checked by `tests/test_rules.py`:
 
 - Pages import from the features only their `service` modules, and only the
   names those export in `__all__` (also when they read them as
-  `service.name`).
+  `service.name`, or under another name such as
+  `from textlab.features.transcription import service as transcription`).
 - No inline scripts, event handlers or styles in templates: the Content
   Security Policy blocks them. Behaviour goes into `static/js/app.js`,
   wired through `data-` attributes; sizes and colours into the style
@@ -140,13 +149,20 @@ exists), and a demo job that runs through the job runner without a model.
 
 ### The audio player
 
-Transcription's result (`templates/transcription/result.html`) is a player:
-an `<audio>` element that loads the job's MP3 only when played, a waveform
-of levels measured on the server, and the transcript, whose passages
-(`.turn`) and words (`.w`) carry their times in `data-s` and `data-e`.
-`app.js` marks the passage and word being spoken, keeps the passage in
-view, plays from a clicked time or word, and treats the waveform as a
-slider. Meeting Notes will reuse it.
+The macros in `templates/components/player.html` make a player: `controls`
+(an `<audio>` element that loads the job's MP3 only when played, the time,
+a waveform of levels measured on the server) and `transcript` (passages,
+`.turn`, and words, `.w`, with their times in `data-s` and `data-e`). Put
+both inside one element with `data-player`. `app.js` marks the passage and
+word being spoken, keeps the passage in view, plays from any element with
+`data-seek` inside it (a time, a word, a citation in Meeting Notes' summary)
+and treats the waveform as a slider. Transcription puts the player in a
+tab; Meeting Notes puts the controls above its tabs, so citations in the
+summary play the recording while it shows.
+
+Without a recording, Meeting Notes' citations carry `data-goto`: `app.js`
+selects the tab of the transcript line with that `data-line` in the same
+result and marks it.
 
 ## Tests
 
@@ -154,6 +170,8 @@ slider. Meeting Notes will reuse it.
 login and CSRF (`test_auth.py`), pages, headers and errors (`test_app.py`),
 the job runner (`test_jobs.py`), jobs through the web with the demo job
 (`test_job_pages.py`), uploads (`test_uploads.py`), the Transcription page
-and Home with a faked backend (`test_transcription_page.py`) and the rules
-(`test_rules.py`). The launcher and the Open OnDemand files are tested in
+and Home with a faked backend (`test_transcription_page.py`), Meeting Notes
+with a faked model (`test_meeting_notes_page.py`) and the rules
+(`test_rules.py`). The fake transcription backend is the `backend` fixture
+in `conftest.py`. The launcher and the Open OnDemand files are tested in
 `tests/test_launch.py` at the repository root.

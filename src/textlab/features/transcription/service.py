@@ -61,6 +61,7 @@ from textlab.features.transcription import audio, formats
 from textlab.features.transcription.audio import AudioDecodeError
 from textlab.features.transcription.formats import (
     base_name,
+    format_duration,
     turns,
     turns_from_table,
 )
@@ -114,6 +115,7 @@ __all__ = [
     "run_transcription",
     # Results
     "base_name",
+    "format_duration",
     "prepare_playback",
     "save_transcript_files",
     "save_zip",

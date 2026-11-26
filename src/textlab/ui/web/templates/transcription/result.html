@@ -3,6 +3,7 @@
   the recording, marks the passage and the word being spoken, and jumps
   to a passage or word when it is clicked. -#}
 {% from "components/macros.html" import notice, spec %}
+{% import "components/player.html" as player with context %}
 {% set view = job.result %}
 <div class="result">
   <ul class="facts" aria-label="About the result">
@@ -30,44 +31,8 @@
     </div>
 
     <div class="tabs__panel stack" role="tabpanel" id="{{ job.id }}-listen" aria-labelledby="{{ job.id }}-tab-listen" data-player data-duration="{{ '%.2f' | format(view.duration) }}">
-      <div class="player">
-        <audio preload="none" src="{{ root }}/jobs/{{ job.id }}/files/{{ view.audio | urlencode }}" data-player-audio></audio>
-        <div class="player__bar">
-          <button class="player__play" type="button" aria-label="Play" data-player-toggle>
-            <span class="player__icon-play">{{ icon("play", size="sm") }}</span>
-            <span class="player__icon-pause">{{ icon("pause", size="sm") }}</span>
-          </button>
-          <span class="player__time"><span data-player-now>{{ 0 | media_time }}</span> / {{ view.duration | media_time }}</span>
-          {% if view.timed_words %}
-          <div class="switcher switcher--inline" role="radiogroup" aria-label="Show the transcript as">
-            <label class="switcher__option"><input type="radio" name="{{ job.id }}-view" value="passages" data-player-view checked><span>Passages</span></label>
-            <label class="switcher__option"><input type="radio" name="{{ job.id }}-view" value="words" data-player-view><span>Words</span></label>
-          </div>
-          {% endif %}
-        </div>
-        <div class="waveform" role="slider" tabindex="0" aria-label="Position in the recording" aria-valuemin="0" aria-valuemax="{{ view.duration | int }}" aria-valuenow="0" aria-valuetext="{{ 0 | media_time }}" data-player-wave>
-          {%- for level in view.levels %}<span class="waveform__bar waveform__bar--{{ level }}"></span>{% endfor -%}
-        </div>
-      </div>
-      <ol class="transcript" data-player-transcript>
-        {% for turn in view.turns %}
-        <li class="turn" data-s="{{ '%.2f' | format(turn.start) }}" data-e="{{ '%.2f' | format(turn.end) }}">
-          <div class="turn__who">
-            {% if turn.speaker is not none %}<span class="speaker speaker--{{ (turn.speaker_number - 1) % 4 + 1 if turn.speaker_number else 0 }}">{{ "Speaker %d" % turn.speaker_number if turn.speaker_number else "Unknown" }}</span>{% endif %}
-            <button class="turn__time" type="button" data-seek="{{ '%.2f' | format(turn.start) }}" aria-label="Play from {{ turn.start | media_time }}">{{ turn.start | media_time }}</button>
-          </div>
-          <p class="turn__text">
-            {%- if turn.words -%}
-            {%- for word in turn.words -%}
-            {%- if word.start is not none %}<span class="w" data-s="{{ '%.2f' | format(word.start) }}" data-e="{{ '%.2f' | format(word.end if word.end is not none else word.start) }}" data-t="{{ word.start | media_time }}">{{ word.text }}</span>{% else %}{{ word.text }}{% endif %}{{ " " if view.spaced and not loop.last }}
-            {%- endfor -%}
-            {%- else -%}
-            {{ turn.text }}
-            {%- endif -%}
-          </p>
-        </li>
-        {% endfor %}
-      </ol>
+      {{ player.controls(job, view) }}
+      {{ player.transcript(view) }}
     </div>
 
     <div class="tabs__panel" role="tabpanel" id="{{ job.id }}-text" aria-labelledby="{{ job.id }}-tab-text" hidden>

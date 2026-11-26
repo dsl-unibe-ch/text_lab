@@ -251,11 +251,16 @@ def languages() -> list[tuple[str, str, str]]:
     return choices
 
 
-def read_options(form: FormData) -> service.TranscriptionOptions:
+def read_options(
+    form: FormData, *, other_model: bool = True
+) -> service.TranscriptionOptions:
     """Read the transcription settings from the form.
 
     Args:
         form: The form.
+        other_model: Whether the form offers another Whisper model, in its
+            ``model`` field. Without it the model follows from the
+            language, whatever the form holds.
 
     Returns:
         The options.
@@ -267,7 +272,7 @@ def read_options(form: FormData) -> service.TranscriptionOptions:
     language = str(form.get("language") or "").strip() or None
     if language is not None and language not in service.LANGUAGES.values():
         raise uploads.UploadError("Choose a language from the list.")
-    model = str(form.get("model") or "").strip()
+    model = str(form.get("model") or "").strip() if other_model else ""
     if not model:
         try:
             model = service.default_model(language)

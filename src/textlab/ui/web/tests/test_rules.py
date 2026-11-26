@@ -29,14 +29,19 @@ EMOJI = re.compile("[\U0001f000-\U0001faff☀-➿️]")
 
 
 def feature_imports(path):
-    """Return (module, names) of the feature imports of a page module."""
+    """Return (module, [(name, local name)]) of a page's feature imports."""
     tree = ast.parse(path.read_text(encoding="utf-8"))
     found = []
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and (node.module or "").startswith(
             "textlab.features"
         ):
-            found.append((node.module, [alias.name for alias in node.names]))
+            found.append(
+                (
+                    node.module,
+                    [(a.name, a.asname or a.name) for a in node.names],
+                )
+            )
         elif isinstance(node, ast.Import):
             for alias in node.names:
                 if alias.name.startswith("textlab.features"):
@@ -44,15 +49,15 @@ def feature_imports(path):
     return found
 
 
-def service_attributes(path):
-    """Return the names a page module reads from ``service``."""
+def attributes_read(path, local_name):
+    """Return the names a page module reads as ``local_name.<name>``."""
     tree = ast.parse(path.read_text(encoding="utf-8"))
     return {
         node.attr
         for node in ast.walk(tree)
         if isinstance(node, ast.Attribute)
         and isinstance(node.value, ast.Name)
-        and node.value.id == "service"
+        and node.value.id == local_name
     }
 
 
@@ -63,14 +68,17 @@ def test_pages_use_only_the_services_exports(path):
     for module, names in feature_imports(path):
         if module.endswith(".service"):
             service = importlib.import_module(module)
-            assert set(names) <= set(service.__all__), (module, names)
-        else:
-            # "from textlab.features.x import service" is the other way;
-            # then only the exported names are read from it.
-            assert names == ["service"], f"{path.name} imports {module}"
-            service = importlib.import_module(f"{module}.service")
-            used = service_attributes(path)
-            assert used <= set(service.__all__), used - set(service.__all__)
+            imported = {name for name, _ in names}
+            assert imported <= set(service.__all__), (module, imported)
+            continue
+        # "from textlab.features.x import service [as y]" is the other way;
+        # then only the exported names are read from it.
+        assert [name for name, _ in names] == ["service"], (
+            f"{path.name} imports {module}"
+        )
+        service = importlib.import_module(f"{module}.service")
+        used = attributes_read(path, names[0][1])
+        assert used <= set(service.__all__), used - set(service.__all__)
 
 
 @pytest.mark.parametrize("path", TEMPLATES, ids=TEMPLATE_IDS)
@@ -155,3 +163,38 @@ def test_vendored_icons_are_unchanged_lucide_files():
         text = path.read_text()
         assert text.startswith("<!-- @license lucide-static v1.71.0 - ISC -->")
         assert "<script" not in text
+
+
+def top_level_rules(css):
+    """Return ``(selectors, body)`` of the rules outside ``@media`` blocks."""
+    outside, depth, start = [], 0, 0
+    for match in re.finditer(r"@media[^{]*\{|\{|\}", css):
+        if match.group().startswith("@media"):
+            if depth == 0:
+                outside.append(css[start : match.start()])
+            depth += 1
+        elif match.group() == "{" and depth:
+            depth += 1
+        elif match.group() == "}" and depth:
+            depth -= 1
+            if depth == 0:
+                start = match.end()
+    outside.append(css[start:])
+    text = re.sub(r"/\*.*?\*/", "", "".join(outside), flags=re.S)
+    return [
+        ({part.strip() for part in head.split(",")}, body)
+        for head, body in re.findall(r"([^{}]+)\{([^{}]*)\}", text)
+    ]
+
+
+def test_the_menu_button_is_hidden_on_wide_screens():
+    # The index is always shown on wide screens; a Menu button there would
+    # do nothing. The general button rule must not show it again.
+    css = (STATIC_DIR / "css" / "layout.css").read_text()
+    display = [
+        re.search(r"display:\s*([a-z-]+)", body).group(1)
+        for selectors, body in top_level_rules(css)
+        if selectors & {".statusbar__menu", ".statusbar__button"}
+        and "display:" in body
+    ]
+    assert display[-1] == "none"

@@ -21,19 +21,36 @@ The summary's structure depends on the mode (:data:`SUMMARY_MODES`), e.g.
 meeting notes with decisions and action items, or lecture notes.
 
 Streaming functions are plain generators of text, so any interface can
-display them as they arrive.
+display them as they arrive. :func:`summarize` does all of it in one call,
+with callbacks for progress and the text so far, and can be cancelled; the
+web UI uses it.
 """
 
 from __future__ import annotations
 
+import functools
 import os
-from collections.abc import Iterator, Sequence
+import threading
+from collections.abc import Callable, Iterator, Sequence
 from typing import Any
 
 import ollama
 
-from textlab.common.ollama import call_no_think, estimate_tokens, message_text
-from textlab.common.progress import Progress, ProgressCallback, no_progress
+from textlab.common import gpu_manager
+from textlab.common.model_config import get_available_models
+from textlab.common.ollama import (
+    call_no_think,
+    check_ollama_server,
+    estimate_tokens,
+    is_model_loaded,
+    message_text,
+)
+from textlab.common.progress import (
+    Progress,
+    ProgressCallback,
+    check_cancelled,
+    no_progress,
+)
 from textlab.features.meeting_notes.citations import (
     cite_summary,
     format_citations,
@@ -63,6 +80,10 @@ __all__ = [
     "get_summary_stream",
     "get_synthesis_stream",
     "needs_chunking",
+    "summarize",
+    # Models and the server
+    "server_ready",
+    "summary_models",
     # Transcripts
     "build_speaker_context",
     "rename_speakers",
@@ -787,6 +808,135 @@ def get_synthesis_stream(
     notes = _condensed(model_name, partial_notes, output_language)
     messages = _build_synthesis_messages(notes, mode_key, output_language)
     yield from _stream_text(model_name, messages, max_context())
+
+
+#: Characters a summary grows by between two calls of ``on_text``.
+TEXT_STEP = 200
+
+
+def summarize(
+    model_name: str,
+    segments: Sequence[Segment],
+    mode_key: str,
+    *,
+    speaker_context: str | None = None,
+    output_language: str | None = "English",
+    on_progress: ProgressCallback = no_progress,
+    on_text: Callable[[str], None] | None = None,
+    cancel: threading.Event | None = None,
+) -> str:
+    """Summarize a transcript, in one request or in chunks as needed.
+
+    Chooses with :func:`needs_chunking` between one streamed request and
+    the map-reduce of :func:`get_partial_notes` and
+    :func:`get_synthesis_stream`.
+
+    Args:
+        model_name: The Ollama model identifier.
+        segments: The transcript.
+        mode_key: Key in SUMMARY_MODES.
+        speaker_context: Optional sentence describing the speakers.
+        output_language: Language of the summary; ``None`` for the
+            transcript's language.
+        on_progress: Receives a message for each step, and the chunks'
+            progress.
+        on_text: Receives the summary written so far, every
+            :data:`TEXT_STEP` characters and at the end.
+        cancel: Checked between chunks and between streamed tokens.
+
+    Returns:
+        The summary, with the model's citations; check them with
+        :func:`cite_summary`.
+
+    Raises:
+        textlab.common.progress.CancelledError: If ``cancel`` was set.
+    """
+    if not is_model_loaded(model_name):
+        on_progress(
+            Progress(
+                f"Loading {model_name} into GPU memory. The first run can "
+                "take a minute or two."
+            )
+        )
+    if needs_chunking(segments):
+
+        def chunk_progress(update: Progress) -> None:
+            check_cancelled(cancel)
+            on_progress(update)
+
+        notes = get_partial_notes(
+            model_name,
+            segments,
+            mode_key,
+            speaker_context,
+            on_progress=chunk_progress,
+            output_language=output_language,
+        )
+        check_cancelled(cancel)
+        on_progress(
+            Progress(
+                "Writing the summary from the notes of all parts",
+                len(notes) / (len(notes) + 1),
+            )
+        )
+        stream = get_synthesis_stream(
+            model_name, notes, mode_key, output_language
+        )
+    else:
+        on_progress(Progress("Writing the summary"))
+        stream = get_summary_stream(
+            model_name, segments, mode_key, speaker_context, output_language
+        )
+
+    parts: list[str] = []
+    written = shown = 0
+    try:
+        for token in stream:
+            check_cancelled(cancel)
+            parts.append(token)
+            written += len(token)
+            if on_text is not None and written - shown >= TEXT_STEP:
+                shown = written
+                on_text("".join(parts))
+    finally:
+        # Closing the generator ends the request to Ollama early.
+        close = getattr(stream, "close", None)
+        if close is not None:
+            close()
+    summary = "".join(parts)
+    if on_text is not None:
+        on_text(summary)
+    return summary
+
+
+@functools.cache
+def _gpu_name() -> str:
+    """Return the session's GPU, asked once (it does not change)."""
+    return gpu_manager.get_gpu_name()
+
+
+def summary_models() -> list[str]:
+    """Return the models to choose from, for this session's GPU.
+
+    Returns:
+        The Ollama model names of the site's model list (``models.json``);
+        large models only on GPUs with much memory. The first is the
+        default.
+    """
+    return get_available_models(_gpu_name())
+
+
+def server_ready(attempts: int = 1) -> bool:
+    """Return whether the session's Ollama server accepts connections.
+
+    Args:
+        attempts: How many times to try, half a second apart; the server
+            may still be starting when a session begins.
+
+    Returns:
+        True if it does.
+    """
+    return check_ollama_server(attempts=attempts)
 
 
 # ---------------------------------------------------------------------------

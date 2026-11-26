@@ -5,9 +5,11 @@
     [Phase 0 results](#phase-0-results)). Phase 1 built the foundation, the
     launcher and the redeployment files, and the mockups of Home and
     Transcription were agreed on 27 November (see
-    [Phase 1 progress](#phase-1-progress)). Phase 2, the pilot, is built
-    and waits for its test in the sandbox (see
-    [Phase 2 progress](#phase-2-progress)). The work happens on the local
+    [Phase 1 progress](#phase-1-progress)). Phase 2, the pilot, was tried
+    in the sandbox and committed on 27 November (see
+    [Phase 2 progress](#phase-2-progress)). Phase 3 started with Meeting
+    Notes, which waits for its sandbox test (see
+    [Phase 3 progress](#phase-3-progress)). The work happens on the local
     branch `feat/web-ui`, one commit per phase or page, and reaches `main`
     when the whole UI is done. Update this page when a phase ends or a
     decision changes.
@@ -234,8 +236,8 @@ Rules, checked by tests as for the Streamlit pages today:
 |---|---|---|
 | 0. Spike (done) | A minimal FastAPI app in the sandbox, behind the Open OnDemand proxy: base path, login cookie, SSE progress, a 2 GB upload streamed to the workspace, a download | All of it works, or a fallback is chosen (HTMX polling every second instead of SSE) |
 | 1. Foundation (done) | The launcher and the redeployment files (deployed at the switch). In `ui/web/`: app factory, login, CSRF, CSP, layout, design system and components, job runner (queue, SSE, cancelling), upload and download helpers, error pages, test harness. Mockups of Home and Transcription | An empty app with login, navigation and a demo job runs in the sandbox, with tests, and the mockups are agreed |
-| 2. Pilot (in progress) | Home and Transcription: a recording or a ZIP batch, language and model, voice activity detection, speaker identification with speaker counts, the audio player with word highlighting, every download | Everything the Streamlit page does works, with tests, and the UI test passes |
-| 3. Pages | One commit each, in this order: Meeting Notes, Translation, OCR (automatic mode, legacy engines, historic handwriting, Hugging Face models), Topic Modeling, Chat, Visualize Data, Knowledge Graph | As in phase 2, with the page's user guide drafted |
+| 2. Pilot (done) | Home and Transcription: a recording or a ZIP batch, language and model, voice activity detection, speaker identification with speaker counts, the audio player with word highlighting, every download | Everything the Streamlit page does works, with tests, and the UI test passes |
+| 3. Pages (in progress) | One commit each, in this order: Meeting Notes, Translation, OCR (automatic mode, legacy engines, historic handwriting, Hugging Face models), Topic Modeling, Chat, Visualize Data, Knowledge Graph | As in phase 2, with the page's user guide drafted |
 | 4. Switch | The branch merged into `main`; the new user guide replaces the old one; a release, the HPC redeploy, `TEXT_LAB_UI=web` in production | Users work in the new UI; Streamlit can still be selected as a rollback |
 | 5. Removal | `ui/streamlit/` and its tests are removed; Streamlit leaves the image | One release after the switch, without a rollback |
 
@@ -375,21 +377,68 @@ Built on 27 November 2026, with tests
 - The user guide's draft: `docs/next/transcription.md`, left out of the
   published site (`exclude_docs` in `mkdocs.yml`).
 
-Still to do in phase 2:
-
-1. Try it in the sandbox (`TEXT_LAB_UI=web`), against the Streamlit page:
-   one recording with each option (a language, detection, Swiss German,
-   another model, skipping silence, speaker counts); every download, and
-   the ZIP's WAV in ELAN; the player (play, pause, clicking times and
-   words, the waveform, the words view, a recording over 30 minutes); a
-   ZIP batch with a broken file; a review with uploads and with paths on
-   the cluster; leaving the page while a job runs; Home's list of jobs;
-   narrow screens and the dark theme.
-2. Commit phase 2.
-
 A test runs a recording through the page with the real pipeline (Whisper
 "tiny" on a generated tone, in the image, marked `container` and `slow`):
-the worker, ffmpeg, the MP3 and the ZIP with its WAV work together.
+the worker, ffmpeg, the MP3 and the ZIP with its WAV work together. The
+sandbox test passed on 27 November, and phase 2 was committed.
+
+## Phase 3 progress
+
+### Meeting Notes
+
+Built on 27 November 2026, with tests
+(`src/textlab/ui/web/tests/test_meeting_notes_page.py`, and in
+`features/meeting_notes/tests/` for `summarize`):
+
+- **From a recording**: one job transcribes the recording (with the
+  Transcription page's settings: language, speaker counts), then releases
+  the GPU for the language model (`JobContext.use_gpu`) and summarizes.
+  The transcription has the whole GPU: the job's language model is loaded
+  only for the second step. **From a transcript**: a segment table, a text
+  file or pasted text; the job names its model (`ollama_model`), so the
+  GPU release keeps it loaded.
+- **While it runs**, the card shows the summary as the model writes it
+  (`JobContext.preview`, at most once a second). Cancelling stops the
+  model between tokens.
+- **The result**: the summary rendered from Markdown on the server
+  (`render.markdown`: raw HTML escaped, no images, links in a new tab),
+  with its citations as the passages' times. With a recording, the
+  player's controls sit above the tabs and every citation plays its
+  passage; without one, a citation shows its line in the Transcript tab.
+  Sources, the transcript (with the player, as on Transcription), and the
+  downloads of the Streamlit page.
+- **Speakers** are named *Speaker 1*, *Speaker 2* by order of appearance,
+  as on Transcription, in the summary, its sources and the transcript.
+  **Summarize again** (below a result) gives them names and chooses
+  another type, model or language: a new job from the same transcript,
+  with the recording linked into it, no new transcription. The Streamlit
+  page's "Clear GPU memory" is gone: jobs release the GPU themselves.
+- **A failed summary** keeps the transcript as the result, with the error
+  and the form to summarize again open, as the Streamlit page's retry did.
+- `summarize()` in the meeting notes service does the single-pass or
+  chunked summary in one call, with progress, the text so far and
+  cancelling; `summary_models()` and `server_ready()` also moved out of
+  the page. The player became macros shared by both pages
+  (`templates/components/player.html`).
+- The user guide's draft: `docs/next/meeting_notes.md`.
+- Fixed with it: the Menu button showed on wide screens, where the index
+  is always visible, so it did nothing there; it now shows only on narrow
+  screens, where it opens the index (a test checks the rule order).
+- `markdown-it-py` is named in `text_lab.def` (it was in the lock already,
+  through `rich`), so it stays if `rich` goes; no rebuild is needed.
+
+Fixed after the first sandbox run: the form's language model field was
+called `model`, which the Transcription page's settings (reused here)
+read as another Whisper model, so the transcription tried to load the
+language model. The field is now `llm`, Meeting Notes reads the
+transcription settings without another model
+(`read_options(form, other_model=False)`), and a test checks it.
+
+Still to do: try Meeting Notes in the sandbox against the Streamlit page
+(both sources, each summary type, a long recording that is summarized in
+chunks, citations that play, summarizing again with names, a failure such
+as a model that is not installed, cancelling while it writes), then commit
+it.
 
 ## Testing
 

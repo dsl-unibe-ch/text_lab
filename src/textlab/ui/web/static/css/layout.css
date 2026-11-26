@@ -361,7 +361,6 @@ code {
   text-transform: uppercase;
 }
 
-.statusbar__menu,
 .statusbar__brand {
   display: none;
 }
@@ -413,6 +412,13 @@ code {
   color: var(--ink);
   text-decoration: underline;
   text-underline-offset: 0.3em;
+}
+
+/* The menu opens the index on narrow screens. Wide screens always show the
+   index, so the button is hidden there; this rule comes after
+   .statusbar__button, which would show it again. */
+.statusbar__menu {
+  display: none;
 }
 
 .statusbar__key {

@@ -1,0 +1,11 @@
+{#- The summary types as a list of choices; included with name (the field)
+  and chosen (the key checked), and modes ((key, name, description)). -#}
+<div class="choices">
+  {% for key, label, description in modes %}
+  <label class="choice">
+    <input class="radio" type="radio" name="{{ name }}" value="{{ key }}"{% if key == chosen %} checked{% endif %}>
+    <span class="choice__title">{{ label }}</span>
+    <span class="choice__text">{{ description }}</span>
+  </label>
+  {% endfor %}
+</div>

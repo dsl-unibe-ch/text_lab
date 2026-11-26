@@ -140,9 +140,11 @@ From: nvidia/cuda:12.8.0-cudnn-devel-ubuntu22.04
 
     # Web UI (FastAPI + HTMX). mcp is listed again so starlette resolves for
     # both; fastapi 0.164+ needs a newer starlette than the lock's 1.3.1.
+    # markdown-it-py renders model output (Meeting Notes); rich already
+    # brings it, it is named so it stays if rich goes.
     $PIP install --no-cache-dir \
         "fastapi>=0.115,<0.164" "uvicorn[standard]" jinja2 python-multipart \
-        sse-starlette itsdangerous httpx "mcp[cli]>=1.28,<2" \
+        sse-starlette itsdangerous httpx "mcp[cli]>=1.28,<2" markdown-it-py \
         --constraint $LOCKS/main.txt
 
     # Offline NLP assets.

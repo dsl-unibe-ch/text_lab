@@ -41,6 +41,12 @@
         {% if fraction is not none %}<span class="meter__value">{{ (fraction * 100) | round | int }}%</span>{% endif %}
       </p>
     </div>
+    {% if job.preview %}
+    <div class="record__preview">
+      <p class="label">Written so far</p>
+      <div class="record__preview-text">{{ job.preview_tail }}</div>
+    </div>
+    {% endif %}
     {% if job.cancelling %}<p class="record__line">Stopping after the current step.</p>{% endif %}
     {% elif state == "done" %}
     <div class="record__result">

@@ -65,6 +65,7 @@ TOOLS: tuple[Tool, ...] = (
         "/meeting-notes",
         "Audio",
         "Transcribe a meeting and get a summary that cites the recording.",
+        ready=True,
     ),
     Tool(
         "ocr",
@@ -167,9 +168,20 @@ def routers(settings: WebSettings) -> list[APIRouter]:
     Returns:
         The routers.
     """
-    from textlab.ui.web.pages import dev, home, placeholder, transcription
+    from textlab.ui.web.pages import (
+        dev,
+        home,
+        meeting_notes,
+        placeholder,
+        transcription,
+    )
 
-    result = [home.router, transcription.router, placeholder.router]
+    result = [
+        home.router,
+        transcription.router,
+        meeting_notes.router,
+        placeholder.router,
+    ]
     if settings.dev:
         result.append(dev.router)
     return result

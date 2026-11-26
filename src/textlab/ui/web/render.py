@@ -100,6 +100,43 @@ def duration(seconds: int | float | None) -> str:
     return f"{seconds} s"
 
 
+@functools.cache
+def _markdown_parser() -> Any:
+    """Return the Markdown parser for model output, built once."""
+    from markdown_it import MarkdownIt
+
+    parser = MarkdownIt(
+        "commonmark", {"html": False, "linkify": False, "typographer": False}
+    )
+    parser.enable(["table", "strikethrough"])
+    parser.disable("image")
+
+    def link_open(renderer, tokens, index, options, env):
+        tokens[index].attrSet("target", "_blank")
+        tokens[index].attrSet("rel", "noopener noreferrer")
+        return renderer.renderToken(tokens, index, options, env)
+
+    parser.add_render_rule("link_open", link_open)
+    return parser
+
+
+def markdown(text: str) -> Markup:
+    """Render Markdown a model wrote as HTML that is safe to show.
+
+    HTML in the text is escaped, not passed on; links with schemes such as
+    ``javascript:`` are not made links; images are not shown (the page
+    would not load them anyway); links open in a new tab. Tables and
+    strikethrough are read, as models write them.
+
+    Args:
+        text: The Markdown.
+
+    Returns:
+        The HTML.
+    """
+    return Markup(_markdown_parser().render(text))
+
+
 def media_time(seconds: int | float | None) -> str:
     """Return a time in a recording, as players show it.
 

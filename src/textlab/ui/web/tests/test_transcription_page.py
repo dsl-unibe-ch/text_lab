@@ -11,7 +11,6 @@ import os
 import re
 import threading
 import zipfile
-from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -29,89 +28,6 @@ WORDS_TABLE = (
     "1\t2\t00:00:00.500\t00:00:01.000\tthere.\tSPEAKER_00\r\n"
     "2\t1\t00:00:01.200\t00:00:01.600\tYes.\tSPEAKER_01\r\n"
 )
-
-
-def transcript_for(name):
-    """A transcript with two speakers, as WhisperX gives it."""
-    return service.Transcript(
-        name=name,
-        language="de",
-        duration_seconds=12.5,
-        has_speakers=True,
-        segments=[
-            {
-                "start": 0.0,
-                "end": 1.6,
-                "text": "Guten Morgen. Hallo.",
-                "words": [
-                    {
-                        "word": "Guten",
-                        "start": 0.0,
-                        "end": 0.4,
-                        "speaker": "SPEAKER_00",
-                    },
-                    {
-                        "word": "Morgen.",
-                        "start": 0.5,
-                        "end": 1.0,
-                        "speaker": "SPEAKER_00",
-                    },
-                    {
-                        "word": "Hallo.",
-                        "start": 1.2,
-                        "end": 1.6,
-                        "speaker": "SPEAKER_01",
-                    },
-                ],
-            }
-        ],
-    )
-
-
-@pytest.fixture
-def backend(monkeypatch, tmp_path):
-    """Fake the transcription and the playback; record the calls."""
-    monkeypatch.setenv("TEXT_LAB_WORKDIR", str(tmp_path / "work"))
-    get_settings.cache_clear()
-    storage.get_workspace.cache_clear()
-    calls = SimpleNamespace(runs=[], gate=None)
-
-    def prepare_playback(source, folder, name, *, wav=False, cancel=None):
-        assert source.is_file()
-        mp3 = folder / f"{name}.mp3"
-        mp3.write_bytes(b"ID3" + bytes(997))
-        wav_path = None
-        if wav:
-            wav_path = folder / f"{name}.wav"
-            wav_path.write_bytes(b"RIFF" + bytes(96))
-        return service.Playback(
-            path=mp3, duration_seconds=12.5, levels=(1, 4, 8, 2), wav=wav_path
-        )
-
-    def run_transcription(files, options, *, on_progress, cancel=None):
-        calls.runs.append(([file.name for file in files], options))
-        for file in files:
-            assert file.path.is_file()
-        if calls.gate is not None:
-            assert calls.gate.wait(10)
-        return service.TranscriptionResult(
-            transcripts=[
-                transcript_for(file.name)
-                for file in files
-                if not file.name.startswith("broken")
-            ],
-            skipped=[
-                service.SkippedFile(file.name, "could not decode audio")
-                for file in files
-                if file.name.startswith("broken")
-            ],
-        )
-
-    monkeypatch.setattr(service, "prepare_playback", prepare_playback)
-    monkeypatch.setattr(service, "run_transcription", run_transcription)
-    yield calls
-    get_settings.cache_clear()
-    storage.get_workspace.cache_clear()
 
 
 def post(client, data, files=None):

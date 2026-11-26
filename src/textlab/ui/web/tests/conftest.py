@@ -1,13 +1,18 @@
 """Fixtures for the web UI's tests: an app under a session's base path, a
-job runner with a fake GPU release, and clients with and without login."""
+job runner with a fake GPU release, clients with and without login, and a
+fake transcription backend."""
 
 import re
 import time
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 
+from textlab.common import storage
+from textlab.common.config import get_settings
 from textlab.common.storage import Workspace
+from textlab.features.transcription import service as transcription
 from textlab.ui.web import auth
 from textlab.ui.web.app import create_app
 from textlab.ui.web.jobs import JobRunner
@@ -40,10 +45,23 @@ def no_login_delay(monkeypatch):
     monkeypatch.setattr(auth, "FAILED_LOGIN_DELAY", 0)
 
 
+class ReleaseLog(list):
+    """A fake GPU release that notes what it released the GPU for.
+
+    Each call adds the feature, or ``"feature:model"`` when an Ollama model
+    is to stay loaded.
+    """
+
+    def __call__(self, feature, ollama_model=None):
+        self.append(
+            feature if ollama_model is None else f"{feature}:{ollama_model}"
+        )
+
+
 @pytest.fixture
 def released():
     """The features the fake GPU release was called for, in order."""
-    return []
+    return ReleaseLog()
 
 
 @pytest.fixture
@@ -53,7 +71,7 @@ def workspace(tmp_path):
 
 @pytest.fixture
 def runner(released, workspace):
-    runner = JobRunner(prepare_gpu=released.append, workspace=workspace)
+    runner = JobRunner(prepare_gpu=released, workspace=workspace)
     yield runner
     runner.close()
 
@@ -97,3 +115,86 @@ def client(app):
     assert response.status_code == 303
     client.csrf = csrf_token(client.get(f"{BASE}/").text)
     return client
+
+
+def transcript_for(name):
+    """A transcript with two speakers, as WhisperX gives it."""
+    return transcription.Transcript(
+        name=name,
+        language="de",
+        duration_seconds=12.5,
+        has_speakers=True,
+        segments=[
+            {
+                "start": 0.0,
+                "end": 1.6,
+                "text": "Guten Morgen. Hallo.",
+                "words": [
+                    {
+                        "word": "Guten",
+                        "start": 0.0,
+                        "end": 0.4,
+                        "speaker": "SPEAKER_00",
+                    },
+                    {
+                        "word": "Morgen.",
+                        "start": 0.5,
+                        "end": 1.0,
+                        "speaker": "SPEAKER_00",
+                    },
+                    {
+                        "word": "Hallo.",
+                        "start": 1.2,
+                        "end": 1.6,
+                        "speaker": "SPEAKER_01",
+                    },
+                ],
+            }
+        ],
+    )
+
+
+@pytest.fixture
+def backend(monkeypatch, tmp_path):
+    """Fake the transcription and the playback; record the calls."""
+    monkeypatch.setenv("TEXT_LAB_WORKDIR", str(tmp_path / "work"))
+    get_settings.cache_clear()
+    storage.get_workspace.cache_clear()
+    calls = SimpleNamespace(runs=[], gate=None)
+
+    def prepare_playback(source, folder, name, *, wav=False, cancel=None):
+        assert source.is_file()
+        mp3 = folder / f"{name}.mp3"
+        mp3.write_bytes(b"ID3" + bytes(997))
+        wav_path = None
+        if wav:
+            wav_path = folder / f"{name}.wav"
+            wav_path.write_bytes(b"RIFF" + bytes(96))
+        return transcription.Playback(
+            path=mp3, duration_seconds=12.5, levels=(1, 4, 8, 2), wav=wav_path
+        )
+
+    def run_transcription(files, options, *, on_progress, cancel=None):
+        calls.runs.append(([file.name for file in files], options))
+        for file in files:
+            assert file.path.is_file()
+        if calls.gate is not None:
+            assert calls.gate.wait(10)
+        return transcription.TranscriptionResult(
+            transcripts=[
+                transcript_for(file.name)
+                for file in files
+                if not file.name.startswith("broken")
+            ],
+            skipped=[
+                transcription.SkippedFile(file.name, "could not decode audio")
+                for file in files
+                if file.name.startswith("broken")
+            ],
+        )
+
+    monkeypatch.setattr(transcription, "prepare_playback", prepare_playback)
+    monkeypatch.setattr(transcription, "run_transcription", run_transcription)
+    yield calls
+    get_settings.cache_clear()
+    storage.get_workspace.cache_clear()
