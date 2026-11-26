@@ -1,13 +1,19 @@
-"""Line-detection worker: find the text on page images with PaddleOCR.
+"""Line-detection worker: find the text lines on page images with kraken.
 
-Runs in the image's PaddleOCR environment (``common.container.PADDLE_ENV``),
+Runs in the image's kraken environment (``common.container.KRAKEN_ENV``),
 started by :func:`.service.detect_lines` through :mod:`textlab.common.jobs`::
 
     python -m textlab.features.handwriting.detect_worker JOB_DIR
 
-The request is ``{"images": [path, ...], "model": name}``; the result is
+The request is ``{"images": [path, ...]}``; the result is
 ``{"pages": [{"image": path, "polygons": [[[x, y], ...], ...]}, ...]}``,
-one entry per image with the quadrilateral of every text piece found.
+one entry per image with the boundary polygon of every line, in reading
+order.
+
+kraken's baseline segmenter (``blla``) was trained on historical
+manuscripts. It finds whole lines, also slanted or curved ones, and sorts
+them into reading order, columns and marginal notes included. Its default
+model ships with the kraken package, so nothing is downloaded.
 
 The app's packages are not installed in this environment: only the
 standard library, its own packages and the standard-library-only modules
@@ -17,69 +23,65 @@ test checks this.
 
 from __future__ import annotations
 
-import os
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
 from textlab.common.jobs import worker_main
 from textlab.common.progress import Progress, ProgressCallback
 
-# Paddle crashes in OpenBLAS with more than one thread, and must not try to
-# reach the internet for model checks.
-os.environ.setdefault("OMP_NUM_THREADS", "1")
-os.environ.setdefault("MKL_NUM_THREADS", "1")
-os.environ.setdefault("DISABLE_MODEL_SOURCE_CHECK", "True")
-os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
 
+def boundaries(lines: Iterable[Any]) -> list[list[list[float]]]:
+    """Return the boundary polygons of kraken's line records.
 
-def polygons(result: Any) -> list[list[list[float]]]:
-    """Return the text polygons of one PaddleOCR detection result.
+    Lines without a boundary (kraken could not compute one) are left out:
+    without it, there is nothing to crop.
 
     Args:
-        result: A result of ``TextDetection.predict``, which can be read
-            like a dictionary; older versions only offer ``.json``.
+        lines: The ``lines`` of a kraken ``Segmentation``, each with a
+            ``boundary`` of ``(x, y)`` points.
 
     Returns:
-        The polygons, as lists of ``[x, y]`` points.
+        The polygons, in the order given, as lists of ``[x, y]`` points.
     """
-    try:
-        polys = result["dt_polys"]
-    except (KeyError, TypeError):
-        polys = (getattr(result, "json", None) or {}).get("res", {})
-        polys = polys.get("dt_polys", [])
-    if hasattr(polys, "tolist"):
-        polys = polys.tolist()
-    return [
-        [[float(x), float(y)] for x, y in polygon] for polygon in polys or []
-    ]
+    polygons = []
+    for line in lines:
+        boundary: Sequence[Sequence[float]] | None = getattr(
+            line, "boundary", None
+        )
+        if boundary:
+            polygons.append([[float(x), float(y)] for x, y in boundary])
+    return polygons
 
 
 def detect(request: Mapping[str, Any], report: ProgressCallback) -> dict:
-    """Find the text polygons on the requested page images.
+    """Find the text lines on the requested page images.
 
     Args:
-        request: ``{"images": [...], "model": ...}``.
+        request: ``{"images": [...]}``.
         report: Receives an update after each page.
 
     Returns:
         ``{"pages": [{"image", "polygons"}, ...]}``.
     """
-    import paddle
-    from paddleocr import TextDetection
+    import torch
+    from kraken.configs import SegmentationInferenceConfig
+    from kraken.tasks import SegmentationTaskModel
+    from PIL import Image
 
     images = list(request["images"])
-    use_gpu = paddle.device.is_compiled_with_cuda() and (
-        paddle.device.cuda.device_count() > 0
+    # A session has one GPU; kraken's default would claim every visible one.
+    config = SegmentationInferenceConfig(
+        accelerator="gpu" if torch.cuda.is_available() else "cpu",
+        device=1,
     )
-    detector = TextDetection(
-        model_name=request["model"], device="gpu" if use_gpu else "cpu"
-    )
+    segmenter = SegmentationTaskModel.load_model()
     pages = []
     for index, image in enumerate(images, start=1):
-        found = []
-        for result in detector.predict(image, batch_size=1):
-            found.extend(polygons(result))
-        pages.append({"image": image, "polygons": found})
+        with Image.open(image) as page:
+            segmentation = segmenter.predict(page, config)
+        pages.append(
+            {"image": image, "polygons": boundaries(segmentation.lines)}
+        )
         report(
             Progress(
                 f"Finding lines... page {index}/{len(images)}",

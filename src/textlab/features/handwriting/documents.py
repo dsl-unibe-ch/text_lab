@@ -13,14 +13,12 @@ import io
 import json
 import os
 import shutil
-import subprocess
-import zipfile
 from collections.abc import Sequence
 from pathlib import Path
 from typing import BinaryIO
 from xml.etree import ElementTree
 
-from textlab.common.upload_safety import extract_zip_safely
+from textlab.common import pages
 from textlab.features.handwriting.lines import crop_box, fit_pixels
 from textlab.features.handwriting.models import (
     DocumentTranscription,
@@ -29,7 +27,7 @@ from textlab.features.handwriting.models import (
 )
 
 #: File types read, alone or inside a ZIP archive.
-INPUT_EXTENSIONS = (".pdf", ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp")
+INPUT_EXTENSIONS = pages.INPUT_EXTENSIONS
 #: Resolution PDFs are rendered at. Handwriting needs more detail than
 #: print, and 300 DPI is the usual resolution of archive scans.
 DPI = 300
@@ -43,7 +41,7 @@ PAGE_NAMESPACE = (
 
 
 def page_images(input_path: Path, out_dir: Path) -> list[Path]:
-    """Return a file's pages as PNG images.
+    """Return a file's pages as PNG images, PDFs rendered at :data:`DPI`.
 
     Args:
         input_path: A PDF or an image file.
@@ -55,51 +53,10 @@ def page_images(input_path: Path, out_dir: Path) -> list[Path]:
     Raises:
         HandwritingError: If the file cannot be read or has no pages.
     """
-    out_dir.mkdir(parents=True, exist_ok=True)
-    if input_path.suffix.lower() == ".pdf":
-        result = subprocess.run(
-            [
-                "pdftoppm",
-                "-r",
-                str(DPI),
-                "-png",
-                str(input_path),
-                str(out_dir / "page"),
-            ],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-        )
-        if result.returncode != 0:
-            raise HandwritingError(
-                f"Could not read the PDF {input_path.name}: "
-                f"{result.stderr.strip()[-500:]}"
-            )
-        # pdftoppm pads page numbers to the same width, so names sort.
-        images = sorted(out_dir.glob("page-*.png"))
-    else:
-        images = _image_frames(input_path, out_dir)
-    if not images:
-        raise HandwritingError(f"{input_path.name} has no pages.")
-    return images
-
-
-def _image_frames(input_path: Path, out_dir: Path) -> list[Path]:
-    """Write every frame of an image file as an RGB PNG."""
-    from PIL import Image, ImageSequence, UnidentifiedImageError
-
     try:
-        with Image.open(input_path) as image:
-            images = []
-            for index, frame in enumerate(ImageSequence.Iterator(image), 1):
-                path = out_dir / f"page-{index:04d}.png"
-                frame.convert("RGB").save(path)
-                images.append(path)
-            return images
-    except (OSError, UnidentifiedImageError) as error:
-        raise HandwritingError(
-            f"Could not read the image {input_path.name}: {error}"
-        ) from error
+        return pages.page_images(input_path, out_dir, DPI)
+    except pages.PageError as error:
+        raise HandwritingError(str(error)) from error
 
 
 def image_size(path: Path) -> tuple[int, int]:
@@ -292,29 +249,14 @@ def extract_inputs(
 ) -> list[Path]:
     """Extract the supported files of a ZIP archive, in a stable order.
 
-    macOS resource-fork files (``._name``) are left out.
-
     Raises:
         HandwritingError: If the archive cannot be read.
     """
     try:
-        with zipfile.ZipFile(archive, "r") as source:
-            files = extract_zip_safely(
-                source, input_dir, allowed_extensions=set(INPUT_EXTENSIONS)
-            )
-    except zipfile.BadZipFile as error:
-        raise HandwritingError(f"Not a valid ZIP archive: {error}") from error
-    files = [path for path in files if not path.name.startswith("._")]
-    files.sort(key=lambda path: str(path.relative_to(input_dir)).casefold())
-    return files
+        return pages.extract_inputs(archive, input_dir, INPUT_EXTENSIONS)
+    except pages.PageError as error:
+        raise HandwritingError(str(error)) from error
 
 
-def zip_folder(folder: Path) -> bytes:
-    """Return a ZIP archive of a folder's files, with relative names."""
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
-        for root, _dirs, names in sorted(os.walk(folder)):
-            for name in sorted(names):
-                path = Path(root) / name
-                archive.write(path, path.relative_to(folder))
-    return buffer.getvalue()
+#: Return a ZIP archive of a folder's files, with relative names.
+zip_folder = pages.zip_folder

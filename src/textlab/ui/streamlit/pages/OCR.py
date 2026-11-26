@@ -5,7 +5,9 @@ documents and ZIP batches; manual engine selection is in an expander below
 (:mod:`textlab.ui.streamlit.ocr.manual`). Results and review are drawn by
 the modules in :mod:`textlab.ui.streamlit.ocr`. Below it, a second expander
 holds historic German handwriting (:mod:`textlab.ui.streamlit.handwriting`),
-a separate feature with its own models.
+and a third Hugging Face OCR models of the user's choice
+(:mod:`textlab.ui.streamlit.hf_ocr`), separate features with their own
+models.
 """
 
 import os
@@ -43,6 +45,7 @@ from textlab.ui.streamlit.components.gpu import free_gpu_for  # noqa: E402
 from textlab.ui.streamlit.handwriting.panel import (  # noqa: E402
     handwriting_expander,
 )
+from textlab.ui.streamlit.hf_ocr.panel import hf_ocr_expander  # noqa: E402
 from textlab.ui.streamlit.ocr.manual import (  # noqa: E402
     manual_engines_expander,
 )
@@ -412,3 +415,4 @@ else:
 st.divider()
 manual_engines_expander(workflow_mode)
 handwriting_expander()
+hf_ocr_expander()

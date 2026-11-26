@@ -18,9 +18,9 @@ from textlab.common.model_config import load_model_config
 #: Key of the model list in the model configuration.
 CONFIG_KEY = "handwriting_models"
 
-#: The text detector that finds the lines (PaddleOCR, in the image's
-#: ``paddle_backend`` environment).
-LINE_DETECTOR = "PP-OCRv5_server_det"
+#: The segmenter that finds the lines: kraken's baseline segmenter with its
+#: default model, in the image's ``kraken_backend`` environment.
+LINE_DETECTOR = "kraken baseline segmenter (blla, default model)"
 
 
 class HandwritingError(RuntimeError):
@@ -67,7 +67,7 @@ class HandwritingModel:
         if self.adapter:
             recognition = f"{self.adapter} (LoRA adapter on {recognition})"
         return {
-            "line_detection": f"PaddleOCR {LINE_DETECTOR}",
+            "line_detection": LINE_DETECTOR,
             "recognition": recognition,
         }
 

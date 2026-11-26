@@ -48,7 +48,10 @@ def test_there_is_no_separate_page():
 
 
 def test_the_ocr_page_draws_it_below_the_legacy_engines():
-    """The OCR page's own workflows come first and are unchanged."""
+    """The OCR page's own workflows come first and are unchanged.
+
+    The Hugging Face OCR models tool follows below it.
+    """
     calls = [
         node.value.func.id
         for node in tree(OCR_PAGE).body
@@ -56,4 +59,8 @@ def test_the_ocr_page_draws_it_below_the_legacy_engines():
         and isinstance(node.value, ast.Call)
         and isinstance(node.value.func, ast.Name)
     ]
-    assert calls[-2:] == ["manual_engines_expander", "handwriting_expander"]
+    assert calls[-3:] == [
+        "manual_engines_expander",
+        "handwriting_expander",
+        "hf_ocr_expander",
+    ]

@@ -1,7 +1,7 @@
 # Historic Handwriting
 
 Transcribes handwritten historical German documents (Kurrent, medieval
-hands) line by line. A text detector finds the lines on each page, and a
+hands) line by line. kraken's segmenter finds the lines on each page, and a
 handwriting recognition model of the Digital Humanities group of the
 University of Bern ([dh-unibe](https://huggingface.co/dh-unibe)) reads
 each line. It is separate from the OCR feature, whose pipeline reads
@@ -22,16 +22,16 @@ model is loaded once per batch.
 1. **Pages** (`documents.page_images`): a PDF is rendered at 300 DPI with
    `pdftoppm`; every frame of an image file (a TIFF can have several)
    becomes an RGB PNG.
-2. **Line detection** (`detect_worker.py`): PaddleOCR's
-   `PP-OCRv5_server_det` text detector finds the text on each page, in a
-   worker in the image's `paddle_backend` environment. It returns one
-   quadrilateral per piece of text. `lines.group_lines` joins pieces that
-   sit side by side at the same height into lines (the recognition models
-   were trained on whole lines) and sorts the lines into reading order:
-   top to bottom, and left to right for lines next to each other, such as
-   a marginal note beside the body text. Each line is cropped with a
-   margin of 10% of its height and scaled down to the model's
-   `max_pixels`, as in training.
+2. **Line detection** (`detect_worker.py`): kraken's baseline segmenter
+   (`blla`, with the default model that ships with kraken, so nothing is
+   downloaded) finds the text lines on each page, in a worker in the
+   image's `kraken_backend` environment. It returns one boundary polygon
+   per whole line, in kraken's reading order: lines are ordered within the
+   text regions it finds (columns, marginal notes), and the regions among
+   each other. `lines.line_boxes` turns each polygon into its box, keeping
+   that order and dropping boxes too small to hold writing. Each line is
+   cropped with a margin of 10% of its height and scaled down to the
+   model's `max_pixels`, as in training.
 3. **Recognition** (`worker.py`, `recognizer.py`): the chosen model reads
    every crop, in a worker in the app's environment. Lines are read in
    batches of 8, halved when the GPU runs out of memory.
@@ -118,9 +118,9 @@ print(run.text)
 handwriting/
 ├── service.py        # the API above: steps, progress, outputs
 ├── models.py         # model configuration, options, results
-├── lines.py          # text pieces to lines, reading order, crop boxes
+├── lines.py          # line polygons to boxes, crop boxes
 ├── documents.py      # page images, crops, previews, text/JSON/PAGE XML, ZIPs
-├── detect_worker.py  # line detection (paddle_backend environment)
+├── detect_worker.py  # line detection with kraken (kraken_backend environment)
 ├── worker.py         # recognition worker (app environment)
 ├── recognizer.py     # model loading, LoRA merge, batched generation
 └── tests/
@@ -135,22 +135,22 @@ handwriting/
 | The workers' request, progress and result | `handwriting/job-*` | When the worker ends |
 
 Results are returned in memory. Model weights are downloaded into the
-Hugging Face store (`HF_HOME`) on first use; the PaddleOCR detector is
-already in the PaddleX store.
+Hugging Face store (`HF_HOME`) on first use; kraken's segmentation model
+is part of the kraken package in the image.
 
 ## Configuration
 
 | Setting | Used for |
 |---|---|
 | `handwriting_models` in `common/models.json` | The models offered |
-| `PADDLE_BACKEND_PYTHON` | Another interpreter for the line-detection worker; optional |
+| `KRAKEN_BACKEND_PYTHON` | Another interpreter for the line-detection worker; optional |
 | `HF_HOME` | Hugging Face model store, set by the image |
 
 ## Tests
 
 In `tests/`, without GPU or models:
 
-- `test_lines.py`: joining pieces, slanted lines, reading order, crops.
+- `test_lines.py`: polygons to boxes in the detector's order, crops.
 - `test_models.py`: the configured models load; results and citation.
 - `test_recognizer.py`: the LoRA merge on a tiny model, refused adapters,
   batching and the out-of-memory fallback.
@@ -158,8 +158,9 @@ In `tests/`, without GPU or models:
 - `test_service.py`: the service with fake workers: steps, outputs, batch
   layout, cleanup.
 - `test_workers.py`: what the detection worker may import; the detection
-  worker run through `common.jobs` with fake `paddle` and `paddleocr`
-  modules; the recognition worker with a fake model.
+  worker run through `common.jobs` with fake `kraken` and `torch`
+  modules; reading kraken's line boundaries; the recognition worker with
+  a fake model.
 - `test_handwriting_page.py`: the panel imports only the service and uses
   only the names it exports; there is no separate page; the OCR page draws
   it last, below the legacy engines.

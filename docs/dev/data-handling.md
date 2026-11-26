@@ -63,7 +63,10 @@ sends to OCR to `translation/ocr-*`, OCR keeps each run in `ocr/job-*`,
 `ocr/batch-*` or, for manual engine selection, `ocr/manual-*`, Survey
 writes the blank form's images and rebuilt exports to `survey/*`, Historic
 Handwriting keeps each run's upload, page images and line crops in
-`handwriting/run-*` or `handwriting/batch-*`, and Topic
+`handwriting/run-*` or `handwriting/batch-*`, the Hugging Face OCR models
+tool its upload and page images in `hf_ocr/run-*` or `hf_ocr/batch-*`
+(the models a user chooses go into their own
+`~/.cache/textlab/hf_ocr_models`, never their documents), and Topic
 Modeling writes the table it hands to its worker, and the result ZIP, to
 `topic_modeling/run-*`. Visualize Data keeps each run's table and charts in
 `visualization/run-*`, and Chat a conversation's table and charts in
