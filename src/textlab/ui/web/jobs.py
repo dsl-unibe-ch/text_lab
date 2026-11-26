@@ -19,7 +19,7 @@ fragments, which ``static/js/app.js`` swaps in with htmx.
 
 Each job has a private folder in the workspace: ``inputs/`` for uploads,
 removed when the job ends, and ``outputs/`` for files to download, removed
-with the job.
+with the job, or when it ends without finishing (failed or cancelled).
 """
 
 from __future__ import annotations
@@ -88,6 +88,9 @@ class Download:
         media_type: The file's media type.
         path: The file on disk, usually in the job's ``outputs`` folder.
         data: The file's content, for small files made in memory.
+        listed: Whether the card lists it among the downloads. Files the
+            result uses otherwise, such as the recording an audio player
+            plays, are not listed but can be fetched the same way.
     """
 
     name: str
@@ -95,6 +98,7 @@ class Download:
     media_type: str = "application/octet-stream"
     path: Path | None = None
     data: bytes | None = dataclasses.field(default=None, repr=False)
+    listed: bool = True
 
     @property
     def size(self) -> int | None:
@@ -192,6 +196,11 @@ class Job:
             return None
         end = self.finished or (time.time() if now is None else now)
         return end - self.started
+
+    @property
+    def listed_downloads(self) -> list[Download]:
+        """The downloads the card lists."""
+        return [item for item in self.downloads if item.listed]
 
     def download(self, name: str) -> Download | None:
         """Return the download called ``name``, if the job offers one.
@@ -328,6 +337,7 @@ class JobRunner:
         self._running: Job | None = None
         self._listeners: set[Callable[[], None]] = set()
         self._thread: threading.Thread | None = None
+        self._beside: list[threading.Thread] = []
         self._closed = False
         self.version = 0
 
@@ -376,36 +386,61 @@ class JobRunner:
             self._drafts[job.id] = job
         return job
 
-    def submit(self, job: Job, work: Work) -> Job:
-        """Queue a job created with :meth:`create`.
+    def submit(self, job: Job, work: Work, *, at_once: bool = False) -> Job:
+        """Queue a job created with :meth:`create`, or start it at once.
 
         Args:
             job: The job.
             work: The work to run for it.
+            at_once: Start the work now in a thread of its own, beside the
+                queue, instead of after the jobs before it. Only for short
+                work without the GPU, such as preparing a recording to
+                review, which should not wait for an hour-long
+                transcription.
 
         Returns:
-            The job, now waiting.
+            The job, now waiting (or running, with ``at_once``).
 
         Raises:
             RuntimeError: If the runner is closed.
             KeyError: If the job was not created by this runner or was
                 submitted already.
+            ValueError: If ``at_once`` is set for a job that uses the GPU.
         """
+        if at_once and job.gpu:
+            raise ValueError("Jobs that use the GPU wait in the queue.")
+        beside = None
         with self._wakeup:
             if self._closed:
                 raise RuntimeError("The job runner is closed.")
             self._drafts.pop(job.id)
             job.submitted = time.time()
             self._jobs[job.id] = job
-            self._work[job.id] = work
-            self._queue.append(job.id)
-            self._touch(job)
-            if self._thread is None:
-                self._thread = threading.Thread(
-                    target=self._loop, name="textlab-jobs", daemon=True
+            if at_once:
+                job.state = JobState.RUNNING
+                job.started = job.submitted
+                beside = threading.Thread(
+                    target=self._run,
+                    args=(job, work),
+                    name=f"textlab-job-{job.id}",
+                    daemon=True,
                 )
-                self._thread.start()
-            self._wakeup.notify()
+                self._beside = [
+                    thread for thread in self._beside if thread.is_alive()
+                ]
+                self._beside.append(beside)
+            else:
+                self._work[job.id] = work
+                self._queue.append(job.id)
+                if self._thread is None:
+                    self._thread = threading.Thread(
+                        target=self._loop, name="textlab-jobs", daemon=True
+                    )
+                    self._thread.start()
+                self._wakeup.notify()
+            self._touch(job)
+        if beside is not None:
+            beside.start()
         self._notify()
         return job
 
@@ -563,9 +598,11 @@ class JobRunner:
             for job in jobs:
                 job.cancel.set()
             self._wakeup.notify_all()
-            thread = self._thread
-        if thread is not None:
-            thread.join(timeout=10)
+            threads = [self._thread, *self._beside]
+        deadline = time.monotonic() + 10
+        for thread in threads:
+            if thread is not None:
+                thread.join(timeout=max(0.0, deadline - time.monotonic()))
         for job in jobs:
             remove_tree(job.folder)
 
@@ -679,6 +716,10 @@ class JobRunner:
             ) or traceback.format_exc(limit=20)
         finally:
             remove_tree(job.inputs)
+        if changes["state"] is not JobState.DONE:
+            # Files written before the work stopped are not offered.
+            remove_tree(job.outputs)
+            changes["downloads"] = []
         changes["finished"] = time.time()
         self._update(job, **changes)
 
@@ -722,18 +763,26 @@ def render_card(request: Request, job: Job, *, oob: bool = False) -> str:
     )
 
 
-def render_indicator(request: Request, *, oob: bool = False) -> str:
+def render_indicator(
+    request: Request, *, oob: bool = False, page: str = ""
+) -> str:
     """Render the job indicator's count and list.
 
     Args:
         request: The current request.
         oob: Whether to mark them for an out-of-band swap.
+        page: Id of the page they go to; Home also gets its list of
+            recent jobs.
 
     Returns:
-        The HTML of both parts.
+        The HTML of the parts.
     """
     return renderer(request).render(
-        request, "jobs/indicator_parts.html", oob=oob
+        request,
+        "jobs/indicator_parts.html",
+        oob=oob,
+        page=page,
+        now=time.time(),
     )
 
 
@@ -879,8 +928,9 @@ async def events(request: Request, page: str = "") -> EventSourceResponse:
 
     Each ``update`` event holds out-of-band fragments: the cards of the
     page's jobs that changed, an empty element in place of removed ones,
-    and the job indicator. The ``idle`` event tells the page to close the
-    stream; it opens a new one when it gets an active job again.
+    and the job indicator (on Home also the list of recent jobs). The
+    ``idle`` event tells the page to close the stream; it opens a new one
+    when it gets an active job again.
 
     Args:
         request: The current request.
@@ -920,7 +970,9 @@ async def events(request: Request, page: str = "") -> EventSourceResponse:
                 version = runner.version
                 if version != indicator_version:
                     indicator_version = version
-                    parts.append(render_indicator(request, oob=True))
+                    parts.append(
+                        render_indicator(request, oob=True, page=page)
+                    )
                 if parts:
                     yield ServerSentEvent(data="".join(parts), event="update")
                 current = runner.version == indicator_version and all(

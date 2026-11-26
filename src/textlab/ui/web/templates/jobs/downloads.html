@@ -3,7 +3,7 @@
 <div class="files">
   <p class="label">Downloads</p>
   <ul class="files__list">
-    {% for item in job.downloads %}
+    {% for item in job.listed_downloads %}
     <li>
       <a class="file{% if loop.first %} file--main{% endif %}" href="{{ root }}/jobs/{{ job.id }}/files/{{ item.name | urlencode }}" download>
         <span class="file__name">{{ item.name }}</span>

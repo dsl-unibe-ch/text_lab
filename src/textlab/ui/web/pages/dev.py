@@ -1,10 +1,10 @@
 """Developer pages: the component gallery, the page mockups and a demo job.
 
 Served under ``/dev`` only when ``TEXT_LAB_WEB_DEV`` is set (a sandbox's
-``template/dev.env``), never in production. The mockups show agreed
-designs with sample data before their pages are built; the demo job runs a
-job through the whole runner (queue, progress, cancelling, upload,
-downloads) without a model.
+``template/dev.env``), never in production. Mockups show a page's design
+with sample data before the page is built, to agree on it; they are
+removed once the page exists. The demo job runs a job through the whole
+runner (queue, progress, cancelling, upload, downloads) without a model.
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ from markupsafe import Markup
 from starlette.concurrency import run_in_threadpool
 
 from textlab.common.progress import Progress
+from textlab.features.transcription import service
 from textlab.ui.web import uploads
 from textlab.ui.web.auth import Checked, protected_router
 from textlab.ui.web.jobs import (
@@ -30,6 +31,7 @@ from textlab.ui.web.jobs import (
     runner_of,
 )
 from textlab.ui.web.pages import TOOLS
+from textlab.ui.web.pages.transcription import Listening
 from textlab.ui.web.render import renderer
 
 router = protected_router(prefix="/dev")
@@ -37,11 +39,10 @@ router = protected_router(prefix="/dev")
 #: Page id of the demo job's page.
 DEMO_PAGE = "demo"
 
-#: The mockups, by name: their title and the page they show.
-MOCKUPS = {
-    "home": "Home",
-    "transcription": "Transcription",
-}
+#: The mockups, by name (``templates/mockups/<name>.html``): their title.
+#: Home and Transcription were agreed and built in phase 2 of the web UI
+#: plan; the next pages get theirs here.
+MOCKUPS: dict[str, str] = {}
 
 #: Longest demo job, in seconds.
 DEMO_MAX_SECONDS = 600
@@ -229,6 +230,84 @@ def demo_work(seconds: int, fail: bool, inputs: list[Path]):
     return work
 
 
+#: Passages of the sample transcript: speaker, start, text.
+SAMPLE_TURNS = (
+    (
+        1,
+        0.0,
+        "Guten Morgen zusammen und willkommen zur ersten Sitzung des "
+        "Seminars. Heute geht es darum, wie wir Interviews systematisch "
+        "auswerten.",
+    ),
+    (
+        2,
+        14.0,
+        "Danke. Darf ich gleich fragen, ob wir die Transkripte selbst "
+        "korrigieren müssen?",
+    ),
+    (
+        1,
+        21.0,
+        "Ja, unbedingt. Die automatische Transkription ist ein Entwurf: "
+        "Namen und Fachbegriffe sollten Sie immer prüfen.",
+    ),
+    (
+        3,
+        33.0,
+        "Und wie gehen wir mit Dialekt um, zum Beispiel mit Berndeutsch?",
+    ),
+    (
+        1,
+        39.0,
+        "Dafür gibt es eigene Modelle für Schweizerdeutsch. Die wählen "
+        "Sie bei der Sprache aus.",
+    ),
+)
+
+
+def sample_listening() -> Listening:
+    """Return the result of a transcription with sample data.
+
+    Returns:
+        A transcript of five passages by three speakers, with word times;
+        its recording does not exist, so the player does not play.
+    """
+    turns = []
+    for number, start, text in SAMPLE_TURNS:
+        words = tuple(
+            service.TimedWord(
+                word, start + 0.4 * index, start + 0.4 * index + 0.3
+            )
+            for index, word in enumerate(text.split())
+        )
+        turns.append(
+            service.Turn(
+                start=start,
+                end=words[-1].end or start,
+                text=text,
+                words=words,
+                speaker=f"SPEAKER_{number - 1:02d}",
+                speaker_number=number,
+            )
+        )
+    return Listening(
+        audio="lecture_intro.mp3",
+        duration=760.0,
+        levels=tuple(
+            (index * 37 + (index // 7) * 11) % 8 + 1 for index in range(120)
+        ),
+        turns=turns,
+        language="German",
+        detected=True,
+        models=[
+            ("Transcription", "large-v3-turbo"),
+            ("Word timing", "WhisperX alignment model for German"),
+            ("Speakers", service.DIARIZATION_MODEL),
+            ("Silence", "not skipped"),
+        ],
+    )
+
+
 def sample_jobs() -> dict[str, Job]:
     """Return jobs in every state with sample data, for the mockups.
 
@@ -272,7 +351,8 @@ def sample_jobs() -> dict[str, Job]:
             page="transcription",
             folder=nowhere,
             state=JobState.DONE,
-            result_template="mockups/transcription_result.html",
+            result_template="transcription/result.html",
+            result=sample_listening(),
             submitted=now - 640,
             started=now - 600,
             finished=now - 475,

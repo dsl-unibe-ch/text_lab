@@ -44,6 +44,18 @@ def feature_imports(path):
     return found
 
 
+def service_attributes(path):
+    """Return the names a page module reads from ``service``."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    return {
+        node.attr
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "service"
+    }
+
+
 @pytest.mark.parametrize("path", PAGE_MODULES, ids=lambda path: path.name)
 def test_pages_use_only_the_services_exports(path):
     import importlib
@@ -53,8 +65,12 @@ def test_pages_use_only_the_services_exports(path):
             service = importlib.import_module(module)
             assert set(names) <= set(service.__all__), (module, names)
         else:
-            # "from textlab.features.x import service" is the other way.
+            # "from textlab.features.x import service" is the other way;
+            # then only the exported names are read from it.
             assert names == ["service"], f"{path.name} imports {module}"
+            service = importlib.import_module(f"{module}.service")
+            used = service_attributes(path)
+            assert used <= set(service.__all__), used - set(service.__all__)
 
 
 @pytest.mark.parametrize("path", TEMPLATES, ids=TEMPLATE_IDS)

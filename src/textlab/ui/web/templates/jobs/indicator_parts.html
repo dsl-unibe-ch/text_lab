@@ -1,3 +1,5 @@
-{#- The job indicator's count and list, swapped in out of band. -#}
+{#- The job indicator's count and list, swapped in out of band; on Home
+  also its list of recent jobs. -#}
 {% include "jobs/indicator_count.html" %}
 {% include "jobs/indicator_list.html" %}
+{% if page == "home" %}{% include "pages/home_jobs.html" %}{% endif %}

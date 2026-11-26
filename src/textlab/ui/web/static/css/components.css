@@ -1528,6 +1528,12 @@ p.option__title {
   text-decoration: none;
 }
 
+.ledger__empty {
+  padding: 0.7rem var(--space-1);
+  border-bottom: var(--hairline) solid var(--rule);
+  color: var(--ink-3);
+}
+
 .ledger__item:hover {
   background: var(--tint);
   color: var(--ink);
@@ -1632,6 +1638,16 @@ p.option__title {
   color: var(--on-red);
 }
 
+/* The button shows play or pause; app.js sets is-playing on the player. */
+.player__icon-pause,
+.is-playing .player__icon-play {
+  display: none;
+}
+
+.is-playing .player__icon-pause {
+  display: inline-flex;
+}
+
 .player__time {
   font-family: var(--font-mono);
   font-size: var(--text-sm);
@@ -1647,6 +1663,8 @@ p.option__title {
   align-items: center;
   gap: 2px;
   height: 3rem;
+  cursor: pointer;
+  touch-action: none;
 }
 
 .waveform__bar {
@@ -1673,6 +1691,7 @@ p.option__title {
 .waveform__bar--8 { height: 100%; }
 
 .transcript {
+  position: relative;
   max-height: 28rem;
   margin: 0;
   padding: 0;
@@ -1748,7 +1767,38 @@ p.option__title {
   line-height: 1.6;
 }
 
-.word-current {
+/* Words with times: the one being spoken is marked; each can be clicked. */
+.w {
+  cursor: pointer;
+}
+
+.w:hover {
+  text-decoration: underline;
+  text-decoration-color: var(--rule-strong);
+  text-underline-offset: 0.2em;
+}
+
+/* Words view: each word under its time, to check the timing. */
+.transcript--words .turn__text {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+}
+
+.transcript--words .w {
+  display: inline-grid;
+}
+
+.transcript--words .w::before {
+  content: attr(data-t);
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: var(--text-label);
+  line-height: 1.4;
+}
+
+.word-current,
+.w.is-current {
   background: none;
   color: inherit;
   box-shadow: inset 0 -0.5em 0 var(--red-wash);
@@ -1776,6 +1826,50 @@ p.option__title {
   margin: 0;
 }
 
+.plain-text .speaker {
+  margin-right: var(--space-2);
+}
+
+/* A table of results, such as the recordings of a batch. */
+.table-wrap {
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.table th {
+  padding: var(--space-2) var(--space-3) var(--space-2) 0;
+  border-bottom: var(--hairline) solid var(--ink);
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: var(--text-label);
+  font-weight: 500;
+  letter-spacing: var(--tracking-label);
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.table td {
+  padding: var(--space-2) var(--space-3) var(--space-2) 0;
+  border-bottom: var(--hairline) solid var(--rule);
+  vertical-align: baseline;
+}
+
+.table__num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.table__mono {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
 @media (max-width: 600px) {
   .turn {
     grid-template-columns: minmax(0, 1fr);
@@ -1794,6 +1888,10 @@ p.option__title {
 
   .player__bar .switcher {
     margin-left: 0;
+  }
+
+  .waveform {
+    gap: 1px;
   }
 }
 

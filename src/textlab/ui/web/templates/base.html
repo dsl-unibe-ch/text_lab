@@ -50,7 +50,7 @@
         {% if settings.dev %}
         <p class="label index__group">Developer</p>
         <ul class="index__list">
-          {% for label, path in [("Overview", "/dev"), ("Components", "/dev/components"), ("Mockup: Home", "/dev/mockups/home"), ("Mockup: Transcription", "/dev/mockups/transcription"), ("Demo job", "/dev/demo")] %}
+          {% for label, path in [("Overview", "/dev"), ("Components", "/dev/components"), ("Demo job", "/dev/demo")] %}
           <li>
             <a class="index__link" href="{{ root }}{{ path }}"{% if current_path == path %} aria-current="page"{% endif %}>
               <span class="index__num">D{{ loop.index }}</span><span class="index__name">{{ label }}</span>

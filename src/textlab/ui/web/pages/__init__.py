@@ -57,6 +57,7 @@ TOOLS: tuple[Tool, ...] = (
         "Audio",
         "Turn recordings into text, with timestamps and the speakers told "
         "apart.",
+        ready=True,
     ),
     Tool(
         "meeting_notes",
@@ -166,9 +167,9 @@ def routers(settings: WebSettings) -> list[APIRouter]:
     Returns:
         The routers.
     """
-    from textlab.ui.web.pages import dev, home, placeholder
+    from textlab.ui.web.pages import dev, home, placeholder, transcription
 
-    result = [home.router, placeholder.router]
+    result = [home.router, transcription.router, placeholder.router]
     if settings.dev:
         result.append(dev.router)
     return result

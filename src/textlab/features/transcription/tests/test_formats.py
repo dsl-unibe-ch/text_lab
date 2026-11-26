@@ -224,3 +224,113 @@ def test_plain_text_from_segment_table():
         formats.transcription_csv(SPEAKERS)
     )
     assert text == "Hi there.\nYes.\num\nNext."
+
+
+# ---------------------------------------------------------------------------
+# Passages for a player
+# ---------------------------------------------------------------------------
+
+
+def test_turns_without_speakers_are_the_segments_with_their_words():
+    turns = formats.turns(PLAIN)
+    assert [turn.text for turn in turns] == ["Hello world.", "Late."]
+    first = turns[0]
+    assert (first.start, first.end, first.speaker) == (0.0, 1.5, None)
+    assert [(w.text, w.start, w.end) for w in first.words] == [
+        ("Hello", 0.0, 0.5),
+        ("world.", 0.6, 1.5),
+    ]
+    assert first.speaker_number == 0
+
+
+def test_turns_split_where_the_speaker_changes_as_the_table_does():
+    turns = formats.turns(SPEAKERS)
+    assert [
+        (turn.speaker, turn.speaker_number, turn.text) for turn in turns
+    ] == [
+        ("SPEAKER_00", 1, "Hi there."),
+        ("SPEAKER_01", 2, "Yes."),
+        ("UNKNOWN", 0, "um"),
+        ("SPEAKER_01", 2, "Next."),
+    ]
+    assert (turns[1].start, turns[1].end) == (1.2, 1.6)
+    table = formats.load_tsv_rows(formats.transcription_csv(SPEAKERS))
+    assert [row["Text"] for row in table] == [turn.text for turn in turns]
+
+
+def test_words_without_times_keep_their_place():
+    transcript = Transcript(
+        name="a.wav",
+        language="en",
+        duration_seconds=3.0,
+        segments=[
+            {
+                "start": 0.0,
+                "end": 2.0,
+                "text": "In 2024 we",
+                "words": [
+                    {"word": "In", "start": 0.0, "end": 0.2},
+                    {"word": "2024"},
+                    {"word": "we", "start": 1.5, "end": 2.0},
+                ],
+            },
+            {"start": 2.5, "end": 3.0, "text": " No words. "},
+        ],
+    )
+    first, second = formats.turns(transcript)
+    assert [(w.text, w.start) for w in first.words] == [
+        ("In", 0.0),
+        ("2024", None),
+        ("we", 1.5),
+    ]
+    assert (second.text, second.start, second.words) == ("No words.", 2.5, ())
+
+
+def test_turns_come_back_from_the_word_table():
+    turns = formats.turns_from_table(formats.words_csv(SPEAKERS))
+    assert [(turn.speaker_number, turn.text) for turn in turns] == [
+        (1, "Hi there."),
+        (2, "Yes."),
+        (0, "um"),
+        (2, "Next."),
+    ]
+    assert turns[0].words[1].start == 0.5
+    assert turns[3].end == 5.5
+
+
+def test_turns_come_back_from_segment_tables():
+    for table in (
+        formats.transcription_csv(SPEAKERS),
+        formats.elan_tsv(SPEAKERS),
+    ):
+        turns = formats.turns_from_table(table)
+        assert [(turn.speaker, turn.start) for turn in turns] == [
+            ("SPEAKER_00", 0.0),
+            ("SPEAKER_01", 1.2),
+            ("UNKNOWN", 1.7),
+            ("SPEAKER_01", 5.0),
+        ]
+        assert all(turn.words == () for turn in turns)
+
+
+def test_a_word_table_without_speakers_has_none():
+    turns = formats.turns_from_table(formats.words_csv(PLAIN))
+    assert [turn.speaker for turn in turns] == [None, None]
+    assert [turn.text for turn in turns] == ["Hello world.", "Late."]
+
+
+def test_comma_separated_tables_are_read_too():
+    turns = formats.turns_from_table(
+        "Start,End,Text\n00:00:01.000,00:00:02.000,Hello\n"
+    )
+    assert [(turn.start, turn.end, turn.text) for turn in turns] == [
+        (1.0, 2.0, "Hello")
+    ]
+
+
+@pytest.mark.parametrize(
+    "text", ["", "name\tage\nx\t1\n", "Start\tEnd\n1\t2\n"]
+)
+def test_other_tables_are_not_transcripts(text):
+    with pytest.raises(ValueError, match="not a transcript table"):
+        formats.turns_from_table(text)

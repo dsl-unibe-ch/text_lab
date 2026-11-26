@@ -1,9 +1,10 @@
 """Audio decoding, language detection and voice activity detection.
 
 Audio is decoded with ``ffmpeg`` into 16 kHz mono float samples, the format
-WhisperX expects. Heavy libraries (torch, faster-whisper, Silero VAD) are
-imported inside the functions that need them, so this module can be
-imported without a GPU.
+WhisperX expects. For playback in a browser, samples are encoded as MP3
+(:func:`write_mp3`) and measured for a waveform (:func:`waveform_levels`).
+Heavy libraries (torch, faster-whisper, Silero VAD) are imported inside the
+functions that need them, so this module can be imported without a GPU.
 """
 
 from __future__ import annotations
@@ -19,12 +20,20 @@ from typing import Any
 import numpy as np
 
 from textlab.common import gpu_manager
+from textlab.features.transcription.models import WAVEFORM_LEVELS
 
 #: Sample rate WhisperX works with.
 SAMPLE_RATE = 16000
 
 #: Seconds of audio used to detect the language.
 LANGUAGE_DETECTION_SECONDS = 30
+
+#: Bit rate of recordings prepared for the browser: plenty for speech, an
+#: hour takes about 22 MB.
+PLAYBACK_BITRATE = "48k"
+
+#: Parts of a recording a waveform shows.
+WAVEFORM_BARS = 120
 
 
 class AudioDecodeError(RuntimeError):
@@ -128,6 +137,83 @@ def convert_audio_to_wav_bytes(
     audio = decode_audio_bytes(audio_bytes, sr=sr)
     wav_filename = os.path.splitext(original_filename)[0] + ".wav"
     return to_wav_bytes(audio, sr), wav_filename, audio
+
+
+def write_wav(audio: np.ndarray, path: Path, sr: int = SAMPLE_RATE) -> None:
+    """Write samples to a 16-bit PCM WAV file.
+
+    Args:
+        audio: Mono float samples.
+        path: The file to write.
+        sr: Their sample rate.
+    """
+    import soundfile
+
+    soundfile.write(str(path), audio, sr, format="WAV", subtype="PCM_16")
+
+
+def write_mp3(
+    audio: np.ndarray,
+    path: Path,
+    sr: int = SAMPLE_RATE,
+    bitrate: str = PLAYBACK_BITRATE,
+) -> None:
+    """Encode samples as an MP3 file with a constant bit rate.
+
+    Every browser plays MP3, and with a constant bit rate it can jump to
+    any time in the file without reading it from the start.
+
+    Args:
+        audio: Mono float samples.
+        path: The file to write.
+        sr: Their sample rate.
+        bitrate: The bit rate, as ffmpeg takes it.
+
+    Raises:
+        AudioDecodeError: If ffmpeg fails.
+    """
+    pcm = (np.clip(audio, -1.0, 1.0) * 32767).astype("<i2").tobytes()
+    command = [
+        "ffmpeg", "-nostats", "-hide_banner", "-loglevel", "error", "-y",
+        "-f", "s16le", "-ac", "1", "-ar", str(sr), "-i", "pipe:0",
+        "-c:a", "libmp3lame", "-b:a", bitrate, str(path),
+    ]  # fmt: skip
+    result = subprocess.run(
+        command, input=pcm, capture_output=True, check=False
+    )
+    if result.returncode != 0:
+        raise AudioDecodeError(
+            "Could not encode the recording as MP3:\n"
+            f"{result.stderr.decode(errors='replace')}"
+        )
+
+
+def waveform_levels(
+    audio: np.ndarray,
+    bars: int = WAVEFORM_BARS,
+    levels: int = WAVEFORM_LEVELS,
+) -> tuple[int, ...]:
+    """Measure the loudness of equal parts of a recording, for a waveform.
+
+    Args:
+        audio: Mono float samples.
+        bars: How many parts.
+        levels: Steps of loudness.
+
+    Returns:
+        One step per part, from 1 (quiet or silent) to ``levels`` (the
+        loudest part). The square root of the loudness is used, so quiet
+        speech still shows. Empty audio gives no parts.
+    """
+    if audio.size == 0 or bars < 1:
+        return ()
+    parts = np.array_split(audio.astype(np.float32), min(bars, audio.size))
+    loudness = np.sqrt(np.array([np.sqrt(np.mean(part**2)) for part in parts]))
+    top = float(loudness.max())
+    if top <= 0:
+        return tuple(1 for _ in parts)
+    steps = np.ceil(loudness / top * levels).astype(int)
+    return tuple(int(step) for step in np.clip(steps, 1, levels))
 
 
 def detect_language(

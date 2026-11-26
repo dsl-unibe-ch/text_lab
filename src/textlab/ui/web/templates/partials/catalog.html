@@ -6,9 +6,9 @@
     <ul class="catalog__list">
       {% for tool in items %}
       <li>
-        <a class="catalog__link" href="{{ root }}{{ tool_links[tool.id] if tool_links is defined and tool.id in tool_links else tool.path }}">
+        <a class="catalog__link" href="{{ root }}{{ tool.path }}">
           <span class="catalog__num">{{ tool.number }}</span>
-          <span class="catalog__name">{{ tool.label }}{% if not tool.ready and tool_links is not defined %} <span class="index__soon">Soon</span>{% endif %}</span>
+          <span class="catalog__name">{{ tool.label }}{% if not tool.ready %} <span class="index__soon">Soon</span>{% endif %}</span>
           <span class="catalog__text">{{ tool.summary }}</span>
           <span class="catalog__go">{{ icon("arrow-right") }}</span>
         </a>

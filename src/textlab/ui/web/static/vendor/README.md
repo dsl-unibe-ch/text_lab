@@ -24,7 +24,7 @@ release goes into a new folder.
 ## Icons
 
 Only the icons the templates use are copied: the design uses few icons
-(arrows, download, play, close, menu, the select's chevron). The templates show them with
+(arrows, download, play and pause, close, menu, the select's chevron). The templates show them with
 `icon("name")` (see `render.py`), which inlines the SVG so it takes the
 colour of the text around it. A test fails if a template names an icon
 that is not here, or if one here is not used.

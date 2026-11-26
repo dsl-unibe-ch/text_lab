@@ -45,7 +45,7 @@
     {% elif state == "done" %}
     <div class="record__result">
       {% if job.result_template %}{% include job.result_template %}{% endif %}
-      {% if job.downloads %}{% include "jobs/downloads.html" %}{% endif %}
+      {% if job.listed_downloads %}{% include "jobs/downloads.html" %}{% endif %}
     </div>
     {% elif state == "failed" %}
     {% call notice("error", "The job failed", details=job.error_details) %}{{ job.error }}{% endcall %}

@@ -237,3 +237,70 @@ def test_file_names_with_any_characters_download_under_their_name():
     header = content_disposition('Grüße "neu".txt')
     assert header.startswith('attachment; filename="Gr__e _neu_.txt"')
     assert "filename*=UTF-8''Gr%C3%BC%C3%9Fe%20%22neu%22.txt" in header
+
+
+def test_work_without_the_gpu_can_start_beside_the_queue(runner, released):
+    long = Gate("long")
+    queued = start(runner, long, gpu="transcribe")
+    assert long.started.wait(5)
+
+    quick = runner.create(title="quick", page="test")
+    runner.submit(quick, lambda context: "quick", at_once=True)
+    wait_for(lambda: quick.state is JobState.DONE)
+    assert quick.result == "quick"
+    assert queued.state is JobState.RUNNING
+    assert released == ["transcribe"]
+    long.opened.set()
+    wait_for(lambda: queued.state is JobState.DONE)
+
+
+def test_work_beside_the_queue_can_be_cancelled(runner):
+    work = Gate()
+    job = runner.create(title="quick", page="test")
+    runner.submit(job, work, at_once=True)
+    assert work.started.wait(5)
+    assert job.state is JobState.RUNNING
+    runner.cancel(job.id)
+    wait_for(lambda: job.state is JobState.CANCELLED)
+
+
+def test_work_with_the_gpu_always_waits_in_the_queue(runner):
+    job = runner.create(title="gpu", page="test", gpu="transcribe")
+    with pytest.raises(ValueError, match="queue"):
+        runner.submit(job, lambda context: None, at_once=True)
+    runner.discard(job)
+
+
+def test_closing_waits_for_work_beside_the_queue(released, workspace):
+    runner = JobRunner(prepare_gpu=released.append, workspace=workspace)
+    work = Gate()
+    job = runner.create(title="quick", page="test")
+    runner.submit(job, work, at_once=True)
+    assert work.started.wait(5)
+    runner.close()
+    assert job.state is JobState.CANCELLED
+    assert not job.folder.exists()
+
+
+def test_files_a_result_uses_can_stay_off_the_list(runner):
+    def work(context):
+        context.offer(Download("a.txt", "Text", data=b"a"))
+        context.offer(Download("a.mp3", "Recording", data=b"b", listed=False))
+
+    job = start(runner, work)
+    wait_for(lambda: job.state is JobState.DONE)
+    assert [item.name for item in job.listed_downloads] == ["a.txt"]
+    assert job.download("a.mp3").data == b"b"
+
+
+def test_a_job_that_stops_early_keeps_no_files(runner):
+    def work(context):
+        path = context.outputs / "half.txt"
+        path.write_text("half")
+        context.offer(Download("half.txt", "Text", path=path))
+        raise RuntimeError("broke halfway")
+
+    job = start(runner, work)
+    wait_for(lambda: job.state is JobState.FAILED)
+    assert job.downloads == []
+    assert not job.outputs.exists()

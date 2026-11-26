@@ -16,8 +16,6 @@ PAGES = [
     *(tool.path for tool in TOOLS),
     "/dev",
     "/dev/components",
-    "/dev/mockups/home",
-    "/dev/mockups/transcription",
     "/dev/demo",
 ]
 

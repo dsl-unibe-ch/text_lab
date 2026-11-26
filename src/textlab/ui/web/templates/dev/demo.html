@@ -2,7 +2,7 @@
 {% from "components/macros.html" import masthead, section_head, dropzone with context %}
 {% block title %}Demo job{% endblock %}
 {% block content %}
-{{ masthead("Demo job", "Runs a job without a model, to try the job runner: the queue, live progress, cancelling, an upload and downloads.", number="D5", kicker="Developer") }}
+{{ masthead("Demo job", "Runs a job without a model, to try the job runner: the queue, live progress, cancelling, an upload and downloads.", number="D3", kicker="Developer") }}
 
 <form class="sheet" hx-post="{{ root }}/dev/demo" hx-encoding="multipart/form-data" hx-target="#jobs" hx-swap="afterbegin" hx-disabled-elt="find button[type=submit]" data-upload-form>
   <ol class="steps">

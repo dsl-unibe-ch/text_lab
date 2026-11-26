@@ -100,6 +100,26 @@ def duration(seconds: int | float | None) -> str:
     return f"{seconds} s"
 
 
+def media_time(seconds: int | float | None) -> str:
+    """Return a time in a recording, as players show it.
+
+    Args:
+        seconds: Seconds from the start.
+
+    Returns:
+        For example ``"00:14"``, ``"12:40"`` or ``"1:02:05"``; ``""`` for
+        ``None``.
+    """
+    if seconds is None:
+        return ""
+    seconds = max(0, int(seconds))
+    hours, rest = divmod(seconds, 3600)
+    minutes, seconds = divmod(rest, 60)
+    if hours:
+        return f"{hours}:{minutes:02d}:{seconds:02d}"
+    return f"{minutes:02d}:{seconds:02d}"
+
+
 def time_left(seconds: int | float | None) -> str:
     """Return the time left in a session, to the minute.
 
@@ -201,8 +221,8 @@ class Renderer:
     - ``session_left``: the seconds until the session ends, or ``None``;
     - ``settings``, ``version``, the navigation (``tools``,
       ``tool_groups``, ``page_path``, ``page_label``, set by the app) and
-      the filters ``file_size``, ``duration``, ``time_left`` and
-      ``clock_time``.
+      the filters ``file_size``, ``duration``, ``media_time``,
+      ``time_left`` and ``clock_time``.
     """
 
     def __init__(self, settings: WebSettings):
@@ -224,6 +244,7 @@ class Renderer:
         self.environment.filters.update(
             file_size=file_size,
             duration=duration,
+            media_time=media_time,
             clock_time=clock_time,
             time_left=time_left,
         )

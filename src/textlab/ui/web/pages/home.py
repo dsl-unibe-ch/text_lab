@@ -1,10 +1,8 @@
-"""The Home page: what Text Lab offers and the session's recent jobs.
-
-Until the pilot (phase 2 of the web UI plan) it says which pages exist in
-the web UI so far.
-"""
+"""The Home page: what Text Lab is, its tools and the session's jobs."""
 
 from __future__ import annotations
+
+import time
 
 from fastapi import Request
 from fastapi.responses import HTMLResponse
@@ -24,8 +22,13 @@ def home(request: Request) -> HTMLResponse:
         request: The current request.
 
     Returns:
-        The page.
+        The page. Its list of jobs follows the job runner live, through the
+        page's event stream (``jobs.events``).
     """
     return renderer(request).response(
-        request, "pages/home.html", page_id="home", tools=TOOLS
+        request,
+        "pages/home.html",
+        page_id="home",
+        unfinished=not all(tool.ready for tool in TOOLS),
+        now=time.time(),
     )

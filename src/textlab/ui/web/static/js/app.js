@@ -8,7 +8,10 @@
  * - The navigation on narrow screens, the job indicator's popover, the
  *   colour theme switch and the session's time left.
  * - Form helpers: drop zones, upload progress, switches that reveal
- *   settings, choices that show parts of a form, range values, tabs.
+ *   settings, choices that show parts of a form, range values, readouts
+ *   that follow a choice, tabs.
+ * - The audio player of transcripts: plays the recording, marks the
+ *   passage and the word being spoken, jumps to a passage or word.
  * - Error notices for failed htmx requests, copying error details.
  *
  * There are no inline scripts (the Content Security Policy forbids them):
@@ -431,6 +434,16 @@
     }
   }
 
+  /* A select with data-readout shows its option's data-readout-text in
+     the element with that id, such as the model a language uses. */
+  function showReadout(select) {
+    var readout = document.getElementById(select.getAttribute("data-readout"));
+    var option = select.options[select.selectedIndex];
+    if (readout && option) {
+      readout.textContent = option.getAttribute("data-readout-text") || "";
+    }
+  }
+
   function showRange(input) {
     document.querySelectorAll("[data-output-of='" + input.id + "']").forEach(function (output) {
       output.textContent = input.value;
@@ -447,6 +460,9 @@
     }
     if (target.matches("[data-reveal]")) {
       applyReveal(target);
+    }
+    if (target.matches("select[data-readout]")) {
+      showReadout(target);
     }
     var switchForm = target.closest("[data-switch]");
     if (switchForm && target.name === switchForm.getAttribute("data-switch")) {
@@ -498,10 +514,318 @@
       box.hidden = true;
     }
     if (form && event.detail.successful && form.hasAttribute("data-upload-form")) {
-      form.reset();
-      form.querySelectorAll("[data-dropzone] input[type='file']").forEach(listFiles);
+      // The files are sent; the settings stay for the next one.
+      form.querySelectorAll("[data-dropzone] input[type='file']").forEach(function (input) {
+        input.value = "";
+        listFiles(input);
+      });
     }
   });
+
+  /* ---- Audio player --------------------------------------------------- */
+
+  /*
+   * A player ([data-player], with data-duration) holds an <audio
+   * data-player-audio>, a play button, the time, a waveform and the
+   * transcript: passages (.turn) and words (.w) with their times in data-s
+   * and data-e, in order. Its state is built when it is first used. The
+   * recording loads only then (preload="none"), so a page of results
+   * loads no audio.
+   */
+  var players = new WeakMap();
+
+  function mediaTime(seconds) {
+    seconds = Math.max(0, Math.floor(seconds));
+    var hours = Math.floor(seconds / 3600);
+    var minutes = Math.floor((seconds % 3600) / 60);
+    var rest = seconds % 60;
+    var pad = function (value) {
+      return value < 10 ? "0" + value : String(value);
+    };
+    return (hours ? hours + ":" : "") + pad(minutes) + ":" + pad(rest);
+  }
+
+  function timed(box, selector) {
+    var elements = Array.prototype.slice.call(box.querySelectorAll(selector));
+    return {
+      elements: elements,
+      starts: elements.map(function (element) {
+        return Number(element.getAttribute("data-s"));
+      }),
+      ends: elements.map(function (element) {
+        return Number(element.getAttribute("data-e"));
+      })
+    };
+  }
+
+  /* The index of the last item that starts at or before time, or -1. */
+  function lastStarted(list, time) {
+    var low = 0;
+    var high = list.starts.length - 1;
+    var found = -1;
+    while (low <= high) {
+      var middle = (low + high) >> 1;
+      if (list.starts[middle] <= time) {
+        found = middle;
+        low = middle + 1;
+      } else {
+        high = middle - 1;
+      }
+    }
+    return found;
+  }
+
+  function playerOf(element) {
+    var box = element.closest("[data-player]");
+    if (!box) {
+      return null;
+    }
+    var player = players.get(box);
+    if (player) {
+      return player;
+    }
+    var audio = box.querySelector("[data-player-audio]");
+    player = {
+      box: box,
+      audio: audio,
+      duration: Number(box.getAttribute("data-duration")) || 0,
+      now: box.querySelector("[data-player-now]"),
+      toggle: box.querySelector("[data-player-toggle]"),
+      wave: box.querySelector("[data-player-wave]"),
+      bars: Array.prototype.slice.call(box.querySelectorAll(".waveform__bar")),
+      transcript: box.querySelector("[data-player-transcript]"),
+      turns: timed(box, ".turn"),
+      words: timed(box, ".w"),
+      played: -1,
+      bar: null,
+      turn: null,
+      word: null,
+      frame: 0
+    };
+    players.set(box, player);
+
+    var playing = function (on) {
+      box.classList.toggle("is-playing", on);
+      if (player.toggle) {
+        player.toggle.setAttribute("aria-label", on ? "Pause" : "Play");
+      }
+    };
+    audio.addEventListener("play", function () {
+      playing(true);
+      run(player);
+    });
+    audio.addEventListener("pause", function () {
+      playing(false);
+      update(player);
+    });
+    audio.addEventListener("seeked", function () {
+      update(player);
+    });
+    audio.addEventListener("loadedmetadata", function () {
+      if (isFinite(audio.duration) && audio.duration > 0) {
+        player.duration = audio.duration;
+      }
+    });
+    audio.addEventListener("error", function () {
+      playing(false);
+      showError(
+        "The recording cannot be played",
+        "It may have been removed with its job, or the session ended. Reload the page."
+      );
+    });
+    return player;
+  }
+
+  function mark(player, key, element, className) {
+    if (player[key] === element) {
+      return false;
+    }
+    if (player[key]) {
+      player[key].classList.remove(className);
+    }
+    if (element) {
+      element.classList.add(className);
+    }
+    player[key] = element;
+    return true;
+  }
+
+  function update(player) {
+    var time = player.audio.currentTime || 0;
+    if (player.now) {
+      player.now.textContent = mediaTime(time);
+    }
+    if (player.wave) {
+      player.wave.setAttribute("aria-valuenow", String(Math.floor(time)));
+      player.wave.setAttribute("aria-valuetext", mediaTime(time));
+    }
+
+    var count = player.bars.length;
+    if (count && player.duration) {
+      var here = Math.min(count - 1, Math.floor((time / player.duration) * count));
+      if (here !== player.played) {
+        player.bars.forEach(function (bar, index) {
+          bar.classList.toggle("is-played", index < here);
+        });
+        player.played = here;
+      }
+      mark(player, "bar", player.bars[here], "is-here");
+    }
+
+    // A word stays marked through short pauses, a passage through longer.
+    var index = lastStarted(player.words, time);
+    var word = index >= 0 && time <= player.words.ends[index] + 1 ? player.words.elements[index] : null;
+    mark(player, "word", word, "is-current");
+    index = lastStarted(player.turns, time);
+    var turn = index >= 0 && time <= player.turns.ends[index] + 3 ? player.turns.elements[index] : null;
+    if (mark(player, "turn", turn, "turn--current") && turn && !player.audio.paused) {
+      follow(player, turn);
+    }
+  }
+
+  /* Keep the passage being spoken in view in the transcript's box. */
+  function follow(player, turn) {
+    var list = player.transcript;
+    if (!list || list.scrollHeight <= list.clientHeight) {
+      return;
+    }
+    var top = turn.offsetTop;
+    if (top < list.scrollTop || top + turn.offsetHeight > list.scrollTop + list.clientHeight) {
+      list.scrollTop = Math.max(0, top - list.clientHeight / 4);
+    }
+  }
+
+  function run(player) {
+    window.cancelAnimationFrame(player.frame);
+    var step = function () {
+      update(player);
+      if (!player.audio.paused) {
+        player.frame = window.requestAnimationFrame(step);
+      }
+    };
+    step();
+  }
+
+  function play(player) {
+    var started = player.audio.play();
+    if (started && started.catch) {
+      // Failures to load show through the audio's error event.
+      started.catch(function () {});
+    }
+  }
+
+  function seek(player, time, andPlay) {
+    var end = player.duration || time;
+    player.audio.currentTime = Math.max(0, Math.min(time, end));
+    update(player);
+    if (andPlay && player.audio.paused) {
+      play(player);
+    }
+  }
+
+  document.addEventListener("click", function (event) {
+    var target = event.target;
+    if (!(target instanceof Element) || !target.closest("[data-player]")) {
+      return;
+    }
+    var player = playerOf(target);
+    if (target.closest("[data-player-toggle]")) {
+      if (player.audio.paused) {
+        play(player);
+      } else {
+        player.audio.pause();
+      }
+      return;
+    }
+    var from = target.closest("[data-seek]") || target.closest(".w");
+    if (from) {
+      seek(player, Number(from.getAttribute("data-seek") || from.getAttribute("data-s")), true);
+    }
+  });
+
+  /* Pressing on the waveform jumps there; dragging moves along it. */
+  document.addEventListener("pointerdown", function (event) {
+    var wave = event.target instanceof Element ? event.target.closest("[data-player-wave]") : null;
+    if (!wave || event.button !== 0) {
+      return;
+    }
+    var player = playerOf(wave);
+    var seekTo = function (clientX) {
+      var box = wave.getBoundingClientRect();
+      var share = Math.min(1, Math.max(0, (clientX - box.left) / box.width));
+      seek(player, share * player.duration, false);
+    };
+    var move = function (moved) {
+      seekTo(moved.clientX);
+    };
+    var stop = function () {
+      wave.removeEventListener("pointermove", move);
+      wave.removeEventListener("pointerup", stop);
+      wave.removeEventListener("pointercancel", stop);
+    };
+    seekTo(event.clientX);
+    wave.setPointerCapture(event.pointerId);
+    wave.addEventListener("pointermove", move);
+    wave.addEventListener("pointerup", stop);
+    wave.addEventListener("pointercancel", stop);
+  });
+
+  /* The waveform is a slider: arrows move 5 s, page keys 30 s. */
+  document.addEventListener("keydown", function (event) {
+    var wave = event.target instanceof Element ? event.target.closest("[data-player-wave]") : null;
+    if (!wave) {
+      return;
+    }
+    var player = playerOf(wave);
+    var now = player.audio.currentTime || 0;
+    var moves = {
+      ArrowLeft: now - 5,
+      ArrowDown: now - 5,
+      ArrowRight: now + 5,
+      ArrowUp: now + 5,
+      PageDown: now - 30,
+      PageUp: now + 30,
+      Home: 0,
+      End: player.duration
+    };
+    if (Object.prototype.hasOwnProperty.call(moves, event.key)) {
+      seek(player, moves[event.key], false);
+      event.preventDefault();
+    } else if (event.key === " " || event.key === "Enter") {
+      if (player.audio.paused) {
+        play(player);
+      } else {
+        player.audio.pause();
+      }
+      event.preventDefault();
+    }
+  });
+
+  /* Passages or words: the words view shows each word's time. */
+  document.addEventListener("change", function (event) {
+    var target = event.target;
+    if (!(target instanceof Element) || !target.matches("[data-player-view]")) {
+      return;
+    }
+    var box = target.closest("[data-player]");
+    var list = box ? box.querySelector("[data-player-transcript]") : null;
+    if (list) {
+      list.classList.toggle("transcript--words", target.value === "words");
+    }
+  });
+
+  /* One recording plays at a time. */
+  document.addEventListener(
+    "play",
+    function (event) {
+      document.querySelectorAll("[data-player-audio]").forEach(function (audio) {
+        if (audio !== event.target) {
+          audio.pause();
+        }
+      });
+    },
+    true
+  );
 
   /* ---- Start ---------------------------------------------------------- */
 
@@ -509,6 +833,7 @@
     scope.querySelectorAll("[data-reveal]").forEach(applyReveal);
     scope.querySelectorAll("[data-switch]").forEach(applySwitch);
     scope.querySelectorAll("input[type='range']").forEach(showRange);
+    scope.querySelectorAll("select[data-readout]").forEach(showReadout);
   }
 
   applyTheme(currentTheme());

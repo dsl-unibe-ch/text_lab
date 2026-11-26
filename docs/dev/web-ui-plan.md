@@ -2,12 +2,15 @@
 
 !!! note "Status"
     Plan agreed on 26 November 2026; phase 0 done the same day (see
-    [Phase 0 results](#phase-0-results)). Phase 1 started the same day: the
-    foundation, the launcher and the redeployment files are built, and the
-    mockups of Home and Transcription wait for agreement (see
-    [Phase 1 progress](#phase-1-progress)). The work happens on the branch
-    `feat/web-ui` and the branches that follow it, one per phase or page.
-    Update this page when a phase ends or a decision changes.
+    [Phase 0 results](#phase-0-results)). Phase 1 built the foundation, the
+    launcher and the redeployment files, and the mockups of Home and
+    Transcription were agreed on 27 November (see
+    [Phase 1 progress](#phase-1-progress)). Phase 2, the pilot, is built
+    and waits for its test in the sandbox (see
+    [Phase 2 progress](#phase-2-progress)). The work happens on the local
+    branch `feat/web-ui`, one commit per phase or page, and reaches `main`
+    when the whole UI is done. Update this page when a phase ends or a
+    decision changes.
 
 Text Lab's user interface moves from Streamlit to a web UI built with
 [FastAPI](https://fastapi.tiangolo.com/), Jinja2 templates and
@@ -35,7 +38,7 @@ page calls only its feature's `service.py`, and the new pages do the same.
 | Question | Decision | Reason |
 |---|---|---|
 | How users switch | **At once**, when every page exists in the new UI. Streamlit stays selectable for one release as a rollback, then it is removed | A fresh design next to Streamlit pages would feel like two apps, and keeping two UIs doubles every UI change |
-| How it is built | **Page by page, merged into `main`** behind a launch switch, not on one long-lived branch | Each page is reviewed, tested and merged on its own; production runs Streamlit until the switch |
+| How it is built | **Page by page on one local branch** (`feat/web-ui`), committed per phase or page, merged into `main` once every page exists; then one release and one HPC redeploy | One developer, no reviewers to wait for; production is stable and `main` sees no changes meanwhile (should a fix land on `main`, merge it into the branch) |
 | Design | **Fresh**: modern, responsive, easy to use, accessible | |
 | Long runs | **Background jobs**, one GPU job at a time, results kept for the session | Users can leave or reload a page, and runs can no longer take the GPU from each other |
 | First pages | **Home and Transcription** | Transcription has the cleanest service: a worker process, progress reports and cancelling |
@@ -206,7 +209,7 @@ Rules, checked by tests as for the Streamlit pages today:
 
 ## Deployment and the switch
 
-- **One HPC redeploy, in phase 1.** `template/script.sh.erb` starts
+- **One HPC redeploy, at the switch.** `template/script.sh.erb` starts
   `python -m textlab.ui.launch` instead of Streamlit. The launcher starts
   the UI that `TEXT_LAB_UI` names (`streamlit` by default, or `web`), with
   today's port, base path and upload limit, so production behaves as
@@ -218,8 +221,9 @@ Rules, checked by tests as for the Streamlit pages today:
 - **Sandbox**: `TEXT_LAB_UI=web` in `template/dev.env` shows the new UI,
   and `export TEXT_LAB_WEB_DEV=1` its developer pages under `/dev`: the
   component gallery, the mockups and a demo job.
-- **The switch**: `TEXT_LAB_UI=web` in the live `site.env`, without an HPC
-  redeploy. Rolling back means setting it back.
+- **The switch**: the release with the whole UI, the HPC redeploy of its
+  Open OnDemand files, then `TEXT_LAB_UI=web` in the live `site.env`.
+  Rolling back means setting it back, without another redeploy.
 - **Removal**: one release later, the launcher starts only the web UI, and
   Streamlit leaves the image at its next rebuild (`locks/main.txt` and
   `text_lab.def`).
@@ -229,10 +233,10 @@ Rules, checked by tests as for the Streamlit pages today:
 | Phase | Content | Done when |
 |---|---|---|
 | 0. Spike (done) | A minimal FastAPI app in the sandbox, behind the Open OnDemand proxy: base path, login cookie, SSE progress, a 2 GB upload streamed to the workspace, a download | All of it works, or a fallback is chosen (HTMX polling every second instead of SSE) |
-| 1. Foundation (in progress) | The launcher and the HPC redeploy (production unchanged). In `ui/web/`: app factory, login, CSRF, CSP, layout, design system and components, job runner (queue, SSE, cancelling), upload and download helpers, error pages, test harness. Mockups of Home and Transcription | An empty app with login, navigation and a demo job runs in the sandbox, with tests, and the mockups are agreed |
-| 2. Pilot | Home and Transcription: a recording or a ZIP batch, language and model, voice activity detection, speaker identification with speaker counts, the audio player with word highlighting, every download | Everything the Streamlit page does works, with tests, and the UI test passes |
-| 3. Pages | One PR each, in this order: Meeting Notes, Translation, OCR (automatic mode, legacy engines, historic handwriting, Hugging Face models), Topic Modeling, Chat, Visualize Data, Knowledge Graph | As in phase 2, with the page's user guide drafted |
-| 4. Switch | `TEXT_LAB_UI=web` in production; the new user guide replaces the old one; a release | Users work in the new UI; Streamlit can still be selected as a rollback |
+| 1. Foundation (done) | The launcher and the redeployment files (deployed at the switch). In `ui/web/`: app factory, login, CSRF, CSP, layout, design system and components, job runner (queue, SSE, cancelling), upload and download helpers, error pages, test harness. Mockups of Home and Transcription | An empty app with login, navigation and a demo job runs in the sandbox, with tests, and the mockups are agreed |
+| 2. Pilot (in progress) | Home and Transcription: a recording or a ZIP batch, language and model, voice activity detection, speaker identification with speaker counts, the audio player with word highlighting, every download | Everything the Streamlit page does works, with tests, and the UI test passes |
+| 3. Pages | One commit each, in this order: Meeting Notes, Translation, OCR (automatic mode, legacy engines, historic handwriting, Hugging Face models), Topic Modeling, Chat, Visualize Data, Knowledge Graph | As in phase 2, with the page's user guide drafted |
+| 4. Switch | The branch merged into `main`; the new user guide replaces the old one; a release, the HPC redeploy, `TEXT_LAB_UI=web` in production | Users work in the new UI; Streamlit can still be selected as a rollback |
 | 5. Removal | `ui/streamlit/` and its tests are removed; Streamlit leaves the image | One release after the switch, without a rollback |
 
 ### What is rebuilt
@@ -317,21 +321,75 @@ Built on 26 November 2026, with tests (`src/textlab/ui/web/tests/`,
 - Developer pages under `/dev`: the component gallery, the mockups of Home
   and Transcription, and a demo job.
 
-Still to do in phase 1:
+The mockups were agreed on 27 November, with their choices: the language
+is detected in the job, from the recording's first 30 seconds, instead of
+when the file is chosen (the web page uploads the file only when the job
+is submitted); the result shows the player and the transcript together,
+with the plain text and the models in tabs; every output file downloads on
+its own, besides the ZIP of all of them. The mockups were removed when the
+pages were built.
 
-1. Agree the mockups (`/dev/mockups/home`, `/dev/mockups/transcription`).
-   Choices in them to confirm: the language is detected in the job, from
-   the recording's first 30 seconds, instead of when the file is chosen
-   (the web page uploads the file only when the job is submitted); the
-   result shows the player and the transcript together, with the plain
-   text and the models in tabs; every output file downloads on its own,
-   besides the ZIP of all of them.
-2. Try the foundation in the sandbox: with `TEXT_LAB_UI=web` (login through
-   *Connect*, the demo job with an upload, cancelling, downloads, a
-   reload while a job runs, narrow screens) and without it (Streamlit as
-   before).
-3. Release, and ask the HPC team for the redeployment.
-4. Remove `scripts/web_ui_spike/`.
+Still to do from phase 1, with phase 2's sandbox test: try the foundation
+with `TEXT_LAB_UI=web` (login through *Connect*, the demo job, cancelling,
+a reload while a job runs, narrow screens) and without it (Streamlit as
+before). The spike (`scripts/web_ui_spike/`) is removed. The release and
+the HPC redeployment wait for the switch (phase 4).
+
+## Phase 2 progress
+
+Built on 27 November 2026, with tests
+(`src/textlab/ui/web/tests/test_transcription_page.py`, and in
+`features/transcription/tests/` for the service's new parts):
+
+- **Home** (`pages/home.py`): what Text Lab is, the tools, the session's
+  jobs (updated live from the page's event stream) and where to get help.
+  A notice says which tools are not built yet; it goes away by itself when
+  every tool is `ready`.
+- **Transcription** (`pages/transcription.py`), with the three uses of the
+  Streamlit page:
+    - *One recording*: a job that prepares the recording for the browser
+      (an MP3 and its waveform, `service.prepare_playback`), transcribes it
+      and offers every export, and a ZIP of all of them with a WAV copy for
+      ELAN, as before.
+    - *A ZIP of recordings*: checked when it arrives (it must hold
+      recordings), transcribed with the same settings, one ZIP with a folder
+      per recording; skipped recordings are listed.
+    - *Review a transcript*: a recording and a transcript table, uploaded
+      or named by their paths on the cluster. It needs no GPU, so it runs
+      beside the queue (`JobRunner.submit(..., at_once=True)`) and does not
+      wait for a running transcription.
+- **The player**, in `app.js`: the browser's own `<audio>` element plays
+  the MP3 from the job's files (with range requests, so long recordings
+  start at once and seeking works); the waveform is drawn from levels
+  measured on the server. The passage and the word being spoken are
+  marked, the transcript follows, clicking a time, a word or the waveform
+  plays from there, and the waveform works as a slider from the keyboard.
+  Unlike the Streamlit player, it plays the whole recording, not the first
+  30 minutes.
+- **The service** (`features/transcription/service.py`) exports what pages
+  use in `__all__`, with new helpers: the passages for a player
+  (`turns`, `turns_from_table`), the recording for the browser
+  (`prepare_playback`), the exports on disk (`save_transcript_files`,
+  `save_zip`), the recordings in a ZIP (`zip_recordings`) and language
+  names. The rules test now also checks names read as `service.x`.
+- The user guide's draft: `docs/next/transcription.md`, left out of the
+  published site (`exclude_docs` in `mkdocs.yml`).
+
+Still to do in phase 2:
+
+1. Try it in the sandbox (`TEXT_LAB_UI=web`), against the Streamlit page:
+   one recording with each option (a language, detection, Swiss German,
+   another model, skipping silence, speaker counts); every download, and
+   the ZIP's WAV in ELAN; the player (play, pause, clicking times and
+   words, the waveform, the words view, a recording over 30 minutes); a
+   ZIP batch with a broken file; a review with uploads and with paths on
+   the cluster; leaving the page while a job runs; Home's list of jobs;
+   narrow screens and the dark theme.
+2. Commit phase 2.
+
+A test runs a recording through the page with the real pipeline (Whisper
+"tiny" on a generated tone, in the image, marked `container` and `slow`):
+the worker, ffmpeg, the MP3 and the ZIP with its WAV work together.
 
 ## Testing
 
@@ -342,16 +400,16 @@ Still to do in phase 1:
   refused.
 - **Import rules**: pages use only the feature services; import-linter
   already keeps the backend from importing any UI.
-- **Manual checks**: each page's PR lists what to try in the sandbox, taken
+- **Manual checks**: each page lists in this plan what to try in the sandbox, taken
   from the features of the Streamlit page it replaces.
 - Browser tests (Playwright) are not planned: the image has no browser.
 
 ## Documentation
 
-- The developer guide and the feature READMEs change with each PR, as
-  usual.
+- The developer guide and the feature READMEs change with each page's
+  commit, as usual.
 - The user guide describes what production runs. Each new page's guide is
-  written in its PR under `docs/next/`, which the published site leaves out
+  written with the page under `docs/next/`, which the published site leaves out
   (`exclude_docs` in `mkdocs.yml`), and replaces the current guide at the
   switch.
 

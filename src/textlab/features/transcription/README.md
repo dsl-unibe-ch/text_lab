@@ -3,7 +3,8 @@
 Transcribes recordings with WhisperX: speech to text with word-level
 timestamps, optional voice activity detection (VAD), and speaker
 identification (diarization). Swiss German has its own models. Used by the
-Transcribe page and the Meeting Notes Generator.
+Transcribe page and the Meeting Notes Generator, in the Streamlit UI and
+the web UI.
 
 ## Pipeline
 
@@ -42,6 +43,10 @@ WhisperX, torch, numpy, silero_vad, soundfile and ollama (through
 
 ## Public API
 
+`service.__all__` lists what interfaces use; the web UI imports nothing
+else (its rules test checks this). Names marked *service* below are also
+exported there when they live in another module.
+
 | Name | Module | Purpose |
 |---|---|---|
 | `run_transcription(files, options, on_progress=, cancel=, backend_python=)` | `service` | Run the pipeline in a worker process |
@@ -50,7 +55,12 @@ WhisperX, torch, numpy, silero_vad, soundfile and ollama (through
 | `TranscriptionOptions`, `AudioFile`, `Transcript`, `TranscriptionResult` | `models` | Inputs and outputs; convert to and from JSON |
 | `default_model(language)`, `alignment_language(language)`, `converted_model_missing(...)` | `whisper_models` | Model choice per language |
 | `transcript_files(transcript, base_name)`, `batch_zip(...)`, `load_transcript_items(...)` | `formats` | Exports (segment, word and ELAN tables, SRT, VTT, text) and readers |
-| `convert_audio_to_wav_bytes(...)`, `detect_language_from_bytes(...)` | `audio` | Decoding and language detection for the pages |
+| `convert_audio_to_wav_bytes(...)`, `detect_language_from_bytes(...)` | `audio` | Decoding and language detection for the Streamlit pages |
+| `LANGUAGES`, `language_name(code)`, `writes_spaces(code)` | `service` | The languages to choose from, their names, whether words are separated by spaces |
+| `zip_recordings(archive)` | `service` | The recordings a ZIP holds, from its table of contents, to check an upload before queueing it |
+| `save_transcript_files(transcript, folder)`, `save_zip(files, target)` | `service` | The exports written to disk, and packed from disk |
+| `turns(transcript)`, `turns_from_table(text)` (*service*) | `formats` | The passages (`Turn`, with `TimedWord`s and numbered speakers) an audio player shows, from a transcript or from a word or segment table |
+| `prepare_playback(source, folder, name, wav=)` | `service` | Decodes a recording once, writes an MP3 every browser plays (`audio.write_mp3`) and an optional WAV, and measures its waveform (`audio.waveform_levels`); returns a `Playback` |
 
 A minimal use:
 
@@ -67,9 +77,10 @@ with staged_uploads([("talk.mp3", audio_bytes)]) as files:
 transcript = result.transcripts[0]
 ```
 
-The browser player (`ui/streamlit/components/audio_player.py`) and the
-Streamlit status box (`ui/streamlit/components/progress.py`) belong to the
-user interface, not to this package.
+The browser players (`ui/streamlit/components/audio_player.py`, and the
+web UI's `templates/transcription/result.html` with `static/js/app.js`)
+and the Streamlit status box (`ui/streamlit/components/progress.py`)
+belong to the user interfaces, not to this package.
 
 ## Files written
 
@@ -78,6 +89,7 @@ user interface, not to this package.
 | Uploaded recordings, extracted ZIP members | `transcription/upload-*`, `transcription/batch-*` in the job workspace | When the run ends |
 | Worker request, progress and result | `transcription/job-*` in the job workspace | When the run ends |
 | ffmpeg's temporary copy of hard-to-pipe formats | `$TMPDIR` (inside the workspace) | Immediately after decoding |
+| The web UI's MP3 for the player, exports and their ZIP | The job's `outputs/` under `web-jobs/` in the workspace | When the user removes the job, or the session ends |
 
 Nothing is written outside the workspace; results are returned to the page,
 which offers them as downloads.

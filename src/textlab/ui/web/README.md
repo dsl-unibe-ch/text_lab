@@ -33,8 +33,8 @@ port, base path (`/node/<host>/<port>/`) and the portal's host name;
 | `uploads.py` | Reading forms with files, checking them, saving them into a job |
 | `render.py` | Templates, icons, links from the base path, number formats |
 | `settings.py` | The server's settings (`TOKEN`, `USER`, `TEXT_LAB_WEB_DEV`) |
-| `pages/` | One module per page, and `TOOLS`, the navigation |
-| `templates/` | `base.html` (layout), `components/macros.html`, `jobs/`, one folder per page; `mockups/` and `dev/` for the developer pages |
+| `pages/` | One module per page (`home`, `transcription`, `placeholder` for the tools not built yet, `dev`), and `TOOLS`, the navigation |
+| `templates/` | `base.html` (layout), `components/macros.html`, `jobs/`, one folder per page (`pages/` for Home and the placeholders, `transcription/`); `mockups/` and `dev/` for the developer pages |
 | `static/` | `css/` (`fonts.css`, `tokens.css`, `layout.css`, `components.css`), `js/` (`app.js`, `theme.js`), `vendor/` (htmx, IBM Plex fonts, Lucide icons; see its README) |
 
 ### Links
@@ -87,8 +87,15 @@ Uploads in `job.inputs` are deleted when the job ends.
 
 The page lists its jobs with `render_card` and sets `page_id`. `app.js`
 opens the page's event stream while one of the session's jobs waits or runs
-and swaps in the cards and the job indicator as they change. Short GPU
-requests outside jobs (a chat message) use `runner.exclusive()`.
+and swaps in the cards and the job indicator as they change (on Home also
+its list of jobs). Short GPU requests outside jobs (a chat message) use
+`runner.exclusive()`.
+
+Short work without the GPU, which should not wait for an hour-long job,
+starts at once beside the queue: `runner.submit(job, work, at_once=True)`
+(the review of a transcript). Files a result uses but the card should not
+list, such as the recording a player plays, are offered with
+`Download(..., listed=False)`; they are fetched from the same link.
 
 ### Errors
 
@@ -102,7 +109,8 @@ which the user sees.
 Checked by `tests/test_rules.py`:
 
 - Pages import from the features only their `service` modules, and only the
-  names those export in `__all__`.
+  names those export in `__all__` (also when they read them as
+  `service.name`).
 - No inline scripts, event handlers or styles in templates: the Content
   Security Policy blocks them. Behaviour goes into `static/js/app.js`,
   wired through `data-` attributes; sizes and colours into the style
@@ -127,14 +135,25 @@ these patterns, and to the tokens in `static/css/tokens.css`, rather than
 adding cards, shadows or icons.
 
 The developer pages (`/dev`, with `TEXT_LAB_WEB_DEV=1`) show the component
-gallery, the mockups of the pages before they are built, and a demo job that
-runs through the job runner without a model.
+gallery, the mockups of pages before they are built (removed once a page
+exists), and a demo job that runs through the job runner without a model.
+
+### The audio player
+
+Transcription's result (`templates/transcription/result.html`) is a player:
+an `<audio>` element that loads the job's MP3 only when played, a waveform
+of levels measured on the server, and the transcript, whose passages
+(`.turn`) and words (`.w`) carry their times in `data-s` and `data-e`.
+`app.js` marks the passage and word being spoken, keeps the passage in
+view, plays from a clicked time or word, and treats the waveform as a
+slider. Meeting Notes will reuse it.
 
 ## Tests
 
 `tests/` here, run with the other tests (see `docs/dev/testing.md`):
 login and CSRF (`test_auth.py`), pages, headers and errors (`test_app.py`),
 the job runner (`test_jobs.py`), jobs through the web with the demo job
-(`test_job_pages.py`), uploads (`test_uploads.py`) and the rules
+(`test_job_pages.py`), uploads (`test_uploads.py`), the Transcription page
+and Home with a faked backend (`test_transcription_page.py`) and the rules
 (`test_rules.py`). The launcher and the Open OnDemand files are tested in
 `tests/test_launch.py` at the repository root.

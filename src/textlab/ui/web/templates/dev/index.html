@@ -18,7 +18,7 @@
       {% for name, title in mockups.items() %}
       <li>
         <a class="catalog__link" href="{{ root }}/dev/mockups/{{ name }}">
-          <span class="catalog__num">D{{ loop.index + 2 }}</span>
+          <span class="catalog__num">M{{ loop.index }}</span>
           <span class="catalog__name">Mockup: {{ title }}</span>
           <span class="catalog__text">The {{ title }} page as designed, with sample data. Nothing on it works yet.</span>
           <span class="catalog__go">{{ icon("arrow-right") }}</span>
@@ -32,7 +32,7 @@
     <ul class="catalog__list">
       <li>
         <a class="catalog__link" href="{{ root }}/dev/demo">
-          <span class="catalog__num">D5</span>
+          <span class="catalog__num">D3</span>
           <span class="catalog__name">Demo job</span>
           <span class="catalog__text">A job without a model: the queue, live progress, cancelling, an upload and downloads.</span>
           <span class="catalog__go">{{ icon("arrow-right") }}</span>
