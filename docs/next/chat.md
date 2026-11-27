@@ -32,8 +32,10 @@ conversations stay listed there until your Text Lab session ends.
 
 ## The answer
 
-The answer appears word by word as the model writes it. While it is
-written:
+The answer appears word by word as the model writes it, and the page
+follows it down. To read something higher up meanwhile, scroll up: the page
+then stays where you are, until you scroll back to the end or send the next
+message. While the answer is written:
 
 - **Stop** (the square in place of the Send button) stops it at once.
   What was written so far stays in the conversation, marked *Stopped*.
@@ -55,8 +57,9 @@ slow each other down; you can cancel the other job from there.
 
 ## Conversations
 
-The panel on the right (behind **Conversations** on narrow screens) lists
-the conversations of your session, the most recent first.
+The panel along the right edge of the window (behind **Conversations** on
+narrower screens) lists the conversations of your session, the most recent
+first.
 
 - **New chat** starts an empty conversation. Click a conversation to go
   back to it.

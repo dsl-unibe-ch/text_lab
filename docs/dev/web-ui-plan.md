@@ -791,11 +791,24 @@ with the model faked; the service's new parts in
   skips cards it has in the same version.
 - The guide's draft: `docs/next/chat.md`.
 
-Still to do: try it in the sandbox: a plain question with a reasoning
-model (thinking, Stop, Again, Copy), a PDF and a table attached (a data
-question with charts, the HTML download), a reply while a transcription
-runs, two conversations, a narrow window and the dark theme. Then commit.
-Next: Visualize Data.
+Tried in the sandbox and committed on 27 November. The user's review
+asked for two changes, made the same day:
+
+- **The width**: the page used the content width of the other pages
+  (78rem), which left the right part of a wide window empty. Chat now
+  takes the whole width beside the index: the conversation in a wider
+  column (60rem) in the middle, the side panel the height of the window
+  against the right edge, as the index is against the left. Below 1280px
+  the panel slides in behind the Conversations button.
+- **Following the answer**: the page did not keep the answer being
+  written in view. It now follows it with a `ResizeObserver` on the
+  conversation, whatever changes its size, while a reply is written and
+  for a few seconds after (its charts); scrolling up stops that, and
+  scrolling back to the end or sending a message starts it again. Scroll
+  anchoring is off on the page.
+
+Still to do: try the two changes in the sandbox; then commit. Next:
+Visualize Data.
 
 ## Testing
 

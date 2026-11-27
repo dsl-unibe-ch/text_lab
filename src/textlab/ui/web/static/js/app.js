@@ -1444,9 +1444,25 @@
    * [data-chat-composer]) and the side panel (#chat-panel-body, refreshed
    * from data-chat-panel-url after each reply). A reply's card carries
    * data-job-active while it waits or is written.
+   *
+   * The page follows the reply being written: while the reader is at the
+   * foot of the conversation, every change of its size (a word, the
+   * thinking, a chart drawn) scrolls to the foot again (a ResizeObserver,
+   * so it does not depend on what changed it). Scrolling up stops that;
+   * scrolling back to the foot, or sending a message, starts it again.
+   * Once no reply is written (and its charts are drawn), the page stays
+   * put, so a box the reader opens does not move it.
    */
   var chatKept = {};
   var plotlyLoading = null;
+  var chatFollow = true;
+  var chatLastY = window.scrollY;
+  var followUntil = 0;
+  var touchY = null;
+
+  // Milliseconds the page still follows a reply after it ended: its
+  // charts are drawn then.
+  var FOLLOW_AFTER = 4000;
 
   function chatPage() {
     return document.querySelector("[data-chat]");
@@ -1456,13 +1472,28 @@
     return document.querySelector("#transcript [data-chat-answer][data-job-active]");
   }
 
-  function nearBottom() {
+  function atFoot(slack) {
     var page = document.documentElement;
-    return window.innerHeight + window.scrollY >= page.scrollHeight - 160;
+    return window.innerHeight + window.scrollY >= page.scrollHeight - slack;
   }
 
-  function toBottom() {
+  function toFoot() {
     window.scrollTo(0, document.documentElement.scrollHeight);
+    chatLastY = window.scrollY;
+  }
+
+  function follow() {
+    chatFollow = true;
+    toFoot();
+  }
+
+  // The reader scrolled the page up (scrolling the side panel does not
+  // count).
+  function stopFollowing(event) {
+    var inPanel = event && event.target instanceof Element && event.target.closest(".chat__panel");
+    if (chatPage() && !inPanel) {
+      chatFollow = false;
+    }
   }
 
   function growInput(area) {
@@ -1500,7 +1531,7 @@
         return card.id;
       }
     );
-    return { pinned: nearBottom(), active: active };
+    return { active: active };
   }
 
   function chatAfterUpdate(before) {
@@ -1509,13 +1540,16 @@
     }
     keepOpen(document);
     syncComposer();
-    if (before.pinned) {
-      toBottom();
+    if (chatFollow) {
+      toFoot();
     }
     var ended = before.active.some(function (id) {
       var card = document.getElementById(id);
       return card && !card.hasAttribute("data-job-active");
     });
+    if (ended) {
+      followUntil = Date.now() + FOLLOW_AFTER;
+    }
     var page = chatPage();
     if (ended && page && window.htmx) {
       window.htmx.ajax("GET", page.getAttribute("data-chat-panel-url"), {
@@ -1541,15 +1575,54 @@
     }
   });
 
-  document.addEventListener(
-    "toggle",
+  /* The reader scrolls up: the page stops following the reply. */
+  window.addEventListener(
+    "wheel",
     function (event) {
-      var details = event.target;
-      if (details instanceof Element && details.matches("details[data-chat-keep]") && details.id) {
-        chatKept[details.id] = details.open;
+      if (event.deltaY < 0) {
+        stopFollowing(event);
       }
     },
-    true
+    { passive: true }
+  );
+  window.addEventListener(
+    "touchstart",
+    function (event) {
+      touchY = event.touches.length ? event.touches[0].clientY : null;
+    },
+    { passive: true }
+  );
+  window.addEventListener(
+    "touchmove",
+    function (event) {
+      if (touchY !== null && event.touches.length && event.touches[0].clientY > touchY + 4) {
+        stopFollowing(event);
+      }
+    },
+    { passive: true }
+  );
+  document.addEventListener("keydown", function (event) {
+    var field = event.target instanceof Element && event.target.closest("input, textarea, select");
+    if (!field && (event.key === "PageUp" || event.key === "ArrowUp" || event.key === "Home")) {
+      stopFollowing(event);
+    }
+  });
+  window.addEventListener(
+    "scroll",
+    function () {
+      if (!chatPage()) {
+        return;
+      }
+      var y = window.scrollY;
+      if (atFoot(32)) {
+        chatFollow = true;
+      } else if (y < chatLastY - 1) {
+        // The scroll bar dragged up: the page itself only scrolls down.
+        chatFollow = false;
+      }
+      chatLastY = y;
+    },
+    { passive: true }
   );
 
   document.addEventListener("keydown", function (event) {
@@ -1583,13 +1656,22 @@
       area.value = "";
       growInput(area);
       syncComposer();
-      toBottom();
+      follow();
+    } else if (element.matches(".answer__again") && event.detail.successful) {
+      follow();
     }
   });
 
   document.addEventListener("click", function (event) {
     var target = event.target instanceof Element ? event.target : null;
     if (!target) {
+      return;
+    }
+    // A box the reader opened or closed stays so when its card is
+    // replaced; the click opens or closes it after this.
+    var summary = target.closest("details[data-chat-keep] > summary");
+    if (summary && summary.parentNode.id) {
+      chatKept[summary.parentNode.id] = !summary.parentNode.open;
       return;
     }
     if (target.closest("[data-chat-stop]")) {
@@ -1801,6 +1883,27 @@
     keepOpen(scope);
   }
 
+  // Whatever changes the size of the conversation while a reply is
+  // written, or of the message box while the reader types at the foot,
+  // the foot stays in view.
+  function watchChat() {
+    var transcript = document.getElementById("transcript");
+    var composer = document.querySelector("[data-chat-composer]");
+    if (!transcript || !composer || !window.ResizeObserver) {
+      return;
+    }
+    new ResizeObserver(function () {
+      if (chatFollow && (chatActive() || Date.now() < followUntil)) {
+        toFoot();
+      }
+    }).observe(transcript);
+    new ResizeObserver(function () {
+      if (chatFollow) {
+        toFoot();
+      }
+    }).observe(composer);
+  }
+
   /* ---- Start ---------------------------------------------------------- */
 
   function initialise(scope) {
@@ -1816,7 +1919,8 @@
   initialiseTranslator(document);
   if (chatPage()) {
     syncComposer();
-    toBottom();
+    watchChat();
+    follow();
   }
   if (window.htmx) {
     window.htmx.onLoad(function (element) {

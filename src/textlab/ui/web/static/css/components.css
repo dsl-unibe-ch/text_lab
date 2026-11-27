@@ -3918,29 +3918,41 @@ kbd {
 
 /* ---- Chat ------------------------------------------------------------- */
 
-/* The conversation, with the message box at the foot of the window, and
-   the side panel; the page's own footer is the note under the box. */
+/* Chat takes the whole width beside the index: the conversation in the
+   middle, the side panel against the right edge, as the index is against
+   the left. The message box stays at the foot of the window; the page's
+   own footer is the note under it. */
 .main:has(> .chat) {
-  padding-bottom: 0;
+  max-width: none;
+  padding: 0;
 }
 
 .chat {
+  --chat-width: 60rem;
+  --chat-panel-width: 19rem;
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 16.5rem;
-  gap: var(--space-7);
+  grid-template-columns: minmax(0, 1fr) var(--chat-panel-width);
   align-items: start;
+  /* app.js keeps the reply being written in view; the browser's own
+     anchoring of the scroll position would work against it. */
+  overflow-anchor: none;
 }
 
 .chat__main {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  min-height: calc(100vh - var(--statusbar-height) - var(--space-7));
+  min-height: calc(100vh - var(--statusbar-height));
+  padding: var(--space-6) var(--gutter) 0;
 }
 
+/* The conversation's column: wide enough for tables, code and charts, in
+   the middle of the space between the index and the panel. */
 .chat__main > * {
-  max-width: 50rem;
+  width: 100%;
+  max-width: var(--chat-width);
+  margin-inline: auto;
 }
 
 .chat__head {
@@ -4575,19 +4587,24 @@ kbd {
   height: 1.5rem;
 }
 
-/* The side panel: conversations, context, downloads. */
+/* The side panel, the height of the window against its right edge: the
+   session's conversations on top, then the context used, the downloads
+   and the models; deleting the conversation at its foot. */
 .chat__panel {
   position: sticky;
-  top: calc(var(--statusbar-height) + var(--space-5));
-  max-height: calc(100vh - var(--statusbar-height) - var(--space-6));
+  top: var(--statusbar-height);
+  height: calc(100vh - var(--statusbar-height));
   overflow-y: auto;
-  border-top: 3px solid var(--ink);
+  border-left: var(--hairline) solid var(--rule);
+  background: var(--paper);
 }
 
 .chat-panel {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: var(--space-5);
-  padding: var(--space-3) 0 var(--space-4);
+  min-height: 100%;
+  padding: var(--space-5) var(--space-5) var(--space-4);
 }
 
 .chat-panel__part {
@@ -4599,11 +4616,19 @@ kbd {
   margin: 0;
 }
 
+.chat-panel__foot {
+  margin-top: auto;
+  padding-top: var(--space-3);
+  border-top: var(--hairline) solid var(--rule);
+}
+
 .chat-panel__head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: var(--space-3);
+  padding-bottom: var(--space-2);
+  border-bottom: var(--rule-heavy) solid var(--ink);
 }
 
 .chat-panel__head h2,
@@ -4612,12 +4637,11 @@ kbd {
 }
 
 .conversations {
-  max-height: 40vh;
+  max-height: 45vh;
   margin: 0;
   padding: 0;
   overflow-y: auto;
   list-style: none;
-  border-top: var(--hairline) solid var(--rule);
 }
 
 .conversations__link {
@@ -4690,8 +4714,9 @@ kbd {
   font-size: var(--text-sm);
 }
 
-/* Narrow screens: the side panel slides in from the right. */
-@media (max-width: 1100px) {
+/* Narrower screens: the side panel slides in from the right, behind the
+   Conversations button, and the conversation takes the width. */
+@media (max-width: 1280px) {
   .chat {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -4704,12 +4729,9 @@ kbd {
     position: fixed;
     inset: var(--statusbar-height) 0 0 auto;
     z-index: var(--z-popover);
-    width: min(20rem, 88vw);
-    max-height: none;
-    padding: 0 var(--space-4);
-    border-top: 0;
-    border-left: var(--hairline) solid var(--ink);
-    background: var(--paper);
+    width: min(var(--chat-panel-width), 88vw);
+    height: auto;
+    border-left-color: var(--ink);
     transform: translateX(105%);
     visibility: hidden;
     transition: transform 180ms ease, visibility 0s linear 180ms;

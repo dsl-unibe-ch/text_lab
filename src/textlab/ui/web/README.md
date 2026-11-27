@@ -137,12 +137,22 @@ with their attachments (read once, their text kept in memory) and their
 exchanges (message, files, job). A reply's history is built from the
 finished replies before it.
 
+The page takes the whole width beside the index (`.main:has(> .chat)`):
+the conversation in a column of its own in the middle (`--chat-width`),
+the side panel the height of the window against the right edge (below
+1280px it slides in behind a button).
+
 `app.js` sends with Enter (Shift+Enter for a new line), grows the message
 box, turns Send into Stop while a reply is active, attaches files dropped
-anywhere on the page, keeps the reply being written in view (unless the
-reader scrolled up), keeps a thinking or steps box open across updates if
+anywhere on the page, keeps a thinking or steps box open across updates if
 the reader opened it, adds Copy to code blocks, and asks for the side panel
-again when a reply ends. When an event stream opens, it sends every card
+again when a reply ends. It follows the reply being written: a
+`ResizeObserver` on the conversation scrolls to its foot after every
+change of its size while a reply is active (and for a few seconds after,
+while its charts are drawn), so following does not depend on what changed
+the page. Scrolling up (wheel, touch, keys, the scroll bar) stops it;
+scrolling back to the foot or sending a message starts it again. The
+browser's scroll anchoring is off on the page (`overflow-anchor: none`). When an event stream opens, it sends every card
 of the conversation; the page skips cards it has in the same version
 (`data-version`, `htmx:oobBeforeSwap`), so finished replies and their
 charts are not drawn again. The page leaves out the layout's footer

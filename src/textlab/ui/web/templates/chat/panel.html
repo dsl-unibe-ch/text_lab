@@ -64,7 +64,7 @@
   </section>
 
   {% if conversation.exchanges or conversation.attachments %}
-  <div class="chat-panel__part">
+  <div class="chat-panel__foot">
     <button class="text-button text-button--danger" type="button" hx-post="{{ root }}/chat/{{ conversation.id }}/delete" hx-confirm="Delete this conversation, with its files and charts?" hx-disabled-elt="this">Delete this conversation</button>
   </div>
   {% endif %}
