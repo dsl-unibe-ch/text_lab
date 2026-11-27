@@ -20,6 +20,12 @@ SAMPLE_VALUE_MAX_CHARS: int = 40
 # Rows inspected when measuring average text length (keeps wide files fast).
 TEXT_LENGTH_SAMPLE_ROWS: int = 1000
 
+# How the agents treat a column (see column_kind).
+NUMERIC = "numeric"
+DATETIME = "datetime"
+TEXT = "text"
+CATEGORICAL = "categorical"
+
 
 def _average_text_length(series: pd.Series) -> float:
     """Return the mean length of the first non-null values of ``series``."""
@@ -27,6 +33,27 @@ def _average_text_length(series: pd.Series) -> float:
     if sample.empty:
         return 0.0
     return float(sample.astype(str).str.len().mean())
+
+
+def column_kind(series: pd.Series) -> str:
+    """Return how the agents treat a column.
+
+    Args:
+        series: The column.
+
+    Returns:
+        ``NUMERIC`` or ``DATETIME`` by its type; otherwise ``TEXT`` if its
+        values average more than ``TEXT_COLUMN_MIN_AVG_CHARS`` characters
+        (free text, used for word clouds but not for statistics), else
+        ``CATEGORICAL``.
+    """
+    if pd.api.types.is_numeric_dtype(series):
+        return NUMERIC
+    if pd.api.types.is_datetime64_any_dtype(series):
+        return DATETIME
+    if _average_text_length(series) > TEXT_COLUMN_MIN_AVG_CHARS:
+        return TEXT
+    return CATEGORICAL
 
 
 def get_column_summary_impl(data_file_path: str, column: str) -> str:
@@ -107,26 +134,11 @@ def get_all_columns_summary_impl(data_file_path: str) -> str:
         if was_last_load_truncated(data_file_path):
             truncation_note = f" (truncated to {MAX_ROWS:,} rows)"
 
-        numeric_cols = [
-            c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])
-        ]
-        datetime_cols = [
-            c
-            for c in df.columns
-            if pd.api.types.is_datetime64_any_dtype(df[c])
-        ]
-        other_cols = [
-            c
-            for c in df.columns
-            if c not in numeric_cols and c not in datetime_cols
-        ]
-        text_lengths = {c: _average_text_length(df[c]) for c in other_cols}
-        text_cols = [
-            c
-            for c in other_cols
-            if text_lengths[c] > TEXT_COLUMN_MIN_AVG_CHARS
-        ]
-        categorical_cols = [c for c in other_cols if c not in text_cols]
+        kinds = {c: column_kind(df[c]) for c in df.columns}
+        numeric_cols = [c for c in df.columns if kinds[c] == NUMERIC]
+        datetime_cols = [c for c in df.columns if kinds[c] == DATETIME]
+        text_cols = [c for c in df.columns if kinds[c] == TEXT]
+        categorical_cols = [c for c in df.columns if kinds[c] == CATEGORICAL]
 
         lines = [
             f"Dataset: {len(df):,} rows × {len(df.columns)} "
@@ -149,7 +161,8 @@ def get_all_columns_summary_impl(data_file_path: str) -> str:
             )
         if text_cols:
             text_details = "; ".join(
-                f"{c} (avg {text_lengths[c]:.0f} chars)" for c in text_cols
+                f"{c} (avg {_average_text_length(df[c]):.0f} chars)"
+                for c in text_cols
             )
             lines.append(
                 f"Text columns ({len(text_cols)}, free text: use for word "

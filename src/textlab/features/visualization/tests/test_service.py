@@ -8,11 +8,15 @@ import asyncio
 import io
 import json
 import os
+import threading
 import time
 import zipfile
 
+import ollama
+import pandas as pd
 import pytest
 
+from textlab.common.progress import Progress
 from textlab.common.storage import Workspace
 from textlab.features.visualization import runs, service, viz_agent
 
@@ -139,10 +143,10 @@ def test_a_slow_run_times_out(workspace, monkeypatch):
 def test_a_failed_model_download_is_reported(workspace, monkeypatch, agent):
     monkeypatch.setattr(runs, "model_installed", lambda model: False)
 
-    def fail(model):
+    def fail(model, stream):
         raise RuntimeError("offline")
 
-    monkeypatch.setattr(runs.ollama, "pull", fail)
+    monkeypatch.setattr(ollama, "pull", fail)
     request = service.AnalysisRequest(model="m", file_name="data.csv")
     run = wait_for(service.start_analysis(request, data=CSV))
     assert run.status == service.ERROR
@@ -156,6 +160,73 @@ def test_a_run_needs_exactly_one_table():
         service.start_analysis(request)
     with pytest.raises(ValueError):
         service.start_analysis(request, data=b"x", data_path="x.csv")
+
+
+def test_an_analysis_runs_in_the_callers_thread(workspace, agent, tmp_path):
+    path = tmp_path / "data.csv"
+    path.write_bytes(CSV)
+    logged = []
+    request = service.AnalysisRequest(model="m", prompt="Plot age")
+    run = service.analyze(
+        request,
+        str(path),
+        on_log=lambda level, message: logged.append((level, message)),
+        run_prefix="web",
+    )
+    assert run.status == service.DONE, run.error
+    assert run.run_id.startswith("web-")
+    assert logged == run.logs
+    assert ("info", "Supervisor planned 1 task(s).") in logged
+    assert [a.filename for a in run.result.artifacts] == [
+        "bar.json",
+        "hist.png",
+    ]
+    # The table is the caller's: it stays.
+    assert path.exists()
+
+
+def test_an_analysis_stops_when_its_event_is_set(
+    workspace, monkeypatch, tmp_path
+):
+    async def cooperative(messages, path, model, cancel_event, **kwargs):
+        while not cancel_event.is_set():
+            await asyncio.sleep(0.02)
+        return {"summary": "", "plots": [], "stats": [], "logs": []}
+
+    monkeypatch.setattr(viz_agent, "run_analysis", cooperative)
+    path = tmp_path / "data.csv"
+    path.write_bytes(CSV)
+    cancel = threading.Event()
+    threading.Timer(0.1, cancel.set).start()
+    run = service.analyze(
+        service.AnalysisRequest(model="m"), str(path), cancel=cancel
+    )
+    assert run.status == service.CANCELLED
+
+
+def test_a_missing_model_is_downloaded_with_progress(
+    workspace, monkeypatch, agent, tmp_path
+):
+    monkeypatch.setattr(runs, "model_installed", lambda model: False)
+
+    def pull(model, stream):
+        yield {"status": "pulling", "total": 4, "completed": 2}
+
+    monkeypatch.setattr(ollama, "pull", pull)
+    path = tmp_path / "data.csv"
+    path.write_bytes(CSV)
+    updates = []
+    run = service.analyze(
+        service.AnalysisRequest(model="m"),
+        str(path),
+        on_progress=updates.append,
+    )
+    assert run.status == service.DONE
+    assert updates == [
+        Progress("Downloading m"),
+        Progress("Downloading m", 0.5),
+    ]
+    assert ("info", "Pulling model 'm'...") in run.logs
 
 
 def test_a_cancelled_run_says_so(workspace, monkeypatch):
@@ -202,6 +273,95 @@ def test_the_column_profile_describes_each_column():
     assert profile.loc["age", "Range (min / mean / max)"] == "30 / 35 / 40"
     assert profile.loc["group", "Top Value"] in {"a", "b"}
     assert profile.loc["income", "Non-Null %"] == "100.0%"
+
+
+# --- table previews ------------------------------------------------------
+
+TABLE = (
+    "id,age,income,sex,region,comment,\n"
+    f"1,30,1000,f,north,{'a' * 70},\n"
+    f"2,40,2000,m,south,{'b ' * 40},\n"
+    f"3,,6000,f,north,{'c' * 70},\n"
+)
+
+
+def table_file(tmp_path, name, data):
+    path = tmp_path / name
+    path.write_bytes(data.encode("utf-8") if isinstance(data, str) else data)
+    return path
+
+
+def test_a_preview_describes_the_columns_as_the_agents_see_them(tmp_path):
+    preview = service.preview_table(
+        "data.csv", table_file(tmp_path, "upload.csv", TABLE)
+    )
+    columns = {column.name: column for column in preview.columns}
+    # The empty column a trailing comma makes is left out, as the agents
+    # leave it out.
+    assert preview.names == ("id", "age", "income", "sex", "region", "comment")
+    assert columns["age"].kind == "number"
+    assert columns["age"].filled == pytest.approx(2 / 3)
+    assert columns["age"].values == "30 to 40, mean 35"
+    assert columns["income"].values == "1,000 to 6,000, mean 3,000"
+    assert (columns["sex"].kind, columns["sex"].distinct) == ("category", 2)
+    assert columns["sex"].values == "f, m"
+    assert columns["comment"].kind == "text"
+    assert columns["comment"].values == "73 characters on average"
+    assert preview.rows[2][:3] == ("3", "", "6000")
+    assert preview.rows[2][5].endswith("...") and len(preview.rows[2][5]) == 60
+    assert (preview.rows_read, preview.complete) == (3, True)
+
+
+def test_a_preview_reads_what_the_agents_read(tmp_path):
+    latin = table_file(
+        tmp_path, "a.csv", "name,city\nZoë,Zürich\n".encode("latin-1")
+    )
+    assert service.preview_table("a.csv", latin).rows == (("Zoë", "Zürich"),)
+    excel = tmp_path / "b.xlsx"
+    pd.DataFrame(
+        {"age": [30, 40], "day": pd.to_datetime(["2024-01-02", "2024-03-04"])}
+    ).to_excel(excel, index=False)
+    preview = service.preview_table("b.xlsx", excel)
+    assert [column.kind for column in preview.columns] == ["number", "date"]
+    assert preview.columns[1].values == "2024-01-02 to 2024-03-04"
+    long = table_file(tmp_path, "c.csv", "x\n" + "1\n" * 5)
+    preview = service.preview_table("c.csv", long, nrows=3)
+    assert (preview.rows_read, preview.complete) == (3, False)
+
+
+@pytest.mark.parametrize(
+    "name,data,message",
+    [
+        ("data.xlsx", b"not excel", "could not be read as a table"),
+        ("data.csv", b"age,income\n", "holds no data"),
+    ],
+)
+def test_a_preview_says_what_is_wrong(tmp_path, name, data, message):
+    with pytest.raises(ValueError, match=message):
+        service.preview_table(name, table_file(tmp_path, name, data))
+
+
+def test_examples_name_the_columns(tmp_path):
+    preview = service.preview_table(
+        "data.csv", table_file(tmp_path, "data.csv", TABLE)
+    )
+    # The identifier and the number with only two values are left out.
+    assert service.example_requests(preview) == (
+        "Plot the distribution of income.",
+        "Is income different between the groups of sex? Run a test and "
+        "show box plots.",
+        "Is sex associated with region?",
+        "Make a word cloud of comment.",
+    )
+    assert len(service.example_requests(preview, limit=2)) == 2
+
+
+def test_no_examples_without_numbers_groups_or_texts(tmp_path):
+    preview = service.preview_table(
+        "data.csv",
+        table_file(tmp_path, "data.csv", "id,code\n1,a\n2,b\n3,c\n"),
+    )
+    assert service.example_requests(preview) == ()
 
 
 # --- downloads -----------------------------------------------------------
@@ -263,3 +423,45 @@ def test_a_table_is_saved_and_summarized(tmp_path):
     assert os.path.basename(path) == "uploaded_data.csv"
     assert "age" in summary
     assert service.is_table("Data.XLSX") and not service.is_table("a.pdf")
+
+
+def test_a_saved_analysis_has_its_downloads_and_charts(tmp_path):
+    request = service.AnalysisRequest(
+        model="m", include_r_code=True, file_name="data.csv"
+    )
+    saved = service.save_result(
+        finished_result(), request, tmp_path, name="data"
+    )
+    files = {item.name: item for item in saved.files}
+    assert [name for name, item in files.items() if item.listed] == [
+        "data-report.html",
+        "data-analysis.zip",
+    ]
+    assert files["chart-1.json"].media_type == "application/json"
+    assert files["chart-2.png"].media_type == "image/png"
+    assert (tmp_path / "chart-1.json").read_text() == FIGURE
+    assert zipfile.is_zipfile(tmp_path / "data-analysis.zip")
+    bar, hist = saved.charts
+    assert bar.label == service.tool_label("plot_interactive_barchart")
+    assert (bar.file, bar.interactive, bar.r_code) == (
+        "chart-1.json",
+        True,
+        "p <- 1",
+    )
+    assert (hist.file, hist.interactive, hist.label) == (
+        "chart-2.png",
+        False,
+        "Chart 2",
+    )
+    assert (
+        saved.summary == "Two charts." and saved.stats[0]["title"] == "t-test"
+    )
+
+
+def test_an_answer_without_charts_or_statistics_has_no_downloads(tmp_path):
+    result = service.AnalysisResult("ds-2", "No numbers here.", [], [])
+    saved = service.save_result(
+        result, service.AnalysisRequest(model="m"), tmp_path
+    )
+    assert saved.files == () and saved.charts == ()
+    assert list(tmp_path.iterdir()) == []

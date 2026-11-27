@@ -1,51 +1,7 @@
 {#- The data agents' charts and statistics in a reply (answer: the page's
-  Answer). An interactive chart is a Plotly figure, fetched and drawn by
-  app.js with the vendored plotly.js, which it loads only then; other
-  charts are images. Each comes with the code that draws it. -#}
-{% set plotly = static('vendor/plotly-3.7.0/plotly-strict.min.js') %}
-{% set plotly_css = static('vendor/plotly-3.7.0/plotly.css') %}
+  Answer), drawn by the shared macros (components/analysis.html). -#}
+{% from "components/analysis.html" import charts, statistics with context %}
 <div class="analysis">
-  {% for chart in answer.charts %}
-  <figure class="chart">
-    <figcaption class="label chart__label">{{ chart.label }}</figcaption>
-    {% if chart.interactive %}
-    <div class="chart__plot" data-chart="{{ root }}/jobs/{{ job.id }}/files/{{ chart.file }}" data-plotly="{{ plotly }}" data-plotly-css="{{ plotly_css }}" role="img" aria-label="{{ chart.label }}, interactive">
-      <p class="chart__loading">Drawing the chart</p>
-    </div>
-    {% else %}
-    <img class="chart__image" src="{{ root }}/jobs/{{ job.id }}/files/{{ chart.file }}" alt="{{ chart.label }}" loading="lazy">
-    {% endif %}
-    {% if chart.code %}
-    <details class="code-block">
-      <summary class="code-block__summary">Python code</summary>
-      <pre><code>{{ chart.code }}</code></pre>
-    </details>
-    {% endif %}
-    {% if chart.r_code %}
-    <details class="code-block">
-      <summary class="code-block__summary">R code</summary>
-      <pre><code>{{ chart.r_code }}</code></pre>
-    </details>
-    {% endif %}
-  </figure>
-  {% endfor %}
-
-  {% for item in answer.stats %}
-  <details class="stat">
-    <summary class="stat__summary">{{ item.get("title") or "Statistical result" }}</summary>
-    <div class="prose stat__result">{{ (item.get("result") or "") | markdown }}</div>
-    {% if item.get("code") %}
-    <details class="code-block">
-      <summary class="code-block__summary">Python code</summary>
-      <pre><code>{{ item.get("code") }}</code></pre>
-    </details>
-    {% endif %}
-    {% if item.get("r_code") %}
-    <details class="code-block">
-      <summary class="code-block__summary">R code</summary>
-      <pre><code>{{ item.get("r_code") }}</code></pre>
-    </details>
-    {% endif %}
-  </details>
-  {% endfor %}
+  {{ charts(job, answer.charts) }}
+  {{ statistics(answer.stats) }}
 </div>

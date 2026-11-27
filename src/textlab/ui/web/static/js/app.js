@@ -20,8 +20,13 @@
  *   linked to their text.
  * - Chat: Enter sends, the message box grows, Send turns into Stop while a
  *   reply is written, files dropped on the page are attached, the reply
- *   being written stays in view, code can be copied, and the data agents'
- *   charts are drawn with plotly.js, loaded only then.
+ *   being written stays in view.
+ * - The data agents' results, in Chat and Visualize Data: their charts are
+ *   drawn with plotly.js, loaded only then; code can be copied; boxes the
+ *   reader opened or closed stay so when their card is replaced. A card
+ *   the page has in the same version is not replaced at all.
+ * - Check boxes ticked or cleared together, with their count, such as the
+ *   columns of a table to analyze.
  * - Error notices for failed htmx requests, copying error details.
  *
  * There are no inline scripts (the Content Security Policy forbids them):
@@ -507,7 +512,36 @@
     if (switchForm && target.name === switchForm.getAttribute("data-switch")) {
       applySwitch(switchForm);
     }
+    if (target.matches("input[type='checkbox'][name]")) {
+      countChecks(target.closest("form") || document, target.name);
+    }
   });
+
+  /* A group of check boxes of one name: buttons with data-check="all" or
+     "none" and data-check-name tick or clear them all, and an element with
+     data-check-count="name" says how many of them are ticked. */
+  function checkBoxes(scope, name) {
+    return Array.prototype.filter.call(
+      scope.querySelectorAll("input[type='checkbox']"),
+      function (box) {
+        return box.name === name;
+      }
+    );
+  }
+
+  function countChecks(scope, name) {
+    var readout = Array.prototype.find.call(scope.querySelectorAll("[data-check-count]"), function (element) {
+      return element.getAttribute("data-check-count") === name;
+    });
+    if (!readout) {
+      return;
+    }
+    var boxes = checkBoxes(scope, name);
+    var ticked = boxes.filter(function (box) {
+      return box.checked;
+    }).length;
+    readout.textContent = ticked + " of " + boxes.length;
+  }
 
   document.addEventListener("input", function (event) {
     if (event.target instanceof Element && event.target.matches("input[type='range']")) {
@@ -1249,6 +1283,16 @@
       }
       return;
     }
+    var check = target.closest("[data-check]");
+    if (check) {
+      var group = check.closest("form") || document;
+      var name = check.getAttribute("data-check-name");
+      checkBoxes(group, name).forEach(function (input) {
+        input.checked = check.getAttribute("data-check") === "all";
+      });
+      countChecks(group, name);
+      return;
+    }
     // A button with data-fill puts its data-fill-value into the field with
     // that id, such as a downloaded model's name into the model field.
     var fill = target.closest("[data-fill]");
@@ -1453,7 +1497,7 @@
    * Once no reply is written (and its charts are drawn), the page stays
    * put, so a box the reader opens does not move it.
    */
-  var chatKept = {};
+  var keptOpen = {};
   var plotlyLoading = null;
   var chatFollow = true;
   var chatLastY = window.scrollY;
@@ -1512,11 +1556,12 @@
     form.querySelector("[data-chat-stop]").hidden = !busy;
   }
 
-  // Details the reader opened or closed stay so when the card is replaced.
+  // Details the reader opened or closed stay so when the card is replaced
+  // (details[data-keep-open] with an id that stays).
   function keepOpen(scope) {
-    scope.querySelectorAll("details[data-chat-keep]").forEach(function (details) {
-      if (Object.prototype.hasOwnProperty.call(chatKept, details.id)) {
-        details.open = chatKept[details.id];
+    scope.querySelectorAll("details[data-keep-open]").forEach(function (details) {
+      if (Object.prototype.hasOwnProperty.call(keptOpen, details.id)) {
+        details.open = keptOpen[details.id];
       }
     });
   }
@@ -1559,16 +1604,16 @@
     }
   }
 
-  // An event stream that opens sends every card of the conversation; one
-  // the page has in the same version stays, so its charts are not drawn
-  // again.
+  // An event stream that opens sends every card of the page; one the page
+  // has in the same version stays, so its charts are not drawn again, nor
+  // its player reset.
   document.addEventListener("htmx:oobBeforeSwap", function (event) {
     var target = event.detail.target;
     var incoming = event.detail.fragment ? event.detail.fragment.firstElementChild : null;
     if (
       target instanceof Element &&
       incoming &&
-      target.matches("[data-chat-answer]") &&
+      target.hasAttribute("data-version") &&
       target.getAttribute("data-version") === incoming.getAttribute("data-version")
     ) {
       event.detail.shouldSwap = false;
@@ -1669,9 +1714,9 @@
     }
     // A box the reader opened or closed stays so when its card is
     // replaced; the click opens or closes it after this.
-    var summary = target.closest("details[data-chat-keep] > summary");
+    var summary = target.closest("details[data-keep-open] > summary");
     if (summary && summary.parentNode.id) {
-      chatKept[summary.parentNode.id] = !summary.parentNode.open;
+      keptOpen[summary.parentNode.id] = !summary.parentNode.open;
       return;
     }
     if (target.closest("[data-chat-stop]")) {
@@ -1853,7 +1898,7 @@
         });
       })
       .catch(function () {
-        element.textContent = "The chart could not be drawn. The conversation's HTML download holds it.";
+        element.textContent = "The chart could not be drawn. It is in the downloads.";
       });
   }
 
@@ -1877,7 +1922,8 @@
     }
   }
 
-  function initialiseChat(scope) {
+  // The data agents' results in new content: charts, code, open boxes.
+  function initialiseResults(scope) {
     scope.querySelectorAll("[data-chart]").forEach(drawChart);
     addCopyButtons(scope);
     keepOpen(scope);
@@ -1911,7 +1957,7 @@
     scope.querySelectorAll("[data-switch]").forEach(applySwitch);
     scope.querySelectorAll("input[type='range']").forEach(showRange);
     scope.querySelectorAll("select[data-readout], input[type='radio'][data-readout]").forEach(showReadout);
-    initialiseChat(scope);
+    initialiseResults(scope);
   }
 
   applyTheme(currentTheme());

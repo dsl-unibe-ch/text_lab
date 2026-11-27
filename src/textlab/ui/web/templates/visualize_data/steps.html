@@ -1,0 +1,12 @@
+{#- The agents' steps so far, on the card of a running analysis
+  (job.preview: (level, message) pairs). The list keeps its newest step in
+  view; it stays closed when the reader closed it. -#}
+{% set count = job.preview | length %}
+<details class="activity" id="steps-{{ job.id }}" data-keep-open open>
+  <summary class="activity__summary">The agents at work: {{ count }} {{ "step" if count == 1 else "steps" }}</summary>
+  <div class="activity__tail">
+    <ol class="activity__list">
+      {% for level, message in job.preview %}<li class="activity__step activity__step--{{ level }}">{{ message }}</li>{% endfor %}
+    </ol>
+  </div>
+</details>

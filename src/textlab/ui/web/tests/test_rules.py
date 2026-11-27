@@ -216,15 +216,29 @@ def class_roots(css):
     return set(re.findall(r"^\s*\.([a-zA-Z][\w-]*)", text, flags=re.M))
 
 
-def test_chat_styles_have_class_names_of_their_own():
-    # The chat's thread once shared the class "transcript" with the audio
-    # player's list of passages, and so its height limit and its scrolling.
-    css = (STATIC_DIR / "css" / "components.css").read_text()
-    start = css.index("/* ---- Chat ----")
-    others = css[:start] + (STATIC_DIR / "css" / "layout.css").read_text()
-    shared = class_roots(css[start:]) & class_roots(others)
+def css_sections(name):
+    """Return the sections of a style sheet, by their titles."""
+    css = (STATIC_DIR / "css" / name).read_text()
+    parts = re.split(r"^/\* ---- (.+?) -*\s*\*/\s*$", css, flags=re.M)
+    return dict(zip(parts[1::2], parts[2::2], strict=True))
+
+
+def test_each_section_styles_classes_of_its_own():
+    # Chat's thread once had the class "transcript", which the audio
+    # player's list of passages has: it took that list's height limit and
+    # its scrolling. So a class is styled in one section only.
+    layout = css_sections("layout.css")
+    components = css_sections("components.css")
+    assert {"Chat", "Visualize Data"} <= set(components)
+    everything = {**layout, **components}
     # .main:has(> .chat) widens the page's frame for Chat only.
-    assert shared == {"main"}, shared
+    allowed = {("Chat", "main")}
+    for title, css in components.items():
+        for other, other_css in everything.items():
+            if other == title:
+                continue
+            for name in class_roots(css) & class_roots(other_css):
+                assert (title, name) in allowed, (title, other, name)
 
 
 def test_the_menu_button_is_hidden_on_wide_screens():

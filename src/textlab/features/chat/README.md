@@ -90,9 +90,9 @@ Interfaces use `service.py`:
 | `prepare_data_file`, `start_data_analysis` | Keep the attached table; answer with the agents (the Streamlit page) |
 | `conversation_folder()`, `discard_conversation_folder(folder)` | The conversation's private folder |
 | `format_chat_history`, `format_chat_history_html`, `has_analysis_plots` | Exports |
-| `model_options()` | `ModelOptions`: the models for this session's GPU, the GPU, whether large models are offered |
+| `model_options()` | `ModelOptions`: the models for this session's GPU, the GPU, whether large models are offered (from `common.model_config`, shared with Visualize Data) |
 | `server_ready(attempts)` | Whether the Ollama server accepts connections |
-| `model_installed`, `pull_model(model, on_progress=)`, `is_model_loaded` | Model handling |
+| `model_installed`, `pull_model(model, on_progress=)`, `is_model_loaded` | Model handling (from `common.ollama`) |
 
 Messages are dictionaries with `role` and `content`; an assistant turn
 answered by the agents also has `analysis`

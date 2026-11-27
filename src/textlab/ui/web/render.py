@@ -100,6 +100,23 @@ def duration(seconds: int | float | None) -> str:
     return f"{seconds} s"
 
 
+def shorten(text: str, limit: int) -> str:
+    """Return ``text`` on one line, cut at a word to ``limit`` characters.
+
+    Args:
+        text: The text, such as a message that names a job.
+        limit: The most characters, the ellipsis included.
+
+    Returns:
+        The line, ending with an ellipsis if it was cut.
+    """
+    line = " ".join(text.split())
+    if len(line) <= limit:
+        return line
+    cut = line[: limit - 1].rsplit(" ", 1)[0] or line[: limit - 1]
+    return cut.rstrip(" ,.;:") + "\u2026"
+
+
 @functools.cache
 def _markdown_parser() -> Any:
     """Return the Markdown parser for model output, built once."""

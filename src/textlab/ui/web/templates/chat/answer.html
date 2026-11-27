@@ -8,7 +8,7 @@
   job.progress says what happens before the first word. When it is done,
   job.result is the page's Answer (pages/chat.py). job.page_data names the
   conversation and the exchange, for Again. app.js keeps open what the
-  reader opened (data-chat-keep) across updates, draws the charts, and
+  reader opened (data-keep-open) across updates, draws the charts, and
   leaves a card of the same data-version as it is when the event stream
   sends it again. -#}
 {% from "components/macros.html" import notice %}
@@ -18,7 +18,7 @@
 {% set fraction = job.progress.fraction if job.progress and job.progress.fraction is not none else none %}
 
 {% macro steps(items, open, title) %}
-<details class="activity" id="activity-{{ job.id }}" data-chat-keep{% if open %} open{% endif %}>
+<details class="activity" id="activity-{{ job.id }}" data-keep-open{% if open %} open{% endif %}>
   <summary class="activity__summary">{{ title }}</summary>
   <ol class="activity__list">
     {% for level, message in items %}<li class="activity__step activity__step--{{ level }}">{{ message }}</li>{% endfor %}
@@ -47,7 +47,7 @@
   {% elif state == "running" %}
   {% if draft and draft.activity %}{{ steps(draft.activity, true, "The data agents at work") }}{% endif %}
   {% if draft and draft.thinking %}
-  <details class="thinking" id="thinking-{{ job.id }}" data-chat-keep>
+  <details class="thinking" id="thinking-{{ job.id }}" data-keep-open>
     <summary class="thinking__summary">
       {% if draft.text %}Thought{% else %}<span class="answer__pulse" aria-hidden="true"></span> Thinking <span class="thinking__tail">{{ draft.thinking[-160:] }}</span>{% endif %}
     </summary>
@@ -70,7 +70,7 @@
   {% set reply = answer.reply %}
   {% if reply.activity %}{{ steps(reply.activity, false, "How the data agents worked: " ~ (reply.activity | length) ~ " steps") }}{% endif %}
   {% if reply.thinking %}
-  <details class="thinking" id="thinking-{{ job.id }}" data-chat-keep>
+  <details class="thinking" id="thinking-{{ job.id }}" data-keep-open>
     <summary class="thinking__summary">Thought for {{ reply.thinking_seconds | duration }}</summary>
     <div class="thinking__text">{{ reply.thinking }}</div>
   </details>

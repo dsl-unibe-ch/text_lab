@@ -33,8 +33,8 @@ port, base path (`/node/<host>/<port>/`) and the portal's host name;
 | `uploads.py` | Reading forms with files, checking them, saving them into a job |
 | `render.py` | Templates, icons, links from the base path, number formats, Markdown from models (`markdown()`, also a template filter: raw HTML escaped, no images) |
 | `settings.py` | The server's settings (`TOKEN`, `USER`, `TEXT_LAB_WEB_DEV`) |
-| `pages/` | One module per page (`home`, `transcription`, `meeting_notes`, `translation`, `ocr` with its tools `ocr_handwriting` and `ocr_huggingface` in modules of their own, `topic_modeling` with its charts in `topic_charts`, `chat`, `placeholder` for the tools not built yet, `dev`), and `TOOLS`, the navigation |
-| `templates/` | `base.html` (layout), `components/macros.html` and `components/player.html` (the audio player), `jobs/`, one folder per page (`pages/` for Home and the placeholders, `transcription/`, `meeting_notes/`, `translation/`, `ocr/`, `topic_modeling/`, `chat/`); `mockups/` and `dev/` for the developer pages |
+| `pages/` | One module per page (`home`, `transcription`, `meeting_notes`, `translation`, `ocr` with its tools `ocr_handwriting` and `ocr_huggingface` in modules of their own, `topic_modeling` with its charts in `topic_charts`, `chat`, `visualize_data`, `placeholder` for the tools not built yet, `dev`), and `TOOLS`, the navigation |
+| `templates/` | `base.html` (layout), `components/macros.html`, `components/player.html` (the audio player) and `components/analysis.html` (the data agents' charts and statistics), `jobs/`, one folder per page (`pages/` for Home and the placeholders, `transcription/`, `meeting_notes/`, `translation/`, `ocr/`, `topic_modeling/`, `chat/`, `visualize_data/`); `mockups/` and `dev/` for the developer pages |
 | `static/` | `css/` (`fonts.css`, `tokens.css`, `layout.css`, `components.css`), `js/` (`app.js`, `theme.js`), `vendor/` (htmx, IBM Plex fonts, Lucide icons; see its README) |
 
 ### Links
@@ -103,7 +103,14 @@ card with `context.preview(text_so_far)`; updates reach the card at most
 once a second. The preview can be any object the card template knows
 (Chat's `Draft`: thinking, answer, the agents' steps), and
 `context.preview(value, every=0.15)` updates more often, for a reply read
-as it is written.
+as it is written. A ledger record shows a text preview as written so far;
+`runner.create(..., preview_template=...)` shows another kind (Visualize
+Data's steps of the agents, with `every=0`, each step as it comes).
+
+Every card carries `data-version`, the job's version. When an event
+stream opens it sends every card of the page, and `app.js` leaves a card
+it has in the same version as it is (`htmx:oobBeforeSwap`), so charts are
+not drawn again and players not reset.
 
 Short work without the GPU, which should not wait for an hour-long job,
 starts at once beside the queue: `runner.submit(job, work, at_once=True)`
@@ -145,8 +152,8 @@ the side panel the height of the window against the right edge (below
 `app.js` sends with Enter (Shift+Enter for a new line), grows the message
 box, turns Send into Stop while a reply is active, attaches files dropped
 anywhere on the page, keeps a thinking or steps box open across updates if
-the reader opened it, adds Copy to code blocks, and asks for the side panel
-again when a reply ends. It follows the reply being written: a
+the reader opened it (`details[data-keep-open]`, on any page), adds Copy to
+code blocks, and asks for the side panel again when a reply ends. It follows the reply being written: a
 `ResizeObserver` on the conversation scrolls to its foot after every
 change of its size while a reply is active (and for a few seconds after,
 while its charts are drawn), so following does not depend on what changed
@@ -158,14 +165,40 @@ of the conversation; the page skips cards it has in the same version
 charts are not drawn again. The page leaves out the layout's footer
 (`{% block footer %}`) and shows the disclaimer under the message box.
 
-The data agents' interactive charts are Plotly figures, offered as the
-reply job's files (`chart-<n>.json`, not listed) and drawn by `app.js`
-with the vendored plotly.js (`static/vendor/plotly-3.7.0/`, the strict
+The data agents' charts and statistics are drawn by the macros of
+`components/analysis.html`, here and in Visualize Data. Interactive charts
+are Plotly figures, offered as the job's files (`chart-<n>.json`, not
+listed) and drawn by `app.js` with the vendored plotly.js (`static/vendor/plotly-3.7.0/`, the strict
 bundle, loaded only on a page with such a chart). Its style rules come
 from `plotly.css`, linked as `#plotly.js-style-global.no-inline-styles`,
 since plotly.js's own `<style>` element would be blocked; see
 `static/vendor/README.md`. The charts take the page's colours and type,
 also when the theme changes. Static charts are images.
+
+### Visualize Data
+
+The page follows Topic Modeling's form (below, *A file chosen before the
+settings*): the table is read as soon as it is chosen, with the agents'
+own readers (`service.preview_table`), and its columns come back as a
+table to tick, with the type the agents will give each, how full it is,
+its distinct values and what they are like; the first rows are in a
+second tab. *All* and *None* tick or clear the columns, and a count
+follows (`data-check`, `data-check-count` in `app.js`). Requests that name
+the table's columns (`service.example_requests`) come back out of band
+into the request step, as buttons that fill the request box
+(`data-fill`). All columns ticked, or none, means the whole table. A new
+table replaces the one the form names; a page opened again names none, so
+the session keeps the newest three (`MAX_TABLES`) and drops the rest.
+
+Each analysis is a job in the GPU queue (`gpu_manager.LLM`, the model
+kept loaded): its work runs the agents in the job's thread
+(`service.analyze`), shows each of their steps as it comes (the job's
+preview, drawn by `visualize_data/steps.html`, the newest step in view),
+and writes the report, the ZIP and the charts into the job's outputs
+(`service.save_result`). The result shows what was asked, the summary,
+the statistics (open), the charts with their code, and the agents' steps
+(folded). Cancelling stops the agents after their current step; nothing
+is kept. The model of the last analysis is offered first.
 
 ### Errors
 
@@ -288,7 +321,9 @@ in a wrapper that posts the file as soon as it is chosen (`hx-trigger=
 a draft job (`JobRunner.draft`) and answers with its columns and first
 rows. The form itself posts everything but the file (`hx-params="not
 file"`); each run copies the collection into a job of its own, so the
-same collection can run again with other settings.
+same collection can run again with other settings (`uploads.copy_into`
+links it into each run's inputs). Visualize Data does the same with its
+table.
 
 ## Tests
 
@@ -303,7 +338,9 @@ the pipeline and the engines faked (`test_ocr_page.py`), historic
 handwriting and Hugging Face models with their workers faked
 (`test_ocr_handwriting_page.py`, `test_ocr_huggingface_page.py`), Topic
 Modeling with the analysis faked (`test_topic_modeling_page.py`), Chat
-with the model faked (`test_chat_page.py`) and the rules
-(`test_rules.py`). The fake transcription backend is the `backend` fixture
+with the model faked (`test_chat_page.py`), Visualize Data with the agents
+faked (`test_visualize_data_page.py`) and the rules (`test_rules.py`,
+among them that each section of the style sheets styles classes of its
+own, so a page's styles cannot reach another page). The fake transcription backend is the `backend` fixture
 in `conftest.py`. The launcher and the Open OnDemand files are tested in
 `tests/test_launch.py` at the repository root.

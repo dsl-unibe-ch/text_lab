@@ -1,0 +1,43 @@
+{#- A finished analysis (job.result: the page's Analysis): what was asked,
+  the agents' summary, the statistical results, the charts with their
+  code, and how the agents worked. The card lists the downloads after
+  it. -#}
+{% from "components/analysis.html" import charts, statistics with context %}
+{% set analysis = job.result %}
+{% set asked = analysis.request %}
+{% set saved = analysis.saved %}
+<div class="findings">
+  <dl class="spec">
+    <dt>Request</dt>
+    <dd>{{ asked.prompt or "None: the agents explored the table" }}</dd>
+    <dt>Columns</dt>
+    <dd>{{ asked.columns | join(", ") if asked.columns else "All" }}</dd>
+    <dt>Model</dt>
+    <dd>{{ asked.model }}{% if asked.include_r_code %}, with R code{% endif %}</dd>
+  </dl>
+
+  {% if saved.summary %}<div class="prose findings__summary">{{ saved.summary | markdown }}</div>{% endif %}
+
+  {% if saved.stats %}
+  <section class="findings__part" aria-labelledby="stats-{{ job.id }}">
+    <h4 class="label findings__title" id="stats-{{ job.id }}">Statistics</h4>
+    {{ statistics(saved.stats, open=true) }}
+  </section>
+  {% endif %}
+
+  {% if saved.charts %}
+  <section class="findings__part" aria-labelledby="charts-{{ job.id }}">
+    <h4 class="label findings__title" id="charts-{{ job.id }}">Charts</h4>
+    <div class="analysis">{{ charts(job, saved.charts, r_note=analysis.r_note) }}</div>
+  </section>
+  {% endif %}
+
+  {% if analysis.steps %}
+  <details class="activity" id="steps-{{ job.id }}" data-keep-open>
+    <summary class="activity__summary">How the agents worked: {{ analysis.steps | length }} {{ "step" if analysis.steps | length == 1 else "steps" }}</summary>
+    <ol class="activity__list">
+      {% for level, message in analysis.steps %}<li class="activity__step activity__step--{{ level }}">{{ message }}</li>{% endfor %}
+    </ol>
+  </details>
+  {% endif %}
+</div>

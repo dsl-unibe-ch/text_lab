@@ -17,7 +17,7 @@ import pytest
 from textlab.common.progress import Progress
 from textlab.features.chat import service
 from textlab.ui.web.jobs import JobState
-from textlab.ui.web.pages import chat as page
+from textlab.ui.web.render import shorten
 from textlab.ui.web.tests.conftest import BASE, wait_for
 from textlab.ui.web.tests.test_job_pages import htmx
 
@@ -521,5 +521,5 @@ def test_an_unknown_conversation_goes_back_to_chat(client, model):
 
 
 def test_titles_are_shortened_at_a_word():
-    assert page.shorten("one two\nthree", 60) == "one two three"
-    assert page.shorten("alpha beta gamma delta", 12) == "alpha beta…"
+    assert shorten("one two\nthree", 60) == "one two three"
+    assert shorten("alpha beta gamma delta", 12) == "alpha beta…"

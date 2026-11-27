@@ -3916,6 +3916,169 @@ kbd {
   }
 }
 
+/* ---- The data agents' results: steps, charts, statistics, code ------- */
+
+/* The agents' steps, folded away (Chat's replies, Visualize Data's
+   analyses). */
+.activity {
+  padding-left: var(--space-3);
+  border-left: 2px solid var(--rule-strong);
+  color: var(--ink-2);
+  font-size: var(--text-sm);
+}
+
+.activity__summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-label);
+  font-weight: 500;
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.activity__summary:hover {
+  color: var(--ink);
+}
+
+.activity__list {
+  display: grid;
+  gap: 0.15rem;
+  max-height: 16rem;
+  margin: var(--space-2) 0 0;
+  padding-left: 1.4rem;
+  overflow-y: auto;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+/* Steps being taken: the newest stays in view, at the foot of the box
+   (a scroll box in reverse starts at its end). */
+.activity__tail {
+  display: flex;
+  flex-direction: column-reverse;
+  max-height: 16rem;
+  margin-top: var(--space-2);
+  overflow-y: auto;
+}
+
+.activity__tail .activity__list {
+  max-height: none;
+  margin-top: 0;
+  overflow: visible;
+}
+
+.activity__step {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.activity__step--warning {
+  color: var(--amber);
+}
+
+.activity__step--error {
+  color: var(--red-text);
+}
+
+/* Code: in answers, and the code of results, with a Copy button. */
+.code {
+  position: relative;
+  margin: 0 0 var(--space-3);
+}
+
+.code pre,
+.code-block pre {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  overflow-x: auto;
+  background: var(--tint);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.55;
+}
+
+.code__copy {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-3);
+  background: var(--tint);
+}
+
+.code-block,
+.stat {
+  border-top: var(--hairline) solid var(--rule);
+}
+
+.code-block__summary,
+.stat__summary {
+  padding: var(--space-2) 0;
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-label);
+  font-weight: 500;
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.code-block__summary:hover,
+.stat__summary:hover {
+  color: var(--ink);
+}
+
+/* Why a result has no R code. */
+.code-block__note {
+  margin: 0;
+  padding: var(--space-2) 0;
+  border-top: var(--hairline) solid var(--rule);
+  color: var(--ink-3);
+  font-size: var(--text-xs);
+}
+
+.stat__result {
+  padding-bottom: var(--space-3);
+  font-size: var(--text-md);
+}
+
+/* The agents' charts. */
+.analysis {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.chart {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.chart__label {
+  color: var(--ink-2);
+}
+
+.chart__plot {
+  width: 100%;
+  min-height: 22rem;
+}
+
+.chart__loading {
+  margin: 0;
+  color: var(--ink-3);
+  font-size: var(--text-sm);
+}
+
+/* Static charts are drawn on white. */
+.chart__image {
+  max-width: 100%;
+  height: auto;
+  background: #fff;
+}
+
 /* ---- Chat ------------------------------------------------------------- */
 
 /* Chat takes the whole width beside the index: the conversation in the
@@ -4214,17 +4377,15 @@ kbd {
   display: inline-flex;
 }
 
-/* The model's thinking and the data agents' steps, folded away. */
-.thinking,
-.activity {
+/* The model's thinking, folded away, with its newest words beside it. */
+.thinking {
   padding-left: var(--space-3);
   border-left: 2px solid var(--rule-strong);
   color: var(--ink-2);
   font-size: var(--text-sm);
 }
 
-.thinking__summary,
-.activity__summary {
+.thinking__summary {
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -4238,8 +4399,7 @@ kbd {
   cursor: pointer;
 }
 
-.thinking__summary:hover,
-.activity__summary:hover {
+.thinking__summary:hover {
   color: var(--ink);
 }
 
@@ -4268,110 +4428,6 @@ kbd {
   margin-top: var(--space-2);
   overflow-y: auto;
   white-space: pre-wrap;
-}
-
-.activity__list {
-  display: grid;
-  gap: 0.15rem;
-  max-height: 16rem;
-  margin: var(--space-2) 0 0;
-  padding-left: 1.4rem;
-  overflow-y: auto;
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-}
-
-.activity__step--warning {
-  color: var(--amber);
-}
-
-.activity__step--error {
-  color: var(--red-text);
-}
-
-/* Code: in answers, and the code of charts, with a Copy button. */
-.code {
-  position: relative;
-  margin: 0 0 var(--space-3);
-}
-
-.code pre,
-.code-block pre {
-  margin: 0;
-  padding: var(--space-3) var(--space-4);
-  overflow-x: auto;
-  background: var(--tint);
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  line-height: 1.55;
-}
-
-.code__copy {
-  position: absolute;
-  top: var(--space-2);
-  right: var(--space-3);
-  background: var(--tint);
-}
-
-.code-block,
-.stat {
-  border-top: var(--hairline) solid var(--rule);
-}
-
-.code-block__summary,
-.stat__summary {
-  padding: var(--space-2) 0;
-  color: var(--ink-2);
-  font-family: var(--font-mono);
-  font-size: var(--text-label);
-  font-weight: 500;
-  letter-spacing: var(--tracking-label);
-  text-transform: uppercase;
-  cursor: pointer;
-}
-
-.code-block__summary:hover,
-.stat__summary:hover {
-  color: var(--ink);
-}
-
-.stat__result {
-  padding-bottom: var(--space-3);
-  font-size: var(--text-md);
-}
-
-/* The data agents' charts. */
-.analysis {
-  display: grid;
-  gap: var(--space-5);
-}
-
-.chart {
-  display: grid;
-  gap: var(--space-2);
-  margin: 0;
-}
-
-.chart__label {
-  color: var(--ink-2);
-}
-
-.chart__plot {
-  width: 100%;
-  min-height: 22rem;
-}
-
-.chart__loading {
-  margin: 0;
-  color: var(--ink-3);
-  font-size: var(--text-sm);
-}
-
-/* Static charts are drawn on white. */
-.chart__image {
-  max-width: 100%;
-  height: auto;
-  background: #fff;
 }
 
 /* The message box, kept at the foot of the window. */
@@ -4774,3 +4830,142 @@ kbd {
     animation: none;
   }
 }
+
+/* ---- Visualize Data ---------------------------------------------------- */
+
+/* The uploaded table: its name and size, its columns to tick, its first
+   rows. */
+.dataset {
+  display: grid;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+}
+
+.dataset__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2) var(--space-4);
+}
+
+.dataset__name {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+/* How many columns are ticked, and the All and None buttons. */
+.dataset__tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2) var(--space-4);
+  margin-bottom: var(--space-2);
+}
+
+.dataset__count {
+  margin: 0 auto 0 0;
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+/* Long and wide tables scroll in their box; the head stays in view. */
+.dataset__scroll {
+  max-height: 24rem;
+  overflow: auto;
+}
+
+.dataset__scroll thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--sheet);
+}
+
+.dataset__tick {
+  width: 1.75rem;
+}
+
+.dataset__column label {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.dataset__kind {
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.dataset__values {
+  min-width: 12rem;
+  color: var(--ink-2);
+}
+
+/* Columns left out of the analysis fade. */
+.dataset__columns tr:has(.checkbox:not(:checked)) td {
+  color: var(--ink-3);
+}
+
+.dataset__rows td {
+  min-width: 8rem;
+}
+
+/* Requests that name the table's columns, to fill in. */
+.asks {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.asks__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: var(--hairline) solid var(--rule);
+}
+
+.ask {
+  width: 100%;
+  padding: var(--space-2) 0;
+  border: 0;
+  border-bottom: var(--hairline) solid var(--rule);
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.ask:hover {
+  color: var(--red-text);
+}
+
+/* A finished analysis: what was asked, the summary, the statistics, the
+   charts, the agents' steps. */
+.findings {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.findings__summary {
+  max-width: 48rem;
+  font-size: var(--text-md);
+}
+
+.findings__part {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.findings__title {
+  margin: 0;
+  padding-bottom: var(--space-2);
+  border-bottom: var(--hairline) solid var(--ink);
+  color: var(--ink-2);
+}
+

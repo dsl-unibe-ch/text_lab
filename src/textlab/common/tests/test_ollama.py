@@ -1,11 +1,13 @@
 """Ollama helpers, against a fake client: no server or model is needed."""
 
+import threading
 from types import SimpleNamespace
 
 import ollama as client
 import pytest
 
 from textlab.common import ollama
+from textlab.common.progress import CancelledError, Progress
 
 
 @pytest.mark.parametrize(
@@ -270,3 +272,35 @@ def test_release_models_gives_up_after_the_timeout(monkeypatch):
     monkeypatch.setattr(ollama.time, "monotonic", lambda: next(clock))
     monkeypatch.setattr(ollama.time, "sleep", lambda seconds: None)
     assert ollama.release_models(timeout=5) == ["stuck:latest"]
+
+
+def test_a_model_is_pulled_with_its_progress(monkeypatch):
+    pulled = []
+
+    def pull(model, stream):
+        pulled.append((model, stream))
+        yield {"status": "pulling", "total": 4, "completed": 1}
+        yield {"status": "success"}
+
+    monkeypatch.setattr(client, "pull", pull)
+    updates = []
+    ollama.pull_model("big:1b", on_progress=updates.append)
+    assert pulled == [("big:1b", True)]
+    assert updates == [
+        Progress("Downloading big:1b"),
+        Progress("Downloading big:1b", 0.25),
+    ]
+
+
+def test_a_pull_stops_when_cancelled(monkeypatch):
+    cancel = threading.Event()
+
+    def pull(model, stream):
+        yield {"status": "pulling", "total": 4, "completed": 1}
+        cancel.set()
+        yield {"status": "pulling", "total": 4, "completed": 2}
+        raise AssertionError("the pull went on")
+
+    monkeypatch.setattr(client, "pull", pull)
+    with pytest.raises(CancelledError):
+        ollama.pull_model("big:1b", cancel=cancel)

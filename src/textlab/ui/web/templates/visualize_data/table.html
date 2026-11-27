@@ -1,0 +1,78 @@
+{#- An uploaded table, inside the form (table is the page's Table, table_id
+  its draft job's id): its name and size, its columns to tick for the
+  analysis with what they hold, and its first rows. Swapped into #table
+  after each upload; the requests that name its columns go to #examples,
+  out of band. -#}
+{% set preview = table.preview %}
+{% set count = preview.columns | length %}
+<input type="hidden" name="table" value="{{ table_id }}">
+<div class="dataset__head">
+  <p class="dataset__name">{{ table.name }}</p>
+  <p class="label">{% if preview.complete %}{{ "{:,}".format(preview.rows_read) }} {{ "row" if preview.rows_read == 1 else "rows" }}{% else %}at least {{ "{:,}".format(preview.rows_read) }} rows{% endif %} · {{ count }} {{ "column" if count == 1 else "columns" }} · {{ table.size | file_size }}</p>
+</div>
+<div class="tabs">
+  <div class="tabs__list" role="tablist" aria-label="{{ table.name }}">
+    <button class="tabs__tab" type="button" role="tab" id="{{ table_id }}-tab-columns" aria-selected="true" aria-controls="{{ table_id }}-columns">Columns</button>
+    <button class="tabs__tab" type="button" role="tab" id="{{ table_id }}-tab-rows" aria-selected="false" aria-controls="{{ table_id }}-rows" tabindex="-1">First rows</button>
+  </div>
+  <div class="tabs__panel" role="tabpanel" id="{{ table_id }}-columns" aria-labelledby="{{ table_id }}-tab-columns">
+    <div class="dataset__tools">
+      <p class="dataset__count"><span data-check-count="columns">{{ count }} of {{ count }}</span> ticked</p>
+      <button class="text-button" type="button" data-check="all" data-check-name="columns">All</button>
+      <button class="text-button" type="button" data-check="none" data-check-name="columns">None</button>
+    </div>
+    <div class="table-wrap dataset__scroll">
+      <table class="table dataset__columns">
+        <caption class="visually-hidden">The columns of {{ table.name }}: tick the ones to analyze</caption>
+        <thead>
+          <tr>
+            <th scope="col"><span class="visually-hidden">Analyze</span></th>
+            <th scope="col">Column</th>
+            <th scope="col">Type</th>
+            <th scope="col" class="table__num">Filled</th>
+            <th scope="col" class="table__num">Distinct</th>
+            <th scope="col">Values</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for column in preview.columns %}
+          <tr>
+            <td class="dataset__tick"><input class="checkbox" type="checkbox" id="{{ table_id }}-column-{{ loop.index }}" name="columns" value="{{ column.name }}" checked></td>
+            <td class="dataset__column"><label for="{{ table_id }}-column-{{ loop.index }}">{{ column.name }}</label></td>
+            <td class="dataset__kind">{{ column.kind }}</td>
+            <td class="table__num">{{ (column.filled * 100) | round | int }}%</td>
+            <td class="table__num">{{ "{:,}".format(column.distinct) }}</td>
+            <td class="dataset__values">{{ column.values }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="field__help">Fewer columns give more focused results; none ticked, all are analyzed. Described from {% if preview.complete %}all its rows{% else %}its first {{ "{:,}".format(preview.rows_read) }} rows{% endif %}. Text is free text, for word clouds but not for statistics.</p>
+  </div>
+  <div class="tabs__panel" role="tabpanel" id="{{ table_id }}-rows" aria-labelledby="{{ table_id }}-tab-rows" hidden>
+    <div class="table-wrap dataset__scroll">
+      <table class="table dataset__rows">
+        <caption class="visually-hidden">The first rows of {{ table.name }}</caption>
+        <thead>
+          <tr>{% for name in preview.names %}<th scope="col">{{ name }}</th>{% endfor %}</tr>
+        </thead>
+        <tbody>
+          {% for row in preview.rows %}
+          <tr>{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+<div class="asks" id="examples" hx-swap-oob="true"{% if not examples %} hidden{% endif %}>
+  {% if examples %}
+  <p class="label">Try, with your columns</p>
+  <ul class="asks__list">
+    {% for text in examples %}
+    <li><button class="ask" type="button" data-fill="viz-request" data-fill-value="{{ text }}">{{ text }}</button></li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</div>

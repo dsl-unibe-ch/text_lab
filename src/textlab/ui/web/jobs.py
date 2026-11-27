@@ -140,6 +140,9 @@ class Job:
             jobs can always be cancelled.
         result_template: Template that shows a finished job's result on
             its card, or ``None`` for the downloads only.
+        preview_template: Template that shows a running job's preview on
+            its card, such as the steps of agents at work, or ``None`` for
+            a text preview, shown as written so far.
         card_template: Template of the job's card. Pages whose jobs are
             not records in a ledger, such as a translation shown in an
             editor's pane, give their own; it must keep the card's id,
@@ -174,6 +177,7 @@ class Job:
     ollama_model: str | None = None
     cancellable: bool = True
     result_template: str | None = None
+    preview_template: str | None = None
     card_template: str = "jobs/card.html"
     listed: bool = True
     page_data: dict[str, str] = dataclasses.field(default_factory=dict)
@@ -430,6 +434,7 @@ class JobRunner:
         ollama_model: str | None = None,
         cancellable: bool = True,
         result_template: str | None = None,
+        preview_template: str | None = None,
         card_template: str | None = None,
         listed: bool = True,
         page_data: dict[str, str] | None = None,
@@ -448,6 +453,8 @@ class JobRunner:
                 loaded when the GPU is released for the job.
             cancellable: Whether the work stops when the job is cancelled.
             result_template: Template for the finished job's result.
+            preview_template: Template for a running job's preview; text
+                previews need none.
             card_template: Template of the job's card; the ledger record
                 (``jobs/card.html``) by default.
             listed: Whether the job indicator and Home list the job.
@@ -471,6 +478,7 @@ class JobRunner:
             ollama_model=ollama_model,
             cancellable=cancellable,
             result_template=result_template,
+            preview_template=preview_template,
             card_template=card_template or "jobs/card.html",
             listed=listed,
             page_data=dict(page_data or {}),

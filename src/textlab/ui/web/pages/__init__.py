@@ -113,6 +113,7 @@ TOOLS: tuple[Tool, ...] = (
         "/visualize-data",
         "Data",
         "Describe the chart you need and get it drawn from your data.",
+        ready=True,
     ),
 )
 
@@ -184,6 +185,7 @@ def routers(settings: WebSettings) -> list[APIRouter]:
         topic_modeling,
         transcription,
         translation,
+        visualize_data,
     )
 
     result = [
@@ -196,6 +198,7 @@ def routers(settings: WebSettings) -> list[APIRouter]:
         translation.router,
         chat.router,
         topic_modeling.router,
+        visualize_data.router,
         placeholder.router,
     ]
     if settings.dev:

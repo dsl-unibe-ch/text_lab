@@ -19,8 +19,6 @@ from __future__ import annotations
 
 import dataclasses
 import math
-import os
-import shutil
 from functools import partial
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -228,7 +226,7 @@ async def find_topics(request: Request, session: Checked) -> HTMLResponse:
     )
     try:
         path = await run_in_threadpool(
-            copy_into, draft.inputs / collection.file, job.inputs
+            uploads.copy_into, draft.inputs / collection.file, job.inputs
         )
     except BaseException:
         runner.discard(job)
@@ -258,24 +256,6 @@ def load(path: Path, name: str, archive: bool) -> Any:
     if archive:
         return service.load_archive(data)
     return service.load_table(name, data)
-
-
-def copy_into(source: Path, folder: Path) -> Path:
-    """Put a file into a folder: linked if it can be, else copied.
-
-    Args:
-        source: The file.
-        folder: The folder.
-
-    Returns:
-        The file in the folder.
-    """
-    target = folder / source.name
-    try:
-        os.link(source, target)
-    except OSError:
-        shutil.copyfile(source, target)
-    return target
 
 
 # ---------------------------------------------------------------------------

@@ -1,14 +1,22 @@
-"""The downloads of an analysis: an HTML report and a ZIP of everything."""
+"""The downloads of an analysis: an HTML report and a ZIP of everything.
+
+:func:`save_result` writes them into a folder an interface serves, with
+each chart as a file of its own for the interface to show.
+"""
 
 from __future__ import annotations
 
 import base64
+import dataclasses
 import html as html_lib
 import io
+import mimetypes
 import zipfile
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
+from textlab.common.outputs import OutputFolder, SavedFile
 from textlab.features.visualization.models import (
     AnalysisRequest,
     AnalysisResult,
@@ -236,3 +244,117 @@ def results_zip(result: AnalysisResult, request: AnalysisRequest) -> bytes:
 
         zf.writestr("report.html", build_html_report(result, request))
     return zip_buffer.getvalue()
+
+
+@dataclasses.dataclass(frozen=True)
+class SavedChart:
+    """A chart of a saved analysis, for an interface to show.
+
+    Attributes:
+        label: What it is, such as "Interactive Histogram".
+        file: Its file in the folder: a Plotly figure (JSON) or an image.
+        interactive: Whether it is a Plotly figure.
+        code: Python code that draws it.
+        r_code: R code that draws it; empty if there is none.
+    """
+
+    label: str
+    file: str
+    interactive: bool
+    code: str = ""
+    r_code: str = ""
+
+
+@dataclasses.dataclass(frozen=True)
+class SavedAnalysis:
+    """A finished analysis, saved into a folder for an interface.
+
+    Attributes:
+        run_id: Identifies the run.
+        summary: The agents' summary, in Markdown.
+        charts: The charts, in order.
+        stats: The statistical results: dictionaries with ``title``,
+            ``result`` (Markdown), ``code`` and ``r_code``.
+        files: The files written: the report and the ZIP, which are
+            downloads, and the charts, which are not.
+    """
+
+    run_id: str
+    summary: str
+    charts: tuple[SavedChart, ...]
+    stats: tuple[dict[str, Any], ...]
+    files: tuple[SavedFile, ...]
+
+
+def save_result(
+    result: AnalysisResult,
+    request: AnalysisRequest,
+    folder: Path,
+    *,
+    name: str = "data",
+) -> SavedAnalysis:
+    """Write an analysis's downloads and charts into a folder.
+
+    An analysis without charts or statistics, such as a request the agents
+    answered in words, gets no downloads.
+
+    Args:
+        result: The finished analysis.
+        request: What was asked.
+        folder: Where to write, such as a web job's outputs; it must exist.
+        name: Start of the downloads' names, such as the table's name
+            without its extension.
+
+    Returns:
+        The saved analysis.
+    """
+    output = OutputFolder(folder)
+    if result.artifacts or result.stats:
+        output.write(
+            f"{name}-report.html",
+            build_html_report(result, request).encode("utf-8"),
+            "Report with charts and code",
+            "text/html",
+        )
+        output.write(
+            f"{name}-analysis.zip",
+            results_zip(result, request),
+            "Charts, code and report",
+            "application/zip",
+        )
+    charts = []
+    for index, artifact in enumerate(result.artifacts, 1):
+        label = get_tool_label(artifact.tool_name) or f"Chart {index}"
+        if artifact.figure_json is not None:
+            file = output.write(
+                f"chart-{index}.json",
+                artifact.figure_json.encode("utf-8"),
+                label,
+                "application/json",
+                listed=False,
+            )
+        else:
+            suffix = Path(artifact.filename).suffix.lower() or ".png"
+            file = output.write(
+                f"chart-{index}{suffix}",
+                artifact.data,
+                label,
+                mimetypes.guess_type(f"chart{suffix}")[0] or "image/png",
+                listed=False,
+            )
+        charts.append(
+            SavedChart(
+                label,
+                file,
+                interactive=artifact.figure_json is not None,
+                code=artifact.code,
+                r_code=artifact.r_code,
+            )
+        )
+    return SavedAnalysis(
+        run_id=result.run_id,
+        summary=result.summary,
+        charts=tuple(charts),
+        stats=tuple(result.stats),
+        files=tuple(output.files),
+    )

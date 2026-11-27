@@ -4,6 +4,7 @@ import os
 from types import SimpleNamespace
 
 import fitz
+import ollama
 import pytest
 
 from textlab.common.progress import CancelledError, Progress
@@ -657,7 +658,7 @@ def test_a_missing_model_is_downloaded_first(monkeypatch, model_server):
 
     monkeypatch.setattr(service, "model_installed", lambda model: False)
     monkeypatch.setattr(service, "is_model_loaded", lambda model: False)
-    monkeypatch.setattr(service.ollama, "pull", pull)
+    monkeypatch.setattr(ollama, "pull", pull)
     updates = []
     service.respond("big:1b", [], "Q?", on_progress=updates.append)
     assert pulled == ["big:1b"]
@@ -771,15 +772,6 @@ def test_stopping_the_agents_waits_for_their_step(monkeypatch, model_server):
     monkeypatch.setattr(service, "start_data_analysis", start)
     reply = service.respond("m", [], "Plot", table=TABLE, cancel=cancel)
     assert run.cancelled and reply.stopped and reply.text == ""
-
-
-def test_the_models_follow_the_gpu(monkeypatch):
-    monkeypatch.setattr(service, "_gpu_name", lambda: "NVIDIA H100 80GB")
-    options = service.model_options()
-    assert options.large and options.gpu == "NVIDIA H100 80GB"
-    assert options.models
-    monkeypatch.setattr(service, "_gpu_name", lambda: "NVIDIA RTX 4090")
-    assert not service.model_options().large
 
 
 def test_tables_are_kept_apart_and_discarded(tmp_path):

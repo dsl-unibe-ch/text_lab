@@ -18,6 +18,7 @@ they do not announce their size.
 
 from __future__ import annotations
 
+import os
 import shutil
 from collections.abc import Collection
 from pathlib import Path, PurePosixPath
@@ -237,3 +238,28 @@ def save(
     with path.open("xb") as target:
         shutil.copyfileobj(upload.file, target, CHUNK_SIZE)
     return path
+
+
+def copy_into(source: Path, folder: Path) -> Path:
+    """Put a file into a folder: linked if it can be, else copied.
+
+    For an upload that several jobs use in turn, such as a table asked
+    about again: each job gets it in its own ``inputs`` without a copy, and
+    removing one job's inputs leaves the others' file.
+
+    Blocks while copying; call it from a worker thread
+    (``run_in_threadpool``) in async routes.
+
+    Args:
+        source: The file.
+        folder: The folder.
+
+    Returns:
+        The file in the folder, under the same name.
+    """
+    target = folder / source.name
+    try:
+        os.link(source, target)
+    except OSError:
+        shutil.copyfile(source, target)
+    return target

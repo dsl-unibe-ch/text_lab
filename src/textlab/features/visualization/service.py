@@ -1,9 +1,13 @@
 """Analyzing a table with LLM agents: the Visualization feature's API.
 
-Interfaces call this module. :func:`read_preview` and
-:func:`column_profile` give a first look at an upload;
-:func:`start_analysis` runs the agents in the background and returns an
-:class:`AnalysisRun` to poll; :func:`results_zip` packages the result. Chat
+Interfaces call this module. :func:`preview_table` describes an uploaded
+table and its columns, and :func:`example_requests` suggests requests that
+name them (:func:`read_preview` and :func:`column_profile` do the same
+for an upload in memory); :func:`model_options` gives the models to choose
+from. :func:`start_analysis` runs the agents in the background and returns
+an :class:`AnalysisRun` to poll, and :func:`analyze` runs them in the
+caller's thread; :func:`save_result` writes the result's downloads and
+charts into a folder, and :func:`results_zip` packages it in memory. Chat
 uses the same functions for its data questions.
 
 The agents (:mod:`.viz_agent`) and their tools (:mod:`.mcp_server`) are
@@ -14,20 +18,31 @@ from __future__ import annotations
 
 import os
 
+from textlab.common.model_config import ModelOptions, model_options
+from textlab.common.ollama import check_ollama_server
 from textlab.features.visualization.models import (
     AnalysisRequest,
     AnalysisResult,
     Artifact,
 )
 from textlab.features.visualization.preview import (
+    FIRST_ROWS,
+    PROFILE_ROWS,
+    ColumnInfo,
+    TablePreview,
     column_profile,
+    example_requests,
+    preview_table,
     read_preview,
 )
 from textlab.features.visualization.reports import (
     R_NOT_AVAILABLE,
+    SavedAnalysis,
+    SavedChart,
     build_html_report,
     figure,
     results_zip,
+    save_result,
 )
 from textlab.features.visualization.runs import (
     ANALYSIS_TIMEOUT_SECONDS,
@@ -37,6 +52,7 @@ from textlab.features.visualization.runs import (
     RUNNING,
     TIMEOUT,
     AnalysisRun,
+    analyze,
     start_analysis,
 )
 from textlab.features.visualization.viz_config import (
@@ -54,13 +70,24 @@ __all__ = [
     "AnalysisResult",
     "AnalysisRun",
     "Artifact",
+    "ColumnInfo",
+    "ModelOptions",
+    "SavedAnalysis",
+    "SavedChart",
+    "TablePreview",
+    "analyze",
     "build_html_report",
     "column_profile",
+    "example_requests",
     "figure",
     "is_table",
+    "model_options",
     "prepare_data_file",
+    "preview_table",
     "read_preview",
     "results_zip",
+    "save_result",
+    "server_ready",
     "start_analysis",
     "tool_label",
     # Re-exported for interfaces
@@ -69,7 +96,9 @@ __all__ = [
     "DEFAULT_PROMPT",
     "DONE",
     "ERROR",
+    "FIRST_ROWS",
     "MAX_ROWS",
+    "PROFILE_ROWS",
     "RUNNING",
     "R_NOT_AVAILABLE",
     "TIMEOUT",
@@ -107,3 +136,16 @@ def prepare_data_file(name: str, data: bytes, folder: str) -> tuple[str, str]:
 def is_table(name: str) -> bool:
     """Return True if a file name has one of :data:`INPUT_TYPES`."""
     return os.path.splitext(name)[1].lower().lstrip(".") in INPUT_TYPES
+
+
+def server_ready(attempts: int = 1) -> bool:
+    """Return whether the session's Ollama server accepts connections.
+
+    Args:
+        attempts: How many times to try, half a second apart; the server
+            may still be starting when a session begins.
+
+    Returns:
+        True if it does.
+    """
+    return check_ollama_server(attempts=attempts)

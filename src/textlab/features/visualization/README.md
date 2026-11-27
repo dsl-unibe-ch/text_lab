@@ -8,13 +8,16 @@ data questions.
 
 ## Pipeline
 
-`runs.start_analysis` starts a run in a background thread; the page polls
-it. The run:
+`runs.start_analysis` starts a run in a background thread, which the
+Streamlit page and Chat poll; `runs.analyze` runs it in the caller's
+thread, for the web UI's jobs, and passes on each entry of the activity
+log as it comes. The run:
 
-1. **Gets the model**: pulls it to the Ollama server if it is missing.
+1. **Gets the model**: pulls it to the Ollama server if it is missing,
+   with its progress (it can be cancelled meanwhile).
 2. **Saves the table** to a run folder in the workspace (Chat passes a file
-   it keeps for the conversation instead) and reads its first rows to check
-   it and the selected columns.
+   it keeps for the conversation, and the web UI one in the job's folder,
+   instead) and reads its first rows to check it and the selected columns.
 3. **Runs the agents** (`viz_agent.run_analysis`), at most 10 minutes:
    - The supervisor reads a summary of every column (`plot_data`) and
      plans: an instruction each for the interactive, static and statistics
@@ -41,7 +44,16 @@ it. The run:
 
 `reports.py` builds the downloads: a self-contained HTML report and a ZIP
 with every chart (interactive ones as standalone HTML), its code and the
-report.
+report. `save_result` writes both into a folder an interface serves, with
+each chart as a file of its own (`chart-<n>.json` or an image) for the
+interface to show.
+
+Before a run, `preview.preview_table` reads the first 2,000 rows of a
+table file with the agents' own readers and describes each column as the
+agents will treat it (`plot_data.column_kind`: numbers, dates, categories,
+or free text averaging more than 50 characters), and
+`preview.example_requests` suggests requests that name the table's
+columns.
 
 The heavy work is outside the app process: the models run in the Ollama
 server and the tools in the MCP server process, so the run itself is a
@@ -77,12 +89,17 @@ Interfaces use `service.py`:
 
 | Name | Purpose |
 |---|---|
-| `read_preview(name, data)`, `column_profile(df)` | First rows of an upload, and a summary of each column |
+| `preview_table(name, path)` | A table file's columns (`ColumnInfo`: type, filled, distinct, values) and first rows: a `TablePreview` |
+| `example_requests(preview)` | Requests that name the table's columns |
+| `read_preview(name, data)`, `column_profile(df)` | The same for an upload in memory, as data frames (Streamlit) |
+| `model_options()`, `server_ready()` | The models for the session's GPU (`ModelOptions`), and whether the Ollama server answers |
 | `AnalysisRequest` | Model, prompt, selected columns, R code, file name |
-| `start_analysis(request, data=` or `data_path=)` | Start a run; returns an `AnalysisRun` |
+| `start_analysis(request, data=` or `data_path=)` | Start a run in the background; returns an `AnalysisRun` |
+| `analyze(request, data_path, on_log=, cancel=)` | Run in the caller's thread; returns the finished `AnalysisRun` |
 | `AnalysisRun` | `status`, `logs`, `result`, `error`, `cancel()` |
 | `AnalysisResult` | Summary, charts (`Artifact`), statistics; `to_payload()` for a chat message |
-| `results_zip(result, request)`, `build_html_report(...)` | The downloads |
+| `save_result(result, request, folder, name=)` | Write the downloads and the charts into a folder: a `SavedAnalysis` with `SavedChart`s and the files |
+| `results_zip(result, request)`, `build_html_report(...)` | The downloads, in memory |
 | `prepare_data_file(name, data, folder)` | Save a table for repeated runs and summarize its columns (Chat) |
 | `tool_label`, `DEFAULT_PROMPT`, `MAX_ROWS`, ... | Re-exported for interfaces |
 
@@ -133,6 +150,8 @@ exactly as written (see the ruff exceptions in `pyproject.toml`).
 | What | Where | Removed |
 |---|---|---|
 | The uploaded table and the charts of a run | `visualization/run-*` in the job workspace | When the run ends |
+| The web UI's table, and each analysis's copy with its charts | The draft job's and each job's folder (`web-jobs/`, see the web UI README) | The copies when their analysis ends; the table when another replaces it, or the session ends |
+| The web UI's report, ZIP and charts | The job's `outputs/` (`save_result`) | When the job is removed, or the session ends |
 | Chat's table and its charts | `chat/conversation-*` (see the Chat README) | When the chat is cleared, or the session ends |
 
 ## Configuration
@@ -157,8 +176,10 @@ image and nested Apptainer, as on a compute node):
 - `test_sandbox.py`: the code check with ordinary and malicious code, the
   runner, reading results back (planted links), and, marked `container`,
   that the real sandbox has no home folder, storage or network.
-- `test_service.py`: background runs with a fake agent (results, cleanup,
-  timeout, cancel, model download errors), previews, the ZIP and report.
+- `test_service.py`: runs with a fake agent, in the background and in the
+  caller's thread (results, cleanup, timeout, cancel, model downloads and
+  their errors), previews and their column types, the example requests,
+  the ZIP, the report and the saved result.
 - `test_visualize_page.py`: the page imports only the service, and neither
   service loads the agent or the MCP library.
 

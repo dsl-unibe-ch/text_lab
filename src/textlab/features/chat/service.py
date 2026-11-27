@@ -17,7 +17,6 @@ answered by the agents also has an ``analysis`` entry
 from __future__ import annotations
 
 import dataclasses
-import functools
 import tempfile
 import threading
 import time
@@ -25,14 +24,14 @@ from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
 from typing import Any
 
-import ollama
-
+from textlab.common.model_config import ModelOptions, model_options
 from textlab.common.ollama import (
     check_ollama_server,
     chunk_text,
     estimate_tokens,
     is_model_loaded,
     model_installed,
+    pull_model,
 )
 from textlab.common.progress import (
     CancelledError,
@@ -156,50 +155,6 @@ def plain_messages(messages: Sequence[dict[str, Any]]) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 
-@dataclasses.dataclass(frozen=True)
-class ModelOptions:
-    """The chat models this session can use.
-
-    Attributes:
-        models: The Ollama model names of the site's model list
-            (``models.json``); the first is the default.
-        gpu: The session's GPU, as ``nvidia-smi`` names it.
-        large: Whether the large models are offered, which only GPUs with
-            much memory get.
-    """
-
-    models: tuple[str, ...]
-    gpu: str
-    large: bool
-
-
-@functools.cache
-def _gpu_name() -> str:
-    """Return the session's GPU, asked once (it does not change)."""
-    from textlab.common.gpu_manager import get_gpu_name
-
-    return get_gpu_name()
-
-
-def model_options() -> ModelOptions:
-    """Return the models to choose from, for this session's GPU.
-
-    Returns:
-        The models; large ones only on GPUs with much memory.
-    """
-    from textlab.common.model_config import (
-        get_available_models,
-        is_high_memory_gpu,
-    )
-
-    gpu = _gpu_name()
-    return ModelOptions(
-        models=tuple(get_available_models(gpu)),
-        gpu=gpu,
-        large=is_high_memory_gpu(gpu),
-    )
-
-
 def server_ready(attempts: int = 1) -> bool:
     """Return whether the session's Ollama server accepts connections.
 
@@ -211,26 +166,6 @@ def server_ready(attempts: int = 1) -> bool:
         True if it does.
     """
     return check_ollama_server(attempts=attempts)
-
-
-def pull_model(
-    model: str, *, on_progress: ProgressCallback = no_progress
-) -> None:
-    """Download a model to the Ollama server.
-
-    Args:
-        model: The model.
-        on_progress: Receives the share downloaded so far.
-
-    Raises:
-        ollama.ResponseError: If the download fails.
-    """
-    on_progress(Progress(f"Downloading {model}"))
-    for update in ollama.pull(model=model, stream=True):
-        # Updates are ProgressResponse objects, which also answer get().
-        total, completed = update.get("total"), update.get("completed")
-        if total and completed is not None:
-            on_progress(Progress(f"Downloading {model}", completed / total))
 
 
 # ---------------------------------------------------------------------------

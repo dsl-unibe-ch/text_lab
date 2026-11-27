@@ -819,7 +819,60 @@ rest (`test_chat_styles_have_class_names_of_their_own`). Before the first
 message, the welcome stands in the middle of the thread, and the message
 box at the foot of the window.
 
-Still to do: try it in the sandbox; then commit. Next: Visualize Data.
+Tried in the sandbox and committed on 27 November.
+
+### Visualize Data
+
+Built on 27 November 2026, without a mockup, with tests
+(`test_visualize_data_page.py` with the agents faked; the service's new
+parts in `features/visualization/tests/test_service.py`):
+
+- **One form**, as Topic Modeling's: the table is read as soon as it is
+  chosen, with the agents' own readers, and kept in a draft job while the
+  user writes the request; every analysis links it into a job of its own,
+  so the same table can be asked about again (Streamlit kept one result,
+  lost on a new run or a reload). A new table replaces the one the form
+  names; after a reload the form names none, so the session keeps the
+  newest three tables.
+- **The columns** come back as a table to tick (Streamlit's column
+  profile and multiselect in one): the type the agents will give each
+  column (number, date, category, or text, from the same rule as their
+  summary, `plot_data.column_kind`), how full it is, its distinct values
+  and what they are like; *All* and *None*, and a count. The first rows
+  are in a second tab. All columns ticked, or none, is the whole table, of
+  which the agents are then told nothing (Streamlit sent every column's
+  name when all were selected).
+- **Requests that name the table's columns** are suggested under the
+  request box (a distribution, a comparison of groups, the relation of
+  two numbers, an association, a word cloud; `example_requests`), and
+  *What the agents can do* replaces Streamlit's capabilities box. The model
+  of the last analysis is offered first.
+- **An analysis is a job** in the GPU queue. The agents run in the job's
+  thread (`service.analyze`, new; Streamlit polled a thread of their own),
+  and each of their steps reaches the card as it is taken (the job's
+  preview, shown by a template of the page: `preview_template`, new in the
+  runner), the newest in view. Cancelling stops them after their current
+  step. A missing model is pulled with its progress, and can be
+  cancelled meanwhile.
+- **The result**: what was asked, the summary, the statistics (open), the
+  charts with their Python and R code (a chart without R code says why),
+  and the agents' steps folded away; the downloads are the HTML report and
+  the ZIP (`service.save_result`, which also writes each chart as a file
+  of the job for the page to draw). Charts and statistics are drawn by
+  macros Chat now shares (`components/analysis.html`), with the styles
+  in a section of their own.
+- **Shared**: `common.model_config.model_options` and
+  `common.ollama.pull_model` (from Chat), `render.shorten` (from Chat),
+  `uploads.copy_into` (from Topic Modeling). Every job card carries
+  `data-version`, and the page skips any card it has in the same version
+  (Chat's rule, now for all pages), so a finished analysis's charts are
+  not drawn again when a new job opens the event stream. Boxes the reader
+  opened stay open on any page (`data-keep-open`).
+- The rules test now checks every section of the style sheets: a class is
+  styled in one section only.
+- The guide's draft: `docs/next/visualize_data.md`.
+
+Still to do: try it in the sandbox; then commit. Next: Knowledge Graph.
 
 ## Testing
 

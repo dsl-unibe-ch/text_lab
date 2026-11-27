@@ -44,7 +44,7 @@ from textlab.ui.web.jobs import (
     render_card,
     runner_of,
 )
-from textlab.ui.web.render import is_htmx, renderer, root
+from textlab.ui.web.render import is_htmx, renderer, root, shorten
 
 router = protected_router()
 
@@ -236,15 +236,6 @@ def conversation_or_404(
 def stream_page(conversation: Conversation) -> str:
     """Return the page id of a conversation's jobs, such as "chat:3f2a"."""
     return f"{PAGE}:{conversation.id}"
-
-
-def shorten(text: str, limit: int) -> str:
-    """Return ``text`` on one line, cut at a word to ``limit`` characters."""
-    line = " ".join(text.split())
-    if len(line) <= limit:
-        return line
-    cut = line[: limit - 1].rsplit(" ", 1)[0] or line[: limit - 1]
-    return cut.rstrip(" ,.;:") + "…"
 
 
 # ---------------------------------------------------------------------------
