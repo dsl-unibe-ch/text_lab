@@ -7,6 +7,7 @@ pandas.
 from __future__ import annotations
 
 import csv
+import dataclasses
 import io
 import os
 import zipfile
@@ -298,3 +299,61 @@ def load_archive(data: bytes) -> pd.DataFrame:
             "The ZIP archive does not contain any non-empty .txt files."
         )
     return table
+
+
+#: Rows of a table shown before a run, and the longest cell, in characters.
+PREVIEW_ROWS = 5
+PREVIEW_CELL = 80
+
+
+@dataclasses.dataclass(frozen=True)
+class TableSummary:
+    """An uploaded collection, as a form shows it before a run.
+
+    Attributes:
+        documents: How many rows (documents) it has.
+        columns: Its columns, in order.
+        text_column: The column that most likely holds the texts: the one
+            with the longest texts on average.
+        preview: Its first rows, each cell as short text.
+    """
+
+    documents: int
+    columns: tuple[str, ...]
+    text_column: str
+    preview: tuple[tuple[str, ...], ...]
+
+
+def summarize_table(table: pd.DataFrame) -> TableSummary:
+    """Describe a collection for choosing its columns.
+
+    Args:
+        table: The collection, as :func:`load_table` or
+            :func:`load_archive` read it.
+
+    Returns:
+        Its size, columns, likely text column and first rows.
+    """
+    columns = tuple(str(column) for column in table.columns)
+    lengths = {
+        str(column): table[column].dropna().astype(str).str.len().mean()
+        for column in table.columns
+        if table[column].dtype == object
+    }
+    lengths = {name: value for name, value in lengths.items() if value > 0}
+    text_column = max(lengths, key=lengths.get) if lengths else columns[0]
+    preview = tuple(
+        tuple(_short(value) for value in row)
+        for row in table.head(PREVIEW_ROWS).itertuples(index=False)
+    )
+    return TableSummary(len(table), columns, text_column, preview)
+
+
+def _short(value: Any) -> str:
+    """Return a cell as one short line of text."""
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return ""
+    text = " ".join(str(value).split())
+    if len(text) <= PREVIEW_CELL:
+        return text
+    return text[: PREVIEW_CELL - 1].rstrip() + "\u2026"

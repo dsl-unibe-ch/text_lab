@@ -1,5 +1,7 @@
 """Latent Dirichlet Allocation (LDA) engine based on gensim and pyLDAvis."""
 
+from typing import Any
+
 import gensim
 import gensim.corpora as corpora
 import pandas as pd
@@ -108,16 +110,29 @@ def extract_lda_topics(
         One entry per topic, numbered from 1. LDA has no hard topic sizes,
         so ``count`` is left empty.
     """
-    return [
-        TopicKeywords(
-            topic=i + 1,
-            keywords=[
-                word
-                for word, _ in lda_model.show_topic(i, topn=_TOP_N_KEYWORDS)
-            ],
+    topics = []
+    for i in range(num_topics):
+        pairs = lda_model.show_topic(i, topn=_TOP_N_KEYWORDS)
+        topics.append(
+            TopicKeywords(
+                topic=i + 1,
+                keywords=[word for word, _ in pairs],
+                weights=[float(probability) for _, probability in pairs],
+            )
         )
-        for i in range(num_topics)
-    ]
+    return topics
+
+
+def lda_topic_vectors(lda_model: gensim.models.LdaModel) -> Any:
+    """Return each topic's word distribution, for the overview's map.
+
+    Args:
+        lda_model: A trained gensim LDA model.
+
+    Returns:
+        One row per topic, in topic order, over the whole vocabulary.
+    """
+    return lda_model.get_topics()
 
 
 def generate_lda_document_topics_df(

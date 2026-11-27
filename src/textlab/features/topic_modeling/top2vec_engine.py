@@ -110,7 +110,9 @@ def extract_top2vec_topics(topic_model: Top2Vec) -> list[TopicKeywords]:
     """
     is_reduced = _is_reduced_model(topic_model)
 
-    topic_words, _, topic_nums = topic_model.get_topics(reduced=is_reduced)
+    topic_words, word_scores, topic_nums = topic_model.get_topics(
+        reduced=is_reduced
+    )
     topic_sizes, size_topic_nums = topic_model.get_topic_sizes(
         reduced=is_reduced
     )
@@ -126,9 +128,33 @@ def extract_top2vec_topics(topic_model: Top2Vec) -> list[TopicKeywords]:
                 str(word) for word in topic_words[idx][:_TOP_N_KEYWORDS]
             ],
             count=size_map.get(int(t_num), 0),
+            weights=[
+                float(score) for score in word_scores[idx][:_TOP_N_KEYWORDS]
+            ],
         )
         for idx, t_num in enumerate(topic_nums)
     ]
+
+
+def top2vec_topic_vectors(
+    topic_model: Top2Vec, topics: list[TopicKeywords]
+) -> np.ndarray:
+    """Return each topic's vector, for the overview's map.
+
+    Args:
+        topic_model: A trained Top2Vec model.
+        topics: The topics, as :func:`extract_top2vec_topics` gives them.
+
+    Returns:
+        The topic vectors (reduced ones when the topics were reduced), in
+        the order of ``topics``.
+    """
+    vectors = (
+        topic_model.topic_vectors_reduced
+        if _is_reduced_model(topic_model)
+        else topic_model.topic_vectors
+    )
+    return np.asarray(vectors)[[int(topic.topic) - 1 for topic in topics]]
 
 
 def generate_top2vec_document_topics_df(

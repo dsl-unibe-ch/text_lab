@@ -64,11 +64,34 @@ class Algorithm(StrEnum):
         """Return the human-readable name used in the UI and reports."""
         return _ALGORITHM_LABELS[self]
 
+    @property
+    def description(self) -> str:
+        """Return what the algorithm does and suits, in a sentence or two."""
+        return _ALGORITHM_DESCRIPTIONS[self]
+
 
 _ALGORITHM_LABELS = {
     Algorithm.BERTOPIC: "BERTopic (Transformer Embeddings)",
     Algorithm.TOP2VEC: "Top2Vec (Joint Semantic Embeddings)",
     Algorithm.LDA: "Latent Dirichlet Allocation (LDA)",
+}
+
+_ALGORITHM_DESCRIPTIONS = {
+    Algorithm.BERTOPIC: (
+        "Groups the documents by meaning with a language model, then names "
+        "each group by its typical words. Finds the number of topics by "
+        "itself, and can follow topics over time."
+    ),
+    Algorithm.TOP2VEC: (
+        "Places documents and words in one space and finds where documents "
+        "gather. Finds the number of topics by itself; learns from your "
+        "texts or uses a language model."
+    ),
+    Algorithm.LDA: (
+        "The classic statistical model: each document is a mix of topics, "
+        "each topic a mix of words. Fast; you set the number of topics. "
+        "Suits longer texts best."
+    ),
 }
 
 #: Human-readable names of the Top2Vec embedding backends.
@@ -146,11 +169,17 @@ class TopicModelingConfig:
 
 @dataclass
 class TopicKeywords:
-    """Describe one topic by its display number, keywords and size."""
+    """Describe one topic by its display number, keywords and size.
+
+    ``weights`` gives each keyword's weight in the topic, in the same
+    order, as the engine scores it (c-TF-IDF for BERTopic, probability for
+    LDA, similarity for Top2Vec); empty when the engine gives none.
+    """
 
     topic: int | str
     keywords: list[str]
     count: int | None = None
+    weights: list[float] = field(default_factory=list)
 
 
 class TopicModelingRunResult(TypedDict):
@@ -169,6 +198,11 @@ class TopicModelingRunResult(TypedDict):
     # which allows :func:`evaluate_topic_quality` to skip re-tokenizing.
     tokenized_texts: NotRequired[list[list[str]]]
 
+    # The topics with their keyword weights, and one vector per topic in
+    # the same order, for the overview; only for the run that is shown.
+    topics: NotRequired[list[TopicKeywords]]
+    topic_vectors: NotRequired[Any]
+
 
 @dataclass(frozen=True)
 class Notice:
@@ -181,6 +215,74 @@ class Notice:
 
     level: Literal["info", "warning"]
     message: str
+
+
+@dataclass
+class TopicSummary:
+    """One topic, as the overview shows it.
+
+    Attributes:
+        topic: Its number, as in the topic table.
+        keywords: Its keywords, most typical first.
+        weights: Each keyword's weight, scaled so the first is 1; empty
+            when the engine gives none.
+        documents: How many documents have it as their main topic.
+        examples: The beginning of a few of those documents, the most
+            typical first when the engine says how typical they are.
+    """
+
+    topic: int | str
+    keywords: list[str]
+    weights: list[float]
+    documents: int
+    examples: list[str]
+
+
+@dataclass
+class TopicOverview:
+    """What a run found, ready to draw: topics, their map, their timeline.
+
+    Attributes:
+        documents: How many documents were analyzed.
+        outliers: How many have no topic (outliers, or empty for LDA).
+        topics: The topics, in the topic table's order.
+        similarity: How alike each two topics are, from 0 to 1, in the
+            order of ``topics``; ``None`` when there are fewer than two
+            topics or the engine gives no topic vectors.
+        positions: Each topic's place on a map where alike topics lie
+            close, as ``[x, y]`` between 0 and 1; ``None`` with
+            ``similarity``.
+        time_labels: The intervals of the timeline, for people; empty
+            without topics over time.
+        over_time: Per topic, how many of its documents fall into each
+            interval.
+    """
+
+    documents: int
+    outliers: int
+    topics: list[TopicSummary]
+    similarity: list[list[float]] | None = None
+    positions: list[list[float]] | None = None
+    time_labels: list[str] = field(default_factory=list)
+    over_time: list[list[int]] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return the overview as JSON types."""
+        return dataclasses.asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> TopicOverview:
+        """Rebuild an overview from :meth:`to_dict` output.
+
+        Args:
+            data: The dictionary.
+
+        Returns:
+            The overview.
+        """
+        values = dict(data)
+        values["topics"] = [TopicSummary(**item) for item in data["topics"]]
+        return cls(**values)
 
 
 @dataclass
@@ -197,6 +299,8 @@ class TopicModelingResult:
         zip_bytes: The download: report, tables and charts.
         notices: What users should know about the run, such as skipped
             rows or truncated documents.
+        overview: The topics, their map and timeline, to draw; ``None``
+            if it could not be made.
     """
 
     algorithm: Algorithm
@@ -206,6 +310,7 @@ class TopicModelingResult:
     evaluation_metrics: dict[str, float | None]
     zip_bytes: bytes
     notices: list[Notice] = field(default_factory=list)
+    overview: TopicOverview | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Return the result as JSON types, without the ZIP.
@@ -219,6 +324,7 @@ class TopicModelingResult:
             "dashboard_assets": self.dashboard_assets,
             "evaluation_metrics": self.evaluation_metrics,
             "notices": [dataclasses.asdict(notice) for notice in self.notices],
+            "overview": self.overview.to_dict() if self.overview else None,
         }
 
     @classmethod
@@ -243,4 +349,7 @@ class TopicModelingResult:
             evaluation_metrics=data["evaluation_metrics"],
             zip_bytes=zip_bytes,
             notices=[Notice(**notice) for notice in data["notices"]],
+            overview=TopicOverview.from_dict(data["overview"])
+            if data.get("overview")
+            else None,
         )

@@ -452,17 +452,51 @@ def extract_bertopic_topics(topic_model: BERTopic) -> list[TopicKeywords]:
             continue
 
         words = topic_model.get_topic(topic_id) or []
-        keywords = [word for word, _ in words[:_TOP_N_KEYWORDS] if word]
-        if keywords:
+        pairs = [
+            (word, score) for word, score in words[:_TOP_N_KEYWORDS] if word
+        ]
+        if pairs:
             topics.append(
                 TopicKeywords(
                     topic=display_topic_id(topic_id),
-                    keywords=keywords,
+                    keywords=[word for word, _ in pairs],
                     count=int(row["Count"]),
+                    weights=[float(score) for _, score in pairs],
                 )
             )
 
     return topics
+
+
+def bertopic_topic_vectors(
+    topic_model: BERTopic, topics: list[TopicKeywords]
+) -> np.ndarray | None:
+    """Return one vector per topic, for the overview's map.
+
+    The topic embeddings (the mean of each topic's document embeddings)
+    when BERTopic has them, else the c-TF-IDF rows.
+
+    Args:
+        topic_model: A fitted BERTopic model.
+        topics: The topics, as :func:`extract_bertopic_topics` gives them.
+
+    Returns:
+        The vectors in the order of ``topics``, or ``None`` if the model's
+        rows do not match its topics.
+    """
+    ids = sorted(topic_model.get_topics())
+    vectors = getattr(topic_model, "topic_embeddings_", None)
+    if vectors is None:
+        vectors = getattr(topic_model, "c_tf_idf_", None)
+    if vectors is None:
+        return None
+    if hasattr(vectors, "toarray"):
+        vectors = vectors.toarray()
+    vectors = np.asarray(vectors)
+    if len(vectors) != len(ids):
+        return None
+    rows = [ids.index(int(topic.topic) - 1) for topic in topics]
+    return vectors[rows]
 
 
 def generate_bertopic_document_topics_df(

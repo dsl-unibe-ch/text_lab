@@ -33,8 +33,8 @@ port, base path (`/node/<host>/<port>/`) and the portal's host name;
 | `uploads.py` | Reading forms with files, checking them, saving them into a job |
 | `render.py` | Templates, icons, links from the base path, number formats, Markdown from models (`markdown()`, also a template filter: raw HTML escaped, no images) |
 | `settings.py` | The server's settings (`TOKEN`, `USER`, `TEXT_LAB_WEB_DEV`) |
-| `pages/` | One module per page (`home`, `transcription`, `meeting_notes`, `translation`, `ocr` with its tools `ocr_handwriting` and `ocr_huggingface` in modules of their own, `placeholder` for the tools not built yet, `dev`), and `TOOLS`, the navigation |
-| `templates/` | `base.html` (layout), `components/macros.html` and `components/player.html` (the audio player), `jobs/`, one folder per page (`pages/` for Home and the placeholders, `transcription/`, `meeting_notes/`, `translation/`, `ocr/`); `mockups/` and `dev/` for the developer pages |
+| `pages/` | One module per page (`home`, `transcription`, `meeting_notes`, `translation`, `ocr` with its tools `ocr_handwriting` and `ocr_huggingface` in modules of their own, `topic_modeling`, `placeholder` for the tools not built yet, `dev`), and `TOOLS`, the navigation |
+| `templates/` | `base.html` (layout), `components/macros.html` and `components/player.html` (the audio player), `jobs/`, one folder per page (`pages/` for Home and the placeholders, `transcription/`, `meeting_notes/`, `translation/`, `ocr/`, `topic_modeling/`); `mockups/` and `dev/` for the developer pages |
 | `static/` | `css/` (`fonts.css`, `tokens.css`, `layout.css`, `components.css`), `js/` (`app.js`, `theme.js`), `vendor/` (htmx, IBM Plex fonts, Lucide icons; see its README) |
 
 ### Links
@@ -206,6 +206,27 @@ inside it, so the controls of hidden parts stay disabled. Two drop zones
 of the same name on one page need their own `id` (the `dropzone` macro's
 `id` argument).
 
+### Charts from data
+
+Topic Modeling draws its charts itself, in SVG, from the numbers the run
+returns (`TopicOverview`): the libraries' Plotly and pyLDAvis charts load
+their code from a CDN and run inline scripts, which the Content Security
+Policy does not allow; they stay in the download. The page module works
+out the geometry (`TopicsView`: dots on the map, heatmap cells, timeline
+points), so the templates only place it; bars are SVG `<rect>`s of the
+width given, as style attributes are not allowed. The map's dots and the
+topics share a `data-region`, like OCR's outlines and their text.
+
+### A file chosen before the settings
+
+Topic Modeling needs a table's columns before the run. The drop zone sits
+in a wrapper that posts the file as soon as it is chosen (`hx-trigger=
+"change"`, `hx-params="file,collection"`); the page reads it, keeps it in
+a draft job (`JobRunner.draft`) and answers with its columns and first
+rows. The form itself posts everything but the file (`hx-params="not
+file"`); each run copies the collection into a job of its own, so the
+same collection can run again with other settings.
+
 ## Tests
 
 `tests/` here, run with the other tests (see `docs/dev/testing.md`):
@@ -217,7 +238,8 @@ with a faked model (`test_meeting_notes_page.py`), Translation with
 faked models and the real service (`test_translation_page.py`), OCR with
 the pipeline and the engines faked (`test_ocr_page.py`), historic
 handwriting and Hugging Face models with their workers faked
-(`test_ocr_handwriting_page.py`, `test_ocr_huggingface_page.py`) and the
+(`test_ocr_handwriting_page.py`, `test_ocr_huggingface_page.py`), Topic
+Modeling with the analysis faked (`test_topic_modeling_page.py`) and the
 rules
 (`test_rules.py`). The fake transcription backend is the `backend` fixture
 in `conftest.py`. The launcher and the Open OnDemand files are tested in

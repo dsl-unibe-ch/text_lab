@@ -1,0 +1,58 @@
+{#- An uploaded collection, inside the form (collection is a Collection,
+  collection_id its draft job's id): its size, for a table the text
+  column and, for topics over time, the timestamp column, and its first
+  rows. Swapped in after each upload. -#}
+{% set summary = collection.summary %}
+<input type="hidden" name="collection" value="{{ collection_id }}">
+<div class="collection__head">
+  <p class="collection__name">{{ collection.name }}</p>
+  <p class="label">{{ "{:,}".format(summary.documents) }} {{ "text files" if collection.archive else "rows" }}{% if not collection.archive %} · {{ summary.columns | length }} columns{% endif %}</p>
+</div>
+{% if collection.archive %}
+<p class="muted">Each text file is a document; its name stays next to its topic in the download.</p>
+{% else %}
+<div class="field">
+  <label class="field__label" for="text-column">Text column</label>
+  <div class="select-wrap">
+    <select class="select" id="text-column" name="text_column" aria-describedby="text-column-help">
+      {% for column in summary.columns %}<option{% if column == summary.text_column %} selected{% endif %}>{{ column }}</option>{% endfor %}
+    </select>
+    {{ icon("chevron-down", size="sm") }}
+  </div>
+  <p class="field__help" id="text-column-help">The column with the texts; chosen for you is the one with the longest. Rows without text are left out.</p>
+</div>
+<div class="option">
+  <input class="checkbox" type="checkbox" id="over-time" name="over_time" value="1" data-reveal="over-time-more" aria-describedby="over-time-text">
+  <label class="option__title" for="over-time">Topics over time</label>
+  <p class="option__text" id="over-time-text">How often each topic occurs over time, from a column of dates, date-times or years. With BERTopic only; rows without a readable time are left out.</p>
+  <div class="option__more form-grid" id="over-time-more" hidden>
+    <div class="field">
+      <label class="field__label" for="date-column">Timestamp column</label>
+      <div class="select-wrap">
+        <select class="select" id="date-column" name="date_column">
+          {% for column in summary.columns if column != summary.text_column %}<option>{{ column }}</option>{% endfor %}
+        </select>
+        {{ icon("chevron-down", size="sm") }}
+      </div>
+    </div>
+    <div class="field">
+      <label class="field__label" for="time-bins">Intervals, at most</label>
+      <input class="input input--short" id="time-bins" name="time_bins" type="number" min="2" max="100" value="{{ time_bins }}" aria-describedby="time-bins-help">
+      <p class="field__help" id="time-bins-help">With fewer distinct times, each is its own interval.</p>
+    </div>
+  </div>
+</div>
+<div class="table-wrap collection__preview">
+  <table class="table">
+    <caption class="visually-hidden">The first rows of {{ collection.name }}</caption>
+    <thead>
+      <tr>{% for column in summary.columns %}<th scope="col">{{ column }}</th>{% endfor %}</tr>
+    </thead>
+    <tbody>
+      {% for row in summary.preview %}
+      <tr>{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}

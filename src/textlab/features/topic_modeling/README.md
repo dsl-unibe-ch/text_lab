@@ -3,7 +3,9 @@
 Finds the topics of a collection of texts (a table with a text column, or a
 ZIP of text files) with BERTopic, Top2Vec or LDA, evaluates them, and
 returns a topic table, interactive charts and a download with every
-document's topic. Used by the Topic Modeling page.
+document's topic. Used by the Topic Modeling page (Streamlit's
+`Topic_Modeling.py`, and `ui/web/pages/topic_modeling.py` in the new
+interface, which draws the run's overview instead of the charts).
 
 ## Pipeline
 
@@ -28,6 +30,17 @@ document's topic. Used by the Topic Modeling page.
    compared.
 5. **Package** (`reports`): a ZIP with the run's settings and metrics,
    `document_topics.csv`, `topic_keywords.csv` and the charts.
+6. **Overview** (`overview`): what an interface draws, the same way for
+   every algorithm, from what each engine gives: the topics with their
+   keyword weights (c-TF-IDF for BERTopic, probabilities for LDA,
+   similarities for Top2Vec), every document's main topic, and one vector
+   per topic (BERTopic's topic embeddings, LDA's topic-word distributions,
+   Top2Vec's topic vectors). It holds each topic's size and most typical
+   example documents, the cosine similarity of every two topics, a map
+   where alike topics lie close (classical multidimensional scaling, as
+   pyLDAvis does), and, with topics over time, each topic's documents per
+   interval. If it cannot be built, the run keeps its other results and
+   says so in a notice.
 
 A collection too small to cluster fails deep inside UMAP or HDBSCAN;
 `small_corpus` recognizes those failures and replaces them with a message
@@ -44,10 +57,12 @@ Interfaces use `service.py`:
 | Name | Purpose |
 |---|---|
 | `load_table(filename, data)`, `load_archive(data)` | Read an upload into a table; `ValueError` if it is empty or unsupported |
+| `summarize_table(table)` | A `TableSummary`: size, columns, the likeliest text column, the first rows, for choosing columns |
 | `TopicModelingConfig` | The run's settings: algorithm, language, text column, algorithm options, `evaluate_stability` |
 | `run_topic_modeling(table, config, source_name=, on_progress=, cancel=)` | The analysis in a worker; returns a `TopicModelingResult` |
 | `analyze_table(table, config, source_name=, on_progress=)` | The same analysis in this process, for the worker and batch jobs |
-| `TopicModelingResult` | Topic table, charts, metrics, the ZIP, and `notices` to show users |
+| `TopicModelingResult` | Topic table, charts, metrics, the ZIP, `notices` to show users, and the `overview` (`TopicOverview`) to draw |
+| `save_result(result, source_name, folder)` | Writes the ZIP and, from it, the document table, the topic table and the run report into a folder; returns a `SavedTopics` (what to show, and `SavedFile`s) |
 | `Algorithm`, `SUPPORTED_LANGUAGES`, `TABLE_EXTENSIONS`, ... | Choices for the page, re-exported |
 
 A failure users can act on (too few documents, an unreadable timestamp
@@ -84,6 +99,7 @@ topic_modeling/
 ├── top2vec_engine.py   # Top2Vec training, topics, chart
 ├── lda_engine.py       # LDA with gensim, pyLDAvis chart
 ├── evaluation.py       # diversity, coherence, perplexity, stability
+├── overview.py         # sizes, examples, similarity, map, timeline
 ├── small_corpus.py     # recognizing a collection too small to cluster
 ├── reports.py          # topic table, run report, result ZIP
 ├── cli.py              # batch command (placeholder)
@@ -114,10 +130,14 @@ In `tests/`, without GPU or models:
 - `test_topic_modeling.py`: small-corpus errors, timestamps, CSV and ZIP
   reading, text splitting, the topic table, stability and metrics, chunked
   embeddings with a fake model.
-- `test_service.py`: configurations and results across the worker
-  boundary, loading, the analysis with fake modeling modules (notices,
-  progress, embeddings reused for stability, the ZIP), the worker
-  hand-over and error messages.
+- `test_service.py`: configurations and results (with the overview)
+  across the worker boundary, loading and describing tables, the analysis
+  with fake modeling modules (notices, progress, embeddings reused for
+  stability, the ZIP, the overview, a broken overview), the worker
+  hand-over and error messages, `save_result`.
+- `test_overview.py`: sizes, outliers and examples, scaled weights,
+  similarity and the map (alike topics close), sparse vectors, the
+  timeline per year and per interval.
 - `test_topic_modeling_page.py`: the page imports only the service, and the
   service loads no modeling library.
 

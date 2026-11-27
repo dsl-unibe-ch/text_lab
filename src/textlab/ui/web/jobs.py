@@ -561,6 +561,22 @@ class JobRunner:
         with self._lock:
             return self._jobs.get(job_id)
 
+    def draft(self, job_id: str) -> Job | None:
+        """Return a job that was created but not submitted yet.
+
+        A page can create a job when the user uploads a file, keep the
+        upload in its ``inputs`` while the user chooses settings, and
+        submit it when they start the work.
+
+        Args:
+            job_id: The job's id.
+
+        Returns:
+            The job, or ``None`` if no draft has that id.
+        """
+        with self._lock:
+            return self._drafts.get(job_id)
+
     def jobs(
         self, page: str | None = None, *, listed: bool | None = None
     ) -> list[Job]:

@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 
 from textlab.features.topic_modeling.bertopic_engine import (
+    bertopic_topic_vectors,
     extract_bertopic_topics,
     generate_bertopic_document_topics_df,
     generate_bertopic_visualizations,
@@ -25,6 +26,7 @@ from textlab.features.topic_modeling.lda_engine import (
     extract_lda_topics,
     generate_lda_document_topics_df,
     generate_lda_html,
+    lda_topic_vectors,
     train_lda_model,
 )
 from textlab.features.topic_modeling.models import (
@@ -42,6 +44,7 @@ from textlab.features.topic_modeling.top2vec_engine import (
     extract_top2vec_topics,
     generate_top2vec_barchart_html,
     generate_top2vec_document_topics_df,
+    top2vec_topic_vectors,
     train_top2vec_model,
 )
 
@@ -191,7 +194,7 @@ def _run_lda_pipeline(
             lda_model, corpus, id2word
         )
 
-    return {
+    result: TopicModelingRunResult = {
         "topic_df": build_topic_table(topics, with_counts=False),
         "docs_df": generate_lda_document_topics_df(lda_model, corpus, df),
         "dashboard_assets": dashboard_assets,
@@ -200,6 +203,10 @@ def _run_lda_pipeline(
         "corpus": corpus,
         "tokenized_texts": processed_texts,
     }
+    if include_dashboards:
+        result["topics"] = topics
+        result["topic_vectors"] = lda_topic_vectors(lda_model)
+    return result
 
 
 def _run_top2vec_pipeline(
@@ -235,12 +242,16 @@ def _run_top2vec_pipeline(
             generate_top2vec_barchart_html(topic_model)
         )
 
-    return {
+    result: TopicModelingRunResult = {
         "topic_df": build_topic_table(topics),
         "docs_df": generate_top2vec_document_topics_df(topic_model, df),
         "dashboard_assets": dashboard_assets,
         "topic_keywords": [topic.keywords for topic in topics],
     }
+    if include_dashboards:
+        result["topics"] = topics
+        result["topic_vectors"] = top2vec_topic_vectors(topic_model, topics)
+    return result
 
 
 def _run_bertopic_pipeline(
@@ -305,7 +316,7 @@ def _run_bertopic_pipeline(
                 )
             )
 
-    return {
+    result: TopicModelingRunResult = {
         "topic_df": build_topic_table(topics),
         "docs_df": generate_bertopic_document_topics_df(
             topic_ids, probabilities, df
@@ -313,3 +324,7 @@ def _run_bertopic_pipeline(
         "dashboard_assets": dashboard_assets,
         "topic_keywords": [topic.keywords for topic in topics],
     }
+    if include_dashboards:
+        result["topics"] = topics
+        result["topic_vectors"] = bertopic_topic_vectors(topic_model, topics)
+    return result

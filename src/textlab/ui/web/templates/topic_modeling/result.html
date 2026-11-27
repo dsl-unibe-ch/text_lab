@@ -1,0 +1,132 @@
+{#- A topic modeling run inside its record (job.result is a TopicsView):
+  the topics beside a map where alike topics lie close (pointing at a dot
+  marks its topic, a click brings it into view), how alike each two
+  topics are, each topic over time, and the quality scores. All drawn in
+  SVG from the run's numbers; the libraries' interactive charts are in
+  the Everything download, which the record's file listing holds. -#}
+{% from "components/macros.html" import notice %}
+{% set view = job.result %}
+{% set overview = view.overview %}
+{% set topics = view.topics(job.id) %}
+{% set heatmap = view.heatmap(job.id) %}
+{% set timelines = view.timelines(job.id) %}
+<div class="result topics-result">
+  <ul class="facts" aria-label="About the result">
+    <li>{{ view.algorithm }}</li>
+    <li>{{ view.config.language }}</li>
+    {% if overview %}
+    <li>{{ topics | length }} topic{{ "s" if topics | length != 1 }}</li>
+    <li>{{ "{:,}".format(overview.documents) }} document{{ "s" if overview.documents != 1 }}</li>
+    {% if overview.outliers %}<li>{{ "{:,}".format(overview.outliers) }} in no topic</li>{% endif %}
+    {% endif %}
+  </ul>
+
+  {% for item in view.saved.notices %}
+  {% call notice("warning" if item.level == "warning" else "info") %}{{ item.message | markdown }}{% endcall %}
+  {% endfor %}
+
+  {% if topics %}
+  <div class="tabs">
+    <div class="tabs__list" role="tablist" aria-label="Result of {{ job.title }}">
+      <button class="tabs__tab" type="button" role="tab" id="{{ job.id }}-tab-topics" aria-selected="true" aria-controls="{{ job.id }}-topics">Topics</button>
+      {% if heatmap %}<button class="tabs__tab" type="button" role="tab" id="{{ job.id }}-tab-similarity" aria-selected="false" aria-controls="{{ job.id }}-similarity" tabindex="-1">Similarity</button>{% endif %}
+      {% if timelines %}<button class="tabs__tab" type="button" role="tab" id="{{ job.id }}-tab-time" aria-selected="false" aria-controls="{{ job.id }}-time" tabindex="-1">Over time</button>{% endif %}
+      <button class="tabs__tab" type="button" role="tab" id="{{ job.id }}-tab-quality" aria-selected="false" aria-controls="{{ job.id }}-quality" tabindex="-1">Quality</button>
+    </div>
+
+    <div class="tabs__panel" role="tabpanel" id="{{ job.id }}-topics" aria-labelledby="{{ job.id }}-tab-topics">
+      <div class="topic-view{% if not overview.positions %} topic-view--list{% endif %}">
+        {% if overview.positions %}
+        <figure class="topic-map">
+          <svg viewBox="0 0 100 100" role="img" aria-label="Map of the topics: alike topics lie close; larger dots have more documents">
+            {% for topic in topics %}
+            <g class="box topic-dot" data-region="{{ topic.region }}">
+              <circle cx="{{ topic.x }}" cy="{{ topic.y }}" r="{{ topic.r }}"/>
+              <text x="{{ topic.x }}" y="{{ topic.y }}" text-anchor="middle" dominant-baseline="central">{{ topic.topic }}</text>
+              <title>Topic {{ topic.topic }}: {{ topic.title }}, {{ topic.documents }} document{{ "s" if topic.documents != 1 }}</title>
+            </g>
+            {% endfor %}
+          </svg>
+          <figcaption class="label">Alike topics lie close; larger dots have more documents</figcaption>
+        </figure>
+        {% endif %}
+
+        <ol class="topic-list">
+          {% for topic in topics %}
+          <li class="topic" data-region="{{ topic.region }}">
+            <div class="topic__head">
+              <span class="label topic__number">Topic {{ topic.topic }}</span>
+              <h4 class="topic__title">{{ topic.title }}</h4>
+              <span class="label topic__size">{{ "{:,}".format(topic.documents) }} · {{ "%.0f" | format(topic.share * 100) }}%</span>
+            </div>
+            <svg class="bar topic__bar" viewBox="0 0 100 2" preserveAspectRatio="none" aria-hidden="true" focusable="false"><rect width="{{ topic.bar }}" height="2"/></svg>
+            <ul class="keywords" aria-label="Keywords of topic {{ topic.topic }}, the most typical first">
+              {% for word, weight in topic.keywords %}
+              <li class="keyword"><span class="keyword__word">{{ word }}</span><svg class="bar" viewBox="0 0 100 4" preserveAspectRatio="none" aria-hidden="true" focusable="false"><rect width="{{ weight }}" height="4"/></svg></li>
+              {% endfor %}
+            </ul>
+            {% if topic.examples %}
+            <details class="disclosure topic__examples">
+              <summary>Examples ({{ topic.examples | length }})</summary>
+              {% for text in topic.examples %}<blockquote class="topic__example">{{ text }}</blockquote>{% endfor %}
+            </details>
+            {% endif %}
+          </li>
+          {% endfor %}
+        </ol>
+      </div>
+      <p class="muted">Each topic is named by its first keywords, the bars show how typical each keyword is, and the share counts the documents whose main topic it is.{% if view.mixed %} LDA gives every document a mix of topics; it counts here by its main one.{% endif %}</p>
+    </div>
+
+    {% if heatmap %}
+    <div class="tabs__panel" role="tabpanel" id="{{ job.id }}-similarity" aria-labelledby="{{ job.id }}-tab-similarity" hidden>
+      <figure class="heatmap">
+        <svg viewBox="0 0 {{ heatmap.size }} {{ heatmap.size }}" role="img" aria-label="How alike each two topics are">
+          {% for centre, name in heatmap.labels %}
+          <text class="heatmap__label" x="12" y="{{ centre }}" text-anchor="end" dominant-baseline="central">{{ name }}</text>
+          <text class="heatmap__label" x="{{ centre }}" y="9" text-anchor="middle">{{ name }}</text>
+          {% endfor %}
+          {% for x, y, value, title in heatmap.cells %}
+          <rect class="heatmap__cell" x="{{ x }}" y="{{ y }}" width="9.4" height="9.4" fill-opacity="{{ value }}"><title>{{ title }}</title></rect>
+          {% endfor %}
+        </svg>
+        <figcaption class="muted">Darker cells: more alike topics, from 0 to 1 (the cosine similarity of the topics' vectors). Point at a cell for its value.</figcaption>
+      </figure>
+    </div>
+    {% endif %}
+
+    {% if timelines %}
+    <div class="tabs__panel" role="tabpanel" id="{{ job.id }}-time" aria-labelledby="{{ job.id }}-tab-time" hidden>
+      <p class="label">{{ overview.time_labels[0] }} to {{ overview.time_labels[-1] }} · {{ overview.time_labels | length }} interval{{ "s" if overview.time_labels | length != 1 }} · each line to its own peak</p>
+      <ol class="timelines">
+        {% for timeline in timelines %}
+        <li class="timeline">
+          <p class="timeline__name"><span class="label">Topic {{ timeline.topic.topic }}</span> {{ timeline.topic.title }}</p>
+          <svg class="timeline__chart" viewBox="0 0 100 30" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+            <polygon class="timeline__area" points="{{ timeline.area }}"/>
+            <polyline class="timeline__line" points="{{ timeline.line }}"/>
+          </svg>
+          <p class="label">{% if timeline.peak %}Peak {{ timeline.peak }} in {{ timeline.peak_at }}{% else %}No documents with a time{% endif %}</p>
+        </li>
+        {% endfor %}
+      </ol>
+    </div>
+    {% endif %}
+
+    <div class="tabs__panel stack" role="tabpanel" id="{{ job.id }}-quality" aria-labelledby="{{ job.id }}-tab-quality" hidden>
+      {% include "topic_modeling/metrics.html" %}
+    </div>
+  </div>
+  {% else %}
+  <div class="table-wrap">
+    <table class="table">
+      <caption class="visually-hidden">The topics of {{ job.title }}</caption>
+      <thead><tr>{% for column in view.saved.columns %}<th scope="col">{{ column }}</th>{% endfor %}</tr></thead>
+      <tbody>
+        {% for row in view.saved.rows %}<tr>{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% include "topic_modeling/metrics.html" %}
+  {% endif %}
+</div>

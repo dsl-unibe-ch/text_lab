@@ -104,6 +104,7 @@ TOOLS: tuple[Tool, ...] = (
         "/topic-modeling",
         "Text",
         "Find the themes that run through a large set of texts.",
+        ready=True,
     ),
     Tool(
         "visualize_data",
@@ -178,6 +179,7 @@ def routers(settings: WebSettings) -> list[APIRouter]:
         ocr_handwriting,
         ocr_huggingface,
         placeholder,
+        topic_modeling,
         transcription,
         translation,
     )
@@ -190,6 +192,7 @@ def routers(settings: WebSettings) -> list[APIRouter]:
         ocr_handwriting.router,
         ocr_huggingface.router,
         translation.router,
+        topic_modeling.router,
         placeholder.router,
     ]
     if settings.dev:

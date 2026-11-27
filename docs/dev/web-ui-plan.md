@@ -648,11 +648,50 @@ the workers faked and the rest real, and in each feature's `tests/`):
   zones' lists of file types.
 - The guide's draft: the last two sections of `docs/next/ocr.md`.
 
-Still to do: try both in the sandbox (a Kurrent page and a ZIP with each
-handwriting model; a Hugging Face model by name and by link, a first
-download, a model refused for its size, deleting a model, a ZIP;
-cancelling each during recognition; narrow screens and the dark theme),
-then commit them together. Next: Topic Modeling.
+Both were tried in the sandbox and committed together on 27 November.
+
+### Topic Modeling
+
+Built on 27 November 2026, without a mockup (the user asked for the
+migration straight away), with tests (`test_topic_modeling_page.py` with
+the analysis faked, `features/topic_modeling/tests/test_overview.py`, and
+the service tests):
+
+- **The collection first**: choosing a table or a ZIP of text files
+  uploads it at once; it is read, and its size, columns (the likeliest
+  text column chosen) and first rows come back into the form, with the
+  topics-over-time option (timestamp column, intervals; BERTopic only).
+  The upload waits in a draft job (`JobRunner.draft`, new); each run
+  copies it into a job of its own, so the same collection can run again
+  with other settings, each run a record of its own (the Streamlit page
+  replaced its result).
+- **The form**: the algorithms as choices with what each does, the
+  language, each algorithm's settings in a switch (BERTopic's grouping and
+  number of topics in nested switches; its language model, keywords,
+  dimension reduction and outliers folded), and the stability check.
+- **The result**, drawn in SVG from the run's numbers (the libraries'
+  Plotly and pyLDAvis charts need inline scripts and a CDN, which the web
+  UI does not allow; they stay in the ZIP): the topics beside a map where
+  alike topics lie close (dots and topics linked as OCR's outlines and
+  text), each topic's keywords with weight bars and a few example
+  documents; a similarity heatmap; each topic over time as a small chart
+  to its own peak; the quality scores with what each says. Downloads:
+  everything with the interactive charts, the documents with their topic,
+  the topics with their keywords, and the run's settings and scores.
+- **The feature**: a new `overview.py` builds what is drawn the same way
+  for every algorithm, from the keyword weights each engine now keeps and
+  one vector per topic each engine now gives
+  (`bertopic_topic_vectors`, `lda_topic_vectors`,
+  `top2vec_topic_vectors`); classical multidimensional scaling places the
+  topics. `TopicModelingResult.overview` crosses the worker boundary;
+  `summarize_table` and `save_result` serve the page. A failing overview
+  keeps the rest of the run, with a notice.
+- The guide's draft: `docs/next/topic_modeling.md`.
+
+Still to do: try it in the sandbox with each algorithm on a real
+collection (a CSV with a date column for topics over time, an Excel file,
+a ZIP of text files, a custom embedding model, stability, cancelling);
+narrow screens and the dark theme; then commit it. Next: Chat.
 
 ## Testing
 
