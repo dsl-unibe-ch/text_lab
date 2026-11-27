@@ -1,0 +1,11 @@
+{#- What a folder of papers holds, as its path is typed (asked: whether a
+  path was typed; problem: why it cannot be used; count: its PDFs). -#}
+{% if not asked %}
+<p class="field__help">The PDFs directly in this folder are read where they are; nothing is copied.</p>
+{% elif problem %}
+<p class="field__help folder-check folder-check--none">{{ problem }}</p>
+{% elif count %}
+<p class="field__help folder-check folder-check--found">{{ "{:,}".format(count) }} {{ "PDF" if count == 1 else "PDFs" }} in this folder.</p>
+{% else %}
+<p class="field__help folder-check folder-check--none">No PDFs directly in this folder: those in its subfolders are not read.</p>
+{% endif %}

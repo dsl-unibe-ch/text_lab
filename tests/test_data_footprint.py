@@ -31,6 +31,11 @@ HOME_ALLOWED = {
         "suggests ~/papers as the folder holding the user's own papers and "
         "lets the user choose where to save the output"
     ),
+    "ui/web/pages/knowledge_graph.py": (
+        "as the Streamlit page: suggests the home folder for the user's own "
+        "papers and projects, and saves a project there only when the user "
+        "names no other place; projects are output the user keeps"
+    ),
 }
 
 #: Files allowed to contain site-specific strings, with the reason.

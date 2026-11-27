@@ -82,6 +82,7 @@ TOOLS: tuple[Tool, ...] = (
         "/knowledge-graph",
         "Documents",
         "Map the topics of a set of research papers and how they connect.",
+        ready=True,
     ),
     Tool(
         "translation",
@@ -136,15 +137,20 @@ def tool_groups() -> list[tuple[str, list[Tool]]]:
 def page_path(page_id: str) -> str:
     """Return the path of a page below the base path.
 
+    A tool's page of one item has the id ``<tool>:<key>`` and the path
+    ``<tool's path>/<key>``, such as a Knowledge Graph project's page.
+
     Args:
-        page_id: The page's id, such as ``"transcription"``.
+        page_id: The page's id, such as ``"transcription"`` or
+            ``"knowledge_graph:3f2a9c"``.
 
     Returns:
         The path; ``"/"`` for an unknown id.
     """
+    tool_id, _, key = page_id.partition(":")
     for tool in TOOLS:
-        if tool.id == page_id:
-            return tool.path
+        if tool.id == tool_id:
+            return f"{tool.path}/{key}" if key else tool.path
     return OTHER_PAGES.get(page_id, "/")
 
 
@@ -152,13 +158,15 @@ def page_label(page_id: str) -> str:
     """Return the name of a page, for lists of jobs.
 
     Args:
-        page_id: The page's id.
+        page_id: The page's id; a tool's page of one item is named after
+            the tool.
 
     Returns:
         The tool's label, or the id itself for other pages.
     """
+    tool_id = page_id.partition(":")[0]
     for tool in TOOLS:
-        if tool.id == page_id:
+        if tool.id == tool_id:
             return tool.label
     return page_id.replace("_", " ").capitalize()
 
@@ -177,6 +185,7 @@ def routers(settings: WebSettings) -> list[APIRouter]:
         chat,
         dev,
         home,
+        knowledge_graph,
         meeting_notes,
         ocr,
         ocr_handwriting,
@@ -195,6 +204,7 @@ def routers(settings: WebSettings) -> list[APIRouter]:
         ocr.router,
         ocr_handwriting.router,
         ocr_huggingface.router,
+        knowledge_graph.router,
         translation.router,
         chat.router,
         topic_modeling.router,

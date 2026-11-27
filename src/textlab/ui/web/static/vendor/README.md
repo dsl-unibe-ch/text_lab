@@ -10,6 +10,7 @@ registry's checksum before it was copied here, unchanged.
 | `lucide/*.svg` | [`lucide-static`](https://www.npmjs.com/package/lucide-static) 1.71.0, `icons/` | ISC (`lucide/LICENSE`) | `sha512-yUXCvkMCNlqZI72Oco8+FjFwTcPI0Xz5qPZuqYXKP/8BU928hKT0Q4/m+R0e1I44kqEfCz1pd2J7iQ8jTZQEuA==` |
 | `ibm-plex-sans-5.3.0/*.woff2` | [`@fontsource-variable/ibm-plex-sans`](https://www.npmjs.com/package/@fontsource-variable/ibm-plex-sans) 5.3.0, `files/ibm-plex-sans-latin{,-ext}-standard-normal.woff2` (weights 100 to 700, widths 75% to 100%) | SIL Open Font License 1.1 (`ibm-plex-sans-5.3.0/LICENSE`) | `sha512-agG8tXFEo0hD9+J7npa4vbbWult52eMLVaQ6WQRlhs/iCAojrMAoejru85W9HTVXHfyUj96KM7gp/KGAS87XaQ==` |
 | `plotly-3.7.0/plotly-strict.min.js` | [`plotly.js-strict-dist-min`](https://www.npmjs.com/package/plotly.js-strict-dist-min) 3.7.0, `plotly-strict.min.js` | MIT (`plotly-3.7.0/LICENSE`) | `sha512-icoHjKd4XUDxQyijcHgj1v2iujC+QF4s/HCj2iHn5SY52/wb2tPsHP5wbtq6Vv/qW0qrqWmCjpxHRR0tfptRmw==`; the file's SHA-256 is `ca8715e7e348e1d56fb5d31575c7850b5cdd277f601bf047c0fefc4172e2957b` |
+| `vis-network-9.1.2/vis-network.min.{js,css}` | [`vis-network`](https://www.npmjs.com/package/vis-network) 9.1.2, `dist/vis-network.min.js` and `dist/dist/vis-network.min.css` | Apache 2.0 or MIT (`vis-network-9.1.2/LICENSE-MIT`, `LICENSE-APACHE-2.0`) | `sha512-BdapguKg7sk3NvdZaDsM7T6rNhOBFz0/F4ZScxctK4klRzQPLQPTEcmbioXaZhMkkgWymzBR3lFCxL1q+eYyAw==`; the files' SHA-256 are `6e30a2350474cdf92a0932c6d55b8adcb91929066817ed3eec7b87907a4612f3` (script) and `2e82d445ad5878ea881652470ce632601f8f55f1b99e6ebecdff8614600e6d0e` (style sheet) |
 | `ibm-plex-mono-5.3.0/*.woff2` | [`@fontsource/ibm-plex-mono`](https://www.npmjs.com/package/@fontsource/ibm-plex-mono) 5.3.0, `files/ibm-plex-mono-latin{,-ext}-{400,500}-normal.woff2` | SIL Open Font License 1.1 (`ibm-plex-mono-5.3.0/LICENSE`) | `sha512-eTgnZjZEGk1QtD3ZstF+Vclo2HLAni8YMy34/DxllwZvyz1lR/1RF/xTiAquOBO7MvqBx8D2Ig2WCPMVfdZu7Q==` |
 
 htmx 2.0.11 is the release npm tags `latest`; htmx 4 is tagged `next`.
@@ -49,8 +50,8 @@ Browse the icons at <https://lucide.dev/icons/>.
 
 ## plotly.js
 
-Chat draws the data agents' interactive charts with plotly.js; Visualize
-Data will too. `app.js` loads it only on a page with such a chart.
+Chat and Visualize Data draw the data agents' interactive charts with
+plotly.js. `app.js` loads it only on a page with such a chart.
 
 - **The version** is the one the image's plotly.py writes its figures for
   (plotly 6.9.0 bundles plotly.js 3.7.0; see
@@ -86,6 +87,38 @@ got="sha512-$(openssl dgst -sha512 -binary "$work/plotly.tgz" | openssl base64 -
 tar -xzf "$work/plotly.tgz" -C "$work"
 mkdir -p "plotly-$version"
 cp "$work/package/plotly-strict.min.js" "$work/package/LICENSE" "plotly-$version/"
+```
+
+## vis-network
+
+Knowledge Graph draws its graphs with vis-network, which `app.js` loads
+only on a page with a graph, with its style sheet.
+
+- **The version** is the one the image's Pyvis (0.3.2) embeds in the graph
+  pages it writes, the downloads (`pyvis/templates/lib/vis-9.1.2/`), so a
+  graph on the page and in its download behave the same. Pyvis's copy
+  differs from the release only in its line endings and one space
+  character. Change the version with Pyvis.
+- **The `dist` build**, which includes vis-data (`vis.DataSet`) and leaves
+  its style rules to the style sheet: it adds no `<style>` element, so the
+  Content Security Policy needs nothing more. It sets styles through the
+  CSSOM (`element.style`), which the policy allows, and its two
+  `Function` calls are fallbacks modern browsers never reach. The style
+  sheet's images are `data:` URLs, which the policy allows for images.
+
+Taking the files, as for the icons:
+
+```bash
+version=9.1.2
+want="sha512-BdapguKg7sk3NvdZaDsM7T6rNhOBFz0/F4ZScxctK4klRzQPLQPTEcmbioXaZhMkkgWymzBR3lFCxL1q+eYyAw=="
+work="$(mktemp -d)"
+curl -sSo "$work/vis.tgz" "https://registry.npmjs.org/vis-network/-/vis-network-$version.tgz"
+got="sha512-$(openssl dgst -sha512 -binary "$work/vis.tgz" | openssl base64 -A)"
+[[ "$got" == "$want" ]] || { echo "checksum mismatch"; exit 1; }
+tar -xzf "$work/vis.tgz" -C "$work"
+mkdir -p "vis-network-$version"
+cp "$work/package/dist/vis-network.min.js" "$work/package/dist/dist/vis-network.min.css" \
+   "$work/package/LICENSE-MIT" "$work/package/LICENSE-APACHE-2.0" "vis-network-$version/"
 ```
 
 ## Updating htmx

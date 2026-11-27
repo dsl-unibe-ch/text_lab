@@ -27,6 +27,8 @@
  *   the page has in the same version is not replaced at all.
  * - Check boxes ticked or cleared together, with their count, such as the
  *   columns of a table to analyze.
+ * - Knowledge Graph: graphs drawn with vis-network, loaded only then, in
+ *   the page's colours; a click on a node brings out its connections.
  * - Error notices for failed htmx requests, copying error details.
  *
  * There are no inline scripts (the Content Security Policy forbids them):
@@ -1287,10 +1289,15 @@
     if (check) {
       var group = check.closest("form") || document;
       var name = check.getAttribute("data-check-name");
-      checkBoxes(group, name).forEach(function (input) {
+      var boxes = checkBoxes(group, name);
+      boxes.forEach(function (input) {
         input.checked = check.getAttribute("data-check") === "all";
       });
       countChecks(group, name);
+      if (boxes.length) {
+        // A form that acts on changes, such as a graph's options, does.
+        boxes[0].dispatchEvent(new Event("change", { bubbles: true }));
+      }
       return;
     }
     // A button with data-fill puts its data-fill-value into the field with
@@ -1925,6 +1932,7 @@
   // The data agents' results in new content: charts, code, open boxes.
   function initialiseResults(scope) {
     scope.querySelectorAll("[data-chart]").forEach(drawChart);
+    scope.querySelectorAll("[data-graph]").forEach(drawGraph);
     addCopyButtons(scope);
     keepOpen(scope);
   }
@@ -1949,6 +1957,196 @@
       }
     }).observe(composer);
   }
+
+  /* ---- Knowledge Graph ------------------------------------------------ */
+
+  /*
+   * A canvas [data-graph] names its view's JSON (nodes, edges, options, as
+   * Pyvis gives them to vis-network) and vis-network's script and style
+   * sheet (data-vis, data-vis-css). The nodes take the page's type and ink;
+   * the keyboard moves the graph only while it has the focus. With
+   * data-graph-focus, a click on a node fades all but the node, its
+   * neighbours and the edges to them; a click on empty space shows all
+   * again. A button [data-graph-fit] fits the graph of its view into the
+   * canvas.
+   */
+  var visLoading = null;
+  var drawnGraphs = [];
+
+  function loadVis(element) {
+    if (window.vis && window.vis.Network) {
+      return Promise.resolve(window.vis);
+    }
+    if (!visLoading) {
+      var sheet = document.createElement("link");
+      sheet.rel = "stylesheet";
+      sheet.href = element.getAttribute("data-vis-css");
+      document.head.appendChild(sheet);
+      visLoading = new Promise(function (resolve, reject) {
+        var script = document.createElement("script");
+        script.src = element.getAttribute("data-vis");
+        script.addEventListener("load", function () {
+          resolve(window.vis);
+        });
+        script.addEventListener("error", function () {
+          visLoading = null;
+          reject(new Error("vis-network did not load"));
+        });
+        document.head.appendChild(script);
+      });
+    }
+    return visLoading;
+  }
+
+  function graphColours() {
+    var style = window.getComputedStyle(document.body);
+    var read = function (name) {
+      return style.getPropertyValue(name).trim();
+    };
+    return { ink: read("--ink"), text: read("--ink-2"), paper: read("--sheet"), font: read("--font-sans") };
+  }
+
+  function nodeFont(colours) {
+    return { color: colours.ink, face: colours.font };
+  }
+
+  function edgeFont(colours) {
+    return { color: colours.text, strokeColor: colours.paper, face: colours.font, size: 11 };
+  }
+
+  // The node, its neighbours and the edges to them, as sets of ids.
+  function neighbourhood(links, start) {
+    var nodes = {};
+    var edges = {};
+    nodes[start] = true;
+    (links[start] || []).forEach(function (link) {
+      nodes[link[0]] = true;
+      edges[link[1]] = true;
+    });
+    return { nodes: nodes, edges: edges };
+  }
+
+  function focusGraph(entry) {
+    var links = {};
+    entry.edges.forEach(function (edge) {
+      (links[edge.from] = links[edge.from] || []).push([edge.to, edge.id]);
+      (links[edge.to] = links[edge.to] || []).push([edge.from, edge.id]);
+    });
+    var focused = false;
+    entry.network.on("click", function (params) {
+      if (!params.nodes.length && params.edges.length) {
+        return;
+      }
+      if (!params.nodes.length && !focused) {
+        return;
+      }
+      var near = params.nodes.length ? neighbourhood(links, params.nodes[0]) : null;
+      focused = near !== null;
+      entry.nodes.update(
+        entry.nodes.getIds().map(function (id) {
+          return { id: id, opacity: !near || near.nodes[id] ? 1 : 0.16 };
+        })
+      );
+      entry.edges.update(
+        entry.edges.getIds().map(function (id) {
+          return { id: id, hidden: Boolean(near) && !near.edges[id] };
+        })
+      );
+    });
+  }
+
+  function drawGraph(element) {
+    if (element.hasAttribute("data-drawn")) {
+      return;
+    }
+    element.setAttribute("data-drawn", "");
+    // Graphs no longer on the page let go of their canvas.
+    drawnGraphs = drawnGraphs.filter(function (entry) {
+      if (document.body.contains(entry.element)) {
+        return true;
+      }
+      entry.network.destroy();
+      return false;
+    });
+    // The status line is beside the canvas: vis-network empties it.
+    var status = element.parentNode.querySelector("[data-graph-status]");
+    var data = window.fetch(element.getAttribute("data-graph"), { credentials: "same-origin" }).then(
+      function (response) {
+        if (!response.ok) {
+          throw new Error("status " + response.status);
+        }
+        return response.json();
+      }
+    );
+    Promise.all([loadVis(element), data])
+      .then(function (loaded) {
+        var vis = loaded[0];
+        var graph = loaded[1];
+        var colours = graphColours();
+        graph.nodes.forEach(function (node) {
+          node.font = nodeFont(colours);
+        });
+        var options = graph.options || {};
+        options.interaction = Object.assign({}, options.interaction, {
+          keyboard: { enabled: true, bindToWindow: false }
+        });
+        options.edges = Object.assign({}, options.edges, { font: edgeFont(colours) });
+        var entry = {
+          element: element,
+          nodes: new vis.DataSet(graph.nodes),
+          edges: new vis.DataSet(graph.edges)
+        };
+        entry.network = new vis.Network(element, { nodes: entry.nodes, edges: entry.edges }, options);
+        drawnGraphs.push(entry);
+        if (status) {
+          entry.network.on("stabilizationProgress", function (params) {
+            status.textContent = "Arranging the graph: " + Math.round((100 * params.iterations) / params.total) + "%";
+          });
+          entry.network.once("afterDrawing", function () {
+            status.hidden = true;
+          });
+        }
+        if (element.hasAttribute("data-graph-focus")) {
+          focusGraph(entry);
+        }
+      })
+      .catch(function () {
+        if (status) {
+          status.textContent = "The graph could not be drawn. Its download holds it.";
+        }
+      });
+  }
+
+  function graphOf(element) {
+    var view = element.closest(".graph-view");
+    var canvas = view ? view.querySelector("[data-graph]") : null;
+    return drawnGraphs.filter(function (entry) {
+      return entry.element === canvas;
+    })[0];
+  }
+
+  document.addEventListener("click", function (event) {
+    var fit = event.target instanceof Element ? event.target.closest("[data-graph-fit]") : null;
+    var entry = fit ? graphOf(fit) : null;
+    if (entry) {
+      entry.network.fit({ animation: { duration: 300 } });
+    }
+  });
+
+  document.addEventListener("textlab:theme", function () {
+    // The theme's colours apply once the style sheet has switched.
+    window.requestAnimationFrame(function () {
+      var colours = graphColours();
+      drawnGraphs.forEach(function (entry) {
+        entry.nodes.update(
+          entry.nodes.getIds().map(function (id) {
+            return { id: id, font: nodeFont(colours) };
+          })
+        );
+        entry.network.setOptions({ edges: { font: edgeFont(colours) } });
+      });
+    });
+  });
 
   /* ---- Start ---------------------------------------------------------- */
 

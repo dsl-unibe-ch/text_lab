@@ -165,6 +165,14 @@ def test_vendored_plotly_is_the_checked_release():
     assert digest in (STATIC_DIR / "vendor" / "README.md").read_text()
 
 
+def test_vendored_vis_network_is_the_checked_release():
+    folder = STATIC_DIR / "vendor" / "vis-network-9.1.2"
+    readme = (STATIC_DIR / "vendor" / "README.md").read_text()
+    for name in ("vis-network.min.js", "vis-network.min.css"):
+        digest = hashlib.sha256((folder / name).read_bytes()).hexdigest()
+        assert digest in readme, name
+
+
 def test_plotly_style_sheet_is_read_from_its_bundle():
     import subprocess
     import sys

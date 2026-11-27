@@ -10,13 +10,19 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from textlab.common.config import get_settings
 from textlab.common.ollama import server_address
-from textlab.common.progress import Progress, ProgressCallback, no_progress
+from textlab.common.progress import (
+    CancelledError,
+    Progress,
+    ProgressCallback,
+    no_progress,
+)
 from textlab.features.knowledge_graph.corpus import TABLE_JSONL, TOPICS_JSONL
 from textlab.features.knowledge_graph.models import TopicSummary
 
@@ -235,6 +241,7 @@ def extract_topics(
     client: Any,
     model: str = GPUSTACK_MODEL,
     on_progress: ProgressCallback = no_progress,
+    cancel: threading.Event | None = None,
 ) -> TopicSummary:
     """Add topics to every paper of a corpus.
 
@@ -242,7 +249,8 @@ def extract_topics(
     ``corpus_table.with_topics.jsonl``, each record with ``topics`` and
     ``topics_ts`` (UTC time), or with empty ``topics`` and
     ``topics_note: "no_abstract"`` when it has no abstract. The file is
-    replaced only when every paper is done.
+    replaced only when every paper is done; until then, and if the work
+    stops, the topics before stay.
 
     Args:
         corpus: The corpus folder.
@@ -250,6 +258,7 @@ def extract_topics(
             :func:`gpustack_client`).
         model: The model name.
         on_progress: Receives a :class:`Progress` update per paper.
+        cancel: Set to stop before the next paper.
 
     Returns:
         The counts and the path written.
@@ -258,6 +267,7 @@ def extract_topics(
         FileNotFoundError: If the corpus has no table yet.
         RuntimeError: If the model cannot be reached.
         ValueError: If an answer has no topics list.
+        CancelledError: If ``cancel`` was set.
     """
     corpus = Path(corpus)
     source = corpus / TABLE_JSONL
@@ -269,41 +279,50 @@ def extract_topics(
     with source.open(encoding="utf-8") as file:
         total = sum(1 for _ in file)
     processed = skipped = 0
-    with (
-        source.open(encoding="utf-8") as lines,
-        partial.open("w", encoding="utf-8") as out,
-    ):
-        for current, line in enumerate(lines, start=1):
-            record = json.loads(line)
-            title = record.get("title", "")
-            abstract = (record.get("abstract") or "").strip()
-            paper_id = record.get("paper_id", "unknown")
-            fraction = (current - 1) / total
-            if abstract:
-                on_progress(
-                    Progress(
-                        f"Processing {current}/{total}: {paper_id} - "
-                        f"{title[:50]}...",
-                        fraction,
+    try:
+        with (
+            source.open(encoding="utf-8") as lines,
+            partial.open("w", encoding="utf-8") as out,
+        ):
+            for current, line in enumerate(lines, start=1):
+                if cancel is not None and cancel.is_set():
+                    raise CancelledError(
+                        "Topic extraction was stopped; the topics before stay."
                     )
-                )
-                raw = run_llm(build_messages(title, abstract), client, model)
-                record["topics"] = parse_topics(raw)
-                record["topics_ts"] = datetime.now(UTC).isoformat()
-                processed += 1
-            else:
-                on_progress(
-                    Progress(
-                        f"Skipping {current}/{total}: {paper_id} "
-                        "(no abstract)",
-                        fraction,
+                record = json.loads(line)
+                title = record.get("title", "")
+                abstract = (record.get("abstract") or "").strip()
+                paper_id = record.get("paper_id", "unknown")
+                fraction = (current - 1) / total
+                if abstract:
+                    on_progress(
+                        Progress(
+                            f"Processing {current}/{total}: {paper_id} - "
+                            f"{title[:50]}...",
+                            fraction,
+                        )
                     )
-                )
-                record["topics"] = []
-                record["topics_note"] = "no_abstract"
-                skipped += 1
-            out.write(json.dumps(record, ensure_ascii=False) + "\n")
-
+                    raw = run_llm(
+                        build_messages(title, abstract), client, model
+                    )
+                    record["topics"] = parse_topics(raw)
+                    record["topics_ts"] = datetime.now(UTC).isoformat()
+                    processed += 1
+                else:
+                    on_progress(
+                        Progress(
+                            f"Skipping {current}/{total}: {paper_id} "
+                            "(no abstract)",
+                            fraction,
+                        )
+                    )
+                    record["topics"] = []
+                    record["topics_note"] = "no_abstract"
+                    skipped += 1
+                out.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except BaseException:
+        partial.unlink(missing_ok=True)
+        raise
     partial.replace(target)
     LOGGER.info(
         "Topics extracted: %d with abstract, %d without, written to %s",

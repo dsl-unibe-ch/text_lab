@@ -6,7 +6,8 @@
   is not drawn again. While the job is active the record carries
   data-job-active, which keeps the page's stream open (app.js). A running
   job's preview is text written so far, or what the job's preview_template
-  shows. -#}
+  shows. A page can say what a cancelled job kept (page_data's
+  "cancelled"). -#}
 {% from "components/macros.html" import notice %}
 {% set state = job.state %}
 {% set fraction = job.progress.fraction if job.progress and job.progress.fraction is not none else none %}
@@ -61,7 +62,7 @@
     {% elif state == "failed" %}
     {% call notice("error", "The job failed", details=job.error_details) %}{{ job.error }}{% endcall %}
     {% elif state == "cancelled" %}
-    <p class="record__line">Cancelled. Its uploads were deleted and nothing was kept.</p>
+    <p class="record__line">{{ job.page_data.get("cancelled") or "Cancelled. Its uploads were deleted and nothing was kept." }}</p>
     {% endif %}
   </div>
 

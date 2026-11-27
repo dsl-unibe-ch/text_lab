@@ -872,7 +872,59 @@ parts in `features/visualization/tests/test_service.py`):
   styled in one section only.
 - The guide's draft: `docs/next/visualize_data.md`.
 
-Still to do: try it in the sandbox; then commit. Next: Knowledge Graph.
+Tried in the sandbox and committed on 27 November.
+
+### Knowledge Graph
+
+Built on 27 November 2026, without a mockup, with tests
+(`test_knowledge_graph_page.py` with the reading and the model faked; the
+feature's new parts in `features/knowledge_graph/tests/test_projects.py`):
+
+- **Two levels.** `/knowledge-graph` starts a project (an upload or a
+  folder of PDFs on the cluster, counted as its path is typed; a name;
+  where to save it; the model for the topics) or finds saved projects in a
+  folder and opens one. Each project of the session has a page of its own,
+  `/knowledge-graph/<id>`, with its graph, papers and topics in tabs and
+  its tools (add papers, extract the topics again, rebuild the paper
+  table). Streamlit showed all on one page, one project at a time; the
+  session now keeps every project it opened (`app.state.kg_projects`),
+  named in links by a random id, never by its path.
+- **Builds are jobs**: Streamlit ran them in the page, which stayed busy
+  for as long as Grobid and the model worked. A build with the session's
+  model takes the GPU for it; with GPUStack's it needs none. It can be
+  cancelled between papers: the papers read are kept and reused (the
+  card says so: `page_data["cancelled"]`, new). If only the topics fail,
+  the build ends done and says so, as the papers are saved. A missing
+  session model is downloaded first, with its progress. The updates of a
+  project are jobs of its page (`knowledge_graph:<id>`); a page id
+  `<tool>:<key>` now links to `<tool's path>/<key>` in the job indicator
+  and on Home.
+- **The graph** is drawn by vis-network 9.1.2, vendored as the version
+  Pyvis embeds in the downloads (its `dist` build adds no `<style>`
+  element and evaluates no code, so the Content Security Policy needs
+  nothing more), from the nodes, edges and options of `draw_graph`.
+  Pyvis's own page, which runs inline scripts, stays the download. The
+  options (the view, the node types, the least confidence, the papers
+  shown) draw the graph again at each change; the page keeps the last few
+  views. In the page's type and ink, also in the dark theme; the layout's
+  progress shows while it settles; **Fit to view**; in the whole
+  collection a click brings out a node's neighbours, as before. The dashed
+  edges the code meant (a topic's category, cited authors) are dashed now:
+  Pyvis passed `style`, which vis.js does not read. Streamlit also saved
+  each graph page into the project folder; the web UI does not, as the
+  view is downloaded as shown.
+- **The feature**: `build_project`, `extract_topics_with`, `read_project`,
+  `stage_papers` (an upload on disk), `draw_graph`, `grobid_problem` (a
+  warning before an upload, when Grobid cannot start), `gpustack_ready`;
+  `build_corpus` and `extract_topics` can be stopped between papers, and a
+  stopped or failed topic extraction leaves no partial file. The Streamlit
+  page works as before.
+- With this page every tool is in the web UI: Home's "under construction"
+  notice is gone, and the placeholder page serves no tool.
+- The guide's draft: `docs/next/knowledge_graph.md`.
+
+Still to do: try it in the sandbox; then commit. Phase 3 is then done;
+next, phase 4: the switch.
 
 ## Testing
 

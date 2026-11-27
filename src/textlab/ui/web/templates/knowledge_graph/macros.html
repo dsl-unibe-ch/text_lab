@@ -1,0 +1,55 @@
+{#- Parts of the forms that start Knowledge Graph jobs. Import with
+    {% from "knowledge_graph/macros.html" import papers_source, topic_model with context %}
+  prefix keeps the ids of a page's forms apart. -#}
+{% from "components/macros.html" import dropzone with context %}
+
+{#- Where the papers come from: an upload, or a folder on the cluster,
+  whose PDFs are counted as it is typed. -#}
+{% macro papers_source(prefix) %}
+<div class="stack" data-switch="source">
+  <div class="switcher switcher--inline" role="radiogroup" aria-label="Where the papers are">
+    <label class="switcher__option"><input type="radio" name="source" value="upload" checked><span>Upload</span></label>
+    <label class="switcher__option"><input type="radio" name="source" value="folder"><span>A folder on the cluster</span></label>
+  </div>
+  <div data-when="upload">
+    {{ dropzone("file", "Drop a PDF or a ZIP of PDFs here", formats, accept=accept, required=false, id=prefix ~ "-file") }}
+    <div class="upload-progress" data-upload-progress hidden>
+      <progress class="meter__bar" max="1" value="0"></progress>
+      <p class="label" data-upload-progress-text>Uploading</p>
+    </div>
+  </div>
+  <div class="field" data-when="folder" hidden>
+    <label class="field__label" for="{{ prefix }}-papers">Folder of PDFs</label>
+    <input class="input" id="{{ prefix }}-papers" name="papers" type="text" autocomplete="off" spellcheck="false" placeholder="{{ home }}/papers"
+           hx-get="{{ root }}/knowledge-graph/papers-folder" hx-trigger="input changed delay:600ms, change" hx-target="#{{ prefix }}-papers-check" hx-params="papers" hx-sync="this:replace"
+           aria-describedby="{{ prefix }}-papers-check">
+    <div id="{{ prefix }}-papers-check" aria-live="polite"><p class="field__help">The PDFs directly in this folder are read where they are; nothing is copied.</p></div>
+  </div>
+</div>
+{% endmacro %}
+
+{#- The model that extracts the topics: one of the session's, or
+  GPUStack's with the user's API key. -#}
+{% macro topic_model(prefix) %}
+<div class="stack" data-switch="topics_from">
+  <div class="switcher switcher--inline" role="radiogroup" aria-label="Where the model runs">
+    <label class="switcher__option"><input type="radio" name="topics_from" value="session" checked><span>In this session</span></label>
+    <label class="switcher__option"><input type="radio" name="topics_from" value="gpustack"{% if not gpustack %} disabled{% endif %}><span>University GPUStack{% if not gpustack %} (not set up){% endif %}</span></label>
+  </div>
+  <div class="field" data-when="session">
+    <label class="field__label" for="{{ prefix }}-model">Model</label>
+    <div class="select-wrap">
+      <select class="select" id="{{ prefix }}-model" name="model" aria-describedby="{{ prefix }}-model-help">
+        {% for name in options.models %}<option{% if loop.first %} selected{% endif %}>{{ name }}</option>{% endfor %}
+      </select>
+      {{ icon("chevron-down", size="sm") }}
+    </div>
+    <p class="field__help" id="{{ prefix }}-model-help">Runs on this session's GPU ({{ options.gpu }}): the titles and abstracts stay in your session.</p>
+  </div>
+  <div class="field" data-when="gpustack" hidden>
+    <label class="field__label" for="{{ prefix }}-key">GPUStack API key</label>
+    <input class="input" id="{{ prefix }}-key" name="api_key" type="password" autocomplete="off" spellcheck="false" aria-describedby="{{ prefix }}-key-help">
+    <p class="field__help" id="{{ prefix }}-key-help">The titles and abstracts go to the University's GPUStack service, which runs {{ gpustack_model }}; they stay on University infrastructure. The key is used for this job only, and not kept.</p>
+  </div>
+</div>
+{% endmacro %}

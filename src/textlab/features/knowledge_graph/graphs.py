@@ -5,6 +5,10 @@ the page), both imported only when a graph is built. Records are the rows of
 ``corpus_table.with_topics.jsonl``; list fields may be ``"; "``-joined
 strings or lists, and ``citations`` a JSON string or a list.
 
+:func:`draw_graph` gives an interface one view of a corpus: the nodes,
+edges and options vis.js draws, its counts, and the self-contained page to
+download.
+
 Each node has a ``node_type``; by type, its id and look:
 
 - ``paper``: ``doi:<DOI>``, or the paper id without a DOI; blue dot.
@@ -18,6 +22,7 @@ Each node has a ``node_type``; by type, its id and look:
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from collections.abc import Iterable
 from pathlib import Path
@@ -249,7 +254,7 @@ def build_paper_ego_graph(
                 author_id,
                 label="cites_work_by",
                 color=CITES_WORK_EDGE_COLOR,
-                style="dashed",
+                dashes=True,
             )
 
     return graph, _network(graph, "600px", _EGO_OPTIONS)
@@ -292,9 +297,7 @@ def _add_ego_topics(
                 shape="ellipse",
             )
         graph.add_edge(node_id, topic_id, label="has_topic", weight=confidence)
-        graph.add_edge(
-            topic_id, category_id, label="belongs_to", style="dashed"
-        )
+        graph.add_edge(topic_id, category_id, label="belongs_to", dashes=True)
 
 
 def _add_ego_cited_papers(
@@ -467,7 +470,7 @@ def _add_full_topics(
             )
         if category_id in graph.nodes:
             graph.add_edge(
-                topic_id, category_id, label="belongs_to", style="dashed"
+                topic_id, category_id, label="belongs_to", dashes=True
             )
 
 
@@ -541,7 +544,7 @@ def _add_full_cited_authors(graph: Any, records: list[dict[str, Any]]) -> None:
                 author_id,
                 label="cites_work_by",
                 color=CITES_WORK_EDGE_COLOR,
-                style="dashed",
+                dashes=True,
             )
 
 
@@ -578,3 +581,115 @@ def save_graph_html(network: Any, path: str | Path) -> str:
     html = network.generate_html()
     Path(path).write_text(html, encoding="utf-8")
     return html
+
+
+# ---------------------------------------------------------------------------
+# Views for interfaces
+# ---------------------------------------------------------------------------
+
+
+@dataclasses.dataclass(frozen=True)
+class GraphOptions:
+    """What a view of a corpus shows.
+
+    Attributes:
+        paper_id: The paper whose own graph to show; the whole collection
+            if empty.
+        authors: Show the authors.
+        topics: Show the topics and their categories.
+        cited_papers: Show the papers cited.
+        cited_authors: Show the authors cited.
+        min_confidence: Whole collection only: leave out topics with a
+            lower confidence.
+        papers: Whole collection only: the papers to show, by id; all if
+            empty.
+    """
+
+    paper_id: str = ""
+    authors: bool = True
+    topics: bool = True
+    cited_papers: bool = False
+    cited_authors: bool = False
+    min_confidence: float = 0.0
+    papers: tuple[str, ...] = ()
+
+
+@dataclasses.dataclass(frozen=True)
+class GraphView:
+    """One view of a corpus, for an interface to draw.
+
+    Attributes:
+        data: What vis.js draws: ``nodes`` and ``edges`` as vis.js reads
+            them, and the ``options`` of the layout and the interaction.
+        nodes: How many nodes it has.
+        edges: How many connections.
+        papers: How many of the nodes are papers of the corpus.
+        filename: The download's file name.
+        network: The Pyvis network, which writes the download.
+    """
+
+    data: dict[str, Any]
+    nodes: int
+    edges: int
+    papers: int
+    filename: str
+    network: Any = dataclasses.field(repr=False, compare=False)
+
+    def html(self) -> str:
+        """Return the view as a self-contained page, which works offline."""
+        return self.network.generate_html()
+
+
+def draw_graph(
+    records: list[dict[str, Any]], options: GraphOptions
+) -> GraphView:
+    """Build one view of a corpus with topics.
+
+    Args:
+        records: The rows of ``corpus_table.with_topics.jsonl``.
+        options: What to show.
+
+    Returns:
+        The view.
+
+    Raises:
+        ValueError: If the paper asked for is not among the records, or no
+            paper is left to show.
+    """
+    included = {
+        "include_authors": options.authors,
+        "include_topics": options.topics,
+        "include_cited_papers": options.cited_papers,
+        "include_cited_authors": options.cited_authors,
+    }
+    if options.paper_id:
+        paper = next(
+            (r for r in records if r.get("paper_id") == options.paper_id),
+            None,
+        )
+        if paper is None:
+            raise ValueError(f"There is no paper {options.paper_id}.")
+        graph, network = build_paper_ego_graph(
+            paper, all_records=records, **included
+        )
+        filename = f"{options.paper_id}_ego_graph.html"
+    else:
+        chosen = set(options.papers)
+        shown = [
+            r for r in records if not chosen or r.get("paper_id") in chosen
+        ]
+        if not shown:
+            raise ValueError("Choose at least one paper to show.")
+        graph, network = build_full_corpus_graph(
+            shown, min_topic_confidence=options.min_confidence, **included
+        )
+        filename = "full_corpus_graph.html"
+    nodes, edges, *_, layout = network.get_network_data()
+    return GraphView(
+        data={"nodes": nodes, "edges": edges, "options": json.loads(layout)},
+        nodes=graph.number_of_nodes(),
+        edges=graph.number_of_edges(),
+        papers=count_nodes(graph, "paper"),
+        filename=filename,
+        network=network,
+    )

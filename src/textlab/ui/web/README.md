@@ -33,8 +33,8 @@ port, base path (`/node/<host>/<port>/`) and the portal's host name;
 | `uploads.py` | Reading forms with files, checking them, saving them into a job |
 | `render.py` | Templates, icons, links from the base path, number formats, Markdown from models (`markdown()`, also a template filter: raw HTML escaped, no images) |
 | `settings.py` | The server's settings (`TOKEN`, `USER`, `TEXT_LAB_WEB_DEV`) |
-| `pages/` | One module per page (`home`, `transcription`, `meeting_notes`, `translation`, `ocr` with its tools `ocr_handwriting` and `ocr_huggingface` in modules of their own, `topic_modeling` with its charts in `topic_charts`, `chat`, `visualize_data`, `placeholder` for the tools not built yet, `dev`), and `TOOLS`, the navigation |
-| `templates/` | `base.html` (layout), `components/macros.html`, `components/player.html` (the audio player) and `components/analysis.html` (the data agents' charts and statistics), `jobs/`, one folder per page (`pages/` for Home and the placeholders, `transcription/`, `meeting_notes/`, `translation/`, `ocr/`, `topic_modeling/`, `chat/`, `visualize_data/`); `mockups/` and `dev/` for the developer pages |
+| `pages/` | One module per page (`home`, `transcription`, `meeting_notes`, `translation`, `ocr` with its tools `ocr_handwriting` and `ocr_huggingface` in modules of their own, `topic_modeling` with its charts in `topic_charts`, `chat`, `visualize_data`, `knowledge_graph`, `placeholder` for tools not built yet (none now), `dev`), and `TOOLS`, the navigation |
+| `templates/` | `base.html` (layout), `components/macros.html`, `components/player.html` (the audio player) and `components/analysis.html` (the data agents' charts and statistics), `jobs/`, one folder per page (`pages/` for Home and the placeholders, `transcription/`, `meeting_notes/`, `translation/`, `ocr/`, `topic_modeling/`, `chat/`, `visualize_data/`, `knowledge_graph/`); `mockups/` and `dev/` for the developer pages |
 | `static/` | `css/` (`fonts.css`, `tokens.css`, `layout.css`, `components.css`), `js/` (`app.js`, `theme.js`), `vendor/` (htmx, IBM Plex fonts, Lucide icons; see its README) |
 
 ### Links
@@ -91,7 +91,10 @@ and swaps in the cards and the job indicator as they change (on Home also
 its list of jobs). A page whose jobs are named otherwise than by its id
 sets `stream_page`: Chat names each reply's job by its conversation
 (`chat:<id>`), so the stream sends the cards of the conversation shown
-only. Short GPU requests outside jobs can use `runner.exclusive()`; the
+only. A page id `<tool>:<key>` belongs to the page `<tool's path>/<key>`
+(`pages.page_path`), so the job indicator and Home link a job there: a
+Knowledge Graph project's update (`knowledge_graph:<id>`) links to the
+project's page. Short GPU requests outside jobs can use `runner.exclusive()`; the
 pages so far make them jobs instead (see below).
 
 Work with two steps on the GPU releases it again between them with
@@ -129,7 +132,10 @@ list, such as the recording a player plays, are offered with
 `Download(..., listed=False)`; they are fetched from the same link. What
 the card template needs besides the job goes into
 `runner.create(..., page_data={...})`, such as the conversation and the
-message a chat reply belongs to (for its Again button).
+message a chat reply belongs to (for its Again button). A job whose work
+keeps something when cancelled says so on its card with
+`page_data={"cancelled": "..."}` (Knowledge Graph: the papers read until
+then stay in the project).
 
 ### Chat
 
@@ -199,6 +205,44 @@ and writes the report, the ZIP and the charts into the job's outputs
 the statistics (open), the charts with their code, and the agents' steps
 (folded). Cancelling stops the agents after their current step; nothing
 is kept. The model of the last analysis is offered first.
+
+### Knowledge Graph
+
+A project is a folder on the cluster that the steps read and write, so
+the page has two levels. `/knowledge-graph` starts a project (an upload or
+a folder of PDFs on the cluster, a name, where to save it, the model for
+the topics) or finds saved ones in a folder (`/projects-in`) and opens
+one; builds are jobs of that page. Each project of the session has a page
+of its own, `/knowledge-graph/<id>`, whose jobs (adding papers, extracting
+the topics again) are named `knowledge_graph:<id>`; rebuilding the paper
+table is quick and runs in the request, refused while a job works on the
+project. The session's projects live in `app.state.kg_projects`
+(`pages/knowledge_graph.py`, `ProjectStore`): links name a project by a
+random id, never by its path. A folder typed in the form is checked as it
+is typed (`/papers-folder`: its PDFs counted). Paths must be absolute (or
+start with `~`); the server reads and writes what the session's owner can.
+
+A job with the session's model takes the GPU for it (`gpu_manager.LLM`,
+the model kept loaded); with GPUStack's it needs no GPU. Its work stages
+an upload into the job's inputs (`service.stage_papers`) and calls
+`service.build_project`, which starts Grobid, reads the PDFs not read yet,
+and extracts the topics; if only the topics fail, the job ends done and
+its card says so, as the papers are saved.
+
+The graph is drawn in the browser by vis-network, vendored as the version
+Pyvis embeds in the graph pages it writes (`static/vendor/README.md`),
+from the nodes, edges and options of `service.draw_graph`; Pyvis's own
+page uses inline scripts, which the Content Security Policy blocks, and
+stays the download. The graph's options post to `/<id>/graph` a moment
+after a change (`hx-trigger="change delay:150ms"`: htmx handles a change
+before `app.js` enables the options the view's switch shows), which keeps
+the last few views (`GRAPHS_KEPT`) under random keys and answers with the
+panel; `app.js` fetches the view's JSON (`/graphs/<key>.json`), draws it in
+the page's type and ink (again when the theme changes), shows the layout's
+progress, fits it to the view on request, and in the whole collection
+brings out a clicked node's neighbours. The key's colours are those
+`graphs.py` draws in, as custom properties of `.graph-key`; a test keeps
+them the same.
 
 ### Errors
 
@@ -339,7 +383,8 @@ handwriting and Hugging Face models with their workers faked
 (`test_ocr_handwriting_page.py`, `test_ocr_huggingface_page.py`), Topic
 Modeling with the analysis faked (`test_topic_modeling_page.py`), Chat
 with the model faked (`test_chat_page.py`), Visualize Data with the agents
-faked (`test_visualize_data_page.py`) and the rules (`test_rules.py`,
+faked (`test_visualize_data_page.py`), Knowledge Graph with the reading
+and the model faked (`test_knowledge_graph_page.py`) and the rules (`test_rules.py`,
 among them that each section of the style sheets styles classes of its
 own, so a page's styles cannot reach another page). The fake transcription backend is the `backend` fixture
 in `conftest.py`. The launcher and the Open OnDemand files are tested in

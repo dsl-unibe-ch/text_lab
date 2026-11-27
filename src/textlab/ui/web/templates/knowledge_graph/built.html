@@ -1,0 +1,23 @@
+{#- A finished build or update of a project (job.result: the page's
+  Built): what was read and found, and the way to the project. -#}
+{% from "components/macros.html" import notice %}
+{% set summary = job.result.summary %}
+<ul class="facts" aria-label="Papers">
+  <li>{{ summary.read }} read</li>
+  <li>{{ summary.reused }} reused</li>
+  {% if summary.failed %}<li>{{ summary.failed }} not read</li>{% endif %}
+  <li>{{ summary.papers }} in the project</li>
+</ul>
+{% if summary.topic_error %}
+{% call notice("warning", "The topics could not be extracted", details=summary.topic_error) %}<p>The papers are saved. Open the project and extract the topics again under <em>Project tools</em>, with this model or another.</p>{% endcall %}
+{% else %}
+<p class="record__line">Topics for {{ summary.topics }} {{ "paper" if summary.topics == 1 else "papers" }}{% if summary.without_abstract %}; {{ summary.without_abstract }} without an abstract have none{% endif %}.</p>
+{% endif %}
+{% if summary.failed %}
+<p class="record__line">Grobid could not read {{ summary.failed }} {{ "PDF" if summary.failed == 1 else "PDFs" }}. {{ "It is" if summary.failed == 1 else "They are" }} tried again when you add papers to the project.</p>
+{% endif %}
+{% if job.page == "knowledge_graph" %}
+<a class="btn btn--primary" href="{{ root }}/knowledge-graph/{{ job.result.project_id }}">Open the project {{ icon("arrow-right", size="sm") }}</a>
+{% else %}
+<a class="btn" href="{{ root }}/knowledge-graph/{{ job.result.project_id }}">Show the new graph {{ icon("arrow-right", size="sm") }}</a>
+{% endif %}

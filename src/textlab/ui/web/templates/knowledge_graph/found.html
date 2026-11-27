@@ -1,0 +1,21 @@
+{#- The saved projects in a folder (found: (folder, has papers, has
+  topics) for each), each with a button that opens it; or why there are
+  none (problem). -#}
+{% if problem %}
+<p class="field__help">{{ problem }}</p>
+{% elif not found %}
+<p class="field__help">No projects here: their folders' names end in <code>_project_corpus</code>. Try the folder they were saved in.</p>
+{% else %}
+<ul class="found" aria-label="Projects found">
+  {% for folder, papers, topics in found %}
+  <li class="found__item">
+    <div>
+      <p class="found__name">{{ project_name(folder) }}</p>
+      <p class="found__folder">{{ folder }}</p>
+    </div>
+    <p class="label found__state">{% if topics %}Papers and topics{% elif papers %}Papers, no topics yet{% else %}No papers yet{% endif %}</p>
+    <button class="btn" type="button" hx-post="{{ root }}/knowledge-graph/open" hx-vals='{{ {"folder": folder | string} | tojson }}' hx-params="folder" hx-disabled-elt="this">Open {{ icon("arrow-right", size="sm") }}</button>
+  </li>
+  {% endfor %}
+</ul>
+{% endif %}
