@@ -1,0 +1,17 @@
+{#- How the topics merge into larger ones, as BERTopic's hierarchy chart
+  shows it: the topics as leaves on the left, each merge reaching right
+  as far as the distance at which its topics join. -#}
+<figure class="dendrogram">
+  <svg viewBox="0 0 600 {{ tree.height }}" role="img" aria-label="How the topics merge into larger ones">
+    {% for topic, y in tree.leaves %}
+    <text class="dendrogram__label" x="{{ tree.label_x }}" y="{{ y }}" text-anchor="end" dominant-baseline="central" data-region="{{ topic.region }}">{{ topic.topic }} · {{ topic.title }}<title>Topic {{ topic.topic }}: {{ topic.title }}</title></text>
+    {% endfor %}
+    {% for points in tree.links %}<polyline class="dendrogram__link" points="{{ points }}"/>{% endfor %}
+    <line class="axis" x1="{{ tree.left }}" x2="{{ tree.right }}" y1="{{ tree.axis_y }}" y2="{{ tree.axis_y }}"/>
+    {% for x, label in tree.ticks %}
+    <line class="axis" x1="{{ x }}" x2="{{ x }}" y1="{{ tree.axis_y }}" y2="{{ tree.tick_end }}"/>
+    <text class="axis__label" x="{{ x }}" y="{{ tree.tick_label_y }}" text-anchor="middle">{{ label }}</text>
+    {% endfor %}
+  </svg>
+  <figcaption class="muted">Topics that join further right are less alike (distance: 1 minus their similarity, average linkage). Topics that join early may be worth merging.</figcaption>
+</figure>

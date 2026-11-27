@@ -688,10 +688,54 @@ the service tests):
   keeps the rest of the run, with a notice.
 - The guide's draft: `docs/next/topic_modeling.md`.
 
-Still to do: try it in the sandbox with each algorithm on a real
-collection (a CSV with a date column for topics over time, an Excel file,
-a ZIP of text files, a custom embedding model, stability, cancelling);
-narrow screens and the dark theme; then commit it. Next: Chat.
+Tried in the sandbox and committed on 27 November (the user liked the
+look and the options).
+
+**Second version of the result** (27 November, after the user's review:
+the three algorithms looked the same, while their libraries draw them
+differently): each algorithm is now drawn as its own library draws it.
+
+- **LDA, as pyLDAvis**: the intertopic distance map (bubbles placed and
+  sized by pyLDAvis, by their share of the words, with its PC axes and
+  size legend) beside the terms: the 30 most salient of the collection
+  until a topic is chosen, then the chosen topic's 30 most relevant, the
+  grey bar a term's overall frequency, the red its frequency in the topic;
+  the lambda slider re-ranks them, and pointing at a term sizes the
+  bubbles by its spread over the topics (`app.js`). A Documents tab shows
+  each topic's documents with their mixture of topics as a thin bar. The
+  data is pyLDAvis's own, prepared once for its dashboard and for the page
+  (topics in model order, so the numbers match the tables).
+- **BERTopic**: its keyword score bar charts per topic, the topic map, the
+  documents placed by meaning (UMAP of the embeddings, as
+  `visualize_documents`; a sample of 1,500), the hierarchy (a dendrogram,
+  average linkage of the topic similarity), the heatmap in the
+  hierarchy's order, and the topics over time on one chart with each
+  interval's words in the tooltips (BERTopic's own topics over time,
+  computed once for its chart and the page).
+- **Top2Vec**: its word clouds, the topic sizes, the topic map, the
+  documents placed by its document vectors, the heatmap.
+- **Emphasis, not a colour per topic** (data-viz guidance: categorical
+  colours cap at three for scatter-like charts): grey marks, the topic
+  pointed at or chosen in the accent, the rest faded; one `data-region`
+  per topic across charts and lists. A muted grey token, `--ink-4`, for
+  reference marks, checked with the data-viz validator (3:1 on the sheet,
+  apart from the accent with colour-vision deficiency, both themes).
+- **Code**: `features/topic_modeling/overview.py` builds the shared parts
+  and each library's (`ldavis_parts`, the document map, the hierarchy, the
+  words per interval, the clouds, the mixtures); the engines give the
+  inputs (`prepare_ldavis`, `lda_document_topics`, `topics_over_time_frame`,
+  `topics_over_time_rows`, `top2vec_topic_words`, document vectors).
+  `ui/web/pages/topic_charts.py` holds the drawing (`TopicsView`, moved out
+  of the page module); `templates/topic_modeling/view_<algorithm>.html`
+  and `parts/`.
+- Checked with real runs on a CPU node (all three algorithms, a made-up
+  corpus of four themes), rendered with the page's templates and looked
+  at as images: LDA's map, BERTopic's documents, hierarchy, heatmap and
+  over time. Fixed from that look: the size legend moved below the map,
+  bubbles kept clear of the edges, the heatmap sized by its topics.
+
+Still to do: try the second version in the sandbox with each algorithm on
+a real collection; then commit it. Next: Chat.
 
 ## Testing
 

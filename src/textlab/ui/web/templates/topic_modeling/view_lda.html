@@ -1,0 +1,15 @@
+{#- An LDA run, as pyLDAvis shows it: the topics on a map beside the terms
+  ranked by relevance for the chosen one; then, as every document is a mix
+  of topics, the documents most about each topic with their mixtures; and
+  the scores. Expects view, job and topics. -#}
+{% from "topic_modeling/macros.html" import tab, panel %}
+<div class="tabs">
+  <div class="tabs__list" role="tablist" aria-label="Result of {{ job.title }}">
+    {{ tab(job.id, "topics", "Topics", first=true) }}
+    {{ tab(job.id, "documents", "Documents") }}
+    {{ tab(job.id, "quality", "Quality") }}
+  </div>
+  {% call panel(job.id, "topics", first=true) %}{% include "topic_modeling/parts/ldavis.html" %}{% endcall %}
+  {% call panel(job.id, "documents") %}{% include "topic_modeling/parts/mixtures.html" %}{% endcall %}
+  {% call panel(job.id, "quality", class="stack") %}{% include "topic_modeling/metrics.html" %}{% endcall %}
+</div>

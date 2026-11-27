@@ -30,16 +30,31 @@ interface, which draws the run's overview instead of the charts).
    compared.
 5. **Package** (`reports`): a ZIP with the run's settings and metrics,
    `document_topics.csv`, `topic_keywords.csv` and the charts.
-6. **Overview** (`overview`): what an interface draws, the same way for
-   every algorithm, from what each engine gives: the topics with their
-   keyword weights (c-TF-IDF for BERTopic, probabilities for LDA,
-   similarities for Top2Vec), every document's main topic, and one vector
-   per topic (BERTopic's topic embeddings, LDA's topic-word distributions,
-   Top2Vec's topic vectors). It holds each topic's size and most typical
+6. **Overview** (`overview`): what an interface draws. Every run gets the
+   parts all algorithms share, built the same way from what each engine
+   gives (the topics with their keyword weights, every document's main
+   topic, one vector per topic): each topic's size and most typical
    example documents, the cosine similarity of every two topics, a map
-   where alike topics lie close (classical multidimensional scaling, as
-   pyLDAvis does), and, with topics over time, each topic's documents per
-   interval. If it cannot be built, the run keeps its other results and
+   where alike topics lie close (classical multidimensional scaling), a
+   dendrogram of how they merge (SciPy, average linkage) and, with topics
+   over time, each topic's documents per interval. Each algorithm adds
+   what its own library draws:
+    - **LDA**: pyLDAvis's view, from the data `lda_engine.prepare_ldavis`
+      prepares for the dashboard anyway (topics in model order): each
+      topic's place and share of the words, the terms it may rank by
+      relevance (term, frequency in the topic, frequency, log probability,
+      log lift), the most salient terms, and each term's spread over the
+      topics (`overview.ldavis_parts`); and each example's mixture of
+      topics (`lda_engine.lda_document_topics`).
+    - **BERTopic**: the documents placed by meaning (UMAP of their
+      embeddings, BERTopic's settings for `visualize_documents`, a random
+      sample of 1,500 for large collections), and its topics over time,
+      computed once (`bertopic_engine.topics_over_time_frame`) for both
+      the Plotly chart and each interval's words.
+    - **Top2Vec**: the documents placed by meaning (its document vectors),
+      and its word clouds (the 30 words closest to each topic).
+
+   If the overview cannot be built, the run keeps its other results and
    says so in a notice.
 
 A collection too small to cluster fails deep inside UMAP or HDBSCAN;
@@ -99,7 +114,7 @@ topic_modeling/
 ├── top2vec_engine.py   # Top2Vec training, topics, chart
 ├── lda_engine.py       # LDA with gensim, pyLDAvis chart
 ├── evaluation.py       # diversity, coherence, perplexity, stability
-├── overview.py         # sizes, examples, similarity, map, timeline
+├── overview.py         # what each algorithm's view draws
 ├── small_corpus.py     # recognizing a collection too small to cluster
 ├── reports.py          # topic table, run report, result ZIP
 ├── cli.py              # batch command (placeholder)
@@ -137,7 +152,9 @@ In `tests/`, without GPU or models:
   hand-over and error messages, `save_result`.
 - `test_overview.py`: sizes, outliers and examples, scaled weights,
   similarity and the map (alike topics close), sparse vectors, the
-  timeline per year and per interval.
+  timeline per year and per interval; pyLDAvis's data and the mixtures for
+  LDA, the words per interval for BERTopic, the word clouds for Top2Vec,
+  the document map and its sample, the hierarchy.
 - `test_topic_modeling_page.py`: the page imports only the service, and the
   service loads no modeling library.
 

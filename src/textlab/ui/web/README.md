@@ -211,11 +211,22 @@ of the same name on one page need their own `id` (the `dropzone` macro's
 Topic Modeling draws its charts itself, in SVG, from the numbers the run
 returns (`TopicOverview`): the libraries' Plotly and pyLDAvis charts load
 their code from a CDN and run inline scripts, which the Content Security
-Policy does not allow; they stay in the download. The page module works
-out the geometry (`TopicsView`: dots on the map, heatmap cells, timeline
-points), so the templates only place it; bars are SVG `<rect>`s of the
-width given, as style attributes are not allowed. The map's dots and the
-topics share a `data-region`, like OCR's outlines and their text.
+Policy does not allow; they stay in the download. Each algorithm is drawn
+as its own library draws it (`templates/topic_modeling/view_<algorithm>.html`
+with the parts in `parts/`): LDA as pyLDAvis (a bubble map beside the
+chosen topic's terms, ranked by relevance with the lambda slider, which
+`app.js` re-ranks), BERTopic with its keyword bar charts, topic map,
+document map, hierarchy, heatmap and topics over time, Top2Vec with word
+clouds and sizes. `pages/topic_charts.py` works out the geometry
+(`TopicsView`), so the templates only place it; bars are SVG `<rect>`s of
+the width given, as style attributes are not allowed.
+
+The charts use emphasis, not a colour per topic: everything in grey, the
+topic pointed at or chosen in the accent. Marks of one topic share a
+`data-region` across the charts and lists, which `app.js` marks together;
+`:has()` fades the rest. The muted grey for reference marks (`--ink-4`)
+was checked with the data-viz validator: 3:1 on the sheet and apart from
+the accent with colour-vision deficiency, in both themes.
 
 ### A file chosen before the settings
 

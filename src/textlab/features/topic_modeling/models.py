@@ -198,10 +198,16 @@ class TopicModelingRunResult(TypedDict):
     # which allows :func:`evaluate_topic_quality` to skip re-tokenizing.
     tokenized_texts: NotRequired[list[list[str]]]
 
-    # The topics with their keyword weights, and one vector per topic in
-    # the same order, for the overview; only for the run that is shown.
+    # What the overview draws, only for the run that is shown: the topics
+    # with their keyword weights, one vector per topic in the same order,
+    # and what each algorithm's own library draws (see ``overview``).
     topics: NotRequired[list[TopicKeywords]]
     topic_vectors: NotRequired[Any]
+    document_vectors: NotRequired[Any]
+    time_rows: NotRequired[list[list[Any]]]
+    ldavis: NotRequired[Any]
+    document_topics: NotRequired[Any]
+    topic_words: NotRequired[list[list[list[Any]]]]
 
 
 @dataclass(frozen=True)
@@ -221,6 +227,9 @@ class Notice:
 class TopicSummary:
     """One topic, as the overview shows it.
 
+    The first fields are known for every algorithm; the last ones only for
+    the algorithm whose library draws them (they stay empty otherwise).
+
     Attributes:
         topic: Its number, as in the topic table.
         keywords: Its keywords, most typical first.
@@ -229,6 +238,19 @@ class TopicSummary:
         documents: How many documents have it as their main topic.
         examples: The beginning of a few of those documents, the most
             typical first when the engine says how typical they are.
+        prevalence: Its share of the collection, from 0 to 1: of the
+            words for LDA (as pyLDAvis sizes topics), else of the
+            documents.
+        cloud: Top2Vec's word cloud: up to 30 words with their weight,
+            scaled so the first is 1, as ``[word, weight]``.
+        mixtures: LDA: for each example, the topics it mixes, as
+            ``[topic index, share]``, the largest first.
+        terms: LDA: the terms pyLDAvis may rank for the topic, as ``[term,
+            frequency in the topic, frequency overall, log probability,
+            log lift]``; their relevance for a weight lambda is ``lambda *
+            log probability + (1 - lambda) * log lift``.
+        time_words: BERTopic over time: per interval, the topic's words
+            then, or "" when it has no documents there.
     """
 
     topic: int | str
@@ -236,6 +258,46 @@ class TopicSummary:
     weights: list[float]
     documents: int
     examples: list[str]
+    prevalence: float = 0.0
+    cloud: list[list[Any]] = field(default_factory=list)
+    mixtures: list[list[list[float]]] = field(default_factory=list)
+    terms: list[list[Any]] = field(default_factory=list)
+    time_words: list[str] = field(default_factory=list)
+
+
+@dataclass
+class Hierarchy:
+    """How the topics merge into larger ones: a dendrogram.
+
+    Attributes:
+        order: The topics' indices in the order of the leaves, top first.
+        links: Each merge as its outline: four distances and four leaf
+            positions, ``[[d1, d2, d3, d4], [p1, p2, p3, p4]]``; a leaf
+            position is its place in ``order`` (0, 1, ...), a merge's is
+            between those it joins.
+        height: The distance of the last merge.
+    """
+
+    order: list[int]
+    links: list[list[list[float]]]
+    height: float
+
+
+@dataclass
+class DocumentMap:
+    """The documents placed where documents of alike meaning lie close.
+
+    Attributes:
+        points: Each document drawn, as ``[x, y, topic index]`` with x and
+            y between 0 and 1 and topic index -1 for no topic.
+        excerpts: The beginning of each, in the same order.
+        documents: How many documents there are in all; more than
+            ``points`` when only a sample is drawn.
+    """
+
+    points: list[list[float]]
+    excerpts: list[str]
+    documents: int
 
 
 @dataclass
@@ -250,12 +312,22 @@ class TopicOverview:
             order of ``topics``; ``None`` when there are fewer than two
             topics or the engine gives no topic vectors.
         positions: Each topic's place on a map where alike topics lie
-            close, as ``[x, y]`` between 0 and 1; ``None`` with
-            ``similarity``.
+            close, as ``[x, y]`` between 0 and 1: pyLDAvis's for LDA, else
+            from ``similarity``; ``None`` without either.
         time_labels: The intervals of the timeline, for people; empty
             without topics over time.
         over_time: Per topic, how many of its documents fall into each
             interval.
+        hierarchy: How the topics merge (from ``similarity``), or
+            ``None``.
+        document_map: The documents placed by meaning (BERTopic, Top2Vec),
+            or ``None``.
+        salient: LDA: pyLDAvis's most salient terms of the whole
+            collection, as ``[term, frequency]``.
+        term_topics: LDA: for each term a topic may rank, how its
+            occurrences spread over the topics, as ``[topic index,
+            share]``.
+        origin: LDA: where pyLDAvis's axes cross on the map, ``[x, y]``.
     """
 
     documents: int
@@ -265,6 +337,11 @@ class TopicOverview:
     positions: list[list[float]] | None = None
     time_labels: list[str] = field(default_factory=list)
     over_time: list[list[int]] = field(default_factory=list)
+    hierarchy: Hierarchy | None = None
+    document_map: DocumentMap | None = None
+    salient: list[list[Any]] = field(default_factory=list)
+    term_topics: dict[str, list[list[float]]] = field(default_factory=dict)
+    origin: list[float] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Return the overview as JSON types."""
@@ -282,6 +359,10 @@ class TopicOverview:
         """
         values = dict(data)
         values["topics"] = [TopicSummary(**item) for item in data["topics"]]
+        if data.get("hierarchy"):
+            values["hierarchy"] = Hierarchy(**data["hierarchy"])
+        if data.get("document_map"):
+            values["document_map"] = DocumentMap(**data["document_map"])
         return cls(**values)
 
 

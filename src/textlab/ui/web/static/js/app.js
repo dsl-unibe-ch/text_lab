@@ -1234,7 +1234,7 @@
     }
     var box = target.closest(".box[data-region]");
     if (box) {
-      var page = box.closest("[data-pager-page]") || document;
+      var page = box.closest("[data-pager-page], [role='tabpanel']") || document;
       var block = page.querySelector("[data-region='" + box.getAttribute("data-region") + "']:not(.box)");
       if (block) {
         block.scrollIntoView({ block: "nearest", behavior: calm ? "auto" : "smooth" });
@@ -1264,6 +1264,166 @@
     var region = event.target instanceof Element ? event.target.closest("[data-region]") : null;
     if (region) {
       linkRegion(region, false);
+    }
+  });
+
+  /* ---- Topic models: pyLDAvis's view ---------------------------------- */
+
+  /*
+   * An LDA result shows pyLDAvis's view ([data-ldavis]): a map of topic
+   * bubbles and, beside it, a list of terms ([data-ldavis-list]): the most
+   * salient ones until a topic is chosen, then the chosen topic's. A topic
+   * is chosen by clicking its bubble, the list or the arrows. Its terms
+   * rank by relevance, lambda * log probability + (1 - lambda) * log lift,
+   * re-ranked when lambda changes; the first ones show, with their bars
+   * scaled to the largest overall frequency shown. Pointing at a term sizes
+   * the bubbles by how its occurrences spread over the topics
+   * (data-shares, "index:share" pairs), as pyLDAvis does.
+   */
+  function ldavisChoose(root, index) {
+    var select = root.querySelector("[data-ldavis-select]");
+    var caption = root.querySelector("[data-ldavis-caption]");
+    root.querySelectorAll("[data-ldavis-list]").forEach(function (list) {
+      var shown = list.getAttribute("data-ldavis-list") === index;
+      list.hidden = !shown;
+      if (shown && caption) {
+        caption.textContent = list.getAttribute("data-caption");
+      }
+    });
+    root.querySelectorAll("[data-ldavis-topic]").forEach(function (topic) {
+      topic.classList.toggle("is-chosen", topic.getAttribute("data-ldavis-topic") === index);
+    });
+    if (select) {
+      select.value = index;
+    }
+    ldavisRank(root);
+  }
+
+  function ldavisRank(root) {
+    var select = root.querySelector("[data-ldavis-select]");
+    var slider = root.querySelector("[data-ldavis-lambda]");
+    var list = select && select.value !== ""
+      ? root.querySelector("[data-ldavis-list='" + select.value + "']")
+      : null;
+    if (!list || !slider) {
+      return;
+    }
+    var lambda = Number(slider.value);
+    var count = Number(root.getAttribute("data-ldavis-terms")) || 30;
+    var rows = Array.prototype.slice.call(list.children).map(function (row) {
+      return {
+        row: row,
+        relevance: lambda * Number(row.getAttribute("data-logprob")) +
+          (1 - lambda) * Number(row.getAttribute("data-loglift")),
+        total: Number(row.getAttribute("data-total")),
+        freq: Number(row.getAttribute("data-freq"))
+      };
+    });
+    rows.sort(function (a, b) {
+      return b.relevance - a.relevance;
+    });
+    var largest = rows.slice(0, count).reduce(function (most, item) {
+      return Math.max(most, item.total);
+    }, 0) || 1;
+    rows.forEach(function (item, place) {
+      item.row.hidden = place >= count;
+      var total = item.row.querySelector(".ldavis__total");
+      var freq = item.row.querySelector(".ldavis__freq");
+      if (total) {
+        total.setAttribute("width", (100 * item.total / largest).toFixed(2));
+      }
+      if (freq) {
+        freq.setAttribute("width", (100 * item.freq / largest).toFixed(2));
+      }
+      list.appendChild(item.row);
+    });
+  }
+
+  function ldavisSpread(root, row) {
+    var radius = Number(root.getAttribute("data-ldavis-radius")) || 16;
+    var shares = {};
+    if (row) {
+      (row.getAttribute("data-shares") || "").split(" ").forEach(function (pair) {
+        var parts = pair.split(":");
+        if (parts.length === 2) {
+          shares[parts[0]] = Number(parts[1]);
+        }
+      });
+    }
+    root.querySelectorAll("[data-ldavis-topic]").forEach(function (topic) {
+      var circle = topic.querySelector("circle");
+      var share = shares[topic.getAttribute("data-ldavis-topic")] || 0;
+      circle.setAttribute("r", row ? (radius * Math.sqrt(share)).toFixed(2) : circle.getAttribute("data-r"));
+    });
+  }
+
+  document.addEventListener("click", function (event) {
+    var target = event.target;
+    if (!(target instanceof Element)) {
+      return;
+    }
+    var root = target.closest("[data-ldavis]");
+    if (!root) {
+      return;
+    }
+    var topic = target.closest("[data-ldavis-topic]");
+    if (topic) {
+      var index = topic.getAttribute("data-ldavis-topic");
+      var select = root.querySelector("[data-ldavis-select]");
+      ldavisChoose(root, select && select.value === index ? "" : index);
+      return;
+    }
+    var step = target.closest("[data-ldavis-step]");
+    if (step) {
+      var options = Array.prototype.slice.call(root.querySelector("[data-ldavis-select]").options);
+      var current = options.findIndex(function (option) {
+        return option.selected;
+      });
+      var next = (current + Number(step.getAttribute("data-ldavis-step")) + options.length) % options.length;
+      ldavisChoose(root, options[next].value);
+    }
+  });
+
+  document.addEventListener("keydown", function (event) {
+    var target = event.target;
+    if (!(target instanceof Element) || (event.key !== "Enter" && event.key !== " ")) {
+      return;
+    }
+    var topic = target.closest("[data-ldavis-topic]");
+    var root = topic ? topic.closest("[data-ldavis]") : null;
+    if (root) {
+      event.preventDefault();
+      ldavisChoose(root, topic.getAttribute("data-ldavis-topic"));
+    }
+  });
+
+  document.addEventListener("change", function (event) {
+    var target = event.target;
+    if (target instanceof Element && target.matches("[data-ldavis-select]")) {
+      ldavisChoose(target.closest("[data-ldavis]"), target.value);
+    }
+  });
+
+  document.addEventListener("input", function (event) {
+    var target = event.target;
+    if (target instanceof Element && target.matches("[data-ldavis-lambda]")) {
+      ldavisRank(target.closest("[data-ldavis]"));
+    }
+  });
+
+  document.addEventListener("mouseover", function (event) {
+    var row = event.target instanceof Element ? event.target.closest(".ldavis__row") : null;
+    var root = row ? row.closest("[data-ldavis]") : null;
+    if (root) {
+      ldavisSpread(root, row);
+    }
+  });
+
+  document.addEventListener("mouseout", function (event) {
+    var row = event.target instanceof Element ? event.target.closest(".ldavis__row") : null;
+    var root = row ? row.closest("[data-ldavis]") : null;
+    if (root && !(event.relatedTarget instanceof Element && row.contains(event.relatedTarget))) {
+      ldavisSpread(root, null);
     }
   });
 

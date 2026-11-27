@@ -381,6 +381,8 @@ def test_a_run_draws_its_overview(modeling, monkeypatch):
                 TopicKeywords(2, ["b"], 2, [0.2]),
             ],
             "topic_vectors": np.eye(2),
+            "document_vectors": np.eye(5)[:, :3],
+            "document_topics": np.full((5, 2), 0.5),
         }
 
     pipeline = sys.modules["textlab.features.topic_modeling.pipeline"]
@@ -390,10 +392,13 @@ def test_a_run_draws_its_overview(modeling, monkeypatch):
     )
     table = pd.DataFrame({"Text": list("abcde")})
     result = service.analyze_table(table, config, source_name="data.csv")
-    found = result.overview
+    found = TopicModelingResult.from_dict(result.to_dict(), b"zip").overview
     assert [topic.documents for topic in found.topics] == [3, 2]
     assert found.similarity == [[1.0, 0.0], [0.0, 1.0]]
     assert found.topics[0].examples == ["a", "b", "c"]
+    assert found.topics[0].mixtures[0] == [[0, 0.5], [1, 0.5]]
+    assert len(found.hierarchy.order) == 2
+    assert len(found.document_map.points) == 5
 
 
 def test_a_broken_overview_keeps_the_rest_of_the_run(modeling, monkeypatch):

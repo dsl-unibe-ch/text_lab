@@ -629,25 +629,24 @@ def generate_bertopic_visualizations(topic_model: BERTopic) -> dict[str, str]:
     return visualizations
 
 
-def generate_topics_over_time_html(
+def topics_over_time_frame(
     topic_model: BERTopic,
     texts: list[str],
     timestamps: list[Any],
     nr_bins: int | None = None,
-) -> str:
-    """Return an HTML chart of topics over time from a BERTopic model.
+) -> pd.DataFrame:
+    """Return each topic's frequency and words per interval of time.
 
     Args:
         topic_model: A fitted BERTopic model.
-        texts: A list of input texts used for the topics-over-time analysis.
-        timestamps: A list of timestamps corresponding to each input text.
+        texts: The analyzed texts.
+        timestamps: Each text's timestamp.
         nr_bins: Number of equal-width time intervals to group the
             timestamps into, or ``None`` to keep every distinct timestamp.
 
     Returns:
-        An HTML string containing the topics-over-time visualization. If an
-        error occurs during generation, an HTML error message is returned
-        instead.
+        BERTopic's table: ``Topic``, ``Words``, ``Frequency`` and
+        ``Timestamp`` (the interval's start) per topic and interval.
 
     Raises:
         ValueError: If the number of texts does not match the number of
@@ -658,15 +657,46 @@ def generate_topics_over_time_html(
             f"Text count ({len(texts)}) does not match "
             f"timestamp count ({len(timestamps)})."
         )
+    return topic_model.topics_over_time(texts, timestamps, nr_bins=nr_bins)
 
+
+def topics_over_time_rows(frame: pd.DataFrame) -> list[list[Any]]:
+    """Return BERTopic's topics over time as plain rows.
+
+    Args:
+        frame: The table from :func:`topics_over_time_frame`.
+
+    Returns:
+        ``[topic number, the interval's start in nanoseconds, words]`` per
+        row, with topics numbered as the page shows them.
+    """
+    return [
+        [
+            display_topic_id(int(row.Topic)),
+            int(pd.Timestamp(row.Timestamp).value),
+            str(row.Words),
+        ]
+        for row in frame.itertuples(index=False)
+    ]
+
+
+def generate_topics_over_time_html(
+    topic_model: BERTopic, frame: pd.DataFrame
+) -> str:
+    """Return BERTopic's HTML chart of topics over time.
+
+    Args:
+        topic_model: A fitted BERTopic model.
+        frame: The table from :func:`topics_over_time_frame`.
+
+    Returns:
+        An HTML string containing the topics-over-time visualization. If an
+        error occurs during generation, an HTML error message is returned
+        instead.
+    """
     try:
-        topics_over_time = topic_model.topics_over_time(
-            texts,
-            timestamps,
-            nr_bins=nr_bins,
-        )
         fig = topic_model.visualize_topics_over_time(
-            topics_over_time,
+            frame,
             custom_labels=True,
         )
         _renumber_hover_text(fig)

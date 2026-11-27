@@ -1,0 +1,20 @@
+{#- BERTopic's keyword scores: one small chart per topic, its words with
+  bars of their c-TF-IDF scores, and its example documents. -#}
+{% from "topic_modeling/macros.html" import examples %}
+<ol class="topic-cards">
+  {% for topic in topics %}
+  <li class="topic-card" data-region="{{ topic.region }}">
+    <div class="topic-card__head">
+      <span class="label">Topic {{ topic.topic }}</span>
+      <span class="label topic__size">{{ "{:,}".format(topic.documents) }} · {{ "%.0f" | format(topic.share * 100) }}%</span>
+    </div>
+    <h4 class="topic-card__title">{{ topic.title }}</h4>
+    <ul class="keywords keywords--list" aria-label="Keywords of topic {{ topic.topic }}, the most typical first">
+      {% for word, weight in topic.keywords %}
+      <li class="keyword"><span class="keyword__word">{{ word }}</span><svg class="bar" viewBox="0 0 100 4" preserveAspectRatio="none" aria-hidden="true" focusable="false"><rect width="{{ weight }}" height="4"/></svg></li>
+      {% endfor %}
+    </ul>
+    {{ examples(topic) }}
+  </li>
+  {% endfor %}
+</ol>

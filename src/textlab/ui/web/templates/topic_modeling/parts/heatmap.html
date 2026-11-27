@@ -1,0 +1,22 @@
+{#- How alike each two topics are, as BERTopic's heatmap: darker cells for
+  more alike topics, in the order of the hierarchy when there is one, so
+  groups of alike topics show as dark blocks. -#}
+<figure class="heatmap">
+  <svg viewBox="0 0 {{ heatmap.size }} {{ heatmap.size }}" width="{{ heatmap.width }}" role="img" aria-label="How alike each two topics are">
+    {% for centre, name in heatmap.labels %}
+    <text class="heatmap__label" x="12" y="{{ centre }}" text-anchor="end" dominant-baseline="central">{{ name }}</text>
+    <text class="heatmap__label" x="{{ centre }}" y="9" text-anchor="middle">{{ name }}</text>
+    {% endfor %}
+    {% for x, y, value, title in heatmap.cells %}
+    <rect class="heatmap__cell" x="{{ x }}" y="{{ y }}" width="9.4" height="9.4" fill-opacity="{{ value }}"><title>{{ title }}</title></rect>
+    {% endfor %}
+  </svg>
+  <figcaption>
+    <ul class="heatmap__key" aria-label="Scale">
+      <li><svg viewBox="0 0 10 10" aria-hidden="true" focusable="false"><rect class="heatmap__cell" width="10" height="10" fill-opacity="0.1"/></svg>0, not alike</li>
+      <li><svg viewBox="0 0 10 10" aria-hidden="true" focusable="false"><rect class="heatmap__cell" width="10" height="10" fill-opacity="0.5"/></svg>0.5</li>
+      <li><svg viewBox="0 0 10 10" aria-hidden="true" focusable="false"><rect class="heatmap__cell" width="10" height="10" fill-opacity="1"/></svg>1, the same</li>
+    </ul>
+    <p class="muted">Cosine similarity of the topics' vectors{% if overview.hierarchy %}, in the order of the hierarchy{% endif %}. Point at a cell for its value.</p>
+  </figcaption>
+</figure>

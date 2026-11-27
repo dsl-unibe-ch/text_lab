@@ -148,17 +148,55 @@ cannot be read are left out, and the result says how many.
 
 ## The result
 
-- **Topics**: each topic with its number, its name (its first keywords),
-  how many documents have it as their main topic, its keywords with bars
-  showing how typical each is, and a few example documents. Beside them, a
-  **map** where alike topics lie close and larger dots have more
-  documents; point at a dot or a topic and both are marked, click a dot to
-  bring its topic into view. With LDA every document is a mix of topics;
-  it counts by its main one.
-- **Similarity**: how alike each two topics are; darker cells, more alike.
-  Dark cells away from the diagonal point to topics you might merge.
-- **Over time** (if you asked for it): how many documents of each topic
-  fall into each interval, each topic scaled to its own peak.
+Each algorithm's result is shown the way its own library shows it, so it
+looks as you know it from pyLDAvis or BERTopic. Everywhere, pointing at a
+topic marks it in red in the chart and in the list beside it.
+
+### LDA, as pyLDAvis shows it
+
+- **Topics**: on the left, the **intertopic distance map**: each topic is
+  a bubble, alike topics lie close, and a bubble's area is the topic's
+  share of all the words. On the right, the **terms**: before you choose
+  a topic, the 30 most *salient* terms of the whole collection; once you
+  choose one (click its bubble, or use the list or the arrows), its 30 most
+  *relevant* terms. The grey bar is a term's frequency in the collection,
+  the red bar its estimated frequency in the topic. The **relevance
+  slider (λ)** changes the ranking: at 1, terms rank by how probable they
+  are in the topic; towards 0, by how specific they are to it. Around 0.6
+  often reads best. Point at a term to see how it spreads over the
+  topics: the bubbles change size.
+- **Documents**: under each topic, the documents most about it. As LDA
+  gives every document a mix of topics, each comes with a thin bar of its
+  mix, the topic in red, and the mix in words beside it.
+
+### BERTopic, with BERTopic's charts
+
+- **Topics**: one small chart per topic, its keywords with their c-TF-IDF
+  scores, and a few example documents.
+- **Topic map**: each topic a bubble sized by its documents, alike topics
+  close. Click a bubble to bring its topic into view in the list.
+- **Documents**: every document as a dot, placed by meaning (UMAP of its
+  embedding), each topic's number at the middle of its documents. Point at
+  a topic to light up its documents; dots in no topic are lighter. Large
+  collections show a random sample of 1,500 documents.
+- **Hierarchy**: how the topics merge into larger ones. Topics that join
+  early are alike and may be worth merging.
+- **Similarity**: how alike each two topics are, in the hierarchy's order,
+  so groups of alike topics show as dark blocks.
+- **Over time** (if you asked for it): one line per topic, all on one
+  axis. Point at a point for the count and the topic's words in that
+  interval: a topic's words can change over time. A table holds the same
+  counts.
+
+### Top2Vec, as Top2Vec shows its topics
+
+- **Topics**: a **word cloud** per topic, each word as large as it is close
+  to the topic, and a few example documents.
+- **Sizes**: the topics by size, the largest first.
+- **Topic map**, **Documents** and **Similarity**, as for BERTopic.
+
+### For all algorithms
+
 - **Quality**: the scores, with what each says. They help to **compare
   runs on the same collection**; they never replace reading the topics.
 
@@ -179,8 +217,9 @@ when too few keywords occur in the texts.
 ## Downloads
 
 - **Everything, with the interactive charts** (`_topics.zip`): all of the
-  below, and the libraries' interactive charts as `.html` files, which
-  open in a web browser with an internet connection.
+  below, and the libraries' own interactive charts (pyLDAvis, BERTopic's
+  Plotly charts) as `.html` files, which open in a web browser with an
+  internet connection.
 - **Documents with their topic** (`_document_topics.csv`): your data with
   two columns in front: **Dominant_Topic** (the topic, or *Outlier*) and
   **Topic_Confidence** (how clearly it belongs; empty for KMeans or

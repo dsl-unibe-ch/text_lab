@@ -253,6 +253,7 @@ def analyze_table(
     overview = None
     if "topics" in run:
         try:
+            on_progress(Progress("Drawing the topics..."))
             overview = build_overview(
                 run["topics"],
                 run["docs_df"],
@@ -260,6 +261,11 @@ def analyze_table(
                 topic_vectors=run.get("topic_vectors"),
                 timestamps=timestamps,
                 time_bins=config.time_bins,
+                time_rows=run.get("time_rows"),
+                document_vectors=run.get("document_vectors"),
+                ldavis=run.get("ldavis"),
+                document_topics=run.get("document_topics"),
+                topic_words=run.get("topic_words"),
             )
         except Exception:  # the charts are extra; keep the run's results
             LOGGER.exception("Could not build the topic overview.")

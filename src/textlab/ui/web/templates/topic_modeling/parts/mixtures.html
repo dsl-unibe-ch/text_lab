@@ -1,0 +1,29 @@
+{#- LDA's documents: under each topic, the documents most about it, each
+  with its mixture of topics as a thin bar (the topic it is listed under
+  in the accent, the others in two greys) and in words beside it. -#}
+<ol class="mixtures">
+  {% for topic in topics %}
+  <li class="mixtures__topic" data-region="{{ topic.region }}">
+    <div class="topic__head">
+      <span class="label topic__number">Topic {{ topic.topic }}</span>
+      <h4 class="topic__title">{{ topic.title }}</h4>
+      <span class="label topic__size">{{ "{:,}".format(topic.documents) }} mainly about it</span>
+    </div>
+    {% for text in topic.examples %}
+    {% set parts = topic.mixtures[loop.index0] if loop.index0 < topic.mixtures | length else () %}
+    <div class="mixture">
+      <blockquote class="topic__example">{{ text }}</blockquote>
+      {% if parts %}
+      <svg class="mixture__bar" viewBox="0 0 100 4" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+        {% for part in parts %}<rect class="mixture__part{% if part.this %} mixture__part--this{% elif part.shade %} mixture__part--alt{% endif %}" x="{{ part.x }}" width="{{ part.width }}" height="4"><title>{{ "Topic " ~ part.topic if part.topic != "Other" else "Other topics" }}: {{ "%.0f" | format(part.share * 100) }}%</title></rect>{% endfor %}
+      </svg>
+      <p class="label mixture__text">{% for part in parts %}{{ "Topic " ~ part.topic if part.topic != "Other" else "Other topics" }} {{ "%.0f" | format(part.share * 100) }}%{% if not loop.last %} · {% endif %}{% endfor %}</p>
+      {% endif %}
+    </div>
+    {% else %}
+    <p class="muted">No document has this as its main topic.</p>
+    {% endfor %}
+  </li>
+  {% endfor %}
+</ol>
+<p class="muted">LDA gives every document a mix of topics. Listed under each topic are the documents with the largest share of it; their bars show their whole mix, topics under 5% together as "Other topics".</p>

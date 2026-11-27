@@ -1,0 +1,87 @@
+{#- pyLDAvis's view of an LDA run (view.ldavis): left, the intertopic
+  distance map, each topic a bubble whose area is its share of the words;
+  right, the terms of the chosen topic ranked by relevance, the grey bar
+  each term's overall frequency, the red one its estimated frequency in
+  the topic. app.js chooses a topic (bubble, list or arrows), re-ranks the
+  terms when lambda changes, and sizes the bubbles by how a term pointed at
+  spreads over the topics. Without a topic, the most salient terms. -#}
+{% set vis = view.ldavis(job.id) %}
+{% if vis %}
+<div class="ldavis" data-ldavis data-ldavis-radius="{{ vis.radius }}" data-ldavis-terms="{{ vis.terms_shown }}">
+  <div class="ldavis__controls">
+    <div class="field">
+      <label class="field__label" for="{{ job.id }}-ldavis-topic">Topic</label>
+      <div class="ldavis__picker">
+        <button class="icon-button" type="button" data-ldavis-step="-1" aria-label="Previous topic">{{ icon("arrow-left", size="sm") }}</button>
+        <div class="select-wrap">
+          <select class="select" id="{{ job.id }}-ldavis-topic" data-ldavis-select>
+            <option value="" selected>None: the most salient terms</option>
+            {% for item in vis.topics %}<option value="{{ item.topic.index }}">Topic {{ item.topic.topic }} · {{ item.topic.title }}</option>{% endfor %}
+          </select>
+          {{ icon("chevron-down", size="sm") }}
+        </div>
+        <button class="icon-button" type="button" data-ldavis-step="1" aria-label="Next topic">{{ icon("arrow-right", size="sm") }}</button>
+      </div>
+    </div>
+    <div class="field">
+      <label class="field__label" for="{{ job.id }}-lambda">Relevance metric λ = <output for="{{ job.id }}-lambda" data-output-of="{{ job.id }}-lambda">{{ "%.2f" | format(vis.lambda_) }}</output></label>
+      <input class="range" type="range" id="{{ job.id }}-lambda" min="0" max="1" step="0.01" value="{{ vis.lambda_ }}" data-ldavis-lambda aria-describedby="{{ job.id }}-lambda-help">
+      <p class="field__help" id="{{ job.id }}-lambda-help">At 1, a topic's terms rank by their probability in it; towards 0, by how specific they are to it. Around 0.6 often reads best (Sievert and Shirley, 2014). For a chosen topic.</p>
+    </div>
+  </div>
+
+  <div class="ldavis__body">
+    <figure class="ldavis__map">
+      <svg viewBox="0 0 100 {{ vis.height }}" role="img" aria-label="Intertopic distance map: alike topics lie close; a bubble's area is its topic's share of the words">
+        <line class="ldavis__axis" x1="0" x2="100" y1="{{ vis.origin[1] }}" y2="{{ vis.origin[1] }}"/>
+        <line class="ldavis__axis" x1="{{ vis.origin[0] }}" x2="{{ vis.origin[0] }}" y1="0" y2="100"/>
+        <text class="ldavis__axis-label" x="{{ vis.pc1[0] }}" y="{{ vis.pc1[1] }}" text-anchor="end">PC1</text>
+        <text class="ldavis__axis-label" x="{{ vis.pc2[0] }}" y="{{ vis.pc2[1] }}">PC2</text>
+        {% for item in vis.topics | sort(attribute="r", reverse=true) %}
+        <g class="ldavis__topic" data-ldavis-topic="{{ item.topic.index }}" tabindex="0" role="button" aria-label="Topic {{ item.topic.topic }}, {{ '%.1f' | format(item.topic.prevalence * 100) }}% of the words">
+          <circle cx="{{ item.x }}" cy="{{ item.y }}" r="{{ item.r }}" data-r="{{ item.r }}"/>
+          <text x="{{ item.x }}" y="{{ item.y }}" text-anchor="middle" dominant-baseline="central">{{ item.topic.topic }}</text>
+          <title>Topic {{ item.topic.topic }}: {{ item.topic.title }} ({{ "%.1f" | format(item.topic.prevalence * 100) }}% of the words)</title>
+        </g>
+        {% endfor %}
+        <line class="ldavis__axis" x1="0" x2="100" y1="100" y2="100"/>
+        {% for label, r, cy, ty in vis.legend %}
+        <circle class="ldavis__legend" cx="{{ vis.legend_x }}" cy="{{ cy }}" r="{{ r }}"/>
+        <text class="ldavis__legend-label" x="{{ vis.legend_text_x }}" y="{{ ty }}" dominant-baseline="central">{{ label }}</text>
+        {% endfor %}
+        <text class="ldavis__legend-label" x="{{ vis.legend_title[0] }}" y="{{ vis.legend_title[1] }}" dominant-baseline="central">Marginal topic distribution</text>
+      </svg>
+      <figcaption class="label">Intertopic distance map (multidimensional scaling); bubble area: share of the words</figcaption>
+    </figure>
+
+    <figure class="ldavis__panel">
+      <figcaption class="ldavis__caption" data-ldavis-caption>Top {{ vis.terms_shown }} most salient terms</figcaption>
+      <ol class="ldavis__list" data-ldavis-list="" data-caption="Top {{ vis.terms_shown }} most salient terms">
+        {% for term in vis.salient %}
+        <li class="ldavis__row" data-shares="{{ term.shares }}" title="{{ term.term }}: {{ '{:,.0f}'.format(term.total) }} in the collection">
+          <span class="ldavis__term">{{ term.term }}</span>
+          <svg class="ldavis__bars" viewBox="0 0 100 10" preserveAspectRatio="none" aria-hidden="true" focusable="false"><rect class="ldavis__total" width="{{ term.total_bar }}" height="10"/></svg>
+        </li>
+        {% endfor %}
+      </ol>
+      {% for item in vis.topics %}
+      <ol class="ldavis__list" data-ldavis-list="{{ item.topic.index }}" data-caption="{{ item.caption }}" hidden>
+        {% for term in item.terms %}
+        <li class="ldavis__row" data-logprob="{{ term.logprob }}" data-loglift="{{ term.loglift }}" data-freq="{{ term.freq }}" data-total="{{ term.total }}" data-shares="{{ term.shares }}" title="{{ term.term }}: about {{ '{:,.0f}'.format(term.freq) }} of {{ '{:,.0f}'.format(term.total) }} in this topic"{% if not term.shown %} hidden{% endif %}>
+          <span class="ldavis__term">{{ term.term }}</span>
+          <svg class="ldavis__bars" viewBox="0 0 100 10" preserveAspectRatio="none" aria-hidden="true" focusable="false"><rect class="ldavis__total" width="{{ term.total_bar }}" height="10"/><rect class="ldavis__freq" width="{{ term.freq_bar }}" height="10"/></svg>
+        </li>
+        {% endfor %}
+      </ol>
+      {% endfor %}
+      <ul class="ldavis__key" aria-label="Bars">
+        <li class="ldavis__key-total">Overall term frequency</li>
+        <li class="ldavis__key-freq">Estimated term frequency within the chosen topic</li>
+      </ul>
+      <p class="muted">Saliency and relevance as in pyLDAvis (Chuang and others, 2012; Sievert and Shirley, 2014). Point at a term to size the bubbles by how it spreads over the topics.</p>
+    </figure>
+  </div>
+</div>
+{% else %}
+<p class="muted">pyLDAvis's view could not be made for this run; the Everything download holds its interactive chart.</p>
+{% endif %}

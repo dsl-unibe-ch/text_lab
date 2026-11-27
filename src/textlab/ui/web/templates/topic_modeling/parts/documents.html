@@ -1,0 +1,15 @@
+{#- The documents placed by meaning, as BERTopic's document chart does:
+  each a dot, alike documents close, each topic's number at the middle of
+  its documents. Pointing at a topic (its number, a dot or the list)
+  marks all its documents. -#}
+{% from "topic_modeling/macros.html" import topic_list %}
+<div class="topic-view">
+  <figure class="doc-map">
+    <svg viewBox="0 0 100 100" role="img" aria-label="The documents placed by meaning: alike documents lie close">
+      {% for point in plot.points %}<circle class="doc-point{% if not point.region %} doc-point--none{% endif %}" cx="{{ point.x }}" cy="{{ point.y }}" r="0.6"{% if point.region %} data-region="{{ point.region }}"{% endif %}><title>{{ point.excerpt }}</title></circle>{% endfor %}
+      {% for topic, x, y in plot.labels %}<text class="doc-label" x="{{ x }}" y="{{ y }}" text-anchor="middle" dominant-baseline="central" data-region="{{ topic.region }}">{{ topic.topic }}</text>{% endfor %}
+    </svg>
+    <figcaption class="label">{% if plot.drawn < plot.documents %}{{ "{:,}".format(plot.drawn) }} of {{ "{:,}".format(plot.documents) }} documents, chosen at random; {% endif %}placed by UMAP of their embeddings{% if overview.outliers %}; lighter: in no topic{% endif %}</figcaption>
+  </figure>
+  {{ topic_list(topics) }}
+</div>

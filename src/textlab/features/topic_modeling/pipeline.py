@@ -1,6 +1,7 @@
 """Run the selected topic modeling algorithm and collect its outputs."""
 
 import copy
+import logging
 from itertools import combinations
 from typing import Any
 
@@ -13,6 +14,8 @@ from textlab.features.topic_modeling.bertopic_engine import (
     generate_bertopic_document_topics_df,
     generate_bertopic_visualizations,
     generate_topics_over_time_html,
+    topics_over_time_frame,
+    topics_over_time_rows,
     train_bertopic_model,
 )
 from textlab.features.topic_modeling.data import (
@@ -26,7 +29,9 @@ from textlab.features.topic_modeling.lda_engine import (
     extract_lda_topics,
     generate_lda_document_topics_df,
     generate_lda_html,
+    lda_document_topics,
     lda_topic_vectors,
+    prepare_ldavis,
     train_lda_model,
 )
 from textlab.features.topic_modeling.models import (
@@ -45,8 +50,11 @@ from textlab.features.topic_modeling.top2vec_engine import (
     generate_top2vec_barchart_html,
     generate_top2vec_document_topics_df,
     top2vec_topic_vectors,
+    top2vec_topic_words,
     train_top2vec_model,
 )
+
+LOGGER = logging.getLogger(__name__)
 
 
 def run_topic_modeling_pipeline(
@@ -189,10 +197,10 @@ def _run_lda_pipeline(
 
     topics = extract_lda_topics(lda_model, config.num_topics)
     dashboard_assets: dict[str, str] = {}
+    prepared = None
     if include_dashboards:
-        dashboard_assets["lda_dashboard.html"] = generate_lda_html(
-            lda_model, corpus, id2word
-        )
+        prepared = prepare_ldavis(lda_model, corpus, id2word)
+        dashboard_assets["lda_dashboard.html"] = generate_lda_html(prepared)
 
     result: TopicModelingRunResult = {
         "topic_df": build_topic_table(topics, with_counts=False),
@@ -206,6 +214,8 @@ def _run_lda_pipeline(
     if include_dashboards:
         result["topics"] = topics
         result["topic_vectors"] = lda_topic_vectors(lda_model)
+        result["ldavis"] = prepared
+        result["document_topics"] = lda_document_topics(lda_model, corpus)
     return result
 
 
@@ -251,6 +261,8 @@ def _run_top2vec_pipeline(
     if include_dashboards:
         result["topics"] = topics
         result["topic_vectors"] = top2vec_topic_vectors(topic_model, topics)
+        result["topic_words"] = top2vec_topic_words(topic_model, topics)
+        result["document_vectors"] = topic_model.document_vectors
     return result
 
 
@@ -299,6 +311,7 @@ def _run_bertopic_pipeline(
 
     topics = extract_bertopic_topics(topic_model)
     dashboard_assets: dict[str, str] = {}
+    time_rows: list[list[Any]] = []
     if include_dashboards:
         visualizations = generate_bertopic_visualizations(topic_model)
         dashboard_assets = {
@@ -307,14 +320,21 @@ def _run_bertopic_pipeline(
             "similarity_heatmap.html": visualizations.get("heatmap", ""),
         }
         if config.enable_dtm and timestamps is not None:
-            dashboard_assets["topics_over_time.html"] = (
-                generate_topics_over_time_html(
+            try:
+                frame = topics_over_time_frame(
                     topic_model,
                     raw_texts,
                     timestamps,
                     nr_bins=resolve_time_bins(timestamps, config.time_bins),
                 )
-            )
+            except Exception:  # the chart is extra; keep the run
+                LOGGER.exception("Could not compute the topics over time.")
+                frame = None
+            if frame is not None:
+                dashboard_assets["topics_over_time.html"] = (
+                    generate_topics_over_time_html(topic_model, frame)
+                )
+                time_rows = topics_over_time_rows(frame)
 
     result: TopicModelingRunResult = {
         "topic_df": build_topic_table(topics),
@@ -327,4 +347,6 @@ def _run_bertopic_pipeline(
     if include_dashboards:
         result["topics"] = topics
         result["topic_vectors"] = bertopic_topic_vectors(topic_model, topics)
+        result["document_vectors"] = precomputed_embeddings
+        result["time_rows"] = time_rows
     return result

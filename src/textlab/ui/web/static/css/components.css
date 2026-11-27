@@ -3245,9 +3245,11 @@ kbd {
   margin: 0;
 }
 
+/* Its width attribute follows the number of topics; never wider than
+   the page. */
 .heatmap svg {
   display: block;
-  width: 100%;
+  max-width: 100%;
   height: auto;
 }
 
@@ -3267,47 +3269,568 @@ kbd {
   font-size: 4px;
 }
 
-/* Each topic over time: one small chart per topic, each to its own
-   peak. */
-.timelines {
+/* Charts drawn in a 600-unit wide SVG: text and lines in those units. */
+.axis {
+  stroke: var(--rule-strong);
+  stroke-width: 1px;
+  vector-effect: non-scaling-stroke;
+}
+
+.grid {
+  stroke: var(--rule);
+  stroke-width: 1px;
+  vector-effect: non-scaling-stroke;
+}
+
+.axis__label {
+  fill: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+/* A compact topic list beside a chart: number, name, size. */
+.topic--compact {
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+}
+
+.topic--compact .topic__title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+/* Small multiples of topics, BERTopic's bar charts and Top2Vec's clouds:
+   one card per topic. */
+.topic-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
   gap: var(--space-5);
-  margin: var(--space-4) 0 0;
+  margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.timeline {
+.topic-card {
   display: grid;
-  gap: var(--space-1);
-  padding-top: var(--space-2);
-  border-top: var(--hairline) solid var(--rule);
+  align-content: start;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-3) var(--space-4);
+  border-top: var(--hairline) solid var(--ink);
+  scroll-margin: var(--space-6);
 }
 
-.timeline__name {
+.topic-card.is-linked {
+  background: var(--tint);
+  box-shadow: inset 0 3px 0 var(--red);
+}
+
+.topic-card__head {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  color: var(--ink-3);
+}
+
+.topic-card__title {
   margin: 0;
-  font-size: var(--text-sm);
+  font-size: 1rem;
   font-weight: 600;
   overflow-wrap: anywhere;
 }
 
-.timeline__chart {
-  display: block;
-  width: 100%;
-  height: 3rem;
+.keywords--list {
+  grid-template-columns: minmax(0, 1fr);
 }
 
-.timeline__line {
-  fill: none;
-  stroke: var(--ink);
-  stroke-width: 1.5px;
+/* Top2Vec's word cloud: words sized by how close they lie to the topic. */
+.cloud {
+  margin: 0;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.cloud__word {
+  display: inline-block;
+  margin: 0 0.35em 0.15em 0;
+  color: var(--ink-2);
+}
+
+.cloud__word--1 {
+  color: var(--ink-3);
+  font-size: 0.8125rem;
+}
+
+.cloud__word--2 {
+  font-size: 0.9375rem;
+}
+
+.cloud__word--3 {
+  font-size: 1.125rem;
+}
+
+.cloud__word--4 {
+  color: var(--ink);
+  font-size: 1.375rem;
+}
+
+.cloud__word--5 {
+  color: var(--ink);
+  font-size: 1.75rem;
+  font-weight: 600;
+}
+
+/* Topic sizes, ranked: number, name, bar, count at the bar's end. */
+.sizes {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: var(--hairline) solid var(--ink);
+}
+
+.size {
+  display: grid;
+  grid-template-columns: 5.5rem minmax(0, 1fr) minmax(6rem, 2fr) 4rem;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-2);
+  border-bottom: var(--hairline) solid var(--rule);
+}
+
+.size.is-linked {
+  background: var(--tint);
+}
+
+.size__title {
+  overflow: hidden;
+  font-size: var(--text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.size__bar .bar rect {
+  fill: var(--ink-2);
+}
+
+.size__value {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* The documents placed by meaning: grey dots; a topic pointed at in the
+   accent, the others faded. */
+.doc-map {
+  position: sticky;
+  top: calc(var(--statusbar-height) + var(--space-3));
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  border: var(--hairline) solid var(--rule-strong);
+  background: var(--sheet);
+}
+
+.doc-map svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.doc-map figcaption {
+  padding: 0 var(--space-3) var(--space-3);
+  color: var(--ink-3);
+}
+
+.doc-point {
+  fill: var(--ink-3);
+  fill-opacity: 0.55;
+  /* A wider, invisible ring makes the dot easier to point at. */
+  stroke: transparent;
+  stroke-width: 8px;
   vector-effect: non-scaling-stroke;
 }
 
-.timeline__area {
+.doc-point--none {
+  fill: var(--ink-4);
+  fill-opacity: 0.5;
+}
+
+.doc-point.is-linked {
+  fill: var(--red);
+  fill-opacity: 0.9;
+}
+
+.doc-map:has(.is-linked) .doc-point:not(.is-linked) {
+  fill-opacity: 0.15;
+}
+
+.doc-label {
   fill: var(--ink);
-  fill-opacity: 0.08;
+  font-family: var(--font-mono);
+  font-size: 3px;
+  font-weight: 600;
+  paint-order: stroke;
+  stroke: var(--sheet);
+  stroke-width: 0.8px;
+}
+
+.doc-label.is-linked {
+  fill: var(--red-text);
+}
+
+/* How the topics merge: leaves on the left, merges reaching right. */
+.dendrogram {
+  display: grid;
+  gap: var(--space-2);
+  max-width: 52rem;
+  margin: 0;
+}
+
+.dendrogram svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.dendrogram__label {
+  fill: var(--ink-2);
+  font-size: 12px;
+}
+
+.dendrogram__label.is-linked {
+  fill: var(--red-text);
+}
+
+.dendrogram__link {
+  fill: none;
+  stroke: var(--ink-2);
+  stroke-width: 1.5px;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.heatmap__key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: var(--text-label);
+}
+
+.heatmap__key li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.heatmap__key svg {
+  width: 0.75rem;
+  height: 0.75rem;
+}
+
+/* The topics over time on one chart: grey lines; a topic pointed at in
+   the accent, the others faded. */
+.trend-view {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: var(--space-6);
+  align-items: start;
+}
+
+.trend-chart {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.trend-chart svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.trend-chart figcaption {
+  color: var(--ink-3);
+}
+
+.trend__line {
+  fill: none;
+  stroke: var(--ink-3);
+  stroke-opacity: 0.7;
+  stroke-width: 1.5px;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.trend__point {
+  fill: var(--ink-3);
+  fill-opacity: 0.7;
+  stroke: transparent;
+  stroke-width: 8px;
+  vector-effect: non-scaling-stroke;
+}
+
+.trend.is-linked .trend__line {
+  stroke: var(--red);
+  stroke-opacity: 1;
+  stroke-width: 2.5px;
+}
+
+.trend.is-linked .trend__point {
+  fill: var(--red);
+  fill-opacity: 1;
+}
+
+.trend-chart:has(.trend.is-linked) .trend:not(.is-linked) {
+  opacity: 0.25;
+}
+
+/* LDA's documents: each with its mixture of topics as a thin bar. */
+.mixtures {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: var(--hairline) solid var(--ink);
+}
+
+.mixtures__topic {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-3);
+  border-bottom: var(--hairline) solid var(--rule);
+}
+
+.mixture {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.mixture .topic__example {
+  margin: 0;
+}
+
+.mixture__bar {
+  display: block;
+  width: 100%;
+  height: 0.5rem;
+}
+
+.mixture__part {
+  fill: var(--ink-3);
+}
+
+.mixture__part--alt {
+  fill: var(--ink-4);
+}
+
+.mixture__part--this {
+  fill: var(--red);
+}
+
+.mixture__text {
+  color: var(--ink-3);
+}
+
+/* pyLDAvis's view: the map of topic bubbles beside the chosen topic's
+   terms, the grey bar each term's overall frequency, the red one its
+   frequency in the topic. */
+.ldavis {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.ldavis__controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+  gap: var(--space-5);
+  align-items: start;
+}
+
+.ldavis__picker {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.ldavis__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-6);
+  align-items: start;
+}
+
+.ldavis__map {
+  position: sticky;
+  top: calc(var(--statusbar-height) + var(--space-3));
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  border: var(--hairline) solid var(--rule-strong);
+  background: var(--sheet);
+}
+
+.ldavis__map svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.ldavis__map figcaption {
+  padding: 0 var(--space-3) var(--space-3);
+  color: var(--ink-3);
+}
+
+.ldavis__axis {
+  stroke: var(--rule);
+  stroke-width: 1px;
+  vector-effect: non-scaling-stroke;
+}
+
+.ldavis__axis-label {
+  fill: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: 2.6px;
+}
+
+.ldavis__topic {
+  cursor: pointer;
+}
+
+.ldavis__topic circle {
+  fill: var(--ink-3);
+  fill-opacity: 0.2;
+  stroke: var(--ink-3);
+  stroke-width: 1px;
+  vector-effect: non-scaling-stroke;
+}
+
+.ldavis__topic:hover circle {
+  fill-opacity: 0.35;
+}
+
+.ldavis__topic.is-chosen circle {
+  fill: var(--red);
+  fill-opacity: 0.45;
+  stroke: var(--red);
+}
+
+.ldavis__topic:focus-visible {
+  outline: none;
+}
+
+.ldavis__topic:focus-visible circle {
+  stroke: var(--red);
+  stroke-width: 2.5px;
+}
+
+.ldavis__topic text {
+  fill: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 3px;
+  pointer-events: none;
+}
+
+.ldavis__legend {
+  fill: none;
+  stroke: var(--ink-3);
+  stroke-width: 1px;
+  vector-effect: non-scaling-stroke;
+}
+
+.ldavis__legend-label {
+  fill: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: 2.4px;
+}
+
+.ldavis__panel {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+}
+
+.ldavis__caption {
+  font-weight: 600;
+}
+
+.ldavis__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: var(--hairline) solid var(--ink);
+}
+
+.ldavis__row {
+  display: grid;
+  grid-template-columns: minmax(0, 9rem) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0.125rem var(--space-2);
+  font-size: var(--text-sm);
+}
+
+.ldavis__row:hover {
+  background: var(--tint);
+}
+
+.ldavis__term {
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ldavis__bars {
+  display: block;
+  width: 100%;
+  height: 0.75rem;
+}
+
+.ldavis__total {
+  fill: var(--ink-4);
+}
+
+.ldavis__freq {
+  fill: var(--red);
+}
+
+.ldavis__key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-5);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--ink-3);
+  font-size: var(--text-sm);
+}
+
+.ldavis__key li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.ldavis__key li::before {
+  content: "";
+  width: 1.5rem;
+  height: 0.75rem;
+}
+
+.ldavis__key-total::before {
+  background: var(--ink-4);
+}
+
+.ldavis__key-freq::before {
+  background: var(--red);
 }
 
 /* Quality scores: the value large, what it says below. */
@@ -3342,12 +3865,25 @@ kbd {
 }
 
 @media (max-width: 860px) {
-  .topic-view {
+  .topic-view,
+  .trend-view,
+  .ldavis__body {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .topic-map {
+  .topic-map,
+  .doc-map,
+  .ldavis__map {
     position: static;
+  }
+
+  .size {
+    grid-template-columns: 5rem minmax(0, 1fr) 3.5rem;
+  }
+
+  .size__bar {
+    grid-column: 1 / -1;
+    grid-row: 2;
   }
 
   .topic__head {

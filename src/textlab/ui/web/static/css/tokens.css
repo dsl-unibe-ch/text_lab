@@ -26,6 +26,10 @@
   --ink: #151514;
   --ink-2: #484743;
   --ink-3: #686660;
+  /* Muted chart marks (a reference bar, a second part, data in no group):
+     3:1 on the sheet, and apart from the accent also with colour-vision
+     deficiency (checked with the data-viz palette validator). */
+  --ink-4: #8f8b82;
   --on-ink: #f5f3ee;
   --hatch: rgb(21 21 20 / 0.09);
 
@@ -112,6 +116,7 @@
   --ink: #edebe5;
   --ink-2: #bebbb3;
   --ink-3: #96938b;
+  --ink-4: #7e7b74;
   --on-ink: #131312;
   --hatch: rgb(237 235 229 / 0.08);
   --red: #f2294d;
@@ -140,6 +145,7 @@
     --ink: #edebe5;
     --ink-2: #bebbb3;
     --ink-3: #96938b;
+    --ink-4: #7e7b74;
     --on-ink: #131312;
     --hatch: rgb(237 235 229 / 0.08);
     --red: #f2294d;

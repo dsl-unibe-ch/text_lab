@@ -1,0 +1,26 @@
+{#- A Top2Vec run, as Top2Vec shows its topics: a word cloud per topic and
+  the topics' sizes; then the topic map, the documents placed by meaning
+  and the similarity heatmap; and the scores. Expects view, job and
+  topics. -#}
+{% from "topic_modeling/macros.html" import tab, panel %}
+{% set heatmap = view.heatmap(job.id) %}
+{% set plot = view.document_plot(job.id) %}
+<div class="tabs">
+  <div class="tabs__list" role="tablist" aria-label="Result of {{ job.title }}">
+    {{ tab(job.id, "topics", "Topics", first=true) }}
+    {{ tab(job.id, "sizes", "Sizes") }}
+    {% if overview.positions %}{{ tab(job.id, "map", "Topic map") }}{% endif %}
+    {% if plot %}{{ tab(job.id, "documents", "Documents") }}{% endif %}
+    {% if heatmap %}{{ tab(job.id, "similarity", "Similarity") }}{% endif %}
+    {{ tab(job.id, "quality", "Quality") }}
+  </div>
+  {% call panel(job.id, "topics", first=true) %}
+  {% include "topic_modeling/parts/clouds.html" %}
+  <p class="muted">Each word's size shows how close it lies to the topic, as in Top2Vec's word clouds.</p>
+  {% endcall %}
+  {% call panel(job.id, "sizes") %}{% include "topic_modeling/parts/sizes.html" %}{% endcall %}
+  {% if overview.positions %}{% call panel(job.id, "map") %}{% include "topic_modeling/parts/topic_map.html" %}{% endcall %}{% endif %}
+  {% if plot %}{% call panel(job.id, "documents") %}{% include "topic_modeling/parts/documents.html" %}{% endcall %}{% endif %}
+  {% if heatmap %}{% call panel(job.id, "similarity") %}{% include "topic_modeling/parts/heatmap.html" %}{% endcall %}{% endif %}
+  {% call panel(job.id, "quality", class="stack") %}{% include "topic_modeling/metrics.html" %}{% endcall %}
+</div>
