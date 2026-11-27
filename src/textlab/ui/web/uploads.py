@@ -32,6 +32,9 @@ from textlab.ui.web.render import file_size
 #: Bytes copied at a time when saving an upload.
 CHUNK_SIZE = 1024 * 1024
 
+#: Second spellings of a file type, named by the first in format lists.
+FORMAT_ALIASES = {"JPEG": "JPG", "TIF": "TIFF"}
+
 
 class UploadError(ValueError):
     """An upload that cannot be used; the message is for the user."""
@@ -142,6 +145,20 @@ def display_name(upload: UploadFile) -> str:
         The name the browser sent, reduced to its last part.
     """
     return safe_upload_name(upload.filename or "")
+
+
+def format_names(suffixes: Collection[str]) -> str:
+    """Return accepted file types for people, as a drop zone lists them.
+
+    Args:
+        suffixes: Accepted endings with their dot, such as ``".pdf"``.
+
+    Returns:
+        The types in capitals, by name, each once: ``".jpg"`` and
+        ``".jpeg"`` are both "JPG". For example "BMP JPG PDF".
+    """
+    names = {item.lstrip(".").upper() for item in suffixes}
+    return " ".join(sorted({FORMAT_ALIASES.get(name, name) for name in names}))
 
 
 def check_suffix(upload: UploadFile, suffixes: Collection[str]) -> None:

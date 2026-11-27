@@ -1186,7 +1186,8 @@
    * chosen with [data-pager-select] or the [data-pager-step] buttons.
    * Elements with the same data-region (an outline on the page image and
    * the block of its text) are marked together while one is pointed at;
-   * clicking an outline brings its text into view.
+   * clicking an outline brings its text into view. A data-fill button
+   * fills a field (the Hugging Face tool's model name).
    */
   function showPage(pager, index) {
     var pages = pager.querySelectorAll("[data-pager-page]");
@@ -1237,6 +1238,17 @@
       var block = page.querySelector("[data-region='" + box.getAttribute("data-region") + "']:not(.box)");
       if (block) {
         block.scrollIntoView({ block: "nearest", behavior: calm ? "auto" : "smooth" });
+      }
+      return;
+    }
+    // A button with data-fill puts its data-fill-value into the field with
+    // that id, such as a downloaded model's name into the model field.
+    var fill = target.closest("[data-fill]");
+    if (fill) {
+      var field = document.getElementById(fill.getAttribute("data-fill"));
+      if (field) {
+        field.value = fill.getAttribute("data-fill-value") || "";
+        field.focus();
       }
     }
   });

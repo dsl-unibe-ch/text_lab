@@ -1,0 +1,38 @@
+{#- A ZIP read by a Hugging Face model, inside its record (job.result is
+  an HfArchive): an overview of its files, and the model and prompt. The
+  record's file listing holds the ZIP of the results, a folder per file. -#}
+{% from "components/macros.html" import spec %}
+{% set batch = job.result %}
+<div class="result">
+  <ul class="facts" aria-label="About the result">
+    <li>{{ batch.model.repo_id }}</li>
+    <li>{{ batch.files | length }} file{{ "s" if batch.files | length != 1 }}</li>
+    <li>{{ batch.pages }} page{{ "s" if batch.pages != 1 }}</li>
+  </ul>
+  <div class="table-wrap">
+    <table class="table">
+      <caption class="visually-hidden">The files of {{ job.title }}</caption>
+      <thead>
+        <tr>
+          <th scope="col">File</th>
+          <th scope="col" class="table__num">Pages</th>
+          <th scope="col" class="table__num">Characters</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in batch.files %}
+        <tr>
+          <td class="table__mono">{{ item.name }}</td>
+          <td class="table__num">{{ item.pages }}</td>
+          <td class="table__num">{{ "{:,}".format(item.characters) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="stack">
+    <h4 class="label">Model used, for citation</h4>
+    {{ spec([("Model", batch.model.citation()), ("Prompt", batch.prompt or "(none)")], mono=true) }}
+    <p class="muted">The ZIP has a folder per file, as in the archive, each with the text and a JSON of the pages. <code>model_used.txt</code> names the model, its revision and the prompt.</p>
+  </div>
+</div>

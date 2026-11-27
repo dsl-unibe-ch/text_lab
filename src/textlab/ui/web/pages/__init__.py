@@ -175,6 +175,8 @@ def routers(settings: WebSettings) -> list[APIRouter]:
         home,
         meeting_notes,
         ocr,
+        ocr_handwriting,
+        ocr_huggingface,
         placeholder,
         transcription,
         translation,
@@ -185,6 +187,8 @@ def routers(settings: WebSettings) -> list[APIRouter]:
         transcription.router,
         meeting_notes.router,
         ocr.router,
+        ocr_handwriting.router,
+        ocr_huggingface.router,
         translation.router,
         placeholder.router,
     ]

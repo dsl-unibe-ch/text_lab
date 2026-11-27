@@ -44,3 +44,10 @@ def test_one_file_is_required_and_checked():
             "file",
             suffixes=[".wav", ".mp3"],
         )
+
+
+def test_file_types_are_named_once_each():
+    assert (
+        uploads.format_names([".pdf", ".jpg", ".jpeg", ".tif", ".tiff"])
+        == "JPG PDF TIFF"
+    )

@@ -2602,27 +2602,6 @@ kbd {
 
 /* ---- OCR -------------------------------------------------------------- */
 
-/* A tool that is not built yet, in a switcher. */
-.switcher__option--off input {
-  cursor: not-allowed;
-}
-
-.switcher__option--off span,
-.switcher__option--off:hover span {
-  color: var(--ink-3);
-  font-weight: 400;
-}
-
-.switcher__soon {
-  margin-left: var(--space-1);
-  padding: 0 0.3em;
-  border: var(--hairline) solid var(--rule-strong);
-  font-family: var(--font-mono);
-  font-size: var(--text-label);
-  letter-spacing: var(--tracking-label);
-  text-transform: uppercase;
-}
-
 /* Region types: one colour each, for the outlines, the legend and the
    label of each block of text. */
 .rt-text,
@@ -2858,6 +2837,61 @@ kbd {
   line-height: 1.55;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+/* A transcribed handwritten line: its number, as on the page, then its
+   text. */
+.ocr-line--numbered {
+  display: grid;
+  grid-template-columns: 2.5rem minmax(0, 1fr);
+  gap: var(--space-2);
+}
+
+.ocr-line__number {
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: var(--text-label);
+  line-height: 1.55rem;
+  text-align: right;
+}
+
+/* A choice's model, under its description. */
+.choice__meta {
+  font-family: var(--font-mono);
+  font-size: var(--text-label);
+  overflow-wrap: anywhere;
+}
+
+/* The user's downloaded Hugging Face models: name, size, Use, Delete. */
+.hf-models {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.hf-models__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: var(--hairline) solid var(--rule);
+}
+
+.hf-models__item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  border-bottom: var(--hairline) solid var(--rule);
+}
+
+.hf-models__name {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+.input--short {
+  max-width: 10rem;
 }
 
 .ocr-latex {

@@ -3,9 +3,8 @@
 !!! note "Draft for the new interface"
     This guide describes the OCR page of the new Text Lab interface. It
     replaces [the current guide](../ocr.md) when the new interface goes
-    live. So far it covers **Standard**, the default, and **Choose an
-    engine**; the other tools (historic handwriting, Hugging Face models)
-    follow as they are built.
+    live. It covers the four tools: **Standard**, the default, **Choose an
+    engine**, **Historic handwriting** and **Hugging Face model**.
 
 OCR reads the text in scans, photos and PDFs: the text in reading order,
 with headings, tables, formulas and figures, and keeps where each part
@@ -145,6 +144,60 @@ engine's result as **JSON** (OlmOCR: its own record, as JSON Lines).
 A ZIP is read as a batch with the engine loaded once; the record lists
 each file with its pages, characters and time, and the download is one
 ZIP with a folder per file.
+
+## Historic handwriting
+
+For handwritten historical German documents, such as Kurrent from the 19th
+century or medieval manuscripts. Choose **Historic handwriting** above the
+form, drop a PDF or an image (or a ZIP of them), choose the model trained
+on material closest to your documents, and press **Transcribe**.
+
+Each page's text lines are found first (kraken's baseline segmenter), then
+read one by one by the model, a handwriting recognition model of the
+Digital Humanities group of the University of Bern. Loading the models
+takes about a minute; the first use of a model also downloads it.
+
+**The result** shows each page beside its lines, numbered in reading
+order. Each line is outlined on the page; point at an outline or a line
+and both are marked, and click an outline to bring its line into view.
+Below are the models used, for citation. Each line is read on its own, so
+check the transcription against the page, especially for unusual hands.
+
+The downloads: **Everything, with PAGE XML** (a ZIP with the text, the
+JSON and a PAGE XML file per page, for tools such as Transkribus or
+eScriptorium), the **Plain text** and the **JSON with boxes**. A ZIP is
+read as a batch; the record lists each file with its pages and lines.
+
+## Hugging Face model
+
+Read documents with a vision-language model of your choice from
+[Hugging Face](https://huggingface.co/models?pipeline_tag=image-text-to-text).
+Choose **Hugging Face model** above the form, drop a PDF or an image (or a
+ZIP of them), and name the model as `owner/name` or paste the link to its
+page.
+
+- It works with public models that Transformers reads directly
+  (image-text-to-text), up to the size the GPU holds. Models that need
+  their own code, an account or more GPU memory are refused, with the
+  reason. Check a model's license before you use its output.
+- The **prompt** is sent with every page. A model trained with a prompt of
+  its own reads best with that one; its model card names it.
+- **Most tokens per page** limits the text written for one page; a dense
+  page needs about 1,000 to 2,000. Lower it if a model keeps repeating
+  itself.
+
+The model is downloaded into your own folder on first use, which can take
+several minutes for a large one; your documents stay on the cluster.
+**Your downloaded models** lists them with their size: **Use** puts a
+model's name into the field, **Delete** removes it (it is downloaded again
+on its next use). The folder counts towards your storage quota.
+
+**The result** shows each page beside the text the model returned, as it
+wrote it, and the model, its revision and the prompt, for citation. A
+model can leave out or invent text: check it against the page. The
+downloads: **Everything** (with `model_used.txt`), the **Plain text** and
+the **JSON** with the model and prompt. A ZIP is read as a batch; the
+record lists each file with its pages and characters.
 
 ## Your data
 

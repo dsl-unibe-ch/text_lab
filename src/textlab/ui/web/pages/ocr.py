@@ -1,7 +1,7 @@
 """The OCR page: text, tables and figures from scans, photos and PDFs.
 
 One page for the OCR tools, chosen with a switcher; each has its own form
-and route, and their jobs share the list below. Built so far:
+and route, and their jobs share the list below:
 
 - **Standard**, the default: one PDF or image, or a ZIP of them read as
   a batch, by the automatic pipeline (``features.ocr.service``): pages
@@ -16,8 +16,11 @@ and route, and their jobs share the list below. Built so far:
   found are outlined on the page, and tables an engine wrote are shown as
   tables.
 
-Historic handwriting and Hugging Face models follow. Survey extraction is
-left out of the web UI (see the web UI plan).
+- **Historic handwriting** (:mod:`.ocr_handwriting`) and **Hugging Face
+  model** (:mod:`.ocr_huggingface`), in modules of their own; this page
+  draws their forms with what their ``form_context`` gives.
+
+Survey extraction is left out of the web UI (see the web UI plan).
 """
 
 from __future__ import annotations
@@ -39,6 +42,7 @@ from textlab.features.ocr import service
 from textlab.ui.web import uploads
 from textlab.ui.web.auth import Checked, protected_router
 from textlab.ui.web.jobs import Download, JobContext, render_card, runner_of
+from textlab.ui.web.pages import ocr_handwriting, ocr_huggingface
 from textlab.ui.web.render import renderer
 
 router = protected_router()
@@ -46,12 +50,12 @@ router = protected_router()
 #: The page's id, which also names its jobs.
 PAGE = "ocr"
 
-#: The OCR tools: their switcher value, name, and whether they are built.
+#: The OCR tools: their switcher value and name.
 OCR_TOOLS = (
-    ("standard", "Standard", True),
-    ("engine", "Choose an engine", True),
-    ("handwriting", "Historic handwriting", False),
-    ("huggingface", "Hugging Face model", False),
+    ("standard", "Standard"),
+    ("engine", "Choose an engine"),
+    ("handwriting", "Historic handwriting"),
+    ("huggingface", "Hugging Face model"),
 )
 
 #: What the Standard and engine tools read: documents and images, or a ZIP.
@@ -245,15 +249,12 @@ def page(request: Request) -> HTMLResponse:
         page_id=PAGE,
         ocr_tools=OCR_TOOLS,
         accept=",".join(DOCUMENT_EXTENSIONS),
-        formats=" ".join(
-            sorted(
-                {ext.lstrip(".").upper() for ext in service.INPUT_EXTENSIONS}
-                - {"JPEG", "TIF"}
-            )
-        )
+        formats=uploads.format_names(service.INPUT_EXTENSIONS)
         + ", or a ZIP of them",
         languages=sorted(service.TESSERACT_LANGUAGES.items()),
         engines=[engine_choice(name) for name in service.ENGINES],
+        **ocr_handwriting.form_context(),
+        **ocr_huggingface.form_context(),
         cards=Markup("".join(render_card(request, job) for job in jobs[::-1])),
     )
 

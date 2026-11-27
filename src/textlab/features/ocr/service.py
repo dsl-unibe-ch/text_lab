@@ -37,6 +37,12 @@ from pathlib import Path
 from typing import Any, BinaryIO
 
 from textlab.common.html_safety import sanitize_table_html
+from textlab.common.outputs import (
+    OutputFolder,
+    SavedFile,
+    image_media_type,
+    web_image,
+)
 from textlab.common.progress import (
     Progress,
     ProgressCallback,
@@ -547,26 +553,6 @@ _DOCX = (
 
 
 @dataclasses.dataclass(frozen=True)
-class SavedFile:
-    """A file :func:`save_document` wrote.
-
-    Attributes:
-        name: Its file name, unique in the folder.
-        label: What it is, for a download list.
-        media_type: Its media type.
-        path: Where it is.
-        listed: Whether it is a download of its own; page images, figures
-            and single tables are shown or linked in the result instead.
-    """
-
-    name: str
-    label: str
-    media_type: str
-    path: Path
-    listed: bool = True
-
-
-@dataclasses.dataclass(frozen=True)
 class SavedRegion:
     """One region of a page, as an interface shows it.
 
@@ -682,13 +668,8 @@ def save_document(result: DocumentResult, folder: Path) -> SavedDocument:
     """
     document, downloads = result.document, result.downloads
     stem = downloads.stem
-    files: list[SavedFile] = []
-
-    def write(name: str, data: bytes, label: str, media: str, listed=True):
-        path = folder / name
-        path.write_bytes(data)
-        files.append(SavedFile(name, label, media, path, listed))
-        return name
+    output = OutputFolder(folder)
+    write = output.write
 
     for suffix, data, label, media in (
         ("_bundle.zip", downloads.full, "Everything", "application/zip"),
@@ -769,7 +750,7 @@ def save_document(result: DocumentResult, folder: Path) -> SavedDocument:
         pages=tuple(pages),
         tables=tuple(tables),
         figures=tuple(figures),
-        files=tuple(files),
+        files=tuple(output.files),
         summary=result.summary,
         models=tuple(models),
     )
@@ -887,15 +868,8 @@ def save_engine_run(run: EngineRun, name: str, folder: Path) -> SavedEngineRun:
         What was written, and the pages to show.
     """
     stem = run.stem
-    files: list[SavedFile] = []
-
-    def write(
-        file_name: str, data: bytes, label: str, media: str, listed=True
-    ):
-        path = folder / file_name
-        path.write_bytes(data)
-        files.append(SavedFile(file_name, label, media, path, listed))
-        return file_name
+    output = OutputFolder(folder)
+    write = output.write
 
     write(
         f"{stem}_outputs.zip", run.zip_bytes, "Everything", "application/zip"
@@ -919,13 +893,13 @@ def save_engine_run(run: EngineRun, name: str, folder: Path) -> SavedEngineRun:
         prefix = f"{stem}_page-{page.page:04d}"
         image, width, height = None, 0, 0
         if page.image:
-            picture, extension, (width, height) = _web_image(page.image)
+            picture, extension, (width, height) = web_image(page.image)
             if picture:
                 image = write(
                     f"{prefix}.{extension}",
                     picture,
                     f"Page {page.page}",
-                    f"image/{'jpeg' if extension == 'jpg' else extension}",
+                    image_media_type(extension),
                     listed=False,
                 )
         lines = tuple(
@@ -973,35 +947,8 @@ def save_engine_run(run: EngineRun, name: str, folder: Path) -> SavedEngineRun:
         engine=run.engine,
         markdown=bool(adapter and adapter.markdown),
         pages=tuple(pages),
-        files=tuple(files),
+        files=tuple(output.files),
     )
-
-
-def _web_image(data: bytes) -> tuple[bytes | None, str, tuple[int, int]]:
-    """Return an image as a browser shows it: PNG or JPEG data.
-
-    Args:
-        data: Image file data, in any format PIL reads.
-
-    Returns:
-        The data (converted to PNG unless it is PNG or JPEG), its file
-        extension and its ``(width, height)``; ``None`` data if it cannot
-        be read.
-    """
-    from PIL import Image
-
-    try:
-        with Image.open(io.BytesIO(data)) as picture:
-            size = picture.size
-            if picture.format == "PNG":
-                return data, "png", size
-            if picture.format == "JPEG":
-                return data, "jpg", size
-            buffer = io.BytesIO()
-            picture.convert("RGB").save(buffer, format="PNG")
-            return buffer.getvalue(), "png", size
-    except Exception:
-        return None, "png", (0, 0)
 
 
 def _saved_region(region: doc_ir.Region, stem: str, write) -> SavedRegion:
@@ -1019,7 +966,7 @@ def _saved_region(region: doc_ir.Region, stem: str, write) -> SavedRegion:
             f"{stem}_{region.id}.{extension}",
             picture,
             "Figure",
-            f"image/{'jpeg' if extension == 'jpg' else extension}",
+            image_media_type(extension),
             listed=False,
         )
     described = region.visual_description

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "components/macros.html" import masthead, section_head, dropzone with context %}
+{% from "components/macros.html" import masthead, section_head, dropzone, notice with context %}
 {% block title %}OCR{% endblock %}
 {% block content %}
 {% set tool = tools | selectattr("id", "equalto", page_id) | first %}
@@ -9,8 +9,8 @@
   only its controls are sent. Each form has its own route. -#}
 <div class="sheet" data-switch="tool">
   <div class="switcher" role="radiogroup" aria-label="How to read the document">
-    {% for value, label, built in ocr_tools %}
-    <label class="switcher__option{% if not built %} switcher__option--off{% endif %}"><input type="radio" name="tool" value="{{ value }}"{% if loop.first %} checked{% endif %}{% if not built %} disabled{% endif %}><span>{{ label }}{% if not built %} <span class="switcher__soon">Soon</span>{% endif %}</span></label>
+    {% for value, label in ocr_tools %}
+    <label class="switcher__option"><input type="radio" name="tool" value="{{ value }}"{% if loop.first %} checked{% endif %}><span>{{ label }}</span></label>
     {% endfor %}
   </div>
 
@@ -165,6 +165,125 @@
     <div class="sheet__submit">
       <p class="sheet__note">Runs in the background: you can leave this page and come back. The engine is loaded first, which can take a minute.</p>
       <button class="btn btn--primary btn--lg" type="submit"{% if not ready %} disabled{% endif %}>Read with <span id="engine-name">{{ first or "the engine" }}</span> {{ icon("arrow-right", size="sm") }}</button>
+    </div>
+  </form>
+
+  {#- Historic handwriting: the lines of each page are found, then read one
+    by one by the model the user chooses. -#}
+  <form data-when="handwriting" data-upload-form aria-label="Historic handwriting" hidden
+        hx-post="{{ root }}/ocr/handwriting" hx-encoding="multipart/form-data"
+        hx-target="#jobs" hx-swap="afterbegin" hx-disabled-elt="find button[type=submit]">
+    <ol class="steps">
+      <li class="step">
+        <div>
+          <span class="label step__num">01</span>
+          <h2 class="step__title">Document</h2>
+          <p class="step__hint">Handwritten historical German, such as Kurrent from the 19th century or medieval manuscripts. A ZIP is read as a batch, with each model loaded once.</p>
+        </div>
+        <div class="step__body">
+          {{ dropzone("file", "Drop a document here", handwriting_formats, accept=handwriting_accept, id="handwriting-file") }}
+        </div>
+      </li>
+      <li class="step">
+        <div>
+          <span class="label step__num">02</span>
+          <h2 class="step__title">Model</h2>
+          <p class="step__hint">The lines of each page are found first ({{ line_detector }}), then read one by one. Choose the model trained on material closest to your documents.</p>
+        </div>
+        <div class="step__body">
+          {% if handwriting_problem %}
+          {% call notice("warning") %}<p>{{ handwriting_problem }}</p>{% endcall %}
+          {% else %}
+          <fieldset class="field">
+            <legend class="visually-hidden">Handwriting model</legend>
+            <div class="choices">
+              {% for model in handwriting_models %}
+              <label class="choice">
+                <input class="radio" type="radio" name="model" value="{{ model.key }}"{% if loop.first %} checked{% endif %}>
+                <span class="choice__title">{{ model.label }}</span>
+                <span class="choice__text">{{ model.description }}</span>
+                <span class="choice__text choice__meta">{{ model.recognition }}</span>
+              </label>
+              {% endfor %}
+            </div>
+          </fieldset>
+          {% endif %}
+        </div>
+      </li>
+    </ol>
+
+    <div class="upload-progress" data-upload-progress hidden>
+      <progress class="meter__bar" max="1" value="0"></progress>
+      <p class="label" data-upload-progress-text>Uploading</p>
+    </div>
+
+    <div class="sheet__submit">
+      <p class="sheet__note">Runs in the background: you can leave this page and come back. Loading the models takes about a minute; the first use of a model also downloads it. Check the lines against the page, especially for unusual hands.</p>
+      <button class="btn btn--primary btn--lg" type="submit"{% if handwriting_problem %} disabled{% endif %}>Transcribe {{ icon("arrow-right", size="sm") }}</button>
+    </div>
+  </form>
+
+  {#- A vision-language model the user names on Hugging Face, with a prompt
+    and a token limit; the user's downloaded models are listed with a
+    delete button each (ocr/hf_models.html). -#}
+  <form data-when="huggingface" data-upload-form aria-label="OCR with a Hugging Face model" hidden
+        hx-post="{{ root }}/ocr/huggingface" hx-encoding="multipart/form-data"
+        hx-target="#jobs" hx-swap="afterbegin" hx-disabled-elt="find button[type=submit]">
+    <ol class="steps">
+      <li class="step">
+        <div>
+          <span class="label step__num">01</span>
+          <h2 class="step__title">Document</h2>
+          <p class="step__hint">The model reads each page as a whole. A ZIP is read as a batch, with the model loaded once.</p>
+        </div>
+        <div class="step__body">
+          {{ dropzone("file", "Drop a document here", hf_formats, accept=hf_accept, id="hf-file") }}
+        </div>
+      </li>
+      <li class="step">
+        <div>
+          <span class="label step__num">02</span>
+          <h2 class="step__title">Model</h2>
+          <p class="step__hint">Any public vision-language model that Transformers reads directly (image-text-to-text), up to the size the GPU holds. Others are refused, with the reason. Check a model's license before you use its output.</p>
+        </div>
+        <div class="step__body stack">
+          <div class="field">
+            <label class="field__label" for="hf-repo">Hugging Face model</label>
+            <input class="input" id="hf-repo" name="repo" type="text" required autocomplete="off" spellcheck="false" placeholder="{{ hf_example }}" aria-describedby="hf-repo-help">
+            <p class="field__help" id="hf-repo-help">Its name as owner/name, or the link to its page on <a href="https://huggingface.co/models?pipeline_tag=image-text-to-text" target="_blank" rel="noopener noreferrer">Hugging Face</a>. It is downloaded into your own folder on first use; your documents stay on the cluster.</p>
+          </div>
+          {% include "ocr/hf_models.html" %}
+        </div>
+      </li>
+      <li class="step">
+        <div>
+          <span class="label step__num">03</span>
+          <h2 class="step__title">Instructions</h2>
+          <p class="step__hint">Sent with every page.</p>
+        </div>
+        <div class="step__body stack">
+          <div class="field">
+            <label class="field__label" for="hf-prompt">Prompt</label>
+            <textarea class="textarea" id="hf-prompt" name="prompt" rows="3" aria-describedby="hf-prompt-help">{{ hf_prompt }}</textarea>
+            <p class="field__help" id="hf-prompt-help">A model trained with a prompt of its own reads best with that one; its model card names it. Leave it empty for models that take no instruction.</p>
+          </div>
+          <div class="field">
+            <label class="field__label" for="hf-tokens">Most tokens per page</label>
+            <input class="input input--short" id="hf-tokens" name="max_new_tokens" type="number" min="1" max="{{ hf_tokens_limit }}" value="{{ hf_tokens }}" required aria-describedby="hf-tokens-help">
+            <p class="field__help" id="hf-tokens-help">The longest text the model may write for one page; a dense page needs about 1,000 to 2,000. Lower it if a model keeps repeating itself.</p>
+          </div>
+        </div>
+      </li>
+    </ol>
+
+    <div class="upload-progress" data-upload-progress hidden>
+      <progress class="meter__bar" max="1" value="0"></progress>
+      <p class="label" data-upload-progress-text>Uploading</p>
+    </div>
+
+    <div class="sheet__submit">
+      <p class="sheet__note">Runs in the background: you can leave this page and come back. The model is loaded first; its first use also downloads it, which can take several minutes for a large one. Check the text against the page: a model can leave out or invent text.</p>
+      <button class="btn btn--primary btn--lg" type="submit">Read with the model {{ icon("arrow-right", size="sm") }}</button>
     </div>
   </form>
 </div>

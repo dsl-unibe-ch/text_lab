@@ -232,6 +232,9 @@ class TranscriptionRun:
         previews: PNG images of the pages with the lines outlined and
             numbered, if requested.
         zip_bytes: Text, JSON and one PAGE XML file per page in one ZIP.
+        page_images: The pages as they were read, scaled down for display
+            (PNG or JPEG data); the lines' boxes are in pixels of the full
+            page (:attr:`PageTranscription.width`).
     """
 
     document: DocumentTranscription
@@ -240,11 +243,27 @@ class TranscriptionRun:
     json_name: str
     previews: list[bytes]
     zip_bytes: bytes
+    page_images: list[bytes] = dataclasses.field(default_factory=list)
 
     @property
     def text(self) -> str:
         """The text of all pages."""
         return self.document.text
+
+
+@dataclasses.dataclass(frozen=True)
+class BatchFile:
+    """One file of a batch, as it was transcribed.
+
+    Attributes:
+        name: Its path in the archive.
+        pages: How many pages it has.
+        lines: How many lines were transcribed on them.
+    """
+
+    name: str
+    pages: int
+    lines: int
 
 
 @dataclasses.dataclass
@@ -256,9 +275,11 @@ class BatchRun:
         files: The number of files transcribed.
         lines: The number of lines transcribed in all files.
         models_used: The models that produced the results, for citation.
+        items: Each file's overview, in the archive's order.
     """
 
     zip_bytes: bytes
     files: int
     lines: int
     models_used: dict[str, str]
+    items: tuple[BatchFile, ...] = ()

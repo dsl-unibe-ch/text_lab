@@ -15,18 +15,37 @@ A transcription runs in four steps, for one document or a whole batch:
 Both workers exit when they are done, so the GPU is free afterwards. Each
 run works in a job folder in the workspace (area ``handwriting``), removed
 when the run ends; results are returned in memory.
+:func:`save_transcription` writes a run's downloads and page images to a
+folder an interface serves them from, and returns what it needs to show
+the result.
+
+A run stops when its ``cancel`` event is set: between pages and steps,
+and a worker at once, by raising
+:class:`~textlab.common.progress.CancelledError`.
 """
 
 from __future__ import annotations
 
 import dataclasses
 import os
+import threading
 from collections.abc import Callable
 from pathlib import Path
 from typing import BinaryIO
 
 from textlab.common import container, jobs
-from textlab.common.progress import Progress, ProgressCallback, no_progress
+from textlab.common.outputs import (
+    OutputFolder,
+    SavedFile,
+    image_media_type,
+    web_image,
+)
+from textlab.common.progress import (
+    Progress,
+    ProgressCallback,
+    check_cancelled,
+    no_progress,
+)
 from textlab.common.storage import get_workspace
 from textlab.common.upload_safety import (
     safe_upload_name,
@@ -37,6 +56,7 @@ from textlab.features.handwriting.documents import INPUT_EXTENSIONS
 from textlab.features.handwriting.lines import line_boxes
 from textlab.features.handwriting.models import (
     LINE_DETECTOR,
+    BatchFile,
     BatchRun,
     DocumentTranscription,
     HandwritingError,
@@ -52,15 +72,45 @@ from textlab.features.handwriting.models import (
 __all__ = [
     "INPUT_EXTENSIONS",
     "LINE_DETECTOR",
+    "BatchFile",
     "BatchRun",
     "HandwritingError",
     "HandwritingModel",
     "HandwritingOptions",
+    "SavedFile",
+    "SavedLine",
+    "SavedPage",
+    "SavedTranscription",
     "TranscriptionRun",
     "available_models",
+    "cited_models",
+    "save_transcription",
     "transcribe_batch",
     "transcribe_document",
 ]
+
+#: What the keys of ``models_used()`` mean, for people.
+MODEL_ROLES = {
+    "line_detection": "Line detection",
+    "recognition": "Text recognition",
+}
+
+
+def cited_models(models_used: dict[str, str]) -> tuple[tuple[str, str], ...]:
+    """Return the models a result was made with, for people.
+
+    Args:
+        models_used: As ``DocumentTranscription.models_used()`` or
+            ``BatchRun.models_used`` give it.
+
+    Returns:
+        Pairs such as ``("Line detection", "kraken ...")``.
+    """
+    return tuple(
+        (MODEL_ROLES.get(role, role), value)
+        for role, value in models_used.items()
+    )
+
 
 #: Workspace area for job folders.
 WORKSPACE_AREA = "handwriting"
@@ -96,6 +146,7 @@ def transcribe_document(
     options: HandwritingOptions,
     *,
     on_progress: ProgressCallback = no_progress,
+    cancel: threading.Event | None = None,
 ) -> TranscriptionRun:
     """Transcribe one PDF or image.
 
@@ -104,14 +155,16 @@ def transcribe_document(
         data: The file's content.
         options: The model and whether to draw previews.
         on_progress: Receives progress updates.
+        cancel: Stops the transcription when set.
 
     Returns:
-        The transcription and its downloads.
+        The transcription, its downloads and the page images.
 
     Raises:
         HandwritingError: If the file cannot be read or the model is
             unknown.
         textlab.common.jobs.WorkerError: If a worker fails.
+        CancelledError: If ``cancel`` was set.
     """
     spec = get_model(options.model)
     upload_name = safe_upload_name(name)
@@ -120,8 +173,15 @@ def transcribe_document(
         input_path = job / "input" / upload_name
         input_path.parent.mkdir()
         input_path.write_bytes(data)
-        pages = _pages([input_path], job / "pages", on_progress)
-        document = _transcribe([upload_name], pages, spec, job, on_progress)[0]
+        pages = _pages([input_path], job / "pages", on_progress, cancel)
+        document = _transcribe(
+            [upload_name], pages, spec, job, on_progress, cancel
+        )[0]
+        page_images = [
+            web_image(page.image.read_bytes(), documents.PREVIEW_SIDE)[0]
+            or b""
+            for page in pages
+        ]
         previews = []
         if options.previews:
             previews = [
@@ -143,6 +203,7 @@ def transcribe_document(
         json_name=f"{stem}.json",
         previews=previews,
         zip_bytes=zip_bytes,
+        page_images=page_images,
     )
 
 
@@ -151,6 +212,7 @@ def transcribe_batch(
     options: HandwritingOptions,
     *,
     on_progress: ProgressCallback = no_progress,
+    cancel: threading.Event | None = None,
 ) -> BatchRun:
     """Transcribe every PDF and image in a ZIP archive.
 
@@ -161,14 +223,17 @@ def transcribe_batch(
         archive: The ZIP archive, as a file object or path.
         options: The model; previews are not drawn for a batch.
         on_progress: Receives progress updates.
+        cancel: Stops the batch when set.
 
     Returns:
-        A ZIP with one folder per file, mirroring the archive.
+        A ZIP with one folder per file, mirroring the archive, and an
+        overview of the files.
 
     Raises:
         HandwritingError: If the archive holds no supported files, a file
             cannot be read or the model is unknown.
         textlab.common.jobs.WorkerError: If a worker fails.
+        CancelledError: If ``cancel`` was set.
     """
     spec = get_model(options.model)
     with get_workspace().temp_dir(WORKSPACE_AREA, prefix="batch-") as job:
@@ -181,8 +246,8 @@ def transcribe_batch(
                 + ")."
             )
         names = [path.relative_to(input_dir).as_posix() for path in files]
-        pages = _pages(files, job / "pages", on_progress)
-        results = _transcribe(names, pages, spec, job, on_progress)
+        pages = _pages(files, job / "pages", on_progress, cancel)
+        results = _transcribe(names, pages, spec, job, on_progress, cancel)
 
         out_dir = job / "output"
         used: set[str] = set()
@@ -205,15 +270,23 @@ def transcribe_batch(
         files=len(results),
         lines=sum(document.line_count for document in results),
         models_used=models_used,
+        items=tuple(
+            BatchFile(name, len(document.pages), document.line_count)
+            for name, document in zip(names, results, strict=True)
+        ),
     )
 
 
 def _pages(
-    files: list[Path], out_dir: Path, on_progress: ProgressCallback
+    files: list[Path],
+    out_dir: Path,
+    on_progress: ProgressCallback,
+    cancel: threading.Event | None = None,
 ) -> list[_Page]:
     """Return the pages of every file, as images."""
     pages = []
     for file_index, path in enumerate(files):
+        check_cancelled(cancel)
         on_progress(
             Progress(
                 f"Preparing pages... {path.name}",
@@ -238,17 +311,20 @@ def _transcribe(
     spec: HandwritingModel,
     job: Path,
     on_progress: ProgressCallback,
+    cancel: threading.Event | None = None,
 ) -> list[DocumentTranscription]:
     """Detect, crop and read the lines of all pages; one result per file."""
     polygons = detect_lines(
         [page.image for page in pages],
         on_progress=_scaled(on_progress, _PAGES_END, _DETECT_END),
+        cancel=cancel,
     )
     crop_dir = job / "crops"
     crop_count = 0
     for index, (page, found) in enumerate(
         zip(pages, polygons, strict=True), start=1
     ):
+        check_cancelled(cancel)
         page.width, page.height = documents.image_size(page.image)
         page.lines = line_boxes(found)
         page.crops = documents.write_crops(
@@ -267,7 +343,10 @@ def _transcribe(
     crops = [crop for page in pages for crop in page.crops]
     texts = (
         recognize_lines(
-            crops, spec, on_progress=_scaled(on_progress, _CROPS_END, 1.0)
+            crops,
+            spec,
+            on_progress=_scaled(on_progress, _CROPS_END, 1.0),
+            cancel=cancel,
         )
         if crops
         else []
@@ -302,6 +381,7 @@ def detect_lines(
     *,
     on_progress: ProgressCallback = no_progress,
     backend_python: str | None = None,
+    cancel: threading.Event | None = None,
 ) -> list[list[list[list[float]]]]:
     """Find the text lines on page images, in the line-detection worker.
 
@@ -310,6 +390,7 @@ def detect_lines(
         on_progress: Receives the worker's progress.
         backend_python: The worker's interpreter; by default the one of the
             image's kraken environment, or ``KRAKEN_BACKEND_PYTHON``.
+        cancel: Stops the worker when set.
 
     Returns:
         Per image, the boundary polygon of every line in reading order, as
@@ -324,6 +405,7 @@ def detect_lines(
         {"images": [str(image) for image in images]},
         area=WORKSPACE_AREA,
         on_progress=on_progress,
+        cancel=cancel,
         python=python,
     )
     pages = result["pages"]
@@ -339,6 +421,7 @@ def recognize_lines(
     spec: HandwritingModel,
     *,
     on_progress: ProgressCallback = no_progress,
+    cancel: threading.Event | None = None,
 ) -> list[str]:
     """Read line images with a model, in the recognition worker.
 
@@ -346,6 +429,7 @@ def recognize_lines(
         crops: The line images.
         spec: The recognition model.
         on_progress: Receives the worker's progress.
+        cancel: Stops the worker when set.
 
     Returns:
         One text per line image.
@@ -355,6 +439,7 @@ def recognize_lines(
         {"model": spec.to_dict(), "crops": [str(crop) for crop in crops]},
         area=WORKSPACE_AREA,
         on_progress=on_progress,
+        cancel=cancel,
     )
     texts = result["texts"]
     if len(texts) != len(crops):
@@ -362,6 +447,158 @@ def recognize_lines(
             f"Recognition returned {len(texts)} texts for {len(crops)} lines."
         )
     return texts
+
+
+# ---------------------------------------------------------------------------
+# Results for interfaces
+# ---------------------------------------------------------------------------
+
+
+@dataclasses.dataclass(frozen=True)
+class SavedLine:
+    """A transcribed line, as an interface shows it.
+
+    Attributes:
+        id: Its id, unique in the run, such as ``"p1-l3"``.
+        number: Its number on the page, from 1, in reading order.
+        text: Its text.
+        box: Its box on the page as ``(x, y, width, height)``, in pixels
+            of the full page (:attr:`SavedPage.width`).
+    """
+
+    id: str
+    number: int
+    text: str
+    box: tuple[int, int, int, int]
+
+
+@dataclasses.dataclass(frozen=True)
+class SavedPage:
+    """A transcribed page, as an interface shows it.
+
+    Attributes:
+        number: The page number, from 1.
+        text: Its text, one line per line, for copying.
+        image: The file name of the page image, scaled down, or ``None``.
+        width: The full page's width in pixels, which the boxes are in.
+        height: The full page's height in pixels.
+        lines: Its lines, in reading order.
+    """
+
+    number: int
+    text: str
+    image: str | None
+    width: int
+    height: int
+    lines: tuple[SavedLine, ...]
+
+
+@dataclasses.dataclass(frozen=True)
+class SavedTranscription:
+    """What :func:`save_transcription` wrote, and what to show of a run.
+
+    Attributes:
+        name: The document's name.
+        model: The recognition model's name.
+        models: The models that produced it, as role and model, for
+            citation.
+        pages: The pages, in order.
+        files: Every file written, downloads first.
+    """
+
+    name: str
+    model: str
+    models: tuple[tuple[str, str], ...]
+    pages: tuple[SavedPage, ...]
+    files: tuple[SavedFile, ...]
+
+    @property
+    def lines(self) -> int:
+        """How many lines were transcribed, on all pages."""
+        return sum(len(page.lines) for page in self.pages)
+
+
+def save_transcription(
+    run: TranscriptionRun, folder: Path
+) -> SavedTranscription:
+    """Write a transcription's downloads and page images into a folder.
+
+    The downloads are everything in one ZIP (with the PAGE XML files), the
+    text and the JSON; besides them each page image gets a file of its
+    own, named after the document, so an interface can show it.
+
+    Args:
+        run: The result of :func:`transcribe_document`.
+        folder: An existing folder, such as a job's outputs.
+
+    Returns:
+        What was written, and the pages to show.
+    """
+    document = run.document
+    stem = run.text_name.removesuffix(".txt")
+    output = OutputFolder(folder)
+    output.write(
+        f"{stem}_handwriting.zip",
+        run.zip_bytes,
+        "Everything, with PAGE XML",
+        "application/zip",
+    )
+    output.write(
+        run.text_name,
+        run.text.encode("utf-8"),
+        "Plain text",
+        "text/plain; charset=utf-8",
+    )
+    output.write(
+        run.json_name,
+        run.json.encode("utf-8"),
+        "JSON with boxes",
+        "application/json",
+    )
+    pages = []
+    for index, page in enumerate(document.pages):
+        image = None
+        data = run.page_images[index] if index < len(run.page_images) else b""
+        picture, extension, _size = web_image(data) if data else (None, "", 0)
+        if picture:
+            image = output.write(
+                f"{stem}_page-{page.page:04d}.{extension}",
+                picture,
+                f"Page {page.page}",
+                image_media_type(extension),
+                listed=False,
+            )
+        lines = tuple(
+            SavedLine(
+                id=f"p{page.page}-l{number}",
+                number=number,
+                text=line.text,
+                box=(
+                    line.box[0],
+                    line.box[1],
+                    line.box[2] - line.box[0],
+                    line.box[3] - line.box[1],
+                ),
+            )
+            for number, line in enumerate(page.lines, start=1)
+        )
+        pages.append(
+            SavedPage(
+                number=page.page,
+                text=page.text,
+                image=image,
+                width=page.width,
+                height=page.height,
+                lines=lines,
+            )
+        )
+    return SavedTranscription(
+        name=document.name,
+        model=document.model.label,
+        models=cited_models(document.models_used()),
+        pages=tuple(pages),
+        files=tuple(output.files),
+    )
 
 
 def _scaled(

@@ -266,7 +266,8 @@ feature follows the rules above. Every feature is now refactored.
 Backend paths are relative to `src/textlab/`, pages to
 `src/textlab/ui/streamlit/pages/`. Shared code (settings, workspace, worker
 processes, progress, Ollama, GPU management, upload and HTML safety, model
-and language configuration) is in `src/textlab/common/`.
+and language configuration, the files a result writes for an interface) is
+in `src/textlab/common/`.
 
 Known issues:
 

@@ -242,7 +242,7 @@ Rules, checked by tests as for the Streamlit pages today:
 | 0. Spike (done) | A minimal FastAPI app in the sandbox, behind the Open OnDemand proxy: base path, login cookie, SSE progress, a 2 GB upload streamed to the workspace, a download | All of it works, or a fallback is chosen (HTMX polling every second instead of SSE) |
 | 1. Foundation (done) | The launcher and the redeployment files (deployed at the switch). In `ui/web/`: app factory, login, CSRF, CSP, layout, design system and components, job runner (queue, SSE, cancelling), upload and download helpers, error pages, test harness. Mockups of Home and Transcription | An empty app with login, navigation and a demo job runs in the sandbox, with tests, and the mockups are agreed |
 | 2. Pilot (done) | Home and Transcription: a recording or a ZIP batch, language and model, voice activity detection, speaker identification with speaker counts, the audio player with word highlighting, every download | Everything the Streamlit page does works, with tests, and the UI test passes |
-| 3. Pages (in progress) | One commit each, in this order: Meeting Notes, Translation, OCR (one page with a switcher, one commit per tool: Standard (the automatic pipeline), Choose an engine (the legacy engines), historic handwriting, Hugging Face models; survey extraction left out), Topic Modeling, Chat, Visualize Data, Knowledge Graph | As in phase 2, with the page's user guide drafted |
+| 3. Pages (in progress) | One commit each, in this order: Meeting Notes, Translation, OCR (one page with a switcher, one commit per tool: Standard (the automatic pipeline), Choose an engine (the legacy engines), then historic handwriting and Hugging Face models together; survey extraction left out), Topic Modeling, Chat, Visualize Data, Knowledge Graph | As in phase 2, with the page's user guide drafted |
 | 4. Switch | The branch merged into `main`; the new user guide replaces the old one; a release, the HPC redeploy, `TEXT_LAB_UI=web` in production | Users work in the new UI; Streamlit can still be selected as a rollback |
 | 5. Removal | `ui/streamlit/` and its tests are removed; Streamlit leaves the image | One release after the switch, without a rollback |
 
@@ -607,12 +607,52 @@ engines' recognition faked and the rest real, and `test_engines.py`,
   flat page slightly, as on the Streamlit page.
 - The guide's draft: the *Choose an engine* section of `docs/next/ocr.md`.
 
-Still to do: try Choose an engine in the sandbox with each engine (a
-scan, a photo, a page with a table in GLM-OCR's table mode, a paper in
-OlmOCR, a ZIP batch, cancelling a PaddleOCR or OlmOCR run), checking that
-the PaddleOCR outlines sit on the lines of a real skewed scan; then
-commit it. Next: Historic
-handwriting, Hugging Face model.
+Choose an engine was tried in the sandbox and committed on 27 November.
+
+**Historic handwriting** and **Hugging Face model**, built on 27 November
+2026 as one step (the user's choice), with tests
+(`test_ocr_handwriting_page.py` and `test_ocr_huggingface_page.py`, with
+the workers faked and the rest real, and in each feature's `tests/`):
+
+- **Page modules of their own**: `pages/ocr_handwriting.py` and
+  `pages/ocr_huggingface.py` hold each tool's route and work; the OCR page
+  draws their forms with what their `form_context()` gives. The switcher's
+  "Soon" mark is gone, as all four tools are built.
+- **Historic handwriting**: one drop zone (PDF, image or ZIP) and the
+  configured models as choices, each with its description and the models
+  it reads with; the line detector is named. The result shows each page
+  beside its numbered lines, each outlined on the page (`<rect>`s in the
+  full page's pixels over the page scaled down to 1,600 px) and linked to
+  its text, then the models used, for citation. Downloads: everything
+  with PAGE XML, the text, the JSON with boxes. A batch gives the ZIP and
+  an overview: pages and lines per file.
+- **Hugging Face model**: one drop zone, the model's name or link, the
+  prompt and the token limit. The user's downloaded models are listed
+  with their size: *Use* fills the model field, *Delete* removes one
+  (refused while a Hugging Face job of the session waits or runs). The
+  result shows each page beside the text as the model wrote it (models
+  answer in plain text, Markdown or HTML alike), and the model, revision
+  and prompt. A batch gives the ZIP and an overview: pages and characters
+  per file.
+- **The services**: `cancel` for `transcribe_document`/`transcribe_batch`
+  and `read_document`/`read_batch` (between files and steps; the workers
+  are stopped at once by `common.jobs.run_worker`); per-file overviews in
+  both `BatchRun`s; `save_transcription` and `save_run`, which write the
+  downloads and page images and return what to show. Handwriting runs now
+  keep the page images, scaled down. The Hugging Face service re-exports
+  the user's model folder (`stored_models`, `delete_model`, ...), so the
+  page imports only the service.
+- **Shared**: `common/outputs.py` (`SavedFile`, `OutputFolder`,
+  `web_image`), used by the save functions of all three features (the OCR
+  service re-exports `SavedFile`); `uploads.format_names` for the drop
+  zones' lists of file types.
+- The guide's draft: the last two sections of `docs/next/ocr.md`.
+
+Still to do: try both in the sandbox (a Kurrent page and a ZIP with each
+handwriting model; a Hugging Face model by name and by link, a first
+download, a model refused for its size, deleting a model, a ZIP;
+cancelling each during recognition; narrow screens and the dark theme),
+then commit them together. Next: Topic Modeling.
 
 ## Testing
 

@@ -190,6 +190,21 @@ class OcrRun:
         return result_json(self.document, self.model, self.prompt)
 
 
+@dataclasses.dataclass(frozen=True)
+class BatchFile:
+    """One document of a batch, as it was read.
+
+    Attributes:
+        name: Its path in the archive.
+        pages: How many pages it has.
+        characters: How many characters the model returned for them.
+    """
+
+    name: str
+    pages: int
+    characters: int
+
+
 @dataclasses.dataclass
 class BatchRun:
     """A finished batch: the result ZIP and a summary.
@@ -199,12 +214,14 @@ class BatchRun:
         files: Number of documents read.
         pages: Number of pages read.
         model: The model that read them.
+        items: Each document's overview, in the archive's order.
     """
 
     zip_bytes: bytes
     files: int
     pages: int
     model: ModelUsed
+    items: tuple[BatchFile, ...] = ()
 
 
 def result_json(document: DocumentText, model: ModelUsed, prompt: str) -> str:

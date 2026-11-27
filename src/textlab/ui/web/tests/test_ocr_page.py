@@ -90,10 +90,8 @@ def zip_of(entries):
 def test_the_page_offers_the_tools_and_the_options(client):
     html = client.get(f"{BASE}/ocr").text
     assert 'name="tool" value="standard" checked' in html
-    assert 'name="tool" value="engine">' in html
-    for value in ("handwriting", "huggingface"):
-        assert f'name="tool" value="{value}" disabled' in html
-    assert "Soon" in html
+    for value in ("engine", "handwriting", "huggingface"):
+        assert f'name="tool" value="{value}">' in html
     assert 'name="searchable_pdf" value="1" checked' in html
     assert '<option value="auto" selected>Detect page by page</option>' in html
     assert ".zip" in html

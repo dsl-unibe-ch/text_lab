@@ -1,0 +1,49 @@
+{#- A document read by a Hugging Face model, inside its record (job.result
+  is a SavedHfRun): each page beside the text the model returned, shown as
+  written (models answer in plain text, Markdown or HTML alike), then the
+  model, its revision and the prompt, for citation. The record's file
+  listing below holds the downloads. -#}
+{% from "components/macros.html" import spec %}
+{% from "ocr/macros.html" import pager_bar %}
+{% set run = job.result %}
+{% set pages = run.pages %}
+{% set files = root ~ "/jobs/" ~ job.id ~ "/files/" %}
+<div class="result ocr-result">
+  <ul class="facts" aria-label="About the result">
+    <li>{{ run.model.repo_id }}</li>
+    <li>{{ pages | length }} page{{ "s" if pages | length != 1 }}</li>
+  </ul>
+
+  <div class="pager" data-pager>
+    {{ pager_bar(job.id, pages) }}
+
+    {% for item in pages %}
+    <section class="ocr-page{% if not item.image %} ocr-page--text{% endif %}" data-pager-page="{{ loop.index0 }}" aria-label="Page {{ item.number }}"{% if not loop.first %} hidden{% endif %}>
+      {% if item.image %}
+      <div class="ocr-page__scan">
+        <div class="scan">
+          <img class="scan__image" src="{{ files }}{{ item.image | urlencode }}" width="{{ item.width }}" height="{{ item.height }}" alt="Page {{ item.number }} as an image" loading="lazy">
+        </div>
+      </div>
+      {% endif %}
+      <div class="ocr-page__text">
+        <div class="ocr-page__head">
+          <span class="label">Page {{ item.number }}</span>
+          {% if item.text %}<button class="text-button" type="button" data-copy-from="{{ job.id }}-text-{{ item.number }}">{{ icon("copy", size="sm") }} Copy</button>{% endif %}
+        </div>
+        {% if item.text %}
+        <p class="ocr-part ocr-plain" id="{{ job.id }}-text-{{ item.number }}">{{ item.text }}</p>
+        {% else %}
+        <p class="muted ocr-part">The model returned no text for this page.</p>
+        {% endif %}
+      </div>
+    </section>
+    {% endfor %}
+  </div>
+
+  <div class="stack">
+    <h4 class="label">Model used, for citation</h4>
+    {{ spec([("Model", run.model.citation()), ("Prompt", run.prompt or "(none)")], mono=true) }}
+    <p class="muted"><a href="{{ run.model.url }}" target="_blank" rel="noopener noreferrer">The model's page on Hugging Face {{ icon("arrow-up-right", size="sm") }}</a>. A model can leave out or invent text: check it against the page. The same is in <code>model_used.txt</code> in the Everything download.</p>
+  </div>
+</div>

@@ -2,11 +2,13 @@
 
 import io
 import json
+import threading
 import zipfile
 
 import pytest
 from PIL import Image
 
+from textlab.common.progress import CancelledError
 from textlab.common.storage import Workspace
 from textlab.features.handwriting import service
 from textlab.features.handwriting.models import HandwritingModel
@@ -27,10 +29,11 @@ def workspace(tmp_path, monkeypatch):
 @pytest.fixture
 def workers(monkeypatch):
     """Fake workers: two lines per page; each line read as its crop name."""
-    calls = {"detect": [], "recognize": []}
+    calls = {"detect": [], "recognize": [], "cancel": []}
 
-    def detect(images, *, on_progress):
+    def detect(images, *, on_progress, cancel=None):
         calls["detect"].append(list(images))
+        calls["cancel"].append(cancel)
         on_progress(service.Progress("Finding lines...", 1.0))
         two_lines = [
             [[10, 60], [300, 60], [300, 90], [10, 90]],
@@ -38,8 +41,9 @@ def workers(monkeypatch):
         ]
         return [two_lines for _ in images]
 
-    def recognize(crops, spec, *, on_progress):
+    def recognize(crops, spec, *, on_progress, cancel=None):
         calls["recognize"].append((list(crops), spec))
+        calls["cancel"].append(cancel)
         for crop in crops:
             assert crop.exists()
         on_progress(service.Progress("Reading lines...", 1.0))
@@ -102,7 +106,7 @@ def test_a_page_without_lines_skips_recognition(
     workspace, workers, monkeypatch
 ):
     monkeypatch.setattr(
-        service, "detect_lines", lambda images, on_progress: [[]]
+        service, "detect_lines", lambda images, on_progress, cancel: [[]]
     )
     run = service.transcribe_document(
         "blank.png", png(), service.HandwritingOptions(model="test-model")
@@ -123,6 +127,11 @@ def test_a_batch_mirrors_the_archive(workspace, workers):
         buffer, service.HandwritingOptions(model="test-model")
     )
     assert (result.files, result.lines) == (3, 6)
+    assert [(item.name, item.pages, item.lines) for item in result.items] == [
+        ("b.png", 1, 2),
+        ("box1/a.jpg", 1, 2),
+        ("box1/a.png", 1, 2),
+    ]
     # One worker run each for the whole batch.
     assert len(workers["detect"]) == 1 and len(workers["detect"][0]) == 3
     assert len(workers["recognize"]) == 1
@@ -156,3 +165,71 @@ def test_progress_of_a_step_is_mapped_onto_its_share():
         ("half", pytest.approx(0.4)),
         ("unknown", None),
     ]
+
+
+def test_the_workers_are_given_the_cancel_event(workspace, workers):
+    cancel = threading.Event()
+    service.transcribe_document(
+        "a.png",
+        png(),
+        service.HandwritingOptions(model="test-model"),
+        cancel=cancel,
+    )
+    assert workers["cancel"] == [cancel, cancel]
+
+
+def test_a_cancelled_run_stops_before_the_next_step(workspace, workers):
+    cancel = threading.Event()
+    cancel.set()
+    with pytest.raises(CancelledError):
+        service.transcribe_document(
+            "a.png",
+            png(),
+            service.HandwritingOptions(model="test-model"),
+            cancel=cancel,
+        )
+    assert workers["detect"] == []
+    assert not any(workspace.dir(service.WORKSPACE_AREA).iterdir())
+
+
+def test_a_transcription_is_saved_with_its_page_images_and_lines(
+    workspace, workers, tmp_path
+):
+    run = service.transcribe_document(
+        "letter.tif",
+        png(width=4000, height=1200),
+        service.HandwritingOptions(model="test-model", previews=False),
+    )
+    out = tmp_path / "out"
+    out.mkdir()
+    saved = service.save_transcription(run, out)
+    assert [(item.name, item.listed) for item in saved.files] == [
+        ("letter_handwriting.zip", True),
+        ("letter.txt", True),
+        ("letter.json", True),
+        ("letter_page-0001.jpg", False),
+    ]
+    (page,) = saved.pages
+    # The image is scaled down for display; the boxes stay in the full
+    # page's pixels, which the outlines are drawn in.
+    assert Image.open(out / page.image).size == (1600, 480)
+    assert (page.width, page.height) == (4000, 1200)
+    assert [(line.id, line.number) for line in page.lines] == [
+        ("p1-l1", 1),
+        ("p1-l2", 2),
+    ]
+    assert page.lines[0].box == (10, 60, 290, 30)
+    assert page.text == "line-000000\nline-000001"
+    assert saved.lines == 2 and saved.model == "Test model"
+    assert saved.models[0][0] == "Line detection"
+    assert saved.models[1] == (
+        "Text recognition",
+        "org/adapter (LoRA adapter on org/base)",
+    )
+
+
+def test_models_are_named_for_people():
+    assert service.cited_models({"recognition": "x", "other": "y"}) == (
+        ("Text recognition", "x"),
+        ("other", "y"),
+    )

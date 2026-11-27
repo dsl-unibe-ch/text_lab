@@ -3,12 +3,14 @@
 import io
 import json
 import sys
+import threading
 import zipfile
 
 import pytest
 from PIL import Image
 
 from textlab.common import jobs
+from textlab.common.progress import CancelledError
 from textlab.common.storage import Workspace
 from textlab.features.hf_ocr import service
 
@@ -94,6 +96,11 @@ def test_a_batch_mirrors_the_archive_with_one_worker_run(
     buffer.seek(0)
     result = service.read_batch(buffer, OPTIONS)
     assert (result.files, result.pages) == (2, 2)
+    assert [(item.name, item.pages) for item in result.items] == [
+        ("b.png", 1),
+        ("box1/a.png", 1),
+    ]
+    assert result.items[0].characters == len("page-0001.png")
     assert len(worker_calls) == 1
     assert len(worker_calls[0]["request"]["images"]) == 2
     names = names_in(result.zip_bytes)
@@ -164,3 +171,53 @@ def test_the_worker_interpreter_can_be_overridden(
         "/env/bin/python",
         sys.executable,
     ]
+
+
+def test_the_worker_is_given_the_cancel_event(workspace, worker_calls):
+    cancel = threading.Event()
+    service.read_document("a.png", png(), OPTIONS, cancel=cancel)
+    assert worker_calls[0]["cancel"] is cancel
+
+
+def test_a_cancelled_batch_stops_before_the_worker(workspace, worker_calls):
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("a.png", png())
+    buffer.seek(0)
+    cancel = threading.Event()
+    cancel.set()
+    with pytest.raises(CancelledError):
+        service.read_batch(buffer, OPTIONS, cancel=cancel)
+    assert worker_calls == []
+
+
+def test_a_run_is_saved_with_its_page_images(
+    workspace, worker_calls, tmp_path
+):
+    run = service.read_document("letter.png", png(), OPTIONS)
+    out = tmp_path / "out"
+    out.mkdir()
+    saved = service.save_run(run, out)
+    assert [(item.name, item.listed) for item in saved.files] == [
+        ("letter_hf_ocr.zip", True),
+        ("letter.txt", True),
+        ("letter.json", True),
+        ("letter_page-0001.png", False),
+    ]
+    (page,) = saved.pages
+    assert (page.number, page.text) == (1, "page-0001.png")
+    assert (page.width, page.height) == (60, 40)
+    assert saved.model.citation() == "org/model (revision r1)"
+    assert saved.prompt == "Read."
+    assert json.loads((out / "letter.json").read_text())["prompt"] == "Read."
+
+
+def test_the_users_model_folder_is_reached_through_the_service(
+    worker_calls, tmp_path
+):
+    folder = tmp_path / "models" / "models--org--model"
+    folder.mkdir(parents=True)
+    (folder / "weights").write_bytes(b"x" * 10)
+    assert service.stored_models() == [service.StoredModel("org/model", 10)]
+    assert service.delete_model("org/model")
+    assert service.stored_models() == []
