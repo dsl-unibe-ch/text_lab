@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "components/macros.html" import notice, section_head, spec with context %}
+{% from "components/macros.html" import section_head, spec with context %}
 {% block title %}Home{% endblock %}
 {% block content %}
 <section class="intro" aria-labelledby="intro-title">
@@ -15,13 +15,6 @@
     ("Results", "Kept until you remove them or the session ends. Download what you need."),
   ]) }}
 </section>
-
-{% if unfinished %}
-{% call notice("info", "The new Text Lab, under construction") %}
-<p>This interface replaces the current one page by page. Tools marked
-<em>Soon</em> are not built here yet: use the current interface for them.</p>
-{% endcall %}
-{% endif %}
 
 <section class="section" aria-labelledby="tools-title">
   {{ section_head("Tools", "Eight tools, by what they work on", id="tools-title") }}
@@ -50,11 +43,4 @@
     <a href="https://listserv.unibe.ch/mailman/listinfo/text-lab-announcement.dsl" target="_blank" rel="noopener">Subscribe {{ icon("arrow-up-right", size="sm") }}</a>
   </div>
 </section>
-
-{% if settings.dev %}
-<section class="section" aria-labelledby="dev-title">
-  {{ section_head("Developer pages", "TEXT_LAB_WEB_DEV is set", id="dev-title") }}
-  <p class="muted">The component gallery, the mockups and a demo job: see the <a href="{{ root }}/dev">overview</a>.</p>
-</section>
-{% endif %}
 {% endblock %}

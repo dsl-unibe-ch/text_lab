@@ -12,7 +12,6 @@ In a sandbox app, set in `template/dev.env`:
 ```bash
 TEXT_LAB_SRC="$HOME/ondemand/dev/text_lab/src"
 TEXT_LAB_UI=web
-export TEXT_LAB_WEB_DEV=1   # the developer pages under /dev
 ```
 
 Launch the sandbox app and press **Connect to Text Lab**: the button posts
@@ -32,9 +31,9 @@ port, base path (`/node/<host>/<port>/`) and the portal's host name;
 | `jobs.py` | The job runner (one job at a time, GPU release at start, cancelling), job cards, downloads, the event stream |
 | `uploads.py` | Reading forms with files, checking them, saving them into a job |
 | `render.py` | Templates, icons, links from the base path, number formats, Markdown from models (`markdown()`, also a template filter: raw HTML escaped, no images) |
-| `settings.py` | The server's settings (`TOKEN`, `USER`, `TEXT_LAB_WEB_DEV`) |
-| `pages/` | One module per page (`home`, `transcription`, `meeting_notes`, `translation`, `ocr` with its tools `ocr_handwriting` and `ocr_huggingface` in modules of their own, `topic_modeling` with its charts in `topic_charts`, `chat`, `visualize_data`, `knowledge_graph`, `placeholder` for tools not built yet (none now), `dev`), and `TOOLS`, the navigation |
-| `templates/` | `base.html` (layout), `components/macros.html`, `components/player.html` (the audio player) and `components/analysis.html` (the data agents' charts and statistics), `jobs/`, one folder per page (`pages/` for Home and the placeholders, `transcription/`, `meeting_notes/`, `translation/`, `ocr/`, `topic_modeling/`, `chat/`, `visualize_data/`, `knowledge_graph/`); `mockups/` and `dev/` for the developer pages |
+| `settings.py` | The server's settings (`TOKEN`, `USER`, `SLURM_JOB_END_TIME`) |
+| `pages/` | One module per page (`home`, `transcription`, `meeting_notes`, `translation`, `ocr` with its tools `ocr_handwriting` and `ocr_huggingface` in modules of their own, `topic_modeling` with its charts in `topic_charts`, `chat`, `visualize_data`, `knowledge_graph`), and `TOOLS`, the navigation |
+| `templates/` | `base.html` (layout), `components/macros.html`, `components/player.html` (the audio player) and `components/analysis.html` (the data agents' charts and statistics), `jobs/`, one folder per page (`pages/` for Home, `transcription/`, `meeting_notes/`, `translation/`, `ocr/`, `topic_modeling/`, `chat/`, `visualize_data/`, `knowledge_graph/`) |
 | `static/` | `css/` (`fonts.css`, `tokens.css`, `layout.css`, `components.css`), `js/` (`app.js`, `theme.js`), `vendor/` (htmx, IBM Plex fonts, Lucide icons; see its README) |
 
 ### Links
@@ -282,10 +281,6 @@ steps, jobs are records in a ledger, downloads are file listings. Keep to
 these patterns, and to the tokens in `static/css/tokens.css`, rather than
 adding cards, shadows or icons.
 
-The developer pages (`/dev`, with `TEXT_LAB_WEB_DEV=1`) show the component
-gallery, the mockups of pages before they are built (removed once a page
-exists), and a demo job that runs through the job runner without a model.
-
 ### The audio player
 
 The macros in `templates/components/player.html` make a player: `controls`
@@ -373,8 +368,8 @@ table.
 
 `tests/` here, run with the other tests (see `docs/dev/testing.md`):
 login and CSRF (`test_auth.py`), pages, headers and errors (`test_app.py`),
-the job runner (`test_jobs.py`), jobs through the web with the demo job
-(`test_job_pages.py`), uploads (`test_uploads.py`), the Transcription page
+the job runner (`test_jobs.py`), jobs through the web with a demo job
+that only the tests serve (`demo_job.py`, `test_job_pages.py`), uploads (`test_uploads.py`), the Transcription page
 and Home with a faked backend (`test_transcription_page.py`), Meeting Notes
 with a faked model (`test_meeting_notes_page.py`), Translation with
 faked models and the real service (`test_translation_page.py`), OCR with

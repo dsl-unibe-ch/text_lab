@@ -301,14 +301,6 @@ code {
   background: var(--red);
 }
 
-.index__soon {
-  color: var(--ink-3);
-  font-family: var(--font-mono);
-  font-size: 0.625rem;
-  letter-spacing: var(--tracking-label);
-  text-transform: uppercase;
-}
-
 .sidebar__foot {
   display: grid;
   gap: var(--space-1);

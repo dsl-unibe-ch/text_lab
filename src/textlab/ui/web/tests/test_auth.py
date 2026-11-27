@@ -14,10 +14,10 @@ from textlab.ui.web.tests.conftest import (
 
 
 def test_pages_send_a_browser_without_login_to_the_login(anonymous):
-    response = anonymous.get(f"{BASE}/dev/demo")
+    response = anonymous.get(f"{BASE}/transcription")
     assert response.status_code == 303
     assert response.headers["location"] == (
-        f"{BASE}/login?next={quote(f'{BASE}/dev/demo')}"
+        f"{BASE}/login?next={quote(f'{BASE}/transcription')}"
     )
 
 
@@ -66,7 +66,7 @@ def test_a_non_ascii_password_is_refused_not_an_error(anonymous):
 
 
 def test_login_returns_to_the_page_asked_for(anonymous):
-    target = f"{BASE}/dev/demo"
+    target = f"{BASE}/transcription"
     response = anonymous.post(
         f"{BASE}/login", data={"password": PASSWORD, "next": target}
     )
@@ -177,7 +177,7 @@ def test_requests_of_another_user_are_refused(anonymous):
 
 def test_every_route_but_the_login_needs_a_session(settings, app):
     anonymous = make_client(app)
-    routers = [auth.router, jobs.router, *pages.routers(settings)]
+    routers = [auth.router, jobs.router, *pages.routers()]
     checked = 0
     for router in routers:
         for route in router.routes:

@@ -7,8 +7,6 @@ page modules, checked by ``tests/test_rules.py``:
   only the names they export in ``__all__``.
 - Keep processing out of routes and templates: what a page needs beyond
   calling the service goes into the service.
-- Mark a tool ``ready`` in :data:`TOOLS` once its page replaces the
-  Streamlit page.
 """
 
 from __future__ import annotations
@@ -16,8 +14,6 @@ from __future__ import annotations
 import dataclasses
 
 from fastapi import APIRouter
-
-from textlab.ui.web.settings import WebSettings
 
 
 @dataclasses.dataclass(frozen=True)
@@ -31,8 +27,6 @@ class Tool:
         group: What the tool works on, which groups the navigation:
             ``"Audio"``, ``"Documents"``, ``"Text"`` or ``"Data"``.
         summary: What the tool does, in one sentence.
-        ready: Whether the page exists in the web UI. Pages that do not
-            show a placeholder.
     """
 
     id: str
@@ -40,7 +34,6 @@ class Tool:
     path: str
     group: str
     summary: str
-    ready: bool = False
 
     @property
     def number(self) -> str:
@@ -57,7 +50,6 @@ TOOLS: tuple[Tool, ...] = (
         "Audio",
         "Turn recordings into text, with timestamps and the speakers told "
         "apart.",
-        ready=True,
     ),
     Tool(
         "meeting_notes",
@@ -65,7 +57,6 @@ TOOLS: tuple[Tool, ...] = (
         "/meeting-notes",
         "Audio",
         "Transcribe a meeting and get a summary that cites the recording.",
-        ready=True,
     ),
     Tool(
         "ocr",
@@ -74,7 +65,6 @@ TOOLS: tuple[Tool, ...] = (
         "Documents",
         "Read the text in scans, photos and PDFs, historic handwriting "
         "included.",
-        ready=True,
     ),
     Tool(
         "knowledge_graph",
@@ -82,7 +72,6 @@ TOOLS: tuple[Tool, ...] = (
         "/knowledge-graph",
         "Documents",
         "Map the topics of a set of research papers and how they connect.",
-        ready=True,
     ),
     Tool(
         "translation",
@@ -90,7 +79,6 @@ TOOLS: tuple[Tool, ...] = (
         "/translation",
         "Text",
         "Translate text and documents between more than 200 languages.",
-        ready=True,
     ),
     Tool(
         "chat",
@@ -98,7 +86,6 @@ TOOLS: tuple[Tool, ...] = (
         "/chat",
         "Text",
         "Ask a language model questions, about your own documents too.",
-        ready=True,
     ),
     Tool(
         "topic_modeling",
@@ -106,7 +93,6 @@ TOOLS: tuple[Tool, ...] = (
         "/topic-modeling",
         "Text",
         "Find the themes that run through a large set of texts.",
-        ready=True,
     ),
     Tool(
         "visualize_data",
@@ -114,12 +100,11 @@ TOOLS: tuple[Tool, ...] = (
         "/visualize-data",
         "Data",
         "Describe the chart you need and get it drawn from your data.",
-        ready=True,
     ),
 )
 
 #: Paths of pages that are not tools, by page id.
-OTHER_PAGES = {"home": "/", "demo": "/dev/demo"}
+OTHER_PAGES = {"home": "/"}
 
 
 def tool_groups() -> list[tuple[str, list[Tool]]]:
@@ -171,33 +156,27 @@ def page_label(page_id: str) -> str:
     return page_id.replace("_", " ").capitalize()
 
 
-def routers(settings: WebSettings) -> list[APIRouter]:
+def routers() -> list[APIRouter]:
     """Return the routers of all pages.
-
-    Args:
-        settings: The app's settings; the developer pages are included
-            only when ``settings.dev`` is set.
 
     Returns:
         The routers.
     """
     from textlab.ui.web.pages import (
         chat,
-        dev,
         home,
         knowledge_graph,
         meeting_notes,
         ocr,
         ocr_handwriting,
         ocr_huggingface,
-        placeholder,
         topic_modeling,
         transcription,
         translation,
         visualize_data,
     )
 
-    result = [
+    return [
         home.router,
         transcription.router,
         meeting_notes.router,
@@ -209,8 +188,4 @@ def routers(settings: WebSettings) -> list[APIRouter]:
         chat.router,
         topic_modeling.router,
         visualize_data.router,
-        placeholder.router,
     ]
-    if settings.dev:
-        result.append(dev.router)
-    return result

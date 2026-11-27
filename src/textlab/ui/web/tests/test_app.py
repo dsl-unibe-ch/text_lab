@@ -16,14 +16,9 @@ from textlab.ui.web.render import (
 )
 from textlab.ui.web.settings import WebSettings
 from textlab.ui.web.tests.conftest import BASE, PASSWORD, UPLOAD_LIMIT
+from textlab.ui.web.tests.demo_job import PATH
 
-PAGES = [
-    "/",
-    *(tool.path for tool in TOOLS),
-    "/dev",
-    "/dev/components",
-    "/dev/demo",
-]
+PAGES = ["/", *(tool.path for tool in TOOLS)]
 
 
 @pytest.mark.parametrize("path", PAGES)
@@ -119,16 +114,12 @@ def test_errors_of_htmx_requests_are_notices(client):
     assert "<nav" not in response.text
 
 
-def test_developer_pages_are_left_out_unless_turned_on(runner):
-    settings = WebSettings(token=PASSWORD, base_path=BASE, dev=False)
-    client = TestClient(
-        create_app(settings, runner=runner),
-        base_url="https://testserver",
-        follow_redirects=False,
-    )
-    client.post(f"{BASE}/login", data={"password": PASSWORD})
+def test_the_home_page_names_no_unfinished_or_developer_pages(client):
+    page = client.get(f"{BASE}/").text
+    for text in ("under construction", "Soon", "/dev", "Developer"):
+        assert text not in page
+    assert client.get(f"{BASE}/dev").status_code == 404
     assert client.get(f"{BASE}/dev/demo").status_code == 404
-    assert "/dev/components" not in client.get(f"{BASE}/").text
 
 
 def test_unexpected_errors_show_an_error_id(settings, runner):
@@ -150,7 +141,7 @@ def test_unexpected_errors_show_an_error_id(settings, runner):
 def test_requests_over_the_upload_limit_are_refused(client):
     headers = {"X-CSRF-Token": client.csrf, "HX-Request": "true"}
     response = client.post(
-        f"{BASE}/dev/demo",
+        f"{BASE}{PATH}",
         files={"file": ("big.bin", bytes(UPLOAD_LIMIT + 1))},
         data={"seconds": "1"},
         headers=headers,
@@ -176,7 +167,7 @@ def test_bodies_without_a_size_are_counted(client):
         for _ in range(UPLOAD_LIMIT // len(chunk) + 2):
             yield chunk
 
-    response = client.post(f"{BASE}/dev/demo", content=body(), headers=headers)
+    response = client.post(f"{BASE}{PATH}", content=body(), headers=headers)
     assert response.status_code == 413
 
 

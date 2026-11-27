@@ -1,6 +1,10 @@
 """Fixtures for the web UI's tests: an app under a session's base path, a
 job runner with a fake GPU release, clients with and without login, and a
-fake transcription backend."""
+fake transcription backend.
+
+The test app also serves the demo job of ``demo_job.py``, which the tests
+of the job pages and of the app run instead of a feature's job.
+"""
 
 import re
 import time
@@ -13,10 +17,11 @@ from textlab.common import storage
 from textlab.common.config import get_settings
 from textlab.common.storage import Workspace
 from textlab.features.transcription import service as transcription
-from textlab.ui.web import auth
+from textlab.ui.web import auth, pages
 from textlab.ui.web.app import create_app
 from textlab.ui.web.jobs import JobRunner
 from textlab.ui.web.settings import WebSettings
+from textlab.ui.web.tests import demo_job
 
 BASE = "/node/gnode99.example.org/31234"
 PASSWORD = "Correct7Horse8Battery"
@@ -84,12 +89,15 @@ def settings():
         owner=OWNER,
         public_host=PORTAL,
         upload_limit=UPLOAD_LIMIT,
-        dev=True,
     )
 
 
 @pytest.fixture
-def app(settings, runner):
+def app(settings, runner, monkeypatch):
+    routers = pages.routers
+    monkeypatch.setattr(
+        pages, "routers", lambda: [*routers(), demo_job.router]
+    )
     return create_app(settings, runner=runner)
 
 

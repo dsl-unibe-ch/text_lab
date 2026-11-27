@@ -144,7 +144,7 @@ in your sandbox checkout and set what you want to test:
 | Your code and a changed `site.env` | `TEXT_LAB_SRC`, `TEXT_LAB_SITE_ENV` (the repository's `deploy/site.env`) | |
 | A new image with the released code | `TL_CONTAINER` | `TEXT_LAB_SRC` |
 | A new image with your code | `TEXT_LAB_SRC`, `TL_CONTAINER` | |
-| The web UI | `TEXT_LAB_UI=web`, and `export TEXT_LAB_WEB_DEV=1` for its developer pages (component gallery, mockups, demo job) | |
+| The web UI | `TEXT_LAB_UI=web` | |
 | Exactly what production runs (before a release goes live) | Nothing: remove `dev.env` | Everything |
 
 Open OnDemand copies `template/` into the session's job folder, and
@@ -291,6 +291,7 @@ HPC team. The redeployment changes:
 | `template/before.sh.erb` | Sets `text_lab_ui`, the interface the configuration names |
 | `submit.yml.erb` | Passes `text_lab_ui` to the session card (`conn_params`) |
 | `view.html.erb` | For the web UI, *Connect* posts the password to the app's login; for Streamlit, the card is as before |
+| `form.yml` | *Email on start* under the job time: Open OnDemand's `bc_email_on_started`, a Slurm mail when the session starts. It does not depend on the interface |
 
 With `TEXT_LAB_UI` unset or `streamlit`, users see no difference: the same
 Streamlit app with the same options, the same card, the same

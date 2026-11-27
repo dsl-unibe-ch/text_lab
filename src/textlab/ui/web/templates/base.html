@@ -45,24 +45,11 @@
           <li>
             <a class="index__link" href="{{ root }}{{ tool.path }}"{% if current_path.startswith(tool.path) %} aria-current="page"{% endif %}>
               <span class="index__num">{{ tool.number }}</span><span class="index__name">{{ tool.label }}</span>
-              {% if not tool.ready %}<span class="index__soon">Soon</span>{% endif %}
             </a>
           </li>
           {% endfor %}
         </ul>
         {% endfor %}
-        {% if settings.dev %}
-        <p class="label index__group">Developer</p>
-        <ul class="index__list">
-          {% for label, path in [("Overview", "/dev"), ("Components", "/dev/components"), ("Demo job", "/dev/demo")] %}
-          <li>
-            <a class="index__link" href="{{ root }}{{ path }}"{% if current_path == path %} aria-current="page"{% endif %}>
-              <span class="index__num">D{{ loop.index }}</span><span class="index__name">{{ label }}</span>
-            </a>
-          </li>
-          {% endfor %}
-        </ul>
-        {% endif %}
       </nav>
       <div class="sidebar__foot">
         <a href="https://text-lab.dsl.unibe.ch/" target="_blank" rel="noopener">Guide {{ icon("arrow-up-right", size="sm") }}</a>

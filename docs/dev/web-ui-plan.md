@@ -8,12 +8,13 @@
     [Phase 1 progress](#phase-1-progress)). Phase 2, the pilot, was tried
     in the sandbox and committed on 27 November (see
     [Phase 2 progress](#phase-2-progress)). Phase 3 started with Meeting
-    Notes; Translation, OCR and Topic Modeling followed, each tried in the
-    sandbox and committed, and Chat was built on 27 November (see
-    [Phase 3 progress](#phase-3-progress)). The work happens on the local
-    branch `feat/web-ui`, one commit per phase or page, and reaches `main`
-    when the whole UI is done. Update this page when a phase ends or a
-    decision changes.
+    Notes; every page followed, each tried in the sandbox and committed,
+    the last, Knowledge Graph, on 27 November, followed by a
+    [clean-up](#clean-up-before-the-switch) (see
+    [Phase 3 progress](#phase-3-progress)). Next is phase 4, the switch.
+    The work happens on the local branch `feat/web-ui`, one commit per
+    phase or page, and reaches `main` when the whole UI is done. Update
+    this page when a phase ends or a decision changes.
 
 Text Lab's user interface moves from Streamlit to a web UI built with
 [FastAPI](https://fastapi.tiangolo.com/), Jinja2 templates and
@@ -225,9 +226,7 @@ Rules, checked by tests as for the Streamlit pages today:
   rollbacks keep working. The *Connect* change goes into the same
   redeploy; [Deployment](deployment.md#the-launcher-and-the-connect-button)
   lists the files and the order.
-- **Sandbox**: `TEXT_LAB_UI=web` in `template/dev.env` shows the new UI,
-  and `export TEXT_LAB_WEB_DEV=1` its developer pages under `/dev`: the
-  component gallery, the mockups and a demo job.
+- **Sandbox**: `TEXT_LAB_UI=web` in `template/dev.env` shows the new UI.
 - **The switch**: the release with the whole UI, the HPC redeploy of its
   Open OnDemand files, then `TEXT_LAB_UI=web` in the live `site.env`.
   Rolling back means setting it back, without another redeploy.
@@ -242,7 +241,7 @@ Rules, checked by tests as for the Streamlit pages today:
 | 0. Spike (done) | A minimal FastAPI app in the sandbox, behind the Open OnDemand proxy: base path, login cookie, SSE progress, a 2 GB upload streamed to the workspace, a download | All of it works, or a fallback is chosen (HTMX polling every second instead of SSE) |
 | 1. Foundation (done) | The launcher and the redeployment files (deployed at the switch). In `ui/web/`: app factory, login, CSRF, CSP, layout, design system and components, job runner (queue, SSE, cancelling), upload and download helpers, error pages, test harness. Mockups of Home and Transcription | An empty app with login, navigation and a demo job runs in the sandbox, with tests, and the mockups are agreed |
 | 2. Pilot (done) | Home and Transcription: a recording or a ZIP batch, language and model, voice activity detection, speaker identification with speaker counts, the audio player with word highlighting, every download | Everything the Streamlit page does works, with tests, and the UI test passes |
-| 3. Pages (in progress) | One commit each, in this order: Meeting Notes, Translation, OCR (one page with a switcher, one commit per tool: Standard (the automatic pipeline), Choose an engine (the legacy engines), then historic handwriting and Hugging Face models together; survey extraction left out), Topic Modeling, Chat, Visualize Data, Knowledge Graph | As in phase 2, with the page's user guide drafted |
+| 3. Pages (done) | One commit each, in this order: Meeting Notes, Translation, OCR (one page with a switcher, one commit per tool: Standard (the automatic pipeline), Choose an engine (the legacy engines), then historic handwriting and Hugging Face models together; survey extraction left out), Topic Modeling, Chat, Visualize Data, Knowledge Graph | As in phase 2, with the page's user guide drafted |
 | 4. Switch | The branch merged into `main`; the new user guide replaces the old one; a release, the HPC redeploy, `TEXT_LAB_UI=web` in production | Users work in the new UI; Streamlit can still be selected as a rollback |
 | 5. Removal | `ui/streamlit/` and its tests are removed; Streamlit leaves the image | One release after the switch, without a rollback |
 
@@ -326,7 +325,8 @@ Built on 26 November 2026, with tests (`src/textlab/ui/web/tests/`,
   (`exclusive()`); the event stream and the job cards.
 - Error pages and notices, with an error id for unexpected errors.
 - Developer pages under `/dev`: the component gallery, the mockups of Home
-  and Transcription, and a demo job.
+  and Transcription, and a demo job. Removed before the switch (see
+  [Clean-up before the switch](#clean-up-before-the-switch)).
 
 The mockups were agreed on 27 November, with their choices: the language
 is detected in the job, from the recording's first 30 seconds, instead of
@@ -350,8 +350,7 @@ Built on 27 November 2026, with tests
 
 - **Home** (`pages/home.py`): what Text Lab is, the tools, the session's
   jobs (updated live from the page's event stream) and where to get help.
-  A notice says which tools are not built yet; it goes away by itself when
-  every tool is `ready`.
+  A notice said which tools were not built yet, until every tool was.
 - **Transcription** (`pages/transcription.py`), with the three uses of the
   Streamlit page:
     - *One recording*: a job that prepares the recording for the browser
@@ -919,12 +918,28 @@ feature's new parts in `features/knowledge_graph/tests/test_projects.py`):
   `build_corpus` and `extract_topics` can be stopped between papers, and a
   stopped or failed topic extraction leaves no partial file. The Streamlit
   page works as before.
-- With this page every tool is in the web UI: Home's "under construction"
-  notice is gone, and the placeholder page serves no tool.
+- With this page every tool is in the web UI.
 - The guide's draft: `docs/next/knowledge_graph.md`.
 
-Still to do: try it in the sandbox; then commit. Phase 3 is then done;
-next, phase 4: the switch.
+Tried in the sandbox and committed on 27 November. Phase 3 is done.
+
+### Clean-up before the switch
+
+Done on 27 November, before phase 4:
+
+- **Nothing left from the building work**: the developer pages under
+  `/dev` (component gallery, mockups, demo job), `TEXT_LAB_WEB_DEV`, the
+  placeholder page and the `ready` flag of the tools with its *Soon* marks
+  and Home's "under construction" notice are removed, with their styles.
+  The demo job lives on in the tests only (`tests/demo_job.py`), for the
+  tests of the job runner through the web.
+- **Email on start**: a box under the job time on the launch form
+  (`form.yml`), Open OnDemand's `bc_email_on_started`: Slurm mails the user
+  when the session starts. It goes out with the redeployment of the Open
+  OnDemand files, for both interfaces. The launch guide's draft is
+  `docs/next/launch.md`.
+
+Next, phase 4: the switch.
 
 ## Testing
 

@@ -318,7 +318,7 @@ def create_pages(settings: WebSettings, runner: jobs.JobRunner) -> FastAPI:
     app.mount("/static", StaticAssets(directory=STATIC_DIR), name="static")
     app.include_router(auth.router)
     app.include_router(jobs.router)
-    for router in pages.routers(settings):
+    for router in pages.routers():
         app.include_router(router)
     install_error_handlers(app)
     return app

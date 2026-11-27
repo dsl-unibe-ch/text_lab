@@ -24,20 +24,13 @@ def test_settings_come_from_the_launcher_and_the_environment():
         base_path="/node/n/1/",
         public_host=" portal.example.org ",
         upload_limit=123,
-        environ={"TOKEN": "secret", "USER": "alice", "TEXT_LAB_WEB_DEV": "1"},
+        environ={"TOKEN": "secret", "USER": "alice"},
     )
     assert settings.token == "secret"
     assert settings.owner == "alice"
     assert settings.base_path == "/node/n/1"
     assert settings.public_host == "portal.example.org"
     assert settings.upload_limit == 123
-    assert settings.dev
-
-
-@pytest.mark.parametrize("value", ["", "0", "no", "false"])
-def test_developer_pages_are_off_unless_asked_for(value):
-    environ = {"TOKEN": "secret", "TEXT_LAB_WEB_DEV": value}
-    assert not WebSettings.from_env(environ=environ).dev
 
 
 def test_a_missing_password_stops_the_server():

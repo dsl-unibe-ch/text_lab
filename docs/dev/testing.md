@@ -12,9 +12,10 @@
   (`test_launch.py`).
 - **Web UI tests** live in `src/textlab/ui/web/tests/`. They call the
   routes with FastAPI's test client, logged in or not: login, CSRF tokens,
-  every page, jobs from submission to download (with the developer pages'
-  demo job, which needs no model), uploads, and rules for the templates
-  and static files (no inline scripts or styles, every icon vendored).
+  every page, jobs from submission to download (with a demo job that needs
+  no model and only the tests serve, `demo_job.py`), uploads, and rules
+  for the templates and static files (no inline scripts or styles, every
+  icon vendored).
 
 Shared code has its tests in `src/textlab/common/tests/`. Each `tests/`
 folder is a package (it has an `__init__.py`), so a test can import helpers

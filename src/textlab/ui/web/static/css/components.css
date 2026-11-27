@@ -4,8 +4,6 @@
  * records with their status and meter, file lists, specification lists,
  * tabs, the job indicator, and the parts of the Home, Transcription,
  * Translation and OCR pages.
- *
- * The developer page /dev/components shows each of them.
  */
 
 /* ---- Helpers ---------------------------------------------------------- */
@@ -172,24 +170,6 @@
 .btn--secondary:hover {
   background: var(--ink);
   color: var(--on-ink);
-}
-
-.btn--danger {
-  border-color: var(--red-text);
-  background: transparent;
-  color: var(--red-text);
-}
-
-.btn--danger:hover {
-  border-color: var(--red-button);
-  background: var(--red-button);
-  color: var(--on-red);
-}
-
-.btn--sm {
-  height: 2.25rem;
-  padding: 0 var(--space-4);
-  font-size: var(--text-sm);
 }
 
 .btn--lg {
@@ -495,27 +475,6 @@ legend {
   color: var(--ink-2);
   pointer-events: none;
   transform: translateY(-50%);
-}
-
-.input-group {
-  display: flex;
-}
-
-.input-group .input {
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
-}
-
-.input-group__suffix {
-  display: flex;
-  align-items: center;
-  padding: 0 var(--space-3);
-  border: var(--hairline) solid var(--rule-strong);
-  border-left: 0;
-  background: var(--tint);
-  color: var(--ink-2);
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
 }
 
 .inline-fields {
@@ -933,14 +892,6 @@ p.option__title {
     opacity: 0;
     transform: translateY(0.5rem);
   }
-}
-
-.mockup-banner {
-  margin: 0 0 var(--space-6);
-  padding: var(--space-2) var(--space-3);
-  border-left: 3px solid var(--amber);
-  background: var(--amber-wash);
-  color: var(--ink-2);
 }
 
 /* ---- Status, meter, records ------------------------------------------ */
@@ -1403,29 +1354,7 @@ p.option__title {
   color: var(--ink-3);
 }
 
-/* ---- Empty state, error page ----------------------------------------- */
-
-.empty {
-  display: grid;
-  gap: var(--space-2);
-  padding: var(--space-7) var(--space-6);
-  border: var(--hairline) solid var(--rule-strong);
-  background-color: var(--sheet);
-  background-image: repeating-linear-gradient(-45deg, var(--hatch) 0 1px, transparent 1px 9px);
-}
-
-.empty__title {
-  margin: 0;
-  font-size: var(--text-xl);
-  font-stretch: var(--condensed);
-  font-weight: 600;
-}
-
-.empty__text {
-  max-width: 52ch;
-  margin: 0;
-  color: var(--ink-2);
-}
+/* ---- Error page ------------------------------------------------------- */
 
 .error-page {
   display: grid;

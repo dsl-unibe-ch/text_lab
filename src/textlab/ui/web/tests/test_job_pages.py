@@ -1,12 +1,13 @@
 """Jobs through the web: submitting, live updates, cancelling, downloads.
 
-The developer page's demo job stands in for a feature's job.
+The tests' demo job (``demo_job.py``) stands in for a feature's job.
 """
 
 import re
 
 from textlab.ui.web.jobs import JobState
 from textlab.ui.web.tests.conftest import BASE, wait_for
+from textlab.ui.web.tests.demo_job import PAGE, PATH
 
 
 def htmx(client):
@@ -16,7 +17,7 @@ def htmx(client):
 def submit_demo(client, seconds=1, **fields):
     files = fields.pop("files", None)
     response = client.post(
-        f"{BASE}/dev/demo",
+        f"{BASE}{PATH}",
         data={"seconds": str(seconds), "outcome": "done", **fields},
         files=files,
         headers=htmx(client),
@@ -25,7 +26,7 @@ def submit_demo(client, seconds=1, **fields):
     return re.search(r'id="job-([0-9a-f]+)"', response.text).group(1)
 
 
-def read_events(client, page="demo"):
+def read_events(client, page=PAGE):
     """Read the page's event stream until it says idle."""
     events, name = [], None
     with client.stream("GET", f"{BASE}/events?page={page}") as response:
@@ -147,17 +148,17 @@ def test_the_stream_of_a_quiet_session_ends_at_once(client):
     assert [name for name, _ in events] == ["update", "idle"]
 
 
-def test_reloading_the_page_shows_its_jobs(client, runner):
+def test_home_lists_the_sessions_jobs(client, runner):
     job_id = submit_demo(client)
     wait_for(lambda: runner.get(job_id).state is JobState.DONE)
-    page = client.get(f"{BASE}/dev/demo").text
-    assert f'id="job-{job_id}"' in page
-    assert f'href="{BASE}/dev/demo#job-{job_id}"' in page
+    page = client.get(f"{BASE}/").text
+    assert f"#job-{job_id}" in page
+    assert "Demo job, 1 s" in page
 
 
 def test_invalid_values_are_explained(client):
     response = client.post(
-        f"{BASE}/dev/demo", data={"seconds": "0"}, headers=htmx(client)
+        f"{BASE}{PATH}", data={"seconds": "0"}, headers=htmx(client)
     )
     assert response.status_code == 422
     assert "Choose between 1 and" in response.text

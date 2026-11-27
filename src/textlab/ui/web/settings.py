@@ -10,9 +10,6 @@ from collections.abc import Mapping
 #: Largest request body by default: 10 GB, the Streamlit UI's limit.
 DEFAULT_UPLOAD_LIMIT = 10_000 * 1000 * 1000
 
-#: Values of ``TEXT_LAB_WEB_DEV`` that turn the developer pages on.
-TRUE_VALUES = {"1", "true", "yes", "on"}
-
 
 def normalize_base_path(path: str) -> str:
     """Return a base path with a leading and without a final slash.
@@ -44,7 +41,6 @@ class WebSettings:
             posted from a page of another origin is refused; empty turns
             the check off.
         upload_limit: Largest request body, in bytes.
-        dev: Whether the developer pages under ``/dev`` are served.
         session_end: When the Slurm job of the session ends (seconds since
             the epoch), or ``None`` if not known. Results are lost then, so
             the status bar shows it.
@@ -57,7 +53,6 @@ class WebSettings:
     owner: str = ""
     public_host: str = ""
     upload_limit: int = DEFAULT_UPLOAD_LIMIT
-    dev: bool = False
     session_end: float | None = None
     secret_key: bytes = dataclasses.field(
         default_factory=lambda: secrets.token_bytes(32), repr=False
@@ -89,9 +84,8 @@ class WebSettings:
     ) -> WebSettings:
         """Build the settings from the launcher's options and the environment.
 
-        Reads ``TOKEN`` (the session password), ``USER`` (the owner),
-        ``TEXT_LAB_WEB_DEV`` (the developer pages) and Slurm's
-        ``SLURM_JOB_END_TIME`` (the session's end).
+        Reads ``TOKEN`` (the session password), ``USER`` (the owner) and
+        Slurm's ``SLURM_JOB_END_TIME`` (the session's end).
 
         Args:
             base_path: The path the proxy serves the app under.
@@ -112,8 +106,6 @@ class WebSettings:
             owner=environ.get("USER", ""),
             public_host=public_host.strip(),
             upload_limit=upload_limit,
-            dev=environ.get("TEXT_LAB_WEB_DEV", "").strip().lower()
-            in TRUE_VALUES,
             session_end=_timestamp(environ.get("SLURM_JOB_END_TIME", "")),
         )
 

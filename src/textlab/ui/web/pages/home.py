@@ -8,7 +8,6 @@ from fastapi import Request
 from fastapi.responses import HTMLResponse
 
 from textlab.ui.web.auth import protected_router
-from textlab.ui.web.pages import TOOLS
 from textlab.ui.web.render import renderer
 
 router = protected_router()
@@ -29,6 +28,5 @@ def home(request: Request) -> HTMLResponse:
         request,
         "pages/home.html",
         page_id="home",
-        unfinished=not all(tool.ready for tool in TOOLS),
         now=time.time(),
     )
