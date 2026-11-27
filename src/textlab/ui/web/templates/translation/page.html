@@ -1,0 +1,205 @@
+{% extends "base.html" %}
+{% from "components/macros.html" import masthead, section_head, dropzone with context %}
+{% block title %}Translation{% endblock %}
+{% block content %}
+{% set tool = tools | selectattr("id", "equalto", page_id) | first %}
+{% set common_codes = common_languages | map(attribute="0") | list %}
+{{ masthead(tool.label, tool.summary, number=tool.number, kicker=tool.group, guide="https://text-lab.dsl.unibe.ch/translation/") }}
+
+{#- One form for both uses: the languages, the engine and the glossary are
+  shared; the switcher shows the editor or the documents' steps, and only
+  the shown part's controls are sent. Each part has its own submit button
+  with its own route. -#}
+<form class="sheet translator" id="translator" data-switch="mode" data-upload-form data-translator aria-label="Translate">
+  <div class="switcher" role="radiogroup" aria-label="What to translate">
+    <label class="switcher__option"><input type="radio" name="mode" value="text" checked><span>Text</span></label>
+    <label class="switcher__option"><input type="radio" name="mode" value="documents"><span>Documents</span></label>
+  </div>
+
+  <div class="langbar">
+    <div class="langbar__side">
+      <label class="label langbar__label" for="source">From</label>
+      <div class="select-wrap">
+        <select class="select langbar__select" id="source" name="source" data-source-language>
+          <option value="auto"{% if not saved.source %} selected{% endif %}>Detect language</option>
+          <optgroup label="Most used">
+            {% for code, name in common_languages %}<option value="{{ code }}"{% if code == saved.source %} selected{% endif %}>{{ name }}</option>{% endfor %}
+          </optgroup>
+          <optgroup label="All languages">
+            {% for code, name in all_languages %}<option value="{{ code }}"{% if code == saved.source and code not in common_codes %} selected{% endif %}>{{ name }}</option>{% endfor %}
+          </optgroup>
+        </select>
+        {{ icon("chevron-down", size="sm") }}
+      </div>
+    </div>
+    <button class="langbar__swap" type="button" data-swap-languages aria-label="Swap the languages" title="Swap the languages and translate back">{{ icon("arrow-left-right", size="sm") }}</button>
+    <div class="langbar__side">
+      <label class="label langbar__label" for="target">To</label>
+      <div class="select-wrap">
+        <select class="select langbar__select" id="target" name="target" data-target-language>
+          <optgroup label="Most used">
+            {% for code, name in common_languages %}<option value="{{ code }}"{% if code == saved.target %} selected{% endif %}>{{ name }}</option>{% endfor %}
+          </optgroup>
+          <optgroup label="All languages">
+            {% for code, name in all_languages %}<option value="{{ code }}"{% if code == saved.target and code not in common_codes %} selected{% endif %}>{{ name }}</option>{% endfor %}
+          </optgroup>
+        </select>
+        {{ icon("chevron-down", size="sm") }}
+      </div>
+    </div>
+  </div>
+
+  <div class="settings">
+    {% set chosen = engines | selectattr("0", "equalto", saved.backend) | first %}
+    <details class="setting" data-switch="backend">
+      <summary class="setting__summary">
+        <span class="label setting__name">Engine</span>
+        <span class="setting__value" id="engine-value">{{ chosen[1].name }}</span>
+        <span class="setting__change">Change</span>
+      </summary>
+      <div class="setting__body">
+        <fieldset class="field">
+          <legend class="visually-hidden">Engine</legend>
+          <div class="choices">
+            {% for key, backend, problem in engines %}
+            <label class="choice{% if problem %} choice--off{% endif %}">
+              <input class="radio" type="radio" name="backend" value="{{ key }}" data-readout="engine-value" data-readout-text="{{ backend.name }}"{% if key == saved.backend %} checked{% endif %}{% if problem %} disabled{% endif %}>
+              <span class="choice__title">{{ backend.name }}</span>
+              <span class="choice__text">{{ backend.description }}{% if problem %} <strong>{{ problem }}</strong>{% endif %}</span>
+            </label>
+            {% endfor %}
+          </div>
+        </fieldset>
+        <div class="form-grid" data-when="ollama"{% if saved.backend != "ollama" %} hidden{% endif %}>
+          <div class="field">
+            <label class="field__label" for="llm">Language model</label>
+            <div class="select-wrap">
+              <select class="select" id="llm" name="llm" aria-describedby="llm-help">
+                {% for model in models %}<option{% if model == saved.ollama_model or (not saved.ollama_model and loop.first) %} selected{% endif %}>{{ model }}</option>{% endfor %}
+              </select>
+              {{ icon("chevron-down", size="sm") }}
+            </div>
+            <p class="field__help" id="llm-help">Larger models translate better and take longer.</p>
+          </div>
+          <fieldset class="field">
+            <legend class="field__label">Formality</legend>
+            <div class="switcher switcher--inline">
+              {% for choice in formality %}
+              <label class="switcher__option"><input type="radio" name="formality" value="{{ choice }}"{% if choice == saved.formality %} checked{% endif %}><span>{{ choice | capitalize }}</span></label>
+              {% endfor %}
+            </div>
+            <p class="field__help">"Default" lets the model follow the text.</p>
+          </fieldset>
+        </div>
+      </div>
+    </details>
+
+    <details class="setting" data-glossary{% if saved.glossary %} open{% endif %}>
+      <summary class="setting__summary">
+        <span class="label setting__name">Glossary</span>
+        <span class="setting__value" data-glossary-count>{% if saved.glossary %}{{ saved.glossary | length }} term{{ "s" if saved.glossary | length != 1 }}{% else %}No terms{% endif %}</span>
+        <span class="setting__change">Edit</span>
+      </summary>
+      <div class="setting__body">
+        <p class="field__help">Names and terms that must come out a certain way. Longer terms are matched first, so "University of Bern" wins over "Bern". Links, code, equations and placeholders are always kept as they are.</p>
+        <div class="glossary" data-glossary-rows data-glossary-limit="{{ glossary_limit }}">
+          <p class="label glossary__head" aria-hidden="true"><span>Term</span><span></span><span>Always translated as</span><span></span></p>
+          {% for term, translation in saved.glossary %}{% include "translation/glossary_row.html" %}{% endfor %}
+          {% if not saved.glossary %}{% with term = "", translation = "" %}{% include "translation/glossary_row.html" %}{% endwith %}{% endif %}
+        </div>
+        <template data-glossary-template>{% with term = "", translation = "" %}{% include "translation/glossary_row.html" %}{% endwith %}</template>
+        <div class="cluster">
+          <button class="text-button" type="button" data-glossary-add>Add a term</button>
+          <label class="check"><input class="checkbox" type="checkbox" name="glossary_case" value="1"{% if saved.glossary_case_sensitive %} checked{% endif %}><span>Match upper and lower case exactly</span></label>
+        </div>
+      </div>
+    </details>
+  </div>
+
+  {#- Text: the editor. -#}
+  <div class="workspace" data-when="text">
+    <div class="pane pane--source">
+      <label class="visually-hidden" for="text">Text to translate</label>
+      <textarea class="pane__text" id="text" name="text" maxlength="{{ text_limit }}" placeholder="Type or paste text to translate" data-text-source data-count="text-count">{{ text }}</textarea>
+      <div class="pane__foot">
+        <span class="pane__count" id="text-count" data-limit="{{ text_limit }}">{{ "{:,}".format(text | length) }} / {{ "{:,}".format(text_limit) }}</span>
+        <button class="text-button" type="button" data-clear-text>Clear</button>
+      </div>
+    </div>
+    <div class="pane pane--output" id="text-output">
+      {% if editor_card %}{{ editor_card }}{% else %}
+      <div class="output output--empty">
+        <p class="output__placeholder">The translation appears here.</p>
+        <p class="output__hint">The first translation with an engine loads it, which can take a minute or two. Later ones start at once.</p>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  {#- Documents: the files and their outputs. -#}
+  <ol class="steps" data-when="documents" hidden>
+    <li class="step">
+      <div>
+        <span class="label step__num">01</span>
+        <h2 class="step__title">Documents</h2>
+        <p class="step__hint">Each comes back in its own format, with its layout. With "Detect language", each document's language is detected.</p>
+      </div>
+      <div class="step__body">
+        {{ dropzone("files", "Drop documents here", document_formats, accept=document_accept, multiple=true) }}
+      </div>
+    </li>
+    <li class="step">
+      <div>
+        <span class="label step__num">02</span>
+        <h2 class="step__title">Outputs</h2>
+        <p class="step__hint">Every output is checked on its own: one that fails is reported, and the others are kept.</p>
+      </div>
+      <div class="step__body options">
+        <div class="option">
+          <span class="option__mark" aria-hidden="true"></span>
+          <p class="option__title">PDF files become</p>
+          <p class="option__text">Scanned pages are read with OCR first. Text shared by both outputs is translated once.</p>
+          <div class="option__more">
+            <label class="check"><input class="checkbox" type="checkbox" name="pdf_markdown" value="1" data-reveal="math-ocr"{% if "markdown" in saved.pdf_outputs %} checked{% endif %}><span><strong>Markdown</strong>, with tables and figures: the best to read and reuse</span></label>
+            <label class="check check--sub" id="math-ocr"{% if "markdown" not in saved.pdf_outputs %} hidden{% endif %}><input class="checkbox" type="checkbox" name="math_ocr" value="1"{% if saved.math_ocr %} checked{% endif %}><span>Equations as LaTeX in the Markdown (slower: their pages are read with OCR)</span></label>
+            <label class="check"><input class="checkbox" type="checkbox" name="pdf_pdf" value="1"{% if "pdf" in saved.pdf_outputs %} checked{% endif %}><span><strong>PDF</strong> in the layout of the original, as far as the text fits</span></label>
+          </div>
+        </div>
+        <div class="option">
+          <input class="checkbox" type="checkbox" id="review" name="review" value="1" aria-describedby="review-text"{% if saved.review %} checked{% endif %}>
+          <label class="option__title" for="review">Side-by-side file</label>
+          <p class="option__text" id="review-text">Source and translation paragraph by paragraph, as HTML and Word: the easiest way to check a translation. The result here shows them side by side too.</p>
+        </div>
+      </div>
+    </li>
+  </ol>
+
+  <div class="upload-progress" data-upload-progress hidden>
+    <progress class="meter__bar" max="1" value="0"></progress>
+    <p class="label" data-upload-progress-text>Uploading</p>
+  </div>
+
+  <div class="sheet__submit" data-when="text">
+    <div class="cluster">
+      <label class="check"><input class="checkbox" type="checkbox" data-live-toggle><span>Translate as I type</span></label>
+      <p class="sheet__note"><kbd>Ctrl</kbd> + <kbd>Enter</kbd> translates.</p>
+    </div>
+    <button class="btn btn--primary btn--lg" type="submit" data-text-submit
+            hx-post="{{ root }}/translation/text" hx-target="#text-output" hx-swap="innerHTML"
+            hx-sync="this:replace" hx-disabled-elt="this">Translate {{ icon("arrow-right", size="sm") }}</button>
+  </div>
+  <div class="sheet__submit" data-when="documents" hidden>
+    <p class="sheet__note">Runs in the background: you can leave this page and come back.</p>
+    <button class="btn btn--primary btn--lg" type="submit"
+            hx-post="{{ root }}/translation" hx-encoding="multipart/form-data" hx-target="#jobs" hx-swap="afterbegin"
+            hx-validate="true" hx-disabled-elt="this">Translate documents {{ icon("arrow-right", size="sm") }}</button>
+  </div>
+</form>
+
+<section class="section" aria-labelledby="jobs-title">
+  {{ section_head("Your documents", "Kept until you remove them or the session ends", id="jobs-title") }}
+  <div class="records" id="jobs">
+    {{ cards }}
+  </div>
+</section>
+{% endblock %}

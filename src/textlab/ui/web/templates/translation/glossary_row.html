@@ -1,0 +1,8 @@
+{#- One term of the glossary: the term, what it must become, and a button
+  that removes the row; included with term and translation. -#}
+<div class="glossary__row">
+  <input class="input" type="text" name="term" value="{{ term }}" maxlength="{{ term_limit }}" aria-label="Term" autocomplete="off" spellcheck="false">
+  <span class="glossary__arrow" aria-hidden="true">{{ icon("arrow-right", size="sm") }}</span>
+  <input class="input" type="text" name="translation" value="{{ translation }}" maxlength="{{ term_limit }}" aria-label="Always translated as" autocomplete="off" spellcheck="false">
+  <button class="icon-button" type="button" data-glossary-remove aria-label="Remove this term">{{ icon("x", size="sm") }}</button>
+</div>

@@ -1,13 +1,17 @@
 """The translation service, with the backends replaced by plain functions."""
 
+import dataclasses
 import io
 import json
+import threading
 import zipfile
 from types import SimpleNamespace
 
 import pytest
 
+from textlab.common.progress import CancelledError
 from textlab.features.translation import service
+from textlab.features.translation.documents.base import report_progress
 from textlab.features.translation.lang_detect import DetectionResult
 
 OPTIONS = service.TranslationOptions(
@@ -246,6 +250,104 @@ def test_batch_adds_review_files(translators):
     assert b"Guten Tag." in html and b"GUTEN TAG." in html
 
 
+def test_batch_keeps_each_documents_pairs_for_comparing(translators):
+    results = service.translate_documents(
+        [("notes.txt", b"Guten Tag.")],
+        OPTIONS,
+        service.DocumentOptions(detect_source=False, review=False),
+    )
+    assert results.pairs == {"notes.txt": [("Guten Tag.", "GUTEN TAG.")]}
+    assert [name for name, _ in results.outputs] == ["notes.eng_Latn.txt"]
+
+
+def test_batch_without_a_source_language_reports_undetected_documents(
+    translators, monkeypatch
+):
+    detected = {
+        "fr.txt": DetectionResult("fr", 0.99, "fra_Latn", "French"),
+        "unknown.txt": None,
+    }
+    monkeypatch.setattr(
+        service,
+        "detect_document_language",
+        lambda name, data: detected[name],
+    )
+    options = dataclasses.replace(OPTIONS, source_code="", source_name="")
+    results = service.translate_documents(
+        [(name, b"text") for name in detected],
+        options,
+        service.DocumentOptions(detect_source=False, review=False),
+    )
+    assert [name for name, _ in results.file_outputs] == ["fr.txt"]
+    assert [name for name, _ in results.errors] == ["unknown.txt"]
+    assert "could not be told" in results.errors[0][1]
+    assert results.languages["unknown.txt"] == "not detected"
+
+
+def test_batch_stops_when_cancelled(translators, monkeypatch):
+    cancel = threading.Event()
+
+    def translate_document(name, data, translate_fn, target_code, **kwargs):
+        cancel.set()
+        kwargs["progress_cb"](1, 2, "translating")
+        raise AssertionError("not reached")
+
+    monkeypatch.setattr(service, "translate_document", translate_document)
+    with pytest.raises(CancelledError):
+        service.translate_documents(
+            [("a.txt", b"hallo"), ("b.txt", b"welt")],
+            OPTIONS,
+            service.DocumentOptions(detect_source=False),
+            cancel=cancel,
+        )
+
+
+def test_batch_stops_when_cancelled_while_sentences_are_translated(
+    translators, monkeypatch
+):
+    cancel = threading.Event()
+    cancel.set()
+    with pytest.raises(CancelledError):
+        service.translate_documents(
+            [("a.txt", b"hallo")],
+            OPTIONS,
+            service.DocumentOptions(detect_source=False),
+            cancel=cancel,
+        )
+
+
+def test_progress_receivers_can_stop_a_document_but_not_fail_it():
+    def failing(*args):
+        raise RuntimeError("display broke")
+
+    def cancelled(*args):
+        raise CancelledError("stop")
+
+    report_progress(failing, 1, 2, "stage")
+    with pytest.raises(CancelledError):
+        report_progress(cancelled, 1, 2, "stage")
+
+
+def test_a_cancelled_pdf_output_is_not_reported_as_blocked(monkeypatch):
+    from textlab.features.translation.documents import pdf_workflow
+
+    monkeypatch.setattr(pdf_workflow, "inspect_pdf", lambda *a, **k: [])
+
+    def cancelled(*args, **kwargs):
+        raise CancelledError("stop")
+
+    monkeypatch.setattr(pdf_workflow, "translate_pdf_to_markdown", cancelled)
+    with pytest.raises(CancelledError):
+        pdf_workflow.translate_pdf_outputs(
+            b"%PDF",
+            upper,
+            stem="a.en",
+            source_name="a.pdf",
+            outputs=("markdown",),
+            ocr_allowed=True,
+        )
+
+
 def test_outputs_zip_nests_several_sources_and_unpacks_bundles():
     bundle = zip_bytes({"a.en.md": b"# A", "assets/fig.png": b"png"})
     archive = zipfile.ZipFile(
@@ -306,6 +408,35 @@ def test_text_is_reflowed_and_progress_reported(translators):
         ("Translating chunk 1/2", 0.5),
         ("Translating chunk 2/2", 1.0),
     ]
+
+
+def test_text_translation_stops_when_cancelled(translators):
+    cancel = threading.Event()
+    updates = []
+
+    def stop_at_first(update):
+        updates.append(update)
+        cancel.set()
+
+    with pytest.raises(CancelledError):
+        service.translate_text(
+            "Guten Tag.", OPTIONS, on_progress=stop_at_first, cancel=cancel
+        )
+    assert len(updates) == 1
+
+
+def test_languages_and_their_names():
+    codes = dict(service.languages())
+    assert codes["deu_Latn"] == "German"
+    assert service.languages()[0] == ("eng_Latn", "English")
+    assert service.language_name("fra_Latn") == "French"
+    assert service.language_name("xxx_Latn") == "xxx_Latn"
+
+
+def test_backends_have_short_names_and_descriptions():
+    for backend in service.BACKENDS.values():
+        assert backend.name and backend.description
+    assert service.BACKENDS["nllb"].name == "NLLB-200, 600M"
 
 
 def test_glossary_terms_are_forced(translators):

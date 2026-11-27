@@ -8,7 +8,8 @@
     [Phase 1 progress](#phase-1-progress)). Phase 2, the pilot, was tried
     in the sandbox and committed on 27 November (see
     [Phase 2 progress](#phase-2-progress)). Phase 3 started with Meeting
-    Notes, which waits for its sandbox test (see
+    Notes, committed on 27 November; Translation was built the same day and
+    waits for its sandbox test (see
     [Phase 3 progress](#phase-3-progress)). The work happens on the local
     branch `feat/web-ui`, one commit per phase or page, and reaches `main`
     when the whole UI is done. Update this page when a phase ends or a
@@ -165,7 +166,11 @@ Rules, checked by tests as for the Streamlit pages today:
 - **Short GPU requests** (a chat message, the translation editor, a meeting
   summary) also wait for a running job; the page says which job is running
   and offers to cancel it. If this proves too strict, measure whether a
-  small LLM fits on the GPU next to a running job.
+  small LLM fits on the GPU next to a running job. The translation editor
+  runs each translation as a job that is not listed (`listed=False`) and
+  shows it in its output pane (its own `card_template`): a request held
+  open while a model loads could pass the proxy's timeout, and a job
+  reports progress and can be stopped.
 - **Progress** comes from the services' `on_progress` callbacks and reaches
   the page over SSE, in the page's one event stream, which is open only
   while one of its jobs runs or waits. After a reload, the page reconnects
@@ -437,7 +442,68 @@ transcription settings without another model
 Still to do: try Meeting Notes in the sandbox against the Streamlit page
 (both sources, each summary type, a long recording that is summarized in
 chunks, citations that play, summarizing again with names, a failure such
-as a model that is not installed, cancelling while it writes), then commit
+as a model that is not installed, cancelling while it writes). Committed
+on 27 November (b165b39).
+
+### Translation
+
+Built on 27 November 2026, with tests
+(`src/textlab/ui/web/tests/test_translation_page.py`, with faked models
+and the real service, and in `features/translation/tests/` for the
+service's new parts). The Streamlit page's look and its limits were one of
+the reasons for the new UI, so the page was designed anew rather than
+ported:
+
+- **One form for both uses**: the languages (From, a swap button, To)
+  and two settings shared by text and documents, folded to one line each
+  (*Engine* with each engine's description, the model and formality for a
+  language model; *Glossary* as rows of term and translation). The
+  switcher shows the editor or the documents' steps.
+- **The editor**: the text on the left, the translation on the right.
+  There is no *Load model* step any more: the first translation with an
+  engine loads it and says so. Each translation is a job that is not
+  listed (see [Jobs and the GPU](#jobs-and-the-gpu)); a short one comes
+  back with the answer to the request (the route waits up to 1.5 s), a
+  longer one follows over the event stream, with the previous translation
+  dimmed until the new one is ready. A new translation stops and drops the
+  one before. **Stop** cancels; a translation that waits names the job it
+  waits for and offers to cancel it. *Detect language* is the default
+  source: it is detected in the job, and the menu then names it. Ctrl +
+  Enter translates, **Translate as I type** translates after a pause (the
+  choice is remembered in the browser), the swap button translates the
+  translation back, **Copy** copies it. Up to 20,000 characters (longer
+  texts go through Documents as `.txt`). The page keeps the text and the
+  settings in memory for the session, so a reload shows them again.
+- **Documents**: files and ZIP archives, translated by a job with
+  cancelling. With *Detect language*, each document's language is
+  detected; with a chosen language, that one is used (the Streamlit
+  page's separate check box is gone). The result lists each document with
+  its language, its files, the PDF checks, and *Compare source and
+  translation*: the passages side by side in the page (the first 300; the
+  side-by-side file has all). With several files, the record's listing
+  offers the ZIP of all; with one, the file itself.
+- **The service** (`features/translation/service.py`): `cancel` for
+  `translate_text` and `translate_documents` (the document code now lets
+  `CancelledError` through where it ignored progress errors or blocked an
+  output), each document's pairs in `DocumentResults.pairs`, documents
+  without a source language detected or reported, and `languages`,
+  `language_name`, `ollama_models`, `server_ready`,
+  `SUPPORTED_EXTENSIONS`, `PDF_OUTPUTS` for pages. The engine table gives
+  each backend a short `name` and a `description`; the Streamlit page's
+  labels are unchanged.
+- **The job runner**: `listed=False` jobs stay out of the job indicator
+  and Home; `card_template` gives a job its own card; card templates also
+  get the `running` job.
+- Two Lucide icons added (`arrow-left-right`, `copy`), from the same
+  release.
+- The user guide's draft: `docs/next/translate.md`.
+
+Still to do: try Translation in the sandbox against the Streamlit page (a
+text with each engine, detection, the glossary, swapping, translating as
+you type, a long text that follows over the event stream, a translation
+while a transcription runs, Stop; documents of each type, a ZIP, a mixed
+batch with detection, PDFs with each output and LaTeX, cancelling, a PDF
+whose output is blocked; narrow screens and the dark theme), then commit
 it.
 
 ## Testing

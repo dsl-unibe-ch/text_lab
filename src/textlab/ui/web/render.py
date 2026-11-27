@@ -254,7 +254,7 @@ class Renderer:
     - ``icon(name)``: an inline icon;
     - ``csrf_token``: the session's CSRF token, or ``""`` before login;
     - ``current_path``: the request's path below the base path;
-    - ``session_jobs``: the session's jobs, for the job indicator;
+    - ``session_jobs``: the session's listed jobs, for the job indicator;
     - ``session_left``: the seconds until the session ends, or ``None``;
     - ``settings``, ``version``, the navigation (``tools``,
       ``tool_groups``, ``page_path``, ``page_label``, set by the app) and
@@ -327,7 +327,9 @@ class Renderer:
             "static": static,
             "csrf_token": session.csrf_token if session else "",
             "current_path": current or "/",
-            "session_jobs": runner.jobs() if runner is not None else [],
+            "session_jobs": (
+                runner.jobs(listed=True) if runner is not None else []
+            ),
             "session_left": None if end is None else end - time.time(),
         }
 

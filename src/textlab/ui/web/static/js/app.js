@@ -14,6 +14,8 @@
  *   passage and the word being spoken, jumps to a passage or word.
  * - Citations in a summary without a recording show their line in the
  *   transcript.
+ * - The translation editor: counts, clearing, Ctrl+Enter, translating as
+ *   you type, swapping the languages, copying, the glossary's rows.
  * - Error notices for failed htmx requests, copying error details.
  *
  * There are no inline scripts (the Content Security Policy forbids them):
@@ -62,16 +64,22 @@
 
   var notices = document.getElementById("notices");
 
+  var noticeLabels = { info: "Note", warning: "Warning", error: "Error" };
+
   function showError(title, text) {
+    showNotice("error", title, text);
+  }
+
+  function showNotice(level, title, text) {
     if (!notices) {
       return;
     }
     var notice = document.createElement("div");
-    notice.className = "notice notice--error";
-    notice.setAttribute("role", "alert");
+    notice.className = "notice notice--" + level;
+    notice.setAttribute("role", level === "error" ? "alert" : "status");
     var label = document.createElement("p");
     label.className = "label notice__label";
-    label.textContent = "Error";
+    label.textContent = noticeLabels[level] || "Note";
     var body = document.createElement("div");
     body.className = "notice__body";
     var heading = document.createElement("p");
@@ -132,6 +140,7 @@
       // indicator, each replacing the element with its id.
       window.htmx.swap(document.body, event.data, { swapStyle: "none" });
       syncStream();
+      showDetected();
     });
     stream.addEventListener("idle", closeStream);
     stream.addEventListener("error", function () {
@@ -156,7 +165,10 @@
     }
   }
 
-  document.addEventListener("htmx:afterSettle", syncStream);
+  document.addEventListener("htmx:afterSettle", function () {
+    syncStream();
+    showDetected();
+  });
   window.addEventListener("pagehide", closeStream);
 
   /* Running times count on between updates. */
@@ -412,11 +424,17 @@
     }
   }
 
+  /* A switch ([data-switch], naming a radio group) shows its [data-when]
+     parts that list the chosen value. Switches can be nested: a part
+     belongs to the closest switch around it. */
   function applySwitch(form) {
     var name = form.getAttribute("data-switch");
     var chosen = form.querySelector("input[name='" + name + "']:checked");
     var value = chosen ? chosen.value : "";
     form.querySelectorAll("[data-when]").forEach(function (part) {
+      if (part.parentElement.closest("[data-switch]") !== form) {
+        return;
+      }
       var shown = part.getAttribute("data-when").split(" ").indexOf(value) !== -1;
       part.hidden = !shown;
       // Controls in hidden parts are neither checked nor sent.
@@ -437,13 +455,15 @@
   }
 
   /* A select with data-readout shows its option's data-readout-text in
-     the element with that id, such as the model a language uses. */
-  function showReadout(select) {
-    var readout = document.getElementById(select.getAttribute("data-readout"));
-    var option = select.options[select.selectedIndex];
-    if (readout && option) {
-      readout.textContent = option.getAttribute("data-readout-text") || "";
+     the element with that id, such as the model a language uses; a radio
+     button with data-readout shows its own, when it is checked. */
+  function showReadout(control) {
+    var readout = document.getElementById(control.getAttribute("data-readout"));
+    var source = control.matches("select") ? control.options[control.selectedIndex] : control;
+    if (!readout || !source || (control.type === "radio" && !control.checked)) {
+      return;
     }
+    readout.textContent = source.getAttribute("data-readout-text") || "";
   }
 
   function showRange(input) {
@@ -463,7 +483,7 @@
     if (target.matches("[data-reveal]")) {
       applyReveal(target);
     }
-    if (target.matches("select[data-readout]")) {
+    if (target.matches("select[data-readout], input[type='radio'][data-readout]")) {
       showReadout(target);
     }
     var switchForm = target.closest("[data-switch]");
@@ -515,7 +535,8 @@
     if (box) {
       box.hidden = true;
     }
-    if (form && event.detail.successful && form.hasAttribute("data-upload-form")) {
+    var sent = event.detail.elt === form || (event.detail.elt && event.detail.elt.hasAttribute("hx-encoding"));
+    if (form && event.detail.successful && form.hasAttribute("data-upload-form") && sent) {
       // The files are sent; the settings stay for the next one.
       form.querySelectorAll("[data-dropzone] input[type='file']").forEach(function (input) {
         input.value = "";
@@ -861,17 +882,306 @@
     }, 2000);
   });
 
+  /* ---- Translation editor ------------------------------------------- */
+
+  /*
+   * The form [data-translator] holds the source text ([data-text-source]),
+   * its Translate button ([data-text-submit]) and the output pane
+   * (#text-output), whose card the server replaces as the translation
+   * waits, runs and ends. A finished card carries data-detected (the
+   * detected language's code) and data-detected-name.
+   */
+  var liveDelay = 900;
+  var liveTimer = 0;
+  var livePending = false;
+
+  function translator() {
+    return document.querySelector("[data-translator]");
+  }
+
+  function textSubmit(form) {
+    return form ? form.querySelector("[data-text-submit]") : null;
+  }
+
+  function outputCard() {
+    return document.querySelector("#text-output .output");
+  }
+
+  /* Translate now, or as soon as the request in flight has ended. */
+  function translateNow() {
+    var form = translator();
+    var button = textSubmit(form);
+    var source = form ? form.querySelector("[data-text-source]") : null;
+    if (!button || !source || button.closest("[hidden]") || !source.value.trim()) {
+      return;
+    }
+    if (button.disabled) {
+      livePending = true;
+      return;
+    }
+    livePending = false;
+    button.click();
+  }
+
+  function liveOn() {
+    var toggle = document.querySelector("[data-live-toggle]");
+    return toggle !== null && toggle.checked;
+  }
+
+  function scheduleLive() {
+    window.clearTimeout(liveTimer);
+    if (liveOn()) {
+      liveTimer = window.setTimeout(translateNow, liveDelay);
+    }
+  }
+
+  function showCount(area) {
+    var count = document.getElementById(area.getAttribute("data-count"));
+    if (!count) {
+      return;
+    }
+    var limit = Number(count.getAttribute("data-limit")) || 0;
+    var length = area.value.length;
+    count.textContent = length.toLocaleString("en") + " / " + limit.toLocaleString("en");
+    count.classList.toggle("is-near", limit > 0 && length >= limit * 0.9 && length < limit);
+    count.classList.toggle("is-full", limit > 0 && length >= limit);
+  }
+
+  /* "Detect language" names the language found for the last translation. */
+  function showDetected() {
+    var select = document.querySelector("[data-source-language]");
+    var option = select ? select.querySelector("option[value='auto']") : null;
+    if (!option) {
+      return;
+    }
+    var card = outputCard();
+    var name = card ? card.getAttribute("data-detected-name") : "";
+    option.textContent = name ? "Detect language (" + name + ")" : "Detect language";
+  }
+
+  function glossaryRows(box) {
+    return Array.prototype.slice.call(box.querySelectorAll(".glossary__row"));
+  }
+
+  function countGlossary(details) {
+    var box = details.querySelector("[data-glossary-rows]");
+    var out = details.querySelector("[data-glossary-count]");
+    if (!box || !out) {
+      return;
+    }
+    var terms = glossaryRows(box).filter(function (row) {
+      var inputs = row.querySelectorAll("input");
+      return inputs[0].value.trim() && inputs[1].value.trim();
+    }).length;
+    out.textContent = terms ? terms + (terms === 1 ? " term" : " terms") : "No terms";
+    var add = details.querySelector("[data-glossary-add]");
+    if (add) {
+      add.disabled = glossaryRows(box).length >= Number(box.getAttribute("data-glossary-limit") || 50);
+    }
+  }
+
+  function addGlossaryRow(details) {
+    var box = details.querySelector("[data-glossary-rows]");
+    var template = details.querySelector("[data-glossary-template]");
+    if (!box || !template) {
+      return null;
+    }
+    var row = template.content.firstElementChild.cloneNode(true);
+    box.appendChild(row);
+    countGlossary(details);
+    row.querySelector("input").focus();
+    return row;
+  }
+
+  function swapLanguages(form) {
+    var source = form.querySelector("[data-source-language]");
+    var target = form.querySelector("[data-target-language]");
+    var card = outputCard();
+    var from = source.value;
+    if (from === "auto") {
+      from = card ? card.getAttribute("data-detected") || "" : "";
+    }
+    if (!from) {
+      showNotice(
+        "info",
+        "The language to swap is not known yet",
+        "Choose it under From, or translate the text first so that it is detected."
+      );
+      source.focus();
+      return;
+    }
+    source.value = target.value;
+    target.value = from;
+    showDetected();
+    var text = card ? card.querySelector("[data-output-text]") : null;
+    var area = form.querySelector("[data-text-source]");
+    if (text && area && !area.closest("[hidden]")) {
+      // Translate the translation back.
+      area.value = text.textContent;
+      showCount(area);
+      translateNow();
+    }
+  }
+
+  document.addEventListener("click", function (event) {
+    var target = event.target;
+    if (!(target instanceof Element)) {
+      return;
+    }
+    var form = target.closest("[data-translator]");
+    if (target.closest("[data-swap-languages]") && form) {
+      swapLanguages(form);
+      return;
+    }
+    if (target.closest("[data-clear-text]") && form) {
+      var area = form.querySelector("[data-text-source]");
+      area.value = "";
+      showCount(area);
+      area.focus();
+      return;
+    }
+    var copy = target.closest("[data-copy-from]");
+    if (copy) {
+      var from = document.getElementById(copy.getAttribute("data-copy-from"));
+      if (from && navigator.clipboard) {
+        var label = copy.innerHTML;
+        navigator.clipboard.writeText(from.textContent).then(
+          function () {
+            copy.textContent = "Copied";
+            window.setTimeout(function () {
+              copy.innerHTML = label;
+            }, 1500);
+          },
+          function () {
+            showError("The translation could not be copied", "Select it and copy it yourself.");
+          }
+        );
+      }
+      return;
+    }
+    var details = target.closest("[data-glossary]");
+    if (details && target.closest("[data-glossary-add]")) {
+      addGlossaryRow(details);
+      return;
+    }
+    var remove = details ? target.closest("[data-glossary-remove]") : null;
+    if (remove) {
+      var row = remove.closest(".glossary__row");
+      if (glossaryRows(row.parentElement).length > 1) {
+        var next = row.nextElementSibling || row.previousElementSibling;
+        row.remove();
+        if (next && next.querySelector("input")) {
+          next.querySelector("input").focus();
+        }
+      } else {
+        row.querySelectorAll("input").forEach(function (input) {
+          input.value = "";
+        });
+        row.querySelector("input").focus();
+      }
+      countGlossary(details);
+    }
+  });
+
+  document.addEventListener("keydown", function (event) {
+    var target = event.target;
+    if (!(target instanceof Element)) {
+      return;
+    }
+    if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && target.matches("[data-text-source]")) {
+      window.clearTimeout(liveTimer);
+      translateNow();
+      event.preventDefault();
+      return;
+    }
+    // In the glossary, Enter goes on to the next field instead of sending.
+    var row = event.key === "Enter" ? target.closest(".glossary__row") : null;
+    if (row && target.matches("input")) {
+      event.preventDefault();
+      var inputs = row.querySelectorAll("input");
+      if (target === inputs[0]) {
+        inputs[1].focus();
+      } else if (row.nextElementSibling && row.nextElementSibling.querySelector("input")) {
+        row.nextElementSibling.querySelector("input").focus();
+      } else {
+        addGlossaryRow(row.closest("[data-glossary]"));
+      }
+    }
+  });
+
+  document.addEventListener("input", function (event) {
+    var target = event.target;
+    if (!(target instanceof Element)) {
+      return;
+    }
+    if (target.matches("[data-text-source]")) {
+      showCount(target);
+      scheduleLive();
+    }
+    var details = target.closest("[data-glossary]");
+    if (details) {
+      countGlossary(details);
+    }
+  });
+
+  document.addEventListener("change", function (event) {
+    var target = event.target;
+    if (!(target instanceof Element) || !target.closest("[data-translator]")) {
+      return;
+    }
+    if (target.matches("[data-live-toggle]")) {
+      try {
+        window.localStorage.setItem("textlab-live-translation", target.checked ? "on" : "off");
+      } catch (error) {
+        // The choice then lasts for this page only.
+      }
+      if (target.checked) {
+        translateNow();
+      }
+      return;
+    }
+    if (target.matches("[data-source-language]")) {
+      showDetected();
+    }
+    // Another language or engine: translate again when typing does.
+    if (target.matches("select, input[type='radio']") && target.name !== "mode") {
+      scheduleLive();
+    }
+  });
+
+  /* A translation that was asked for while one was being sent. */
+  document.addEventListener("htmx:afterRequest", function (event) {
+    if (livePending && event.detail.elt && event.detail.elt.matches("[data-text-submit]")) {
+      window.setTimeout(translateNow, 0);
+    }
+  });
+
+  function initialiseTranslator(scope) {
+    scope.querySelectorAll("[data-text-source]").forEach(showCount);
+    scope.querySelectorAll("[data-glossary]").forEach(countGlossary);
+    var toggle = scope.querySelector("[data-live-toggle]");
+    if (toggle) {
+      try {
+        toggle.checked = window.localStorage.getItem("textlab-live-translation") === "on";
+      } catch (error) {
+        toggle.checked = false;
+      }
+    }
+    showDetected();
+  }
+
   /* ---- Start ---------------------------------------------------------- */
 
   function initialise(scope) {
     scope.querySelectorAll("[data-reveal]").forEach(applyReveal);
     scope.querySelectorAll("[data-switch]").forEach(applySwitch);
     scope.querySelectorAll("input[type='range']").forEach(showRange);
-    scope.querySelectorAll("select[data-readout]").forEach(showReadout);
+    scope.querySelectorAll("select[data-readout], input[type='radio'][data-readout]").forEach(showReadout);
   }
 
   applyTheme(currentTheme());
   initialise(document);
+  initialiseTranslator(document);
   if (window.htmx) {
     window.htmx.onLoad(function (element) {
       if (element instanceof Element && element !== document.body) {

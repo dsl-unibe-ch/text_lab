@@ -200,6 +200,27 @@ def test_jobs_are_listed_by_page(runner):
     assert len(runner.jobs()) == 3
 
 
+def test_jobs_can_be_left_off_the_lists(runner):
+    for listed in (True, False):
+        work = Gate()
+        work.opened.set()
+        start(runner, work, page="a", listed=listed)
+    assert [job.listed for job in runner.jobs("a", listed=True)] == [True]
+    assert [job.listed for job in runner.jobs("a", listed=False)] == [False]
+    assert len(runner.jobs("a")) == 2
+
+
+def test_a_job_keeps_its_card_template(runner):
+    job = runner.create(title="t", page="test")
+    assert job.card_template == "jobs/card.html"
+    runner.discard(job)
+    job = runner.create(
+        title="t", page="test", card_template="translation/editor.html"
+    )
+    assert job.card_template == "translation/editor.html"
+    runner.discard(job)
+
+
 def test_short_gpu_requests_wait_for_no_job(runner):
     with runner.exclusive():
         work = Gate()

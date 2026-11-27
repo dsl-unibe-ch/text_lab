@@ -4,7 +4,7 @@ Translates pasted text and whole documents with local models: Hugging Face
 translation models (NLLB-200, MADLAD-400, OPUS-MT) on the session's GPU, or
 an LLM on the session's Ollama server. Documents come back in their own
 format (Markdown, plain text, subtitles, Word, Excel, PowerPoint, PDF). Used
-by the Translate page.
+by the Translate page (Streamlit) and the Translation page (web UI).
 
 ## Pipeline
 
@@ -49,19 +49,30 @@ Everything interfaces need is in `service.py`:
 
 | Name | Purpose |
 |---|---|
-| `TranslationOptions` | Backend, languages, Ollama model, formality, glossary |
+| `TranslationOptions` | Backend, languages, Ollama model, formality, glossary; an empty `source_code` detects each document's language |
 | `DocumentOptions` | PDF outputs, LaTeX for equations, language detection, review file |
-| `translate_text(text, options, on_progress=, on_notice=)` | Translate pasted text |
+| `translate_text(text, options, on_progress=, on_notice=, cancel=)` | Translate pasted text |
 | `unpack_uploads(uploads)` | Replace ZIP archives by their supported members |
-| `translate_documents(files, options, document_options, on_progress=)` | Translate a batch; returns `DocumentResults` |
+| `translate_documents(files, options, document_options, on_progress=, cancel=)` | Translate a batch; returns `DocumentResults`, with each document's `(source, translation)` pairs in `pairs` |
+| `languages()`, `language_name(code)` | The languages offered, and their names |
+| `ollama_models()`, `server_ready()` | The language models for the `ollama` backend, and whether its server answers |
+| `SUPPORTED_EXTENSIONS`, `PDF_OUTPUTS` | The file types read, and the outputs a PDF can have |
 | `translate_document(name, data, translate_fn, target_code, ...)` | One file, in its format |
 | `load_backend`, `backend_ready`, `load_signature` | Load a model ahead of use and check that it is still loaded |
 | `supports_pair(backend, source, target)` | Whether OPUS-MT has a model for a pair |
 | `review_files`, `outputs_zip`, `mime_type` | Review files and downloads |
 
-Other modules the page uses directly: `engine` (the backend table
-`BACKENDS` and formality choices), `lang_detect.detect_language`,
-`gpu_profile.detect_gpu_profile` and `messages.describe_error`.
+Also re-exported, so pages import only `service`: the backend table
+`BACKENDS` (each `Backend` with a short `name` and a `description` for
+interfaces, besides its `label`) and the formality choices from `engine`,
+`detect_language` and `DetectionResult` from `lang_detect`,
+`detect_gpu_profile`, and `describe_error` with the error types.
+
+Both translations stop when their `cancel` event is set, at the next
+progress update, by raising `common.progress.CancelledError`. The document
+code passes it on where it otherwise ignores errors of progress receivers
+(`documents.base.report_progress`) or reports an output as blocked
+(`documents.pdf_workflow`).
 
 A minimal use:
 
@@ -122,7 +133,9 @@ pages and reads the result model (`features.ocr.doc_ir`).
 | PDF pages sent to OCR, and OCR's own temporary files | `translation/ocr-*` in the job workspace | When the document's OCR finishes |
 
 Everything else stays in memory: uploads, translations and the results the
-page offers for download. Nothing is written outside the workspace.
+page offers for download. Nothing is written outside the workspace. (The
+web UI saves a job's uploads and outputs in its job folder,
+`web-jobs/<id>`; see `docs/dev/data-handling.md`.)
 
 ## Configuration
 
@@ -136,8 +149,9 @@ address comes from `OLLAMA_HOST`, set by the launch script.
 In `tests/`, all without models, GPU or Ollama:
 
 - `test_service.py`: dispatch per format, PDF outputs and reports, ZIP
-  uploads, batches with language detection and failures, review files, the
-  download ZIP, progress and time estimates.
+  uploads, batches with language detection and failures, review files and
+  pairs, cancelling, the download ZIP, progress and time estimates, the
+  languages and backend names.
 - `test_translation.py`: reflowing hard-wrapped text.
 - `test_translation_shield.py`: protected content and glossary terms.
 - `test_translation_limits.py`: splitting, limits and retries.

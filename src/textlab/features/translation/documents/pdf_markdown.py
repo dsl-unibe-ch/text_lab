@@ -31,11 +31,8 @@ def _ocr_progress_bridge(progress_cb: ProgressCb, stage_hint: str):
     def _cb(frac: float, text: str) -> None:
         pct = int(round(max(0.0, min(1.0, frac)) * 1000))
         # Prepend the outer stage hint so the UI shows "OCR: parsing page
-        # 3/12".
-        try:
-            progress_cb(pct, 1000, f"{stage_hint}: {text}")
-        except Exception:
-            pass
+        # 3/12". A cancelled run stops; other receiver errors are ignored.
+        _report(progress_cb, pct, 1000, f"{stage_hint}: {text}")
 
     return _cb
 

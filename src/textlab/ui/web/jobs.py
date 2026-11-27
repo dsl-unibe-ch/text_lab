@@ -140,6 +140,13 @@ class Job:
             jobs can always be cancelled.
         result_template: Template that shows a finished job's result on
             its card, or ``None`` for the downloads only.
+        card_template: Template of the job's card. Pages whose jobs are
+            not records in a ledger, such as a translation shown in an
+            editor's pane, give their own; it must keep the card's id,
+            ``job-<id>``, and ``data-job-active`` while the job is active.
+        listed: Whether the job is listed in the job indicator and on
+            Home. Short requests a page shows in place, such as a
+            translation in the editor, are not.
         state: Where the job is in its life.
         progress: The work's latest progress update.
         preview: The work's output so far, such as a summary being
@@ -164,6 +171,8 @@ class Job:
     ollama_model: str | None = None
     cancellable: bool = True
     result_template: str | None = None
+    card_template: str = "jobs/card.html"
+    listed: bool = True
     state: JobState = JobState.WAITING
     progress: Progress | None = None
     preview: str = ""
@@ -413,6 +422,8 @@ class JobRunner:
         ollama_model: str | None = None,
         cancellable: bool = True,
         result_template: str | None = None,
+        card_template: str | None = None,
+        listed: bool = True,
     ) -> Job:
         """Create a job and its folders, to be submitted with :meth:`submit`.
 
@@ -428,6 +439,9 @@ class JobRunner:
                 loaded when the GPU is released for the job.
             cancellable: Whether the work stops when the job is cancelled.
             result_template: Template for the finished job's result.
+            card_template: Template of the job's card; the ledger record
+                (``jobs/card.html``) by default.
+            listed: Whether the job indicator and Home list the job.
 
         Returns:
             The job, not yet listed or queued.
@@ -446,6 +460,8 @@ class JobRunner:
             ollama_model=ollama_model,
             cancellable=cancellable,
             result_template=result_template,
+            card_template=card_template or "jobs/card.html",
+            listed=listed,
         )
         with self._lock:
             self._drafts[job.id] = job
@@ -545,11 +561,15 @@ class JobRunner:
         with self._lock:
             return self._jobs.get(job_id)
 
-    def jobs(self, page: str | None = None) -> list[Job]:
+    def jobs(
+        self, page: str | None = None, *, listed: bool | None = None
+    ) -> list[Job]:
         """Return the submitted jobs, oldest first.
 
         Args:
             page: Only the jobs of this page; all if ``None``.
+            listed: Only the listed jobs (``True``), only the others
+                (``False``), or all (``None``).
 
         Returns:
             The jobs.
@@ -558,7 +578,8 @@ class JobRunner:
             return [
                 job
                 for job in self._jobs.values()
-                if page is None or job.page == page
+                if (page is None or job.page == page)
+                and (listed is None or job.listed == listed)
             ]
 
     def ahead(self, job: Job) -> int:
@@ -807,7 +828,7 @@ def runner_of(request: Request) -> JobRunner:
 
 
 def render_card(request: Request, job: Job, *, oob: bool = False) -> str:
-    """Render a job's card.
+    """Render a job's card, with its own card template.
 
     Args:
         request: The current request.
@@ -816,13 +837,17 @@ def render_card(request: Request, job: Job, *, oob: bool = False) -> str:
             event streams.
 
     Returns:
-        The card's HTML.
+        The card's HTML. The template gets ``job``, ``ahead`` (the jobs
+        before a waiting one), ``running`` (the job that runs now, if any),
+        ``now`` and ``oob``.
     """
+    runner = runner_of(request)
     return renderer(request).render(
         request,
-        "jobs/card.html",
+        job.card_template,
         job=job,
-        ahead=runner_of(request).ahead(job),
+        ahead=runner.ahead(job),
+        running=runner.running,
         now=time.time(),
         oob=oob,
     )

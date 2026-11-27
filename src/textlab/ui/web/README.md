@@ -33,8 +33,8 @@ port, base path (`/node/<host>/<port>/`) and the portal's host name;
 | `uploads.py` | Reading forms with files, checking them, saving them into a job |
 | `render.py` | Templates, icons, links from the base path, number formats, Markdown from models (`markdown()`: raw HTML escaped, no images) |
 | `settings.py` | The server's settings (`TOKEN`, `USER`, `TEXT_LAB_WEB_DEV`) |
-| `pages/` | One module per page (`home`, `transcription`, `meeting_notes`, `placeholder` for the tools not built yet, `dev`), and `TOOLS`, the navigation |
-| `templates/` | `base.html` (layout), `components/macros.html` and `components/player.html` (the audio player), `jobs/`, one folder per page (`pages/` for Home and the placeholders, `transcription/`, `meeting_notes/`); `mockups/` and `dev/` for the developer pages |
+| `pages/` | One module per page (`home`, `transcription`, `meeting_notes`, `translation`, `placeholder` for the tools not built yet, `dev`), and `TOOLS`, the navigation |
+| `templates/` | `base.html` (layout), `components/macros.html` and `components/player.html` (the audio player), `jobs/`, one folder per page (`pages/` for Home and the placeholders, `transcription/`, `meeting_notes/`, `translation/`); `mockups/` and `dev/` for the developer pages |
 | `static/` | `css/` (`fonts.css`, `tokens.css`, `layout.css`, `components.css`), `js/` (`app.js`, `theme.js`), `vendor/` (htmx, IBM Plex fonts, Lucide icons; see its README) |
 
 ### Links
@@ -101,7 +101,17 @@ once a second.
 
 Short work without the GPU, which should not wait for an hour-long job,
 starts at once beside the queue: `runner.submit(job, work, at_once=True)`
-(the review of a transcript). Files a result uses but the card should not
+(the review of a transcript).
+
+A short request on the GPU that a page shows in place rather than as a
+record, such as a translation in Translation's editor, is a job too, so it
+waits its turn and its progress reaches the page over the event stream
+(a request held open for minutes could time out at the proxy). Create it
+with `listed=False`, which keeps it out of the job indicator and Home, and
+`card_template=` for its own card (the editor's output pane); that
+template must keep the card's id, `job-<id>`, and `data-job-active` while
+the job is active. A route can wait a moment for such a job and answer
+with its result, so short requests come back at once. Files a result uses but the card should not
 list, such as the recording a player plays, are offered with
 `Download(..., listed=False)`; they are fetched from the same link.
 
@@ -171,7 +181,8 @@ login and CSRF (`test_auth.py`), pages, headers and errors (`test_app.py`),
 the job runner (`test_jobs.py`), jobs through the web with the demo job
 (`test_job_pages.py`), uploads (`test_uploads.py`), the Transcription page
 and Home with a faked backend (`test_transcription_page.py`), Meeting Notes
-with a faked model (`test_meeting_notes_page.py`) and the rules
+with a faked model (`test_meeting_notes_page.py`), Translation with
+faked models and the real service (`test_translation_page.py`) and the rules
 (`test_rules.py`). The fake transcription backend is the `backend` fixture
 in `conftest.py`. The launcher and the Open OnDemand files are tested in
 `tests/test_launch.py` at the repository root.

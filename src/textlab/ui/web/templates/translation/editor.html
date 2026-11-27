@@ -1,0 +1,57 @@
+{#- The editor's output pane for one text translation (a job that is not
+  listed): replaced whenever the job changes, from the page's event stream
+  (oob) or as the answer to Translate and Stop. While the job waits or
+  runs, the previous translation (job.preview) stays, dimmed, under the
+  progress. job.result is a TextTranslation. -#}
+{% from "components/macros.html" import notice %}
+{% set state = job.state %}
+{% set fraction = job.progress.fraction if job.progress and job.progress.fraction is not none else none %}
+<div class="output output--{{ state }}" id="job-{{ job.id }}"{% if job.active %} data-job-active aria-busy="true"{% endif %}{% if oob %} hx-swap-oob="true"{% endif %}{% if state == "done" %} data-detected="{{ job.result.source if job.result.detected is not none else '' }}" data-detected-name="{{ job.result.source_name if job.result.detected is not none else '' }}"{% endif %}>
+  {% if job.active %}
+  <div class="output__status" role="status">
+    <progress class="meter__bar" max="1"{% if fraction is not none %} value="{{ '%.3f' | format(fraction) }}"{% endif %} aria-label="Translating"></progress>
+    <div class="output__status-line">
+      <p class="output__message">
+        {% if state == "waiting" %}
+          {% if running and running.listed %}Waits for "{{ running.title }}" to finish: jobs use the GPU one at a time.
+          {% elif running %}Waits for the previous translation to stop.
+          {% else %}Starts in a moment.{% endif %}
+        {% elif job.cancelling %}Stopping.
+        {% else %}{{ job.progress.message if job.progress else "Translating" }}{% endif %}
+      </p>
+      <div class="cluster">
+        {% if state == "waiting" and running and running.listed and running.cancellable %}
+        <button class="text-button text-button--danger" type="button" hx-post="{{ root }}/jobs/{{ running.id }}/cancel" hx-swap="none" hx-confirm='Cancel "{{ running.title }}"? What it has done so far is lost.' hx-disabled-elt="this">Cancel that job</button>
+        {% endif %}
+        {% if not job.cancelling %}
+        <button class="text-button" type="button" hx-post="{{ root }}/jobs/{{ job.id }}/cancel" hx-target="closest .output" hx-swap="outerHTML" hx-disabled-elt="this">Stop</button>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  {% if job.preview %}<div class="output__text output__text--stale" aria-hidden="true">{{ job.preview }}</div>{% endif %}
+
+  {% elif state == "done" %}
+  {% set result = job.result %}
+  <div class="output__text" id="output-{{ job.id }}" data-output-text tabindex="0" aria-label="Translation into {{ result.target_name }}">{{ result.text }}</div>
+  {% for remark in result.notices %}
+  {% call notice("info") %}<p>{{ remark }}</p>{% endcall %}
+  {% endfor %}
+  <div class="pane__foot">
+    <ul class="facts output__facts" aria-label="About the translation">
+      <li>{{ result.source_name }}{% if result.detected is not none %}, detected{% endif %} to {{ result.target_name }}</li>
+      <li>{{ result.engine }}</li>
+      {% if result.glossary_terms %}<li>{{ result.glossary_terms }} glossary term{{ "s" if result.glossary_terms != 1 }}</li>{% endif %}
+      <li>{{ "{:,}".format(result.words) }} word{{ "s" if result.words != 1 }}</li>
+      <li>{{ result.took }}</li>
+    </ul>
+    <button class="text-button" type="button" data-copy-from="output-{{ job.id }}">{{ icon("copy", size="sm") }} Copy</button>
+  </div>
+
+  {% elif state == "failed" %}
+  {% call notice("error", "The translation failed", details=job.error_details) %}<p>{{ job.error }}</p>{% endcall %}
+
+  {% else %}
+  <p class="output__placeholder">Stopped. Press Translate to start again.</p>
+  {% endif %}
+</div>

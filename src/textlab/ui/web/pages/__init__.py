@@ -88,6 +88,7 @@ TOOLS: tuple[Tool, ...] = (
         "/translation",
         "Text",
         "Translate text and documents between more than 200 languages.",
+        ready=True,
     ),
     Tool(
         "chat",
@@ -174,12 +175,14 @@ def routers(settings: WebSettings) -> list[APIRouter]:
         meeting_notes,
         placeholder,
         transcription,
+        translation,
     )
 
     result = [
         home.router,
         transcription.router,
         meeting_notes.router,
+        translation.router,
         placeholder.router,
     ]
     if settings.dev:

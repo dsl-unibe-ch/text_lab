@@ -1,0 +1,82 @@
+{#- Translated documents inside their record (job.result is a
+  Translations): each document with its language, its files, the checks
+  of a PDF and, folded, source and translation side by side. The record's
+  file listing below holds the ZIP of everything when there are several
+  files. -#}
+{% from "components/macros.html" import notice %}
+{% set result = job.result %}
+<div class="result">
+  <ul class="facts" aria-label="About the translation">
+    <li>{{ result.source or "Detected" }} to {{ result.target }}</li>
+    <li>{{ result.engine }}</li>
+    <li>{{ result.translated }} of {{ result.documents | length }} document{{ "s" if result.documents | length != 1 }} translated</li>
+    {% if result.glossary_terms %}<li>{{ result.glossary_terms }} glossary term{{ "s" if result.glossary_terms != 1 }}</li>{% endif %}
+  </ul>
+
+  {% for remark in result.remarks %}
+  {% call notice("info") %}<p>{{ remark }}</p>{% endcall %}
+  {% endfor %}
+
+  <ol class="documents">
+    {% for document in result.documents %}
+    <li class="document{% if document.error %} document--failed{% endif %}">
+      <div class="document__head">
+        <h4 class="document__name">{{ document.name }}</h4>
+        {% if document.language %}<p class="label">{{ document.language }}</p>{% endif %}
+      </div>
+
+      {% if document.error %}
+      {% call notice("error") %}<p>{{ document.error }}</p>{% endcall %}
+      {% endif %}
+      {% for issue in document.blocked %}
+      {% call notice("warning", "An output could not be made") %}<p>{{ issue }}</p>{% endcall %}
+      {% endfor %}
+
+      {% if document.files %}
+      <ul class="files__list">
+        {% for item in document.files %}
+        <li>
+          <a class="file" href="{{ root }}/jobs/{{ job.id }}/files/{{ item.name | urlencode }}" download>
+            <span class="file__name">{{ item.name }}</span>
+            <span class="file__kind">{{ item.kind }}</span>
+            <span class="file__size">{{ item.size | file_size }}</span>
+            {{ icon("download", size="sm") }}
+          </a>
+        </li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+
+      {% if document.warnings %}
+      <details class="disclosure">
+        <summary>Notes from the checks ({{ document.warnings | length }})</summary>
+        <ul class="plain-list">
+          {% for warning in document.warnings %}<li>{{ warning }}</li>{% endfor %}
+        </ul>
+      </details>
+      {% endif %}
+
+      {% if document.pairs %}
+      <details class="disclosure compare-toggle">
+        <summary>Compare source and translation ({{ "{:,}".format(document.passages) }} passage{{ "s" if document.passages != 1 }})</summary>
+        <div class="compare" role="table" aria-label="{{ document.name }}: source and translation">
+          <div class="compare__row compare__row--head" role="row">
+            <span class="label" role="columnheader">Source</span>
+            <span class="label" role="columnheader">{{ result.target }}</span>
+          </div>
+          {% for source, translation in document.pairs %}
+          <div class="compare__row" role="row">
+            <p class="compare__cell" role="cell">{{ source }}</p>
+            <p class="compare__cell" role="cell">{{ translation }}</p>
+          </div>
+          {% endfor %}
+        </div>
+        {% if document.passages > document.pairs | length %}
+        <p class="muted">The first {{ "{:,}".format(document.pairs | length) }} of {{ "{:,}".format(document.passages) }} passages. The side-by-side file has all of them.</p>
+        {% endif %}
+      </details>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ol>
+</div>
