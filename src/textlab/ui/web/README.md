@@ -33,8 +33,8 @@ port, base path (`/node/<host>/<port>/`) and the portal's host name;
 | `uploads.py` | Reading forms with files, checking them, saving them into a job |
 | `render.py` | Templates, icons, links from the base path, number formats, Markdown from models (`markdown()`, also a template filter: raw HTML escaped, no images) |
 | `settings.py` | The server's settings (`TOKEN`, `USER`, `TEXT_LAB_WEB_DEV`) |
-| `pages/` | One module per page (`home`, `transcription`, `meeting_notes`, `translation`, `ocr` with its tools `ocr_handwriting` and `ocr_huggingface` in modules of their own, `topic_modeling`, `placeholder` for the tools not built yet, `dev`), and `TOOLS`, the navigation |
-| `templates/` | `base.html` (layout), `components/macros.html` and `components/player.html` (the audio player), `jobs/`, one folder per page (`pages/` for Home and the placeholders, `transcription/`, `meeting_notes/`, `translation/`, `ocr/`, `topic_modeling/`); `mockups/` and `dev/` for the developer pages |
+| `pages/` | One module per page (`home`, `transcription`, `meeting_notes`, `translation`, `ocr` with its tools `ocr_handwriting` and `ocr_huggingface` in modules of their own, `topic_modeling` with its charts in `topic_charts`, `chat`, `placeholder` for the tools not built yet, `dev`), and `TOOLS`, the navigation |
+| `templates/` | `base.html` (layout), `components/macros.html` and `components/player.html` (the audio player), `jobs/`, one folder per page (`pages/` for Home and the placeholders, `transcription/`, `meeting_notes/`, `translation/`, `ocr/`, `topic_modeling/`, `chat/`); `mockups/` and `dev/` for the developer pages |
 | `static/` | `css/` (`fonts.css`, `tokens.css`, `layout.css`, `components.css`), `js/` (`app.js`, `theme.js`), `vendor/` (htmx, IBM Plex fonts, Lucide icons; see its README) |
 
 ### Links

@@ -31,7 +31,7 @@
     {% call notice("warning", "The language model server does not answer yet") %}<p>It may still be starting, as it does at the beginning of a session: wait a minute before you send a message. If it keeps failing, send ollama.log from the session's folder to support.</p>{% endcall %}
     {% endif %}
 
-    <div class="transcript" id="transcript" data-chat-transcript>
+    <div class="thread" id="chat-thread">
       <section class="welcome" aria-labelledby="welcome-title">
         <h2 class="welcome__title" id="welcome-title">What would you like to know?</h2>
         <p class="welcome__lead">Ask a language model that runs on the University's computing cluster. Attach your files to ask about them: neither they nor your messages leave the cluster.</p>
@@ -58,7 +58,7 @@
     </div>
 
     <form class="composer" id="composer" data-chat-composer
-          hx-post="{{ root }}/chat/{{ conversation.id }}/messages" hx-target="#transcript" hx-swap="beforeend"
+          hx-post="{{ root }}/chat/{{ conversation.id }}/messages" hx-target="#chat-thread" hx-swap="beforeend"
           hx-params="message,model" hx-disabled-elt="find [data-chat-send]">
       {% include "chat/files.html" %}
       <div class="composer__box">

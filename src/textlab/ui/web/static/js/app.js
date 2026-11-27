@@ -1439,7 +1439,7 @@
   /* ---- Chat ----------------------------------------------------------- */
 
   /*
-   * The page [data-chat] holds the conversation (#transcript: a message
+   * The page [data-chat] holds the conversation (#chat-thread: a message
    * and its reply's card per .exchange), the message box (form
    * [data-chat-composer]) and the side panel (#chat-panel-body, refreshed
    * from data-chat-panel-url after each reply). A reply's card carries
@@ -1469,7 +1469,7 @@
   }
 
   function chatActive() {
-    return document.querySelector("#transcript [data-chat-answer][data-job-active]");
+    return document.querySelector("#chat-thread [data-chat-answer][data-job-active]");
   }
 
   function atFoot(slack) {
@@ -1526,7 +1526,7 @@
       return null;
     }
     var active = Array.prototype.map.call(
-      document.querySelectorAll("#transcript [data-chat-answer][data-job-active]"),
+      document.querySelectorAll("#chat-thread [data-chat-answer][data-job-active]"),
       function (card) {
         return card.id;
       }
@@ -1887,16 +1887,16 @@
   // written, or of the message box while the reader types at the foot,
   // the foot stays in view.
   function watchChat() {
-    var transcript = document.getElementById("transcript");
+    var thread = document.getElementById("chat-thread");
     var composer = document.querySelector("[data-chat-composer]");
-    if (!transcript || !composer || !window.ResizeObserver) {
+    if (!thread || !composer || !window.ResizeObserver) {
       return;
     }
     new ResizeObserver(function () {
       if (chatFollow && (chatActive() || Date.now() < followUntil)) {
         toFoot();
       }
-    }).observe(transcript);
+    }).observe(thread);
     new ResizeObserver(function () {
       if (chatFollow) {
         toFoot();

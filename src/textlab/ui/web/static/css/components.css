@@ -4020,7 +4020,7 @@ kbd {
   padding: var(--space-5) 0 var(--space-6);
 }
 
-.transcript:has(.exchange) .welcome {
+.thread:has(.exchange) .welcome {
   display: none;
 }
 
@@ -4077,13 +4077,19 @@ kbd {
   font-size: var(--text-sm);
 }
 
-/* Messages and replies. */
-.transcript {
+/* Messages and replies: the thread grows with them, and the page
+   scrolls (the message box stays at the foot of the window). Before the
+   first message, the welcome stands in the middle of it. */
+.thread {
   display: grid;
   flex: 1;
   align-content: start;
   gap: var(--space-6);
   padding-bottom: var(--space-5);
+}
+
+.thread:not(:has(.exchange)) {
+  align-content: center;
 }
 
 .exchange {

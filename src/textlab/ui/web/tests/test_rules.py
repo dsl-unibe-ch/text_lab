@@ -210,6 +210,23 @@ def top_level_rules(css):
     ]
 
 
+def class_roots(css):
+    """Return the classes that begin the rules of a style sheet."""
+    text = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    return set(re.findall(r"^\s*\.([a-zA-Z][\w-]*)", text, flags=re.M))
+
+
+def test_chat_styles_have_class_names_of_their_own():
+    # The chat's thread once shared the class "transcript" with the audio
+    # player's list of passages, and so its height limit and its scrolling.
+    css = (STATIC_DIR / "css" / "components.css").read_text()
+    start = css.index("/* ---- Chat ----")
+    others = css[:start] + (STATIC_DIR / "css" / "layout.css").read_text()
+    shared = class_roots(css[start:]) & class_roots(others)
+    # .main:has(> .chat) widens the page's frame for Chat only.
+    assert shared == {"main"}, shared
+
+
 def test_the_menu_button_is_hidden_on_wide_screens():
     # The index is always shown on wide screens; a Menu button there would
     # do nothing. The general button rule must not show it again.

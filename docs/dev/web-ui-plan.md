@@ -807,8 +807,19 @@ asked for two changes, made the same day:
   scrolling back to the end or sending a message starts it again. Scroll
   anchoring is off on the page.
 
-Still to do: try the two changes in the sandbox; then commit. Next:
-Visualize Data.
+The width was right in the sandbox, the following still not, and the
+message box stood in the middle of the window with nothing below it. The
+cause of both: the conversation's element had the class `transcript`,
+which the audio player's list of passages already had, with a height
+limit (28rem) and its own scrolling. The conversation was a box of that
+height scrolling inside itself: the page could not follow it, and the
+message box came right after it. It is the `thread` now, and a test
+checks that the Chat section of the style sheet shares no class with the
+rest (`test_chat_styles_have_class_names_of_their_own`). Before the first
+message, the welcome stands in the middle of the thread, and the message
+box at the foot of the window.
+
+Still to do: try it in the sandbox; then commit. Next: Visualize Data.
 
 ## Testing
 
