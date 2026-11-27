@@ -88,8 +88,11 @@ Uploads in `job.inputs` are deleted when the job ends.
 The page lists its jobs with `render_card` and sets `page_id`. `app.js`
 opens the page's event stream while one of the session's jobs waits or runs
 and swaps in the cards and the job indicator as they change (on Home also
-its list of jobs). Short GPU requests outside jobs (a chat message) use
-`runner.exclusive()`.
+its list of jobs). A page whose jobs are named otherwise than by its id
+sets `stream_page`: Chat names each reply's job by its conversation
+(`chat:<id>`), so the stream sends the cards of the conversation shown
+only. Short GPU requests outside jobs can use `runner.exclusive()`; the
+pages so far make them jobs instead (see below).
 
 Work with two steps on the GPU releases it again between them with
 `context.use_gpu(feature, ollama_model)` (Meeting Notes: transcribing,
@@ -97,7 +100,10 @@ then summarizing). A job that uses an Ollama model names it in
 `runner.create(..., ollama_model=...)`, so the release keeps it loaded.
 Output that grows while the work runs, such as a summary, is shown on the
 card with `context.preview(text_so_far)`; updates reach the card at most
-once a second.
+once a second. The preview can be any object the card template knows
+(Chat's `Draft`: thinking, answer, the agents' steps), and
+`context.preview(value, every=0.15)` updates more often, for a reply read
+as it is written.
 
 Short work without the GPU, which should not wait for an hour-long job,
 starts at once beside the queue: `runner.submit(job, work, at_once=True)`
@@ -113,7 +119,43 @@ template must keep the card's id, `job-<id>`, and `data-job-active` while
 the job is active. A route can wait a moment for such a job and answer
 with its result, so short requests come back at once. Files a result uses but the card should not
 list, such as the recording a player plays, are offered with
-`Download(..., listed=False)`; they are fetched from the same link.
+`Download(..., listed=False)`; they are fetched from the same link. What
+the card template needs besides the job goes into
+`runner.create(..., page_data={...})`, such as the conversation and the
+message a chat reply belongs to (for its Again button).
+
+### Chat
+
+Each message is answered by a job of its own (`listed=False`, its card
+`chat/answer.html` being the reply in the conversation), as the
+translation editor's: it waits while another job holds the GPU and says
+which, and the reply reaches the page word by word over the event stream.
+**Stop** cancels the job; the service stops the model within a quarter of
+a second and the job ends *done*, with what was written. The session's
+conversations live in `app.state.chat` (`pages/chat.py`, `ChatStore`),
+with their attachments (read once, their text kept in memory) and their
+exchanges (message, files, job). A reply's history is built from the
+finished replies before it.
+
+`app.js` sends with Enter (Shift+Enter for a new line), grows the message
+box, turns Send into Stop while a reply is active, attaches files dropped
+anywhere on the page, keeps the reply being written in view (unless the
+reader scrolled up), keeps a thinking or steps box open across updates if
+the reader opened it, adds Copy to code blocks, and asks for the side panel
+again when a reply ends. When an event stream opens, it sends every card
+of the conversation; the page skips cards it has in the same version
+(`data-version`, `htmx:oobBeforeSwap`), so finished replies and their
+charts are not drawn again. The page leaves out the layout's footer
+(`{% block footer %}`) and shows the disclaimer under the message box.
+
+The data agents' interactive charts are Plotly figures, offered as the
+reply job's files (`chart-<n>.json`, not listed) and drawn by `app.js`
+with the vendored plotly.js (`static/vendor/plotly-3.7.0/`, the strict
+bundle, loaded only on a page with such a chart). Its style rules come
+from `plotly.css`, linked as `#plotly.js-style-global.no-inline-styles`,
+since plotly.js's own `<style>` element would be blocked; see
+`static/vendor/README.md`. The charts take the page's colours and type,
+also when the theme changes. Static charts are images.
 
 ### Errors
 
@@ -250,8 +292,8 @@ faked models and the real service (`test_translation_page.py`), OCR with
 the pipeline and the engines faked (`test_ocr_page.py`), historic
 handwriting and Hugging Face models with their workers faked
 (`test_ocr_handwriting_page.py`, `test_ocr_huggingface_page.py`), Topic
-Modeling with the analysis faked (`test_topic_modeling_page.py`) and the
-rules
+Modeling with the analysis faked (`test_topic_modeling_page.py`), Chat
+with the model faked (`test_chat_page.py`) and the rules
 (`test_rules.py`). The fake transcription backend is the `backend` fixture
 in `conftest.py`. The launcher and the Open OnDemand files are tested in
 `tests/test_launch.py` at the repository root.

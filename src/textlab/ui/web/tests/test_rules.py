@@ -158,6 +158,29 @@ def test_vendored_htmx_is_the_checked_release():
     assert digest in (STATIC_DIR / "vendor" / "README.md").read_text()
 
 
+def test_vendored_plotly_is_the_checked_release():
+    folder = STATIC_DIR / "vendor" / "plotly-3.7.0"
+    content = (folder / "plotly-strict.min.js").read_bytes()
+    digest = hashlib.sha256(content).hexdigest()
+    assert digest in (STATIC_DIR / "vendor" / "README.md").read_text()
+
+
+def test_plotly_style_sheet_is_read_from_its_bundle():
+    import subprocess
+    import sys
+
+    folder = STATIC_DIR / "vendor" / "plotly-3.7.0"
+    script = WEB.parents[3] / "scripts" / "plotly_css.py"
+    written = subprocess.run(
+        [sys.executable, str(script), str(folder / "plotly-strict.min.js")],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert written == (folder / "plotly.css").read_text()
+    assert ".js-plotly-plot .plotly .modebar" in written
+
+
 def test_vendored_icons_are_unchanged_lucide_files():
     for path in ICONS_DIR.glob("*.svg"):
         text = path.read_text()

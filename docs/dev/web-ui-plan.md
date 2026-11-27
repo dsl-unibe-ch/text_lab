@@ -8,8 +8,8 @@
     [Phase 1 progress](#phase-1-progress)). Phase 2, the pilot, was tried
     in the sandbox and committed on 27 November (see
     [Phase 2 progress](#phase-2-progress)). Phase 3 started with Meeting
-    Notes, committed on 27 November; Translation was built the same day and
-    passed its sandbox test (see
+    Notes; Translation, OCR and Topic Modeling followed, each tried in the
+    sandbox and committed, and Chat was built on 27 November (see
     [Phase 3 progress](#phase-3-progress)). The work happens on the local
     branch `feat/web-ui`, one commit per phase or page, and reaches `main`
     when the whole UI is done. Update this page when a phase ends or a
@@ -167,10 +167,10 @@ Rules, checked by tests as for the Streamlit pages today:
   summary) also wait for a running job; the page says which job is running
   and offers to cancel it. If this proves too strict, measure whether a
   small LLM fits on the GPU next to a running job. The translation editor
-  runs each translation as a job that is not listed (`listed=False`) and
-  shows it in its output pane (its own `card_template`): a request held
-  open while a model loads could pass the proxy's timeout, and a job
-  reports progress and can be stopped.
+  and Chat run each request as a job that is not listed (`listed=False`)
+  and show it in place (their own `card_template`): a request held open
+  while a model loads could pass the proxy's timeout, and a job reports
+  progress and can be stopped.
 - **Progress** comes from the services' `on_progress` callbacks and reaches
   the page over SSE, in the page's one event stream, which is open only
   while one of its jobs runs or waits. After a reload, the page reconnects
@@ -734,8 +734,68 @@ differently): each algorithm is now drawn as its own library draws it.
   over time. Fixed from that look: the size legend moved below the map,
   bubbles kept clear of the edges, the heatmap sized by its topics.
 
-Still to do: try the second version in the sandbox with each algorithm on
-a real collection; then commit it. Next: Chat.
+Tried in the sandbox and committed on 27 November.
+
+### Chat
+
+Built on 27 November 2026, without a mockup (the user asked for a modern
+chat interface in place of Streamlit's), with tests (`test_chat_page.py`
+with the model faked; the service's new parts in
+`features/chat/tests/test_service.py`):
+
+- **A conversation** as modern chat apps show it: the messages on the
+  right in a tinted block (with the files they were sent with), the
+  replies as text, the message box kept at the foot of the window (Enter
+  sends, Shift+Enter starts a new line; it grows with the text), the model
+  chosen beside Send. Streamlit's sidebar became a side panel: the
+  session's conversations, the context meter (with the same notes as
+  before), the downloads, deleting the conversation; on narrow screens it
+  slides in.
+- **Several conversations per session** (the Streamlit page had one, lost
+  on a reload): kept in the server's memory (`app.state.chat`) until they
+  are deleted or the session ends; *New chat* reuses an empty one.
+- **Replies are jobs** that are not listed (`chat/answer.html`), as the
+  translation editor's: they wait while another job holds the GPU (and
+  say which, with *Cancel that job*), and reach the page word by word over
+  the event stream (`context.preview(draft, every=0.15)`). A reasoning
+  model's **thinking** shows apart from the answer, folded, with its
+  newest words, and *Thought for 12 s* when done. **Stop** stops the model
+  at once (the stream is read in a thread of its own, so even while the
+  model loads) and keeps what was written. **Again** writes the last
+  answer again, with the model chosen now. **Copy** gives the answer as
+  Markdown; code blocks have their own.
+- **Files**: attached with the button or dropped anywhere on the page, up
+  to four, read once (`read_document`); a file without text is not
+  attached, and the page says why. Tables are kept for the data agents,
+  each in a folder of its own (`keep_table`; one folder for all would let
+  a second table overwrite the first).
+- **The data agents** answer data questions as before (the model
+  decides); the reply shows their steps as they work, then the summary,
+  the charts, the statistics and the code. Interactive charts are drawn
+  with plotly.js 3.7.0, vendored as its strict bundle (no `unsafe-eval`),
+  the version the image's plotly.py writes for; its style rules come from
+  a style sheet read from the bundle (`scripts/plotly_css.py`), since its
+  own `<style>` element would be blocked. Visualize Data will use the
+  same.
+- **The feature**: `service.respond` replies to a message (pulling the
+  model with progress, routing, the agents or the chat model, stopping);
+  the stream gives the model's thinking apart from its text (`Piece`);
+  `model_options`, `server_ready`, `discard_table`. The Streamlit page
+  works as before (`answer`).
+- **The job runner**: previews can be any object and come more often
+  (`every=`); `page_data` holds what a card needs besides the job; the
+  event stream sends the job indicator only when it changed (a reply
+  written word by word changes the runner's version many times a second);
+  a page can name its jobs otherwise than by its id (`stream_page`), so
+  the stream sends the cards of the conversation shown only, and the page
+  skips cards it has in the same version.
+- The guide's draft: `docs/next/chat.md`.
+
+Still to do: try it in the sandbox: a plain question with a reasoning
+model (thinking, Stop, Again, Copy), a PDF and a table attached (a data
+question with charts, the HTML download), a reply while a transcription
+runs, two conversations, a narrow window and the dark theme. Then commit.
+Next: Visualize Data.
 
 ## Testing
 

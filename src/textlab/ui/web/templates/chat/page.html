@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% from "components/macros.html" import notice with context %}
+{% block title %}Chat{% endblock %}
+{#- The disclaimer is under the message box instead. -#}
+{% block footer %}{% endblock %}
+{% block content %}
+{% set tool = tools | selectattr("id", "equalto", page_id) | first %}
+{#- A conversation: the messages and their replies, the message box at the
+  foot of the window, and beside them (behind a button on narrow screens)
+  the session's conversations, how much of the model's context is used,
+  and the downloads. app.js sends with Enter, keeps the reply being
+  written in view, turns Send into Stop while a reply is written, takes
+  files dropped on the page, refreshes the side panel after each reply and
+  draws the data agents' charts. -#}
+<div class="chat" data-chat data-chat-panel-url="{{ root }}/chat/{{ conversation.id }}/panel">
+  <div class="chat__main">
+    <header class="chat__head">
+      <div class="chat__heading">
+        <p class="label chat__kicker"><span class="masthead__num">{{ tool.number }}</span> {{ tool.group }} · {{ tool.label }}</p>
+        <h1 class="chat__title"><span id="chat-title">{{ conversation.title }}</span></h1>
+      </div>
+      <div class="chat__head-actions">
+        <button class="text-button chat__panel-toggle" type="button" data-chat-panel-toggle aria-controls="chat-panel" aria-expanded="false">Conversations</button>
+        <a class="label masthead__aside" href="https://text-lab.dsl.unibe.ch/chat/" target="_blank" rel="noopener">Guide {{ icon("arrow-up-right", size="sm") }}</a>
+      </div>
+    </header>
+
+    {% if not options.models %}
+    {% call notice("error", "No language models are set up for Chat") %}<p>The site's model list names none. Please tell support.</p>{% endcall %}
+    {% elif not ready %}
+    {% call notice("warning", "The language model server does not answer yet") %}<p>It may still be starting, as it does at the beginning of a session: wait a minute before you send a message. If it keeps failing, send ollama.log from the session's folder to support.</p>{% endcall %}
+    {% endif %}
+
+    <div class="transcript" id="transcript" data-chat-transcript>
+      <section class="welcome" aria-labelledby="welcome-title">
+        <h2 class="welcome__title" id="welcome-title">What would you like to know?</h2>
+        <p class="welcome__lead">Ask a language model that runs on the University's computing cluster. Attach your files to ask about them: neither they nor your messages leave the cluster.</p>
+        <ul class="ideas" aria-label="Ideas">
+          <li><button class="idea" type="button" data-fill="chat-message" data-fill-value="Summarize the attached document in five bullet points.">
+            <span class="idea__title">Summarize a document</span>
+            <span class="idea__text">Attach a PDF first</span>
+          </button></li>
+          <li><button class="idea" type="button" data-fill="chat-message" data-fill-value="Compare the attached documents: where do they agree, and where do they differ?">
+            <span class="idea__title">Compare documents</span>
+            <span class="idea__text">Up to {{ max_files }} files at a time</span>
+          </button></li>
+          <li><button class="idea" type="button" data-fill="chat-message" data-fill-value="Show the distribution of each numeric column, and test whether they differ between the groups.">
+            <span class="idea__title">Chart a table</span>
+            <span class="idea__text">Attach a CSV or Excel table</span>
+          </button></li>
+          <li><button class="idea" type="button" data-fill="chat-message" data-fill-value="Explain the difference between a fixed effects and a random effects model, with an example.">
+            <span class="idea__title">Explain a method</span>
+            <span class="idea__text">No file needed</span>
+          </button></li>
+        </ul>
+      </section>
+      {% for exchange in exchanges %}{{ exchange }}{% endfor %}
+    </div>
+
+    <form class="composer" id="composer" data-chat-composer
+          hx-post="{{ root }}/chat/{{ conversation.id }}/messages" hx-target="#transcript" hx-swap="beforeend"
+          hx-params="message,model" hx-disabled-elt="find [data-chat-send]">
+      {% include "chat/files.html" %}
+      <div class="composer__box">
+        <label class="visually-hidden" for="chat-message">Message</label>
+        <textarea class="composer__input" id="chat-message" name="message" rows="1" required autocomplete="off" data-chat-input
+                  placeholder="Ask anything, or attach files to ask about them" aria-describedby="chat-note"></textarea>
+        <div class="composer__bar">
+          <div class="composer__attach" data-chat-attach
+               hx-post="{{ root }}/chat/{{ conversation.id }}/files" hx-trigger="change" hx-encoding="multipart/form-data"
+               hx-params="files" hx-target="#chat-files" hx-swap="outerHTML">
+            <input class="visually-hidden" type="file" id="chat-attach" name="files" multiple accept="{{ accept }}" data-chat-file>
+            <label class="composer__tool" for="chat-attach" title="Attach files: {{ formats }}, up to {{ max_files }}, {{ max_file_mb }} MB each">{{ icon("paperclip", size="sm") }}<span class="composer__tool-text">Attach</span></label>
+            <span class="composer__reading" role="status"><span class="answer__pulse" aria-hidden="true"></span>Reading the files</span>
+          </div>
+          <div class="select-wrap composer__model">
+            <label class="visually-hidden" for="chat-model">Model</label>
+            <select class="select" id="chat-model" name="model" title="{% if options.large %}Models for a GPU with much memory ({{ options.gpu }}){% else %}Models for this GPU ({{ options.gpu }}); the largest need a GPU with more memory{% endif %}">
+              {% for name in options.models %}<option{% if name == model %} selected{% endif %}>{{ name }}</option>{% endfor %}
+            </select>
+            {{ icon("chevron-down", size="sm") }}
+          </div>
+          <span class="composer__spacer"></span>
+          <button class="send-button" type="submit" data-chat-send aria-label="Send"{% if not options.models %} disabled{% endif %}>{{ icon("arrow-up") }}</button>
+          <button class="send-button send-button--stop" type="button" data-chat-stop aria-label="Stop the answer" hidden>{{ icon("square", size="sm") }}</button>
+        </div>
+      </div>
+      <p class="composer__note" id="chat-note">Enter sends, Shift+Enter starts a new line. AI models can produce inaccurate or misleading output: check answers before you use them in your research.</p>
+    </form>
+  </div>
+
+  <aside class="chat__panel" id="chat-panel" aria-label="Conversations">
+    {% include "chat/panel.html" %}
+  </aside>
+</div>
+{% endblock %}

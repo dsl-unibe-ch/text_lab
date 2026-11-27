@@ -18,6 +18,10 @@
  *   you type, swapping the languages, copying, the glossary's rows.
  * - OCR results: one page at a time, and the regions outlined on a page
  *   linked to their text.
+ * - Chat: Enter sends, the message box grows, Send turns into Stop while a
+ *   reply is written, files dropped on the page are attached, the reply
+ *   being written stays in view, code can be copied, and the data agents'
+ *   charts are drawn with plotly.js, loaded only then.
  * - Error notices for failed htmx requests, copying error details.
  *
  * There are no inline scripts (the Content Security Policy forbids them):
@@ -140,7 +144,9 @@
     stream.addEventListener("update", function (event) {
       // The data holds out-of-band fragments only: job cards and the job
       // indicator, each replacing the element with its id.
+      var chat = chatBeforeUpdate();
       window.htmx.swap(document.body, event.data, { swapStyle: "none" });
+      chatAfterUpdate(chat);
       syncStream();
       showDetected();
     });
@@ -170,6 +176,7 @@
   document.addEventListener("htmx:afterSettle", function () {
     syncStream();
     showDetected();
+    syncComposer();
   });
   window.addEventListener("pagehide", closeStream);
 
@@ -261,6 +268,7 @@
     } else {
       document.documentElement.setAttribute("data-theme", theme);
     }
+    document.dispatchEvent(new CustomEvent("textlab:theme"));
     document.querySelectorAll("[data-theme-toggle]").forEach(function (button) {
       var label = "Colour theme: " + themeNames[theme];
       button.setAttribute("data-current", theme);
@@ -1062,7 +1070,7 @@
             }, 1500);
           },
           function () {
-            showError("The translation could not be copied", "Select it and copy it yourself.");
+            showError("The text could not be copied", "Select it and copy it yourself.");
           }
         );
       }
@@ -1248,6 +1256,7 @@
       var field = document.getElementById(fill.getAttribute("data-fill"));
       if (field) {
         field.value = fill.getAttribute("data-fill-value") || "";
+        field.dispatchEvent(new Event("input", { bubbles: true }));
         field.focus();
       }
     }
@@ -1427,6 +1436,371 @@
     }
   });
 
+  /* ---- Chat ----------------------------------------------------------- */
+
+  /*
+   * The page [data-chat] holds the conversation (#transcript: a message
+   * and its reply's card per .exchange), the message box (form
+   * [data-chat-composer]) and the side panel (#chat-panel-body, refreshed
+   * from data-chat-panel-url after each reply). A reply's card carries
+   * data-job-active while it waits or is written.
+   */
+  var chatKept = {};
+  var plotlyLoading = null;
+
+  function chatPage() {
+    return document.querySelector("[data-chat]");
+  }
+
+  function chatActive() {
+    return document.querySelector("#transcript [data-chat-answer][data-job-active]");
+  }
+
+  function nearBottom() {
+    var page = document.documentElement;
+    return window.innerHeight + window.scrollY >= page.scrollHeight - 160;
+  }
+
+  function toBottom() {
+    window.scrollTo(0, document.documentElement.scrollHeight);
+  }
+
+  function growInput(area) {
+    area.style.height = "auto";
+    area.style.height = Math.min(area.scrollHeight, window.innerHeight * 0.4) + "px";
+  }
+
+  function syncComposer() {
+    var form = document.querySelector("[data-chat-composer]");
+    if (!form) {
+      return;
+    }
+    var busy = chatActive() !== null;
+    form.classList.toggle("is-busy", busy);
+    form.querySelector("[data-chat-send]").hidden = busy;
+    form.querySelector("[data-chat-stop]").hidden = !busy;
+  }
+
+  // Details the reader opened or closed stay so when the card is replaced.
+  function keepOpen(scope) {
+    scope.querySelectorAll("details[data-chat-keep]").forEach(function (details) {
+      if (Object.prototype.hasOwnProperty.call(chatKept, details.id)) {
+        details.open = chatKept[details.id];
+      }
+    });
+  }
+
+  function chatBeforeUpdate() {
+    if (!chatPage()) {
+      return null;
+    }
+    var active = Array.prototype.map.call(
+      document.querySelectorAll("#transcript [data-chat-answer][data-job-active]"),
+      function (card) {
+        return card.id;
+      }
+    );
+    return { pinned: nearBottom(), active: active };
+  }
+
+  function chatAfterUpdate(before) {
+    if (!before) {
+      return;
+    }
+    keepOpen(document);
+    syncComposer();
+    if (before.pinned) {
+      toBottom();
+    }
+    var ended = before.active.some(function (id) {
+      var card = document.getElementById(id);
+      return card && !card.hasAttribute("data-job-active");
+    });
+    var page = chatPage();
+    if (ended && page && window.htmx) {
+      window.htmx.ajax("GET", page.getAttribute("data-chat-panel-url"), {
+        target: "#chat-panel-body",
+        swap: "outerHTML"
+      });
+    }
+  }
+
+  // An event stream that opens sends every card of the conversation; one
+  // the page has in the same version stays, so its charts are not drawn
+  // again.
+  document.addEventListener("htmx:oobBeforeSwap", function (event) {
+    var target = event.detail.target;
+    var incoming = event.detail.fragment ? event.detail.fragment.firstElementChild : null;
+    if (
+      target instanceof Element &&
+      incoming &&
+      target.matches("[data-chat-answer]") &&
+      target.getAttribute("data-version") === incoming.getAttribute("data-version")
+    ) {
+      event.detail.shouldSwap = false;
+    }
+  });
+
+  document.addEventListener(
+    "toggle",
+    function (event) {
+      var details = event.target;
+      if (details instanceof Element && details.matches("details[data-chat-keep]") && details.id) {
+        chatKept[details.id] = details.open;
+      }
+    },
+    true
+  );
+
+  document.addEventListener("keydown", function (event) {
+    var area = event.target instanceof Element ? event.target.closest("[data-chat-input]") : null;
+    if (!area || event.key !== "Enter" || event.shiftKey || event.isComposing) {
+      return;
+    }
+    event.preventDefault();
+    var form = area.closest("form");
+    if (area.value.trim() && !form.classList.contains("is-busy")) {
+      form.requestSubmit();
+    }
+  });
+
+  document.addEventListener("input", function (event) {
+    if (event.target instanceof Element && event.target.matches("[data-chat-input]")) {
+      growInput(event.target);
+    }
+  });
+
+  document.addEventListener("htmx:afterRequest", function (event) {
+    var element = event.detail.elt;
+    if (!(element instanceof Element)) {
+      return;
+    }
+    if (element.matches("[data-chat-attach]")) {
+      // The same file can be chosen again after it was removed.
+      element.querySelector("input[type='file']").value = "";
+    } else if (element.matches("[data-chat-composer]") && event.detail.successful) {
+      var area = element.querySelector("[data-chat-input]");
+      area.value = "";
+      growInput(area);
+      syncComposer();
+      toBottom();
+    }
+  });
+
+  document.addEventListener("click", function (event) {
+    var target = event.target instanceof Element ? event.target : null;
+    if (!target) {
+      return;
+    }
+    if (target.closest("[data-chat-stop]")) {
+      var card = chatActive();
+      if (card && window.htmx) {
+        window.htmx.ajax("POST", root + "/jobs/" + card.id.replace(/^job-/, "") + "/cancel", {
+          target: card,
+          swap: "outerHTML"
+        });
+      }
+      return;
+    }
+    var toggle = target.closest("[data-chat-panel-toggle]");
+    if (toggle) {
+      var page = chatPage();
+      var open = !page.classList.contains("is-panel-open");
+      page.classList.toggle("is-panel-open", open);
+      toggle.setAttribute("aria-expanded", String(open));
+      return;
+    }
+    var copy = target.closest("[data-copy-code]");
+    if (copy && navigator.clipboard) {
+      var code = copy.parentNode.querySelector("pre");
+      navigator.clipboard.writeText(code ? code.textContent : "").then(function () {
+        copy.textContent = "Copied";
+        window.setTimeout(function () {
+          copy.textContent = "Copy";
+        }, 1500);
+      });
+    }
+  });
+
+  /* Files dropped anywhere on the page are attached (and never opened
+     by the browser in place of the page). */
+  function draggingFiles(event) {
+    return event.dataTransfer && Array.prototype.indexOf.call(event.dataTransfer.types, "Files") >= 0;
+  }
+
+  ["dragenter", "dragover"].forEach(function (type) {
+    document.addEventListener(type, function (event) {
+      var page = chatPage();
+      if (page && draggingFiles(event)) {
+        event.preventDefault();
+        page.classList.add("is-dragover");
+      }
+    });
+  });
+  document.addEventListener("dragleave", function (event) {
+    var page = chatPage();
+    if (page && !(event.relatedTarget instanceof Node)) {
+      page.classList.remove("is-dragover");
+    }
+  });
+  document.addEventListener("drop", function (event) {
+    var page = chatPage();
+    if (!page || !draggingFiles(event)) {
+      return;
+    }
+    event.preventDefault();
+    page.classList.remove("is-dragover");
+    if (event.dataTransfer.files.length) {
+      var input = page.querySelector("[data-chat-file]");
+      input.files = event.dataTransfer.files;
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+  });
+
+  /* Code in answers gets a Copy button. */
+  function addCopyButtons(scope) {
+    scope.querySelectorAll(".answer__text pre, .code-block pre").forEach(function (pre) {
+      if (pre.parentNode.classList.contains("code")) {
+        return;
+      }
+      var box = document.createElement("div");
+      box.className = "code";
+      pre.parentNode.insertBefore(box, pre);
+      box.appendChild(pre);
+      var button = document.createElement("button");
+      button.type = "button";
+      button.className = "text-button code__copy";
+      button.setAttribute("data-copy-code", "");
+      button.textContent = "Copy";
+      box.appendChild(button);
+    });
+  }
+
+  /* The data agents' interactive charts, drawn with plotly.js. */
+  function loadPlotly(element) {
+    if (window.Plotly) {
+      return Promise.resolve(window.Plotly);
+    }
+    if (!plotlyLoading) {
+      // plotly.js adds its style rules to the page unless this element is
+      // there: the Content Security Policy would block them.
+      if (!document.getElementById("plotly.js-style-global")) {
+        var sheet = document.createElement("link");
+        sheet.rel = "stylesheet";
+        sheet.id = "plotly.js-style-global";
+        sheet.className = "no-inline-styles";
+        sheet.href = element.getAttribute("data-plotly-css");
+        document.head.appendChild(sheet);
+      }
+      plotlyLoading = new Promise(function (resolve, reject) {
+        var script = document.createElement("script");
+        script.src = element.getAttribute("data-plotly");
+        script.addEventListener("load", function () {
+          resolve(window.Plotly);
+        });
+        script.addEventListener("error", function () {
+          plotlyLoading = null;
+          reject(new Error("plotly.js did not load"));
+        });
+        document.head.appendChild(script);
+      });
+    }
+    return plotlyLoading;
+  }
+
+  function chartColours() {
+    var style = window.getComputedStyle(document.body);
+    var read = function (name) {
+      return style.getPropertyValue(name).trim();
+    };
+    return {
+      ink: read("--ink"),
+      text: read("--ink-2"),
+      rule: read("--rule"),
+      strong: read("--rule-strong"),
+      font: read("--font-sans")
+    };
+  }
+
+  // The page's colours and type for a chart's layout, as relayout updates.
+  function chartTheme(layout) {
+    var colours = chartColours();
+    var update = {
+      paper_bgcolor: "rgba(0,0,0,0)",
+      plot_bgcolor: "rgba(0,0,0,0)",
+      "font.family": colours.font,
+      "font.color": colours.text,
+      "title.font.color": colours.ink,
+      "legend.bgcolor": "rgba(0,0,0,0)"
+    };
+    Object.keys(layout || {})
+      .concat(["xaxis", "yaxis"])
+      .forEach(function (key) {
+        if (/^[xy]axis\d*$/.test(key)) {
+          update[key + ".gridcolor"] = colours.rule;
+          update[key + ".linecolor"] = colours.strong;
+          update[key + ".zerolinecolor"] = colours.strong;
+        }
+      });
+    return update;
+  }
+
+  function drawChart(element) {
+    if (element.hasAttribute("data-drawn")) {
+      return;
+    }
+    element.setAttribute("data-drawn", "");
+    var figure = window.fetch(element.getAttribute("data-chart"), { credentials: "same-origin" }).then(
+      function (response) {
+        if (!response.ok) {
+          throw new Error("status " + response.status);
+        }
+        return response.json();
+      }
+    );
+    Promise.all([loadPlotly(element), figure])
+      .then(function (loaded) {
+        var Plotly = loaded[0];
+        var layout = loaded[1].layout || {};
+        element.textContent = "";
+        return Plotly.newPlot(element, loaded[1].data || [], layout, {
+          responsive: true,
+          displaylogo: false
+        }).then(function () {
+          return Plotly.relayout(element, chartTheme(layout));
+        });
+      })
+      .catch(function () {
+        element.textContent = "The chart could not be drawn. The conversation's HTML download holds it.";
+      });
+  }
+
+  document.addEventListener("textlab:theme", function () {
+    if (!window.Plotly) {
+      return;
+    }
+    // The theme's colours apply once the style sheet has switched.
+    window.requestAnimationFrame(function () {
+      document.querySelectorAll("[data-chart][data-drawn].js-plotly-plot").forEach(function (element) {
+        window.Plotly.relayout(element, chartTheme(element.layout));
+      });
+    });
+  });
+  if (window.matchMedia) {
+    var darkScheme = window.matchMedia("(prefers-color-scheme: dark)");
+    if (darkScheme.addEventListener) {
+      darkScheme.addEventListener("change", function () {
+        document.dispatchEvent(new CustomEvent("textlab:theme"));
+      });
+    }
+  }
+
+  function initialiseChat(scope) {
+    scope.querySelectorAll("[data-chart]").forEach(drawChart);
+    addCopyButtons(scope);
+    keepOpen(scope);
+  }
+
   /* ---- Start ---------------------------------------------------------- */
 
   function initialise(scope) {
@@ -1434,11 +1808,16 @@
     scope.querySelectorAll("[data-switch]").forEach(applySwitch);
     scope.querySelectorAll("input[type='range']").forEach(showRange);
     scope.querySelectorAll("select[data-readout], input[type='radio'][data-readout]").forEach(showReadout);
+    initialiseChat(scope);
   }
 
   applyTheme(currentTheme());
   initialise(document);
   initialiseTranslator(document);
+  if (chatPage()) {
+    syncComposer();
+    toBottom();
+  }
   if (window.htmx) {
     window.htmx.onLoad(function (element) {
       if (element instanceof Element && element !== document.body) {

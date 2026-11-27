@@ -1,0 +1,103 @@
+{#- The reply to a message: the card of its job, which is not listed. The
+  card is replaced whenever the job changes, from the page's event stream
+  (oob) or as the answer to Stop and Again; it keeps the id job-<id>, and
+  data-job-active while the job waits or runs.
+
+  While the reply is written, job.preview is the service's Draft (the
+  model's thinking, the answer so far, or the data agents' steps) and
+  job.progress says what happens before the first word. When it is done,
+  job.result is the page's Answer (pages/chat.py). job.page_data names the
+  conversation and the exchange, for Again. app.js keeps open what the
+  reader opened (data-chat-keep) across updates, draws the charts, and
+  leaves a card of the same data-version as it is when the event stream
+  sends it again. -#}
+{% from "components/macros.html" import notice %}
+{% set state = job.state %}
+{% set draft = job.preview if job.preview else none %}
+{% set again = root ~ "/chat/" ~ job.page_data.conversation ~ "/exchanges/" ~ job.page_data.exchange ~ "/again" %}
+{% set fraction = job.progress.fraction if job.progress and job.progress.fraction is not none else none %}
+
+{% macro steps(items, open, title) %}
+<details class="activity" id="activity-{{ job.id }}" data-chat-keep{% if open %} open{% endif %}>
+  <summary class="activity__summary">{{ title }}</summary>
+  <ol class="activity__list">
+    {% for level, message in items %}<li class="activity__step activity__step--{{ level }}">{{ message }}</li>{% endfor %}
+  </ol>
+</details>
+{% endmacro %}
+
+{% macro again_button(label) %}
+<button class="text-button answer__again" type="button" hx-post="{{ again }}" hx-include="#chat-model" hx-target="closest .exchange" hx-swap="outerHTML" hx-disabled-elt="this" title="Answer the message again, with the model chosen below">{{ icon("rotate-ccw", size="sm") }} {{ label }}</button>
+{% endmacro %}
+
+<div class="answer answer--{{ state }}" id="job-{{ job.id }}" data-chat-answer data-version="{{ job.version }}"{% if job.active %} data-job-active aria-busy="true"{% endif %}{% if oob %} hx-swap-oob="true"{% endif %}>
+  <h2 class="label answer__model">{{ job.ollama_model }}</h2>
+
+  {% if state == "waiting" %}
+  <p class="answer__status" role="status">
+    <span class="answer__pulse" aria-hidden="true"></span>
+    {% if running and running.listed %}Waits for "{{ running.title }}" to finish: jobs use the GPU one at a time.
+    {% elif running %}Waits for another request to finish.
+    {% else %}Starts in a moment.{% endif %}
+  </p>
+  {% if running and running.listed and running.cancellable %}
+  <button class="text-button text-button--danger" type="button" hx-post="{{ root }}/jobs/{{ running.id }}/cancel" hx-swap="none" hx-confirm='Cancel "{{ running.title }}"? What it has done so far is lost.' hx-disabled-elt="this">Cancel that job</button>
+  {% endif %}
+
+  {% elif state == "running" %}
+  {% if draft and draft.activity %}{{ steps(draft.activity, true, "The data agents at work") }}{% endif %}
+  {% if draft and draft.thinking %}
+  <details class="thinking" id="thinking-{{ job.id }}" data-chat-keep>
+    <summary class="thinking__summary">
+      {% if draft.text %}Thought{% else %}<span class="answer__pulse" aria-hidden="true"></span> Thinking <span class="thinking__tail">{{ draft.thinking[-160:] }}</span>{% endif %}
+    </summary>
+    <div class="thinking__text">{{ draft.thinking }}</div>
+  </details>
+  {% endif %}
+  {% if draft and draft.text %}
+  <div class="answer__text prose is-writing">{{ draft.text | markdown }}</div>
+  {% elif not (draft and draft.thinking) %}
+  <div class="answer__status" role="status">
+    <span class="answer__pulse" aria-hidden="true"></span>
+    <span>{{ job.progress.message if job.progress else "Starting" }}</span>
+    {% if fraction is not none %}<progress class="meter__bar answer__meter" max="1" value="{{ '%.3f' | format(fraction) }}" aria-label="Done so far"></progress>{% endif %}
+  </div>
+  {% endif %}
+  {% if job.cancelling %}<p class="answer__status">Stopping.</p>{% endif %}
+
+  {% elif state == "done" %}
+  {% set answer = job.result %}
+  {% set reply = answer.reply %}
+  {% if reply.activity %}{{ steps(reply.activity, false, "How the data agents worked: " ~ (reply.activity | length) ~ " steps") }}{% endif %}
+  {% if reply.thinking %}
+  <details class="thinking" id="thinking-{{ job.id }}" data-chat-keep>
+    <summary class="thinking__summary">Thought for {{ reply.thinking_seconds | duration }}</summary>
+    <div class="thinking__text">{{ reply.thinking }}</div>
+  </details>
+  {% endif %}
+  {% if reply.text %}<div class="answer__text prose">{{ reply.text | markdown }}</div>{% endif %}
+  {% if answer.charts or answer.stats %}{% include "chat/analysis.html" %}{% endif %}
+  {% if reply.stopped %}<p class="answer__stopped">{{ "Stopped." if reply.text else "Stopped before the answer began." }}</p>{% endif %}
+  <div class="answer__foot">
+    <ul class="facts answer__facts" aria-label="About the answer">
+      <li>{{ reply.seconds | duration }}</li>
+      {% if reply.analysis %}<li>data agents</li>{% endif %}
+    </ul>
+    <div class="answer__actions">
+      {% if reply.text %}
+      <pre id="raw-{{ job.id }}" hidden>{{ reply.text }}</pre>
+      <button class="text-button" type="button" data-copy-from="raw-{{ job.id }}" title="Copy the answer as Markdown">{{ icon("copy", size="sm") }} Copy</button>
+      {% endif %}
+      {{ again_button("Again") }}
+    </div>
+  </div>
+
+  {% elif state == "failed" %}
+  {% call notice("error", "No answer", details=job.error_details) %}<p>{{ job.error }}</p>{% endcall %}
+  <div class="answer__foot"><div class="answer__actions">{{ again_button("Try again") }}</div></div>
+
+  {% else %}
+  <p class="answer__stopped">Cancelled before it started.</p>
+  <div class="answer__foot"><div class="answer__actions">{{ again_button("Ask again") }}</div></div>
+  {% endif %}
+</div>

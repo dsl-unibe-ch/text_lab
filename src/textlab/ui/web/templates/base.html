@@ -2,7 +2,11 @@
   the status bar on top, the footer with the disclaimer.
 
   Pages extend it and fill the blocks "title" and "content"; they set
-  page_id, which names the page's jobs in the event stream. -#}
+  page_id, which names the page's jobs in the event stream (or
+  stream_page, if its jobs are named otherwise, as Chat's by their
+  conversation). A page that
+  shows the disclaimer itself, as Chat does under its message box,
+  empties the block "footer". -#}
 <!doctype html>
 <html lang="en">
 <head>
@@ -15,7 +19,7 @@
   <script src="{{ static('vendor/htmx-2.0.11.min.js') }}" defer></script>
   <script src="{{ static('js/app.js') }}" defer></script>
 </head>
-<body data-root="{{ root }}" data-page="{{ page_id | default('') }}" hx-headers='{"X-CSRF-Token": "{{ csrf_token }}"}'>
+<body data-root="{{ root }}" data-page="{{ stream_page | default(page_id | default('')) }}" hx-headers='{"X-CSRF-Token": "{{ csrf_token }}"}'>
   <a class="skip-link" href="#main">Skip to the content</a>
   <div class="app">
     <aside class="sidebar" id="sidebar" aria-label="Text Lab">
@@ -96,6 +100,7 @@
         {% block content %}{% endblock %}
       </main>
 
+      {% block footer %}
       <footer class="footer">
         <p class="footer__note">AI models can produce inaccurate or misleading output. Please review all results before you use them in your research.</p>
         <p class="footer__meta label">
@@ -104,6 +109,7 @@
           <a href="mailto:support.dsl@unibe.ch">support.dsl@unibe.ch</a>
         </p>
       </footer>
+      {% endblock %}
     </div>
   </div>
   <div class="toasts" id="notices" aria-live="polite"></div>

@@ -147,10 +147,13 @@ class Job:
         listed: Whether the job is listed in the job indicator and on
             Home. Short requests a page shows in place, such as a
             translation in the editor, are not.
+        page_data: What the page's card template needs besides the job,
+            such as the conversation a chat reply belongs to.
         state: Where the job is in its life.
         progress: The work's latest progress update.
-        preview: The work's output so far, such as a summary being
-            written, shown while it runs.
+        preview: The work's output so far, shown while it runs: text,
+            such as a summary being written, or an object the job's card
+            template shows, such as a chat reply with its thinking.
         submitted: When the job was submitted (seconds since the epoch).
         started: When the work started.
         finished: When the work ended.
@@ -173,9 +176,10 @@ class Job:
     result_template: str | None = None
     card_template: str = "jobs/card.html"
     listed: bool = True
+    page_data: dict[str, str] = dataclasses.field(default_factory=dict)
     state: JobState = JobState.WAITING
     progress: Progress | None = None
-    preview: str = ""
+    preview: Any = ""
     submitted: float | None = None
     started: float | None = None
     finished: float | None = None
@@ -224,10 +228,11 @@ class Job:
 
     @property
     def preview_tail(self) -> str:
-        """The end of the preview the card shows, at most PREVIEW_CHARS."""
-        if len(self.preview) <= PREVIEW_CHARS:
-            return self.preview
-        return "\u2026" + self.preview[-PREVIEW_CHARS:]
+        """The end of a text preview, at most PREVIEW_CHARS."""
+        text = self.preview if isinstance(self.preview, str) else ""
+        if len(text) <= PREVIEW_CHARS:
+            return text
+        return "\u2026" + text[-PREVIEW_CHARS:]
 
     @property
     def listed_downloads(self) -> list[Download]:
@@ -287,22 +292,25 @@ class JobContext:
         """
         self._runner._update(self._job, progress=progress)
 
-    def preview(self, text: str) -> None:
+    def preview(self, value: Any, *, every: float = PREVIEW_SECONDS) -> None:
         """Show the work's output so far on the job's card.
 
         For output that grows while the work runs, such as a summary a
-        model writes. Updates reach the card at most every
-        :data:`PREVIEW_SECONDS`; the result replaces the preview when the
-        job ends.
+        model writes. Updates reach the card at most every ``every``
+        seconds; the result replaces the preview when the job ends.
 
         Args:
-            text: The whole output so far.
+            value: The whole output so far: text, or an object the job's
+                card template shows.
+            every: Least seconds between two updates. A chat reply, read
+                as it is written, takes fewer than the default
+                :data:`PREVIEW_SECONDS`.
         """
         now = _preview_clock()
-        if now - self._previewed < PREVIEW_SECONDS:
+        if now - self._previewed < every:
             return
         self._previewed = now
-        self._runner._update(self._job, preview=text)
+        self._runner._update(self._job, preview=value)
 
     def use_gpu(self, feature: str, ollama_model: str | None = None) -> None:
         """Release the GPU for another step of the work.
@@ -424,6 +432,7 @@ class JobRunner:
         result_template: str | None = None,
         card_template: str | None = None,
         listed: bool = True,
+        page_data: dict[str, str] | None = None,
     ) -> Job:
         """Create a job and its folders, to be submitted with :meth:`submit`.
 
@@ -442,6 +451,8 @@ class JobRunner:
             card_template: Template of the job's card; the ledger record
                 (``jobs/card.html``) by default.
             listed: Whether the job indicator and Home list the job.
+            page_data: What the page's card template needs besides the
+                job.
 
         Returns:
             The job, not yet listed or queued.
@@ -462,6 +473,7 @@ class JobRunner:
             result_template=result_template,
             card_template=card_template or "jobs/card.html",
             listed=listed,
+            page_data=dict(page_data or {}),
         )
         with self._lock:
             self._drafts[job.id] = job
@@ -1055,6 +1067,7 @@ async def events(request: Request, page: str = "") -> EventSourceResponse:
         )
         sent: dict[str, int] = {}
         indicator_version = None
+        indicator_sent = None
         try:
             while True:
                 changed.clear()
@@ -1076,9 +1089,13 @@ async def events(request: Request, page: str = "") -> EventSourceResponse:
                 version = runner.version
                 if version != indicator_version:
                     indicator_version = version
-                    parts.append(
-                        render_indicator(request, oob=True, page=page)
-                    )
+                    # Jobs that are not listed, such as a chat reply
+                    # written word by word, change the version often but
+                    # the indicator seldom.
+                    indicator = render_indicator(request, oob=True, page=page)
+                    if indicator != indicator_sent:
+                        indicator_sent = indicator
+                        parts.append(indicator)
                 if parts:
                     yield ServerSentEvent(data="".join(parts), event="update")
                 current = runner.version == indicator_version and all(

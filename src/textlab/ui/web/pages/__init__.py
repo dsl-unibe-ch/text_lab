@@ -97,6 +97,7 @@ TOOLS: tuple[Tool, ...] = (
         "/chat",
         "Text",
         "Ask a language model questions, about your own documents too.",
+        ready=True,
     ),
     Tool(
         "topic_modeling",
@@ -172,6 +173,7 @@ def routers(settings: WebSettings) -> list[APIRouter]:
         The routers.
     """
     from textlab.ui.web.pages import (
+        chat,
         dev,
         home,
         meeting_notes,
@@ -192,6 +194,7 @@ def routers(settings: WebSettings) -> list[APIRouter]:
         ocr_handwriting.router,
         ocr_huggingface.router,
         translation.router,
+        chat.router,
         topic_modeling.router,
         placeholder.router,
     ]

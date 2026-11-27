@@ -107,13 +107,23 @@ def message_text(message: Any) -> str:
     Returns:
         The message content as a string.
     """
-    if message is None:
-        return ""
-    if isinstance(message, Mapping):
-        content = message.get("content")
-    else:
-        content = getattr(message, "content", None)
-    return content or ""
+    return _field(message, "content") or ""
+
+
+def message_thinking(message: Any) -> str:
+    """Return the reasoning of a chat message, or ``""`` when it has none.
+
+    Reasoning models stream their thinking in the message's ``thinking``
+    field before the answer (Ollama 0.28 and later), so an interface can
+    show it apart from the answer.
+
+    Args:
+        message: A message object or dictionary, or ``None``.
+
+    Returns:
+        The thinking as a string.
+    """
+    return _field(message, "thinking") or ""
 
 
 def chat_no_think(

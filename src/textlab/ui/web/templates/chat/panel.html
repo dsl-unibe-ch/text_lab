@@ -1,0 +1,72 @@
+{#- The side panel: the session's conversations, how much of the model's
+  context the next message uses, the downloads and deleting the
+  conversation. It comes again after each reply (app.js asks for it) and
+  out of band with each message and file, as does the page's title. -#}
+<div class="chat-panel" id="chat-panel-body"{% if oob %} hx-swap-oob="true"{% endif %}>
+  <section class="chat-panel__part" aria-labelledby="chat-conversations">
+    <div class="chat-panel__head">
+      <h2 class="label" id="chat-conversations">Conversations</h2>
+      <form method="post" action="{{ root }}/chat/new">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="text-button" type="submit">{{ icon("plus", size="sm") }} New chat</button>
+      </form>
+    </div>
+    <ul class="conversations">
+      {% for item in conversations %}
+      <li>
+        <a class="conversations__link" href="{{ root }}/chat/{{ item.id }}"{% if item is sameas conversation %} aria-current="page"{% endif %}>
+          <span class="conversations__title">{{ item.title }}</span>
+          <span class="conversations__meta">{{ item.updated | clock_time }}{% if item.exchanges %} · {{ item.exchanges | length }} message{{ "s" if item.exchanges | length != 1 }}{% endif %}</span>
+        </a>
+      </li>
+      {% endfor %}
+    </ul>
+    <p class="field__help">Kept until the session ends.</p>
+  </section>
+
+  {% if has_messages or conversation.attachments %}
+  <section class="chat-panel__part" aria-labelledby="chat-context">
+    <h2 class="label" id="chat-context">Context used</h2>
+    <div class="meter">
+      <progress class="meter__bar{% if usage.suggest_new_chat %} meter__bar--warn{% endif %}" max="1" value="{{ '%.3f' | format([usage.fraction, 1] | min) }}" aria-labelledby="chat-context-line"></progress>
+      <p class="meter__line" id="chat-context-line">
+        <span>About {{ "{:,}".format(usage.used_tokens) }} of {{ "{:,}".format(usage.budget_tokens) }} tokens</span>
+        <span class="meter__value">{{ (usage.fraction * 100) | round | int }}%</span>
+      </p>
+    </div>
+    <p class="field__help">What the model reads with your next message: the conversation and the attached files.</p>
+    {% if usage.documents_split %}
+    <p class="chat-panel__note">The attached files are longer than the model can read at once, so they are read in parts. Answers take longer.</p>
+    {% endif %}
+    {% if usage.history_trimmed %}
+    <p class="chat-panel__note chat-panel__note--warn">The model no longer sees the oldest messages of this conversation. Start a new chat to keep answers accurate.</p>
+    {% elif usage.suggest_new_chat %}
+    <p class="chat-panel__note chat-panel__note--warn">The conversation fills most of what the model can read, and answers get less reliable as it fills. Consider starting a new chat.</p>
+    {% endif %}
+  </section>
+  {% endif %}
+
+  {% if has_messages %}
+  <section class="chat-panel__part" aria-labelledby="chat-downloads">
+    <h2 class="label" id="chat-downloads">Download</h2>
+    <ul class="chat-panel__links">
+      <li><a class="chat-panel__link" href="{{ root }}/chat/{{ conversation.id }}/export.md" download>{{ icon("download", size="sm") }} The conversation (.md)</a></li>
+      {% if has_charts %}
+      <li><a class="chat-panel__link" href="{{ root }}/chat/{{ conversation.id }}/export.html" download>{{ icon("download", size="sm") }} With its interactive charts (.html)</a></li>
+      {% endif %}
+    </ul>
+  </section>
+  {% endif %}
+
+  <section class="chat-panel__part" aria-labelledby="chat-models">
+    <h2 class="label" id="chat-models">Models</h2>
+    <p class="field__help">{% if options.large %}All models of the site's list: this session's GPU ({{ options.gpu }}) has much memory.{% else %}The models for this session's GPU ({{ options.gpu }}). The largest need a GPU with more memory, such as an A100 or H100.{% endif %} The first answer of a model loads it, which takes a minute or two.</p>
+  </section>
+
+  {% if conversation.exchanges or conversation.attachments %}
+  <div class="chat-panel__part">
+    <button class="text-button text-button--danger" type="button" hx-post="{{ root }}/chat/{{ conversation.id }}/delete" hx-confirm="Delete this conversation, with its files and charts?" hx-disabled-elt="this">Delete this conversation</button>
+  </div>
+  {% endif %}
+</div>
+{% if oob %}<span id="chat-title" hx-swap-oob="true">{{ conversation.title }}</span>{% endif %}

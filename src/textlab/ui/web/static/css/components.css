@@ -1969,6 +1969,31 @@ p.option__title {
   color: var(--ink-2);
 }
 
+.prose p {
+  margin: 0 0 var(--space-3);
+}
+
+.prose hr {
+  margin: var(--space-5) 0;
+  border: 0;
+  border-top: var(--hairline) solid var(--rule);
+}
+
+.prose code {
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+}
+
+.prose :not(pre) > code {
+  padding: 0.05em 0.3em;
+  background: var(--tint);
+  overflow-wrap: anywhere;
+}
+
+.prose pre {
+  margin: 0 0 var(--space-3);
+}
+
 /* Citations: the times of the passages a point comes from. They play the
    passage, or show it in the transcript. */
 .cites {
@@ -3888,5 +3913,836 @@ kbd {
 
   .topic__head {
     grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ---- Chat ------------------------------------------------------------- */
+
+/* The conversation, with the message box at the foot of the window, and
+   the side panel; the page's own footer is the note under the box. */
+.main:has(> .chat) {
+  padding-bottom: 0;
+}
+
+.chat {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 16.5rem;
+  gap: var(--space-7);
+  align-items: start;
+}
+
+.chat__main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: calc(100vh - var(--statusbar-height) - var(--space-7));
+}
+
+.chat__main > * {
+  max-width: 50rem;
+}
+
+.chat__head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-5);
+  padding-bottom: var(--space-3);
+  border-bottom: 3px solid var(--ink);
+}
+
+.chat__heading {
+  min-width: 0;
+}
+
+.chat__kicker {
+  margin: 0 0 var(--space-1);
+  color: var(--ink-2);
+}
+
+.chat__title {
+  margin: 0;
+  overflow: hidden;
+  font-size: var(--text-xl);
+  font-stretch: var(--condensed);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat__head-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.chat__panel-toggle {
+  display: none;
+}
+
+/* Files dragged over the page: dropping them anywhere attaches them. */
+.chat.is-dragover::after {
+  content: "Drop the files to attach them";
+  position: fixed;
+  inset: var(--space-4);
+  z-index: var(--z-popover);
+  display: grid;
+  place-items: center;
+  border: 2px dashed var(--red);
+  background: color-mix(in srgb, var(--paper) 88%, transparent);
+  color: var(--red-text);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  pointer-events: none;
+}
+
+/* The start of a conversation: what Chat does, and a few ideas. */
+.welcome {
+  padding: var(--space-5) 0 var(--space-6);
+}
+
+.transcript:has(.exchange) .welcome {
+  display: none;
+}
+
+.welcome__title {
+  margin: 0 0 var(--space-2);
+  font-size: clamp(1.75rem, 1.3rem + 1.4vw, 2.5rem);
+  font-stretch: var(--condensed);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+
+.welcome__lead {
+  max-width: 58ch;
+  margin: 0 0 var(--space-5);
+  color: var(--ink-2);
+}
+
+.ideas {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr));
+  gap: 0 var(--space-5);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: var(--hairline) solid var(--ink);
+}
+
+.idea {
+  display: grid;
+  gap: 0.1rem;
+  width: 100%;
+  height: 100%;
+  padding: var(--space-3) 0;
+  border: 0;
+  border-bottom: var(--hairline) solid var(--rule);
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.idea:hover .idea__title {
+  color: var(--red-text);
+}
+
+.idea__title {
+  font-weight: 500;
+}
+
+.idea__text {
+  color: var(--ink-3);
+  font-size: var(--text-sm);
+}
+
+/* Messages and replies. */
+.transcript {
+  display: grid;
+  flex: 1;
+  align-content: start;
+  gap: var(--space-6);
+  padding-bottom: var(--space-5);
+}
+
+.exchange {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.message {
+  justify-self: end;
+  max-width: min(88%, 40rem);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius);
+  background: var(--tint);
+}
+
+.message__text {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.message__files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+  margin: 0 0 var(--space-2);
+  padding: 0;
+  list-style: none;
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.message__files li {
+  padding: 0 var(--space-2);
+  border: var(--hairline) solid var(--rule-strong);
+}
+
+.answer {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.answer__model {
+  margin: 0;
+  color: var(--ink-3);
+}
+
+.answer__text {
+  max-width: none;
+  overflow-wrap: anywhere;
+}
+
+.answer__text > :last-child {
+  margin-bottom: 0;
+}
+
+/* A caret after the last word while the model writes. */
+.is-writing > :last-child::after {
+  content: "";
+  display: inline-block;
+  width: 0.45em;
+  height: 1em;
+  margin-left: 0.15em;
+  background: var(--red);
+  vertical-align: -0.12em;
+  animation: live 1s steps(1) infinite;
+}
+
+.answer__status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  margin: 0;
+  color: var(--ink-2);
+  font-size: var(--text-sm);
+}
+
+.answer__pulse {
+  flex: none;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--red);
+  animation: live 1.2s ease-in-out infinite;
+}
+
+.answer__meter {
+  width: 10rem;
+}
+
+.answer__stopped {
+  margin: 0;
+  color: var(--ink-3);
+  font-size: var(--text-sm);
+}
+
+.answer__foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+  padding-top: var(--space-2);
+  border-top: var(--hairline) solid var(--rule);
+}
+
+.answer__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin-left: auto;
+}
+
+/* Only the last reply can be written again. */
+.answer__again {
+  display: none;
+}
+
+.exchange:last-child .answer__again {
+  display: inline-flex;
+}
+
+/* The model's thinking and the data agents' steps, folded away. */
+.thinking,
+.activity {
+  padding-left: var(--space-3);
+  border-left: 2px solid var(--rule-strong);
+  color: var(--ink-2);
+  font-size: var(--text-sm);
+}
+
+.thinking__summary,
+.activity__summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-label);
+  font-weight: 500;
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.thinking__summary:hover,
+.activity__summary:hover {
+  color: var(--ink);
+}
+
+/* The newest words of the thinking, cut on the left. */
+.thinking__tail {
+  display: flex;
+  flex: 1;
+  justify-content: flex-end;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink-3);
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.thinking[open] .thinking__tail {
+  display: none;
+}
+
+.thinking__text {
+  max-height: 22rem;
+  margin-top: var(--space-2);
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+
+.activity__list {
+  display: grid;
+  gap: 0.15rem;
+  max-height: 16rem;
+  margin: var(--space-2) 0 0;
+  padding-left: 1.4rem;
+  overflow-y: auto;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.activity__step--warning {
+  color: var(--amber);
+}
+
+.activity__step--error {
+  color: var(--red-text);
+}
+
+/* Code: in answers, and the code of charts, with a Copy button. */
+.code {
+  position: relative;
+  margin: 0 0 var(--space-3);
+}
+
+.code pre,
+.code-block pre {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  overflow-x: auto;
+  background: var(--tint);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.55;
+}
+
+.code__copy {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-3);
+  background: var(--tint);
+}
+
+.code-block,
+.stat {
+  border-top: var(--hairline) solid var(--rule);
+}
+
+.code-block__summary,
+.stat__summary {
+  padding: var(--space-2) 0;
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-label);
+  font-weight: 500;
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.code-block__summary:hover,
+.stat__summary:hover {
+  color: var(--ink);
+}
+
+.stat__result {
+  padding-bottom: var(--space-3);
+  font-size: var(--text-md);
+}
+
+/* The data agents' charts. */
+.analysis {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.chart {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.chart__label {
+  color: var(--ink-2);
+}
+
+.chart__plot {
+  width: 100%;
+  min-height: 22rem;
+}
+
+.chart__loading {
+  margin: 0;
+  color: var(--ink-3);
+  font-size: var(--text-sm);
+}
+
+/* Static charts are drawn on white. */
+.chart__image {
+  max-width: 100%;
+  height: auto;
+  background: #fff;
+}
+
+/* The message box, kept at the foot of the window. */
+.composer {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  display: grid;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) 0 var(--space-4);
+  background: var(--paper);
+}
+
+/* The conversation fades out above the box. */
+.composer::before {
+  content: "";
+  position: absolute;
+  inset: auto 0 100% 0;
+  height: var(--space-5);
+  background: linear-gradient(to bottom, transparent, var(--paper));
+  pointer-events: none;
+}
+
+.composer__box {
+  display: grid;
+  border: var(--hairline) solid var(--rule-strong);
+  border-radius: var(--radius);
+  background: var(--sheet);
+}
+
+.composer__box:focus-within {
+  border-color: var(--ink);
+}
+
+.composer__input {
+  max-height: 40vh;
+  min-height: 3.25rem;
+  padding: var(--space-3) var(--space-4) var(--space-1);
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  line-height: 1.5;
+  resize: none;
+}
+
+.composer__input:focus {
+  outline: none;
+}
+
+.composer__input::placeholder {
+  color: var(--ink-3);
+}
+
+.composer__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2) var(--space-2) var(--space-3);
+}
+
+.composer__spacer {
+  flex: 1;
+}
+
+.composer__tool {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: 2rem;
+  padding: 0 var(--space-2);
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-label);
+  font-weight: 500;
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.composer__tool:hover {
+  background: var(--tint);
+  color: var(--ink);
+}
+
+.composer__attach input:focus-visible + .composer__tool {
+  outline: 2px solid var(--red);
+  outline-offset: 2px;
+}
+
+/* While attached files are read. */
+.composer__reading {
+  display: none;
+}
+
+.composer__attach.htmx-request .composer__tool {
+  display: none;
+}
+
+.composer__attach.htmx-request .composer__reading {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--ink-2);
+  font-size: var(--text-xs);
+}
+
+.composer__model {
+  min-width: 0;
+}
+
+.composer__model .select {
+  height: 2rem;
+  max-width: 15rem;
+  border-color: transparent;
+  background: transparent;
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.composer__model .select:hover {
+  border-color: var(--rule-strong);
+}
+
+.send-button {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--ink);
+  color: var(--on-ink);
+  cursor: pointer;
+}
+
+.send-button:hover {
+  background: var(--red-button);
+  color: var(--on-red);
+}
+
+.send-button:disabled {
+  background: var(--rule);
+  color: var(--ink-3);
+  cursor: not-allowed;
+}
+
+.send-button--stop {
+  background: var(--red-button);
+  color: var(--on-red);
+}
+
+.composer__note {
+  margin: 0;
+  color: var(--ink-3);
+  font-size: var(--text-xs);
+}
+
+.composer__files {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.composer__files:empty {
+  display: none;
+}
+
+/* Files attached to the conversation, sent with every message. */
+.attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.attachment {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 100%;
+  padding: 0.15rem 0.15rem 0.15rem var(--space-2);
+  border: var(--hairline) solid var(--rule-strong);
+  border-radius: var(--radius);
+  background: var(--sheet);
+}
+
+.attachment__kind {
+  color: var(--ink-3);
+}
+
+.attachment__name {
+  max-width: 16rem;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment__size {
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.attachment__tools {
+  color: var(--red-text);
+}
+
+.attachment__remove {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+/* The side panel: conversations, context, downloads. */
+.chat__panel {
+  position: sticky;
+  top: calc(var(--statusbar-height) + var(--space-5));
+  max-height: calc(100vh - var(--statusbar-height) - var(--space-6));
+  overflow-y: auto;
+  border-top: 3px solid var(--ink);
+}
+
+.chat-panel {
+  display: grid;
+  gap: var(--space-5);
+  padding: var(--space-3) 0 var(--space-4);
+}
+
+.chat-panel__part {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.chat-panel__part > h2 {
+  margin: 0;
+}
+
+.chat-panel__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.chat-panel__head h2,
+.chat-panel__head form {
+  margin: 0;
+}
+
+.conversations {
+  max-height: 40vh;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+  border-top: var(--hairline) solid var(--rule);
+}
+
+.conversations__link {
+  display: grid;
+  gap: 0.1rem;
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
+  border-bottom: var(--hairline) solid var(--rule);
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.conversations__link:hover {
+  background: var(--tint);
+  color: var(--ink);
+}
+
+.conversations__link[aria-current="page"] {
+  background: var(--sheet);
+  box-shadow: inset 3px 0 0 var(--red);
+}
+
+.conversations__title {
+  overflow: hidden;
+  font-size: var(--text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversations__meta {
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.chat-panel__note {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: var(--text-sm);
+}
+
+.chat-panel__note--warn {
+  color: var(--amber);
+}
+
+.meter__bar--warn {
+  color: var(--amber);
+}
+
+.meter__bar--warn::-webkit-progress-value {
+  background: var(--amber);
+}
+
+.meter__bar--warn::-moz-progress-bar {
+  background: var(--amber);
+}
+
+.chat-panel__links {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chat-panel__link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--ink);
+  font-size: var(--text-sm);
+}
+
+/* Narrow screens: the side panel slides in from the right. */
+@media (max-width: 1100px) {
+  .chat {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .chat__panel-toggle {
+    display: inline-flex;
+  }
+
+  .chat__panel {
+    position: fixed;
+    inset: var(--statusbar-height) 0 0 auto;
+    z-index: var(--z-popover);
+    width: min(20rem, 88vw);
+    max-height: none;
+    padding: 0 var(--space-4);
+    border-top: 0;
+    border-left: var(--hairline) solid var(--ink);
+    background: var(--paper);
+    transform: translateX(105%);
+    visibility: hidden;
+    transition: transform 180ms ease, visibility 0s linear 180ms;
+  }
+
+  .chat.is-panel-open .chat__panel {
+    transform: none;
+    visibility: visible;
+    transition: transform 180ms ease, visibility 0s;
+  }
+}
+
+@media (max-width: 600px) {
+  .message {
+    max-width: 100%;
+  }
+
+  .composer__tool-text {
+    display: none;
+  }
+
+  .composer__model .select {
+    max-width: 9rem;
+  }
+
+  .chat__head .masthead__aside {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .is-writing > :last-child::after,
+  .answer__pulse {
+    animation: none;
   }
 }
