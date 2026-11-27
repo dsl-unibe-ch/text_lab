@@ -4,7 +4,8 @@ Text, tables, figures, formulas and layout from PDFs and images, with an
 automatic pipeline that picks the route per page, plus searchable-PDF export
 and optional figure descriptions. Manual engine selection runs one chosen
 engine instead (EasyOCR, PaddleOCR, OlmOCR or GLM-OCR) for its plain text.
-Used by the OCR page and, for scanned PDF pages, by Translation.
+Used by the OCR pages (Streamlit and web UI) and, for scanned PDF pages,
+by Translation.
 
 ## Pipeline
 
@@ -68,13 +69,15 @@ set `modes`.
 
 ## Public API
 
-Interfaces use `service.py` and the result model `doc_ir.py`:
+Interfaces use `service.py` and the result model `doc_ir.py` (the web UI
+uses `service.py` only):
 
 | Name | Purpose |
 |---|---|
 | `OcrOptions` | Highest quality, figure descriptions, searchable PDF and its language, survey options |
-| `recognize_document(name, data, options, on_progress=)` | One PDF or image; returns a `DocumentResult` (document, summary, downloads) |
-| `recognize_batch(archive, options, on_progress=)` | A ZIP of files; returns a `BatchResult` with the result ZIP and, in survey batch mode, the questionnaire results |
+| `recognize_document(name, data, options, on_progress=, cancel=)` | One PDF or image; returns a `DocumentResult` (document, summary, downloads) |
+| `recognize_batch(archive, options, on_progress=, cancel=)` | A ZIP of files; returns a `BatchResult` with the result ZIP, a `BatchFile` overview of each file and, in survey batch mode, the questionnaire results |
+| `save_document(result, folder)` | Writes a result's downloads, page images, figures and table CSVs into a folder; returns a `SavedDocument` (its `SavedPage`s with `SavedRegion`s and their boxes, `SavedTable`s, figures, `SavedFile`s and the models used) |
 | `DocumentDownloads` | Every download of a document; `refresh_responses()` after a review |
 | `document_summary(document)` | Counts for an overview |
 | `process_document(path, workspace_dir, ...)` | The pipeline itself, on a file; used by Translation |
@@ -156,6 +159,11 @@ Results are returned in memory; nothing is written outside the workspace.
 | `TEXTLAB_VISION_MODEL` | Ollama model for figure descriptions |
 | `PADDLEX_HOME`, `PADDLE_PDX_CACHE_HOME` | PaddleX model store, mounted by the launch script |
 
+Both recognitions stop when their `cancel` event is set: the pipeline
+checks it between pages (`process_document(..., cancel=)`), a batch between
+files, and the PaddleOCR-VL worker is killed at once (`run_vl_worker` and
+`VLWorkerSession.run` poll it), raising `common.progress.CancelledError`.
+
 ## Tests
 
 In `tests/`, without GPU or models unless marked:
@@ -164,13 +172,14 @@ In `tests/`, without GPU or models unless marked:
   mis-encoded text, decorative images), the worker protocol with stub
   workers, stall detection.
 - `test_vl_session.py`: the resident worker loads once per batch, recovers
-  from crashes and falls back to a one-shot worker.
+  from crashes and falls back to a one-shot worker; cancelling kills it.
 - `test_markup.py`, `test_noisy_scan.py`: mark detection on drawn forms.
 - `test_searchable_pdf.py`: word placement and the PDF text layer.
 - `test_enrichments.py`: figure descriptions and survey extraction with a
   fake vision client.
 - `test_service.py`: the service with a fake pipeline: job folders, batch
-  layout, the shared worker session.
+  layout and overview, the shared worker session, cancelling, the files
+  and regions `save_document` gives.
 - `test_engines.py`: the engine adapters with fake models and a stub
   PaddleOCR worker; what the worker may import.
 - `test_manual.py`: manual engine runs and batches with a fake engine:

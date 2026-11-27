@@ -18,9 +18,11 @@ Optional steps: figure descriptions by a local vision model
 from __future__ import annotations
 
 import io
+import threading
 from collections.abc import Callable
 from pathlib import Path
 
+from textlab.common.progress import check_cancelled
 from textlab.features.ocr import doc_ir, vision_enrich
 from textlab.features.ocr.marks import apply_markup, write_mark_debug_overlay
 from textlab.features.ocr.native import (
@@ -135,6 +137,7 @@ def process_document(
     searchable_pdf: bool = False,
     ocr_lang: str = "eng",
     vl_session: VLWorkerSession | None = None,
+    cancel: threading.Event | None = None,
 ) -> doc_ir.Document:
     """Parse one document into a typed IR, choosing the route per page.
 
@@ -171,10 +174,16 @@ def process_document(
             to detect it per page from the text the VL lane extracted.
         vl_session: A resident PaddleOCR-VL worker; batch callers pass one
             so the weights load once for the batch, not once per file.
+        cancel: Stops the work when set: between pages, and the
+            recognition worker at once.
 
     Returns:
         The document, with pages in their original order.
+
+    Raises:
+        CancelledError: If ``cancel`` was set.
     """
+    check_cancelled(cancel)
     input_path = Path(input_path)
     workspace_dir = Path(workspace_dir)
     workspace_dir.mkdir(parents=True, exist_ok=True)
@@ -215,6 +224,7 @@ def process_document(
             worker_path=worker_path,
             on_page=_image_stage,
             session=vl_session,
+            cancel=cancel,
         )
         try:
             if pages_json:
@@ -231,6 +241,7 @@ def process_document(
                     ocr_lang=ocr_lang,
                 )
                 document.pages.append(page)
+                check_cancelled(cancel)
                 if describe_images:
                     _emit(
                         progress,
@@ -240,6 +251,7 @@ def process_document(
                     )
                     vision_enrich.describe_page_figures(page, _vision_client())
                 if searchable_pdf:
+                    check_cancelled(cancel)
                     _emit(progress, 0.95, "Building searchable PDF...")
                     document.searchable_pdf = _build_searchable_pdf(
                         document, input_path
@@ -264,6 +276,9 @@ def process_document(
 
     for i in range(n_pages):
         page_number = i + 1
+        if cancel is not None and cancel.is_set():
+            doc.close()
+            check_cancelled(cancel)
         _emit(
             progress,
             0.05 + 0.35 * (i / max(1, n_pages)),
@@ -321,15 +336,21 @@ def process_document(
                 else f"Recognised {total} page(s)...",
             )
 
-        pages_json = run_vl_worker(
-            [p for _, p in vl_jobs],
-            backend_python=backend_python,
-            worker_path=worker_path,
-            on_page=_vl_page_done,
-            session=vl_session,
-        )
+        try:
+            pages_json = run_vl_worker(
+                [p for _, p in vl_jobs],
+                backend_python=backend_python,
+                worker_path=worker_path,
+                on_page=_vl_page_done,
+                session=vl_session,
+                cancel=cancel,
+            )
+        except BaseException:
+            doc.close()
+            raise
     try:
         for idx, page_json in enumerate(pages_json if vl_jobs else []):
+            check_cancelled(cancel)
             page_number, raster_path = vl_jobs[idx]
             # Finalising also runs the word-geometry pass, seconds per page.
             _emit(
@@ -365,6 +386,7 @@ def process_document(
             client = _vision_client()
             n_pages_out = len(document.pages)
             for index, page in enumerate(document.pages, start=1):
+                check_cancelled(cancel)
                 _emit(
                     progress,
                     0.85 + 0.05 * (index / max(1, n_pages_out)),
@@ -374,6 +396,7 @@ def process_document(
                 vision_enrich.describe_page_figures(page, client)
 
         if searchable_pdf:
+            check_cancelled(cancel)
             _emit(progress, 0.95, "Building searchable PDF...")
             document.searchable_pdf = _build_searchable_pdf(
                 document,

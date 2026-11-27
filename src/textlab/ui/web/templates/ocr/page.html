@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% from "components/macros.html" import masthead, section_head, dropzone with context %}
+{% block title %}OCR{% endblock %}
+{% block content %}
+{% set tool = tools | selectattr("id", "equalto", page_id) | first %}
+{{ masthead(tool.label, tool.summary, number=tool.number, kicker=tool.group, guide="https://text-lab.dsl.unibe.ch/ocr/") }}
+
+{#- The OCR tools share one sheet: the switcher shows one tool's form, and
+  only its controls are sent. Each form has its own route. -#}
+<div class="sheet" data-switch="tool">
+  <div class="switcher" role="radiogroup" aria-label="How to read the document">
+    {% for value, label, built in ocr_tools %}
+    <label class="switcher__option{% if not built %} switcher__option--off{% endif %}"><input type="radio" name="tool" value="{{ value }}"{% if loop.first %} checked{% endif %}{% if not built %} disabled{% endif %}><span>{{ label }}{% if not built %} <span class="switcher__soon">Soon</span>{% endif %}</span></label>
+    {% endfor %}
+  </div>
+
+  <form data-when="standard" data-upload-form aria-label="Standard OCR"
+        hx-post="{{ root }}/ocr/standard" hx-encoding="multipart/form-data"
+        hx-target="#jobs" hx-swap="afterbegin" hx-disabled-elt="find button[type=submit]">
+    <ol class="steps">
+      <li class="step">
+        <div>
+          <span class="label step__num">01</span>
+          <h2 class="step__title">Document</h2>
+          <p class="step__hint">Pages with their own text are read from it; scans and photos are read by a recognition model. A ZIP is read as a batch, with the model loaded once for all its files.</p>
+        </div>
+        <div class="step__body">
+          {{ dropzone("file", "Drop a document here", formats, accept=accept) }}
+        </div>
+      </li>
+      <li class="step">
+        <div>
+          <span class="label step__num">02</span>
+          <h2 class="step__title">Options</h2>
+          <p class="step__hint">The defaults are the fastest: only pages without their own text go to the model.</p>
+        </div>
+        <div class="step__body options">
+          <div class="option">
+            <input class="checkbox" type="checkbox" id="searchable-pdf" name="searchable_pdf" value="1" checked data-reveal="searchable-more" aria-describedby="searchable-text">
+            <label class="option__title" for="searchable-pdf">Searchable PDF</label>
+            <p class="option__text" id="searchable-text">The original pages with an invisible layer of the text, so you can search, select and copy it. Adds a pass per page that places each word.</p>
+            <div class="option__more" id="searchable-more">
+              <div class="field">
+                <label class="field__label" for="ocr-lang">Language, for placing the words</label>
+                <div class="select-wrap">
+                  <select class="select" id="ocr-lang" name="ocr_lang" aria-describedby="ocr-lang-help">
+                    <option value="auto" selected>Detect page by page</option>
+                    {% for name, code in languages %}<option value="{{ code }}">{{ name }}</option>{% endfor %}
+                  </select>
+                  {{ icon("chevron-down", size="sm") }}
+                </div>
+                <p class="field__help" id="ocr-lang-help">The recognition reads 109 languages by itself and needs no choice. This only helps place each word in the searchable PDF, with the languages installed for that; for other languages keep Detect, and the words are placed a little less precisely.</p>
+              </div>
+            </div>
+          </div>
+          <div class="option">
+            <input class="checkbox" type="checkbox" id="highest-quality" name="highest_quality" value="1" aria-describedby="quality-text">
+            <label class="option__title" for="highest-quality">Highest quality</label>
+            <p class="option__text" id="quality-text">Every page goes through the recognition model, also pages with their own text. Best for forms and complex layouts; slower. Pages with equations go to the model anyway.</p>
+          </div>
+          <div class="option">
+            <input class="checkbox" type="checkbox" id="describe-images" name="describe_images" value="1" aria-describedby="describe-text">
+            <label class="option__title" for="describe-images">Describe figures</label>
+            <p class="option__text" id="describe-text">A vision model describes each figure and reads the text in it. Its descriptions are generated, not part of the document. Loading it takes about a minute.</p>
+          </div>
+        </div>
+      </li>
+    </ol>
+
+    <div class="upload-progress" data-upload-progress hidden>
+      <progress class="meter__bar" max="1" value="0"></progress>
+      <p class="label" data-upload-progress-text>Uploading</p>
+    </div>
+
+    <div class="sheet__submit">
+      <p class="sheet__note">Runs in the background: you can leave this page and come back. A page takes from a second to about a minute.</p>
+      <button class="btn btn--primary btn--lg" type="submit">Read the document {{ icon("arrow-right", size="sm") }}</button>
+    </div>
+  </form>
+</div>
+
+<section class="section" aria-labelledby="jobs-title">
+  {{ section_head("Your documents", "Kept until you remove them or the session ends", id="jobs-title") }}
+  <div class="records" id="jobs">
+    {{ cards }}
+  </div>
+</section>
+{% endblock %}

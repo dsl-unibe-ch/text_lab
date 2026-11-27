@@ -16,6 +16,8 @@
  *   transcript.
  * - The translation editor: counts, clearing, Ctrl+Enter, translating as
  *   you type, swapping the languages, copying, the glossary's rows.
+ * - OCR results: one page at a time, and the regions outlined on a page
+ *   linked to their text.
  * - Error notices for failed htmx requests, copying error details.
  *
  * There are no inline scripts (the Content Security Policy forbids them):
@@ -1169,6 +1171,82 @@
     }
     showDetected();
   }
+
+  /* ---- OCR results ---------------------------------------------------- */
+
+  /*
+   * A pager ([data-pager]) shows one of its [data-pager-page] sections,
+   * chosen with [data-pager-select] or the [data-pager-step] buttons.
+   * Elements with the same data-region (an outline on the page image and
+   * the block of its text) are marked together while one is pointed at;
+   * clicking an outline brings its text into view.
+   */
+  function showPage(pager, index) {
+    var pages = pager.querySelectorAll("[data-pager-page]");
+    index = Math.max(0, Math.min(pages.length - 1, index));
+    pages.forEach(function (page) {
+      page.hidden = Number(page.getAttribute("data-pager-page")) !== index;
+    });
+    var select = pager.querySelector("[data-pager-select]");
+    if (select) {
+      select.value = String(index);
+    }
+    pager.querySelectorAll("[data-pager-step]").forEach(function (button) {
+      var step = Number(button.getAttribute("data-pager-step"));
+      button.disabled = (step < 0 && index === 0) || (step > 0 && index === pages.length - 1);
+    });
+  }
+
+  function linkRegion(element, on) {
+    var result = element.closest(".result") || document;
+    var id = element.getAttribute("data-region");
+    result.querySelectorAll("[data-region='" + id + "']").forEach(function (other) {
+      other.classList.toggle("is-linked", on);
+    });
+  }
+
+  document.addEventListener("change", function (event) {
+    var target = event.target;
+    if (target instanceof Element && target.matches("[data-pager-select]")) {
+      showPage(target.closest("[data-pager]"), Number(target.value));
+    }
+  });
+
+  document.addEventListener("click", function (event) {
+    var target = event.target;
+    if (!(target instanceof Element)) {
+      return;
+    }
+    var step = target.closest("[data-pager-step]");
+    if (step) {
+      var pager = step.closest("[data-pager]");
+      var select = pager.querySelector("[data-pager-select]");
+      showPage(pager, Number(select ? select.value : 0) + Number(step.getAttribute("data-pager-step")));
+      return;
+    }
+    var box = target.closest(".box[data-region]");
+    if (box) {
+      var page = box.closest("[data-pager-page]") || document;
+      var block = page.querySelector(".ocr-block[data-region='" + box.getAttribute("data-region") + "']");
+      if (block) {
+        block.scrollIntoView({ block: "nearest", behavior: calm ? "auto" : "smooth" });
+      }
+    }
+  });
+
+  document.addEventListener("mouseover", function (event) {
+    var region = event.target instanceof Element ? event.target.closest("[data-region]") : null;
+    if (region) {
+      linkRegion(region, true);
+    }
+  });
+
+  document.addEventListener("mouseout", function (event) {
+    var region = event.target instanceof Element ? event.target.closest("[data-region]") : null;
+    if (region) {
+      linkRegion(region, false);
+    }
+  });
 
   /* ---- Start ---------------------------------------------------------- */
 

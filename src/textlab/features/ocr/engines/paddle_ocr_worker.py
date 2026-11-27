@@ -25,9 +25,11 @@ from textlab.features.ocr.engines.payloads import (
 )
 
 # Paddle crashes in OpenBLAS with more than one thread, and must not try to
-# reach the internet for model checks.
-os.environ.setdefault("OMP_NUM_THREADS", "1")
-os.environ.setdefault("MKL_NUM_THREADS", "1")
+# reach the internet for model checks. The parent sets this before the
+# worker starts (common.container.paddle_environment); this covers runs by
+# hand.
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
 os.environ.setdefault("DISABLE_MODEL_SOURCE_CHECK", "True")
 os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
 

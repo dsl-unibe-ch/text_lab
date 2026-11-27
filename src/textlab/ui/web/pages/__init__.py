@@ -74,6 +74,7 @@ TOOLS: tuple[Tool, ...] = (
         "Documents",
         "Read the text in scans, photos and PDFs, historic handwriting "
         "included.",
+        ready=True,
     ),
     Tool(
         "knowledge_graph",
@@ -173,6 +174,7 @@ def routers(settings: WebSettings) -> list[APIRouter]:
         dev,
         home,
         meeting_notes,
+        ocr,
         placeholder,
         transcription,
         translation,
@@ -182,6 +184,7 @@ def routers(settings: WebSettings) -> list[APIRouter]:
         home.router,
         transcription.router,
         meeting_notes.router,
+        ocr.router,
         translation.router,
         placeholder.router,
     ]

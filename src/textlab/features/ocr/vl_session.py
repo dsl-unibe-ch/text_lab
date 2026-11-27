@@ -9,6 +9,10 @@ request, on a session or on a worker started for it alone.
 
 The worker reports on standard output with marker lines: one per finished
 page, one when it is ready (serving mode) and one with the result as JSON.
+
+Both ways of running it take a ``cancel`` event: when it is set, the worker
+is killed at once (a page can take a minute) and
+:class:`~textlab.common.progress.CancelledError` is raised.
 """
 
 from __future__ import annotations
@@ -16,6 +20,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import threading
 import time
 import weakref
 from collections.abc import Callable
@@ -24,6 +29,7 @@ from pathlib import Path
 from textlab.common import container
 from textlab.common.jobs import worker_environment
 from textlab.common.ollama import release_models
+from textlab.common.progress import CancelledError
 
 #: The worker module, run with ``python -m`` in the PaddleOCR-VL environment.
 WORKER_MODULE = "textlab.features.ocr.paddle_vl_worker"
@@ -64,13 +70,13 @@ def _worker_command(
 #: reports every finished page, so silence this long means it is wedged.
 VL_STALL_TIMEOUT = float(os.environ.get("TEXTLAB_VL_STALL_TIMEOUT", "900"))
 
+#: Seconds between checks of the cancel event while the worker runs.
+CANCEL_POLL = 0.5
+
 
 def _worker_env(backend_python: str) -> dict:
-    """Return the worker's environment, with Paddle's model checks off."""
-    env = worker_environment(backend_python)
-    env.setdefault("DISABLE_MODEL_SOURCE_CHECK", "True")
-    env.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
-    return env
+    """Return the worker's environment, with Paddle's settings."""
+    return container.paddle_environment(worker_environment(backend_python))
 
 
 def _free_gpu_for_worker() -> None:
@@ -155,7 +161,6 @@ class VLWorkerSession:
     # -- lifecycle ------------------------------------------------------------
     def _start(self):
         import queue
-        import threading
 
         _free_gpu_for_worker()
         self._started_at = time.monotonic()
@@ -191,14 +196,19 @@ class VLWorkerSession:
         ):
             threading.Thread(target=target, args=args, daemon=True).start()
 
-    def close(self):
-        """Stop the worker, killing it if it does not exit in time."""
+    def close(self, *, kill: bool = False):
+        """Stop the worker, killing it if it does not exit in time.
+
+        Args:
+            kill: Kill it at once instead of letting it finish, as when the
+                user cancels in the middle of a page.
+        """
         if self._proc is None:
             return
         proc = self._proc
         self._proc = None
         try:
-            if proc.poll() is None:
+            if proc.poll() is None and not kill:
                 proc.stdin.close()
                 proc.wait(timeout=10)
         except Exception:
@@ -231,8 +241,14 @@ class VLWorkerSession:
         *,
         extra_labels: str = "",
         on_page: Callable[[int, int], None] | None = None,
+        cancel: threading.Event | None = None,
     ) -> list[dict]:
-        """Recognise one document's pages on the resident worker."""
+        """Recognise one document's pages on the resident worker.
+
+        Raises:
+            CancelledError: If ``cancel`` was set; the worker is killed, and
+                the next request starts a new one.
+        """
         import queue
 
         if self._proc is None or self._proc.poll() is not None:
@@ -253,10 +269,16 @@ class VLWorkerSession:
             ) from exc
 
         out_lines: list[str] = []
+        quiet_since = time.monotonic()
         while True:
+            if cancel is not None and cancel.is_set():
+                self.close(kill=True)
+                raise CancelledError("The recognition was cancelled.")
             try:
-                line = self._lines.get(timeout=self.stall_timeout)
+                line = self._lines.get(timeout=CANCEL_POLL)
             except queue.Empty:
+                if time.monotonic() - quiet_since < self.stall_timeout:
+                    continue
                 self.failed = True
                 self.close()
                 raise RuntimeError(
@@ -266,6 +288,7 @@ class VLWorkerSession:
                     "memory may be the cause.\n"
                     f"stderr:\n{''.join(self._stderr)[-4000:]}"
                 ) from None
+            quiet_since = time.monotonic()
             if line is None:
                 self.failed = True
                 self.close()
@@ -318,19 +341,28 @@ def run_vl_worker(
     on_page: Callable[[int, int], None] | None = None,
     stall_timeout: float | None = None,
     session: VLWorkerSession | None = None,
+    cancel: threading.Event | None = None,
 ) -> list[dict]:
     """Invoke the PaddleOCR-VL worker on *image_paths*; return per-page dicts.
 
     ``on_page(done, total)`` fires as each page is recognised. A failed
     resident session falls back to a one-shot worker.
+
+    Raises:
+        CancelledError: If ``cancel`` was set; the worker is killed.
     """
     if not image_paths:
         return []
     if session is not None:
         try:
             return session.run(
-                image_paths, extra_labels=extra_labels, on_page=on_page
+                image_paths,
+                extra_labels=extra_labels,
+                on_page=on_page,
+                cancel=cancel,
             )
+        except CancelledError:
+            raise
         except Exception as exc:
             print(
                 f"[ocr] resident VL worker failed ({exc}); "
@@ -356,6 +388,7 @@ def run_vl_worker(
         env,
         on_page,
         stall_timeout if stall_timeout is not None else VL_STALL_TIMEOUT,
+        cancel=cancel,
     )
     if returncode != 0:
         raise RuntimeError(
@@ -377,14 +410,17 @@ def _run_streaming(
     env: dict,
     on_page: Callable[[int, int], None] | None,
     stall_timeout: float,
+    *,
+    cancel: threading.Event | None = None,
 ) -> tuple[int, str, str]:
     """Run *cmd*, forwarding page-progress markers, and guard against a stall.
 
     Both pipes need reader threads: a single-pipe read deadlocks once the
     other's buffer fills.
-    """
-    import threading
 
+    Raises:
+        CancelledError: If ``cancel`` was set; the worker is killed.
+    """
     proc = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
@@ -418,6 +454,12 @@ def _run_streaming(
         thread.start()
 
     while proc.poll() is None:
+        if cancel is not None and cancel.is_set():
+            proc.kill()
+            proc.wait()
+            for thread in threads:
+                thread.join(timeout=5)
+            raise CancelledError("The recognition was cancelled.")
         if stall_timeout and time.monotonic() - last_output[0] > stall_timeout:
             proc.kill()
             proc.wait()
@@ -432,7 +474,7 @@ def _run_streaming(
                 f"stdout:\n{''.join(out_lines)[-4000:]}\n\n"
                 f"stderr:\n{''.join(err_lines)[-4000:]}"
             )
-        time.sleep(0.5)
+        time.sleep(CANCEL_POLL)
     for thread in threads:
         thread.join(timeout=10)
     return proc.returncode, "".join(out_lines), "".join(err_lines)

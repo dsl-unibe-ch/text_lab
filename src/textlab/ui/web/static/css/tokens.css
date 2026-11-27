@@ -49,6 +49,17 @@
   --speaker-3: #7a3cc0;
   --speaker-4: #0b766a;
 
+  /* Region types on a page read by OCR: the same hues, so they follow the
+     theme. Only text that people read gets a colour of its own. */
+  --region-text: var(--ink-3);
+  --region-title: var(--speaker-1);
+  --region-table: var(--red-text);
+  --region-figure: var(--speaker-2);
+  --region-formula: var(--speaker-3);
+  --region-list: var(--speaker-4);
+  --region-checkbox: var(--green);
+  --region-seal: var(--amber);
+
   /* Type. */
   --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;

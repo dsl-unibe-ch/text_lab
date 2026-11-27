@@ -2,8 +2,8 @@
  * Shared components: the masthead of a page, sections, buttons, the form
  * sheet with its numbered steps, fields, the drop zone, notices, job
  * records with their status and meter, file lists, specification lists,
- * tabs, the job indicator, and the parts of the Home, Transcription and
- * Translation pages.
+ * tabs, the job indicator, and the parts of the Home, Transcription,
+ * Translation and OCR pages.
  *
  * The developer page /dev/components shows each of them.
  */
@@ -2597,6 +2597,357 @@ kbd {
 @media (prefers-reduced-motion: reduce) {
   .langbar__swap:active {
     transform: none;
+  }
+}
+
+/* ---- OCR -------------------------------------------------------------- */
+
+/* A tool that is not built yet, in a switcher. */
+.switcher__option--off input {
+  cursor: not-allowed;
+}
+
+.switcher__option--off span,
+.switcher__option--off:hover span {
+  color: var(--ink-3);
+  font-weight: 400;
+}
+
+.switcher__soon {
+  margin-left: var(--space-1);
+  padding: 0 0.3em;
+  border: var(--hairline) solid var(--rule-strong);
+  font-family: var(--font-mono);
+  font-size: var(--text-label);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+}
+
+/* Region types: one colour each, for the outlines, the legend and the
+   label of each block of text. */
+.rt-text,
+.rt-footnote,
+.rt-header,
+.rt-footer,
+.rt-reference,
+.rt-other {
+  --region: var(--region-text);
+}
+
+.rt-title { --region: var(--region-title); }
+.rt-table { --region: var(--region-table); }
+.rt-figure { --region: var(--region-figure); }
+.rt-formula { --region: var(--region-formula); }
+.rt-list { --region: var(--region-list); }
+.rt-checkbox { --region: var(--region-checkbox); }
+.rt-seal { --region: var(--region-seal); }
+
+/* Pages one at a time: the previous, a choice of page, the next. */
+.pager {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.pager__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.pager__select .select {
+  width: 6rem;
+  height: 2.25rem;
+}
+
+.pager__step:disabled {
+  color: var(--rule-strong);
+  cursor: not-allowed;
+}
+
+.pager__step:disabled:hover {
+  background: none;
+}
+
+/* A page beside its text. */
+.ocr-page {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-5);
+  align-items: start;
+}
+
+.ocr-page__scan {
+  display: grid;
+  gap: var(--space-3);
+  position: sticky;
+  top: calc(var(--statusbar-height) + var(--space-3));
+}
+
+.ocr-page__route {
+  margin: 0;
+  color: var(--ink-3);
+}
+
+.scan {
+  position: relative;
+  border: var(--hairline) solid var(--rule-strong);
+  background: var(--sheet);
+}
+
+.scan__image {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.scan__boxes {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.box {
+  color: var(--region);
+  fill: currentColor;
+  fill-opacity: 0;
+  stroke: currentColor;
+  stroke-opacity: 0.75;
+  stroke-width: 1.5px;
+  vector-effect: non-scaling-stroke;
+  cursor: pointer;
+  transition: fill-opacity var(--speed);
+}
+
+.box:hover,
+.box.is-linked {
+  fill-opacity: 0.18;
+  stroke-opacity: 1;
+  stroke-width: 2.5px;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--font-mono);
+  font-size: var(--text-label);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+}
+
+.legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--ink-2);
+}
+
+.legend li::before {
+  content: "";
+  width: 0.75rem;
+  height: 0.75rem;
+  border: 1.5px solid var(--region);
+}
+
+/* The page's text, block by block in reading order: its type on the left
+   in the colour of its outline. */
+.ocr-page__text {
+  max-height: calc(100vh - var(--statusbar-height) - var(--space-7));
+  overflow-y: auto;
+  border-top: var(--hairline) solid var(--ink);
+}
+
+.ocr-block {
+  display: grid;
+  grid-template-columns: 5.5rem minmax(0, 1fr);
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-2) var(--space-2) 0;
+  border-bottom: var(--hairline) solid var(--rule);
+  scroll-margin: var(--space-4);
+}
+
+.ocr-block.is-linked {
+  background: var(--tint);
+  box-shadow: inset 3px 0 0 var(--region);
+}
+
+.ocr-block__type {
+  padding: 0.3rem 0 0 var(--space-2);
+  color: var(--region);
+  font-family: var(--font-mono);
+  font-size: var(--text-label);
+  font-weight: 500;
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+}
+
+.ocr-block__body {
+  min-width: 0;
+  font-size: 0.9375rem;
+  line-height: 1.55;
+}
+
+.ocr-block__body p {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ocr-block__title {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.ocr-block__small {
+  color: var(--ink-3);
+  font-size: var(--text-sm);
+}
+
+.ocr-latex {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  overflow-x: auto;
+  border-left: 3px solid var(--region);
+  background: var(--sheet);
+  font-size: var(--text-sm);
+  white-space: pre-wrap;
+}
+
+.ocr-figure {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.ocr-figure img,
+.figure-card img {
+  max-width: 100%;
+  height: auto;
+  border: var(--hairline) solid var(--rule);
+  background: var(--sheet);
+}
+
+.ocr-figure figcaption {
+  color: var(--ink-2);
+  font-size: var(--text-sm);
+}
+
+/* What a model generated about a figure: never part of the document. */
+.ocr-generated {
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-3);
+  border-left: 3px dashed var(--rule-strong);
+  color: var(--ink-2);
+  font-size: var(--text-sm);
+}
+
+.ocr-generated .label {
+  display: block;
+  color: var(--ink-3);
+}
+
+/* Check boxes as read: filled, empty, or not sure. */
+.ocr-mark {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.mark {
+  flex: none;
+  width: 0.875rem;
+  height: 0.875rem;
+  border: 1.5px solid var(--ink);
+  transform: translateY(0.1rem);
+}
+
+.mark--checked {
+  border-color: var(--region-checkbox);
+  background: var(--region-checkbox);
+}
+
+.mark--uncertain {
+  border-style: dashed;
+  border-color: var(--amber);
+}
+
+/* Tables as read, from sanitized HTML that carries no classes. */
+.ocr-table table {
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.ocr-table th,
+.ocr-table td {
+  padding: var(--space-1) var(--space-3) var(--space-1) 0;
+  border-bottom: var(--hairline) solid var(--rule);
+  text-align: left;
+  vertical-align: top;
+}
+
+.ocr-table tr:first-child > * {
+  border-top: var(--hairline) solid var(--ink);
+}
+
+.ocr-table-item {
+  display: grid;
+  gap: var(--space-2);
+}
+
+/* Figures in a grid of cards. */
+.figure-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 16rem), 1fr));
+  gap: var(--space-5);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.figure-card {
+  display: grid;
+  align-content: start;
+  gap: var(--space-2);
+}
+
+.figure-card .label,
+.figure-card__caption {
+  margin: 0;
+}
+
+.figure-card__caption {
+  font-size: var(--text-sm);
+}
+
+@media (max-width: 960px) {
+  .ocr-page {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ocr-page__scan {
+    position: static;
+  }
+
+  .ocr-page__text {
+    max-height: none;
+  }
+}
+
+@media (max-width: 600px) {
+  .ocr-block {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-1);
+    padding-left: var(--space-2);
+  }
+
+  .ocr-block__type {
+    padding: 0;
   }
 }
 

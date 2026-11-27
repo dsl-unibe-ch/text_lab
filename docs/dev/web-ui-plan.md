@@ -9,7 +9,7 @@
     in the sandbox and committed on 27 November (see
     [Phase 2 progress](#phase-2-progress)). Phase 3 started with Meeting
     Notes, committed on 27 November; Translation was built the same day and
-    waits for its sandbox test (see
+    passed its sandbox test (see
     [Phase 3 progress](#phase-3-progress)). The work happens on the local
     branch `feat/web-ui`, one commit per phase or page, and reaches `main`
     when the whole UI is done. Update this page when a phase ends or a
@@ -242,7 +242,7 @@ Rules, checked by tests as for the Streamlit pages today:
 | 0. Spike (done) | A minimal FastAPI app in the sandbox, behind the Open OnDemand proxy: base path, login cookie, SSE progress, a 2 GB upload streamed to the workspace, a download | All of it works, or a fallback is chosen (HTMX polling every second instead of SSE) |
 | 1. Foundation (done) | The launcher and the redeployment files (deployed at the switch). In `ui/web/`: app factory, login, CSRF, CSP, layout, design system and components, job runner (queue, SSE, cancelling), upload and download helpers, error pages, test harness. Mockups of Home and Transcription | An empty app with login, navigation and a demo job runs in the sandbox, with tests, and the mockups are agreed |
 | 2. Pilot (done) | Home and Transcription: a recording or a ZIP batch, language and model, voice activity detection, speaker identification with speaker counts, the audio player with word highlighting, every download | Everything the Streamlit page does works, with tests, and the UI test passes |
-| 3. Pages (in progress) | One commit each, in this order: Meeting Notes, Translation, OCR (automatic mode, legacy engines, historic handwriting, Hugging Face models), Topic Modeling, Chat, Visualize Data, Knowledge Graph | As in phase 2, with the page's user guide drafted |
+| 3. Pages (in progress) | One commit each, in this order: Meeting Notes, Translation, OCR (one page with a switcher, one commit per tool: Standard (the automatic pipeline), legacy engines, historic handwriting, Hugging Face models; survey extraction left out), Topic Modeling, Chat, Visualize Data, Knowledge Graph | As in phase 2, with the page's user guide drafted |
 | 4. Switch | The branch merged into `main`; the new user guide replaces the old one; a release, the HPC redeploy, `TEXT_LAB_UI=web` in production | Users work in the new UI; Streamlit can still be selected as a rollback |
 | 5. Removal | `ui/streamlit/` and its tests are removed; Streamlit leaves the image | One release after the switch, without a rollback |
 
@@ -504,7 +504,64 @@ you type, a long text that follows over the event stream, a translation
 while a transcription runs, Stop; documents of each type, a ZIP, a mixed
 batch with detection, PDFs with each output and LaTeX, cancelling, a PDF
 whose output is blocked; narrow screens and the dark theme), then commit
-it.
+it. The sandbox test passed on 27 November.
+
+### OCR
+
+One page with a switcher for the four tools (decided on 27 November), one
+commit per tool. Survey extraction is left out (see
+[Open questions](#open-questions)).
+
+**Standard** (the automatic pipeline; first called Automatic, renamed
+after the first review), built on 27 November 2026, with tests
+(`src/textlab/ui/web/tests/test_ocr_page.py`, with the pipeline faked and
+the rest of the service real, and in `features/ocr/tests/`):
+
+- **One drop zone** for a PDF, an image or a ZIP; a ZIP is read as a batch
+  (the Streamlit page's two workflows become one). Options: searchable PDF
+  (on by default, also for batches) with the language for placing words,
+  highest quality, describe figures. The survey options are gone.
+- **The result** shows each page beside its text: the regions outlined on
+  the page image (an SVG of `<rect>`s, coloured by type, with a legend),
+  and the page's text block by block in reading order, each labelled with
+  its type in the same colour. Pointing at an outline or a block marks
+  both; clicking an outline brings its text into view. Pages one at a
+  time, with a page choice and arrows. Tabs for the tables (each with its
+  CSV), the figures (with generated descriptions apart from the printed
+  caption), and the models used, for citation. Check boxes as read
+  (filled, empty, uncertain), with a notice of uncertain marks. Every
+  download in the record's file listing, *Everything* first.
+- **A batch** gives the ZIP of the Streamlit page and an overview of its
+  files: pages, how many from the text layer, what was found, time.
+- **The service** (`features/ocr/service.py`): `cancel` for
+  `recognize_document` and `recognize_batch` (the pipeline checks between
+  pages and files; the PaddleOCR-VL worker, resident or one-shot, is
+  killed at once), `BatchResult.files`, and `save_document`, which writes
+  a result's downloads, page images, figures and table CSVs into the job's
+  outputs and returns the pages, regions (boxes, sanitized table HTML,
+  LaTeX, figure files, descriptions, marks), tables, figures and models to
+  show. The page keeps only that, not the document with its images.
+- Region colours as tokens (`--region-*`, from the existing hues, so they
+  follow the theme); the Lucide `arrow-left` icon added.
+- The user guide's draft: `docs/next/ocr.md`.
+- Fixed after the first sandbox run: a ZIP batch took 16 minutes, because
+  the resident PaddleOCR-VL worker stalled on its first file until the
+  stall limit (900 s) stopped it; the one-shot fallback then read the five
+  pages in 43 s. The worker inherited the session's `OMP_NUM_THREADS=16`:
+  the Streamlit OCR page had set it to 1 for its whole process, which the
+  web UI does not do, and the workers only set it if it was unset (after
+  numpy had read it). `common.container.paddle_environment` now sets one
+  thread in the environment both Paddle workers start with.
+  The language of the searchable PDF is labelled as what it is: the
+  language for placing words (Tesseract's installed packs), not the
+  recognition's.
+
+Still to do: try Standard in the sandbox against the Streamlit page (a
+born-digital PDF, a scan, a photo, a PDF with tables and figures, describe
+figures, highest quality, the searchable PDF in a reader, a ZIP batch,
+cancelling during recognition, a page with check boxes; narrow screens and
+the dark theme), then commit it. Next: Choose an engine, Historic
+handwriting, Hugging Face model.
 
 ## Testing
 
@@ -548,5 +605,7 @@ it.
 
 ## Open questions
 
-- Survey extraction is hidden on the OCR page today: port it, or leave it
-  out?
+None at the moment. Decided on 27 November: survey extraction (the
+experimental check box of automatic OCR, with its review of the detected
+form) is left out of the new UI; the survey feature stays in the backend
+for now.

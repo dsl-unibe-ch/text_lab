@@ -61,9 +61,7 @@ def run_worker(
     )
     target = [worker_path] if worker_path else ["-m", WORKER_MODULE]
     command = [python, *target, "--lang", language, *map(str, images)]
-    env = jobs.worker_environment(python)
-    env.setdefault("DISABLE_MODEL_SOURCE_CHECK", "True")
-    env.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
+    env = container.paddle_environment(jobs.worker_environment(python))
     result = run_process(command, env)
     if result.returncode != 0:
         raise EngineError(

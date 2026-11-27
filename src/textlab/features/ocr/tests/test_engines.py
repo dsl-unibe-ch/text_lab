@@ -135,6 +135,7 @@ def test_the_worker_and_the_adapter_agree_on_the_result_marker():
         node.value.value
         for node in tree.body
         if isinstance(node, ast.Assign)
+        and isinstance(node.targets[0], ast.Name)
         and node.targets[0].id == "RESULT_MARKER"
     ]
     assert markers == [paddle_ocr.RESULT_MARKER]

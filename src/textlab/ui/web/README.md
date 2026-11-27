@@ -33,8 +33,8 @@ port, base path (`/node/<host>/<port>/`) and the portal's host name;
 | `uploads.py` | Reading forms with files, checking them, saving them into a job |
 | `render.py` | Templates, icons, links from the base path, number formats, Markdown from models (`markdown()`: raw HTML escaped, no images) |
 | `settings.py` | The server's settings (`TOKEN`, `USER`, `TEXT_LAB_WEB_DEV`) |
-| `pages/` | One module per page (`home`, `transcription`, `meeting_notes`, `translation`, `placeholder` for the tools not built yet, `dev`), and `TOOLS`, the navigation |
-| `templates/` | `base.html` (layout), `components/macros.html` and `components/player.html` (the audio player), `jobs/`, one folder per page (`pages/` for Home and the placeholders, `transcription/`, `meeting_notes/`, `translation/`); `mockups/` and `dev/` for the developer pages |
+| `pages/` | One module per page (`home`, `transcription`, `meeting_notes`, `translation`, `ocr`, `placeholder` for the tools not built yet, `dev`), and `TOOLS`, the navigation |
+| `templates/` | `base.html` (layout), `components/macros.html` and `components/player.html` (the audio player), `jobs/`, one folder per page (`pages/` for Home and the placeholders, `transcription/`, `meeting_notes/`, `translation/`, `ocr/`); `mockups/` and `dev/` for the developer pages |
 | `static/` | `css/` (`fonts.css`, `tokens.css`, `layout.css`, `components.css`), `js/` (`app.js`, `theme.js`), `vendor/` (htmx, IBM Plex fonts, Lucide icons; see its README) |
 
 ### Links
@@ -174,6 +174,18 @@ Without a recording, Meeting Notes' citations carry `data-goto`: `app.js`
 selects the tab of the transcript line with that `data-line` in the same
 result and marks it.
 
+### Pages beside their text
+
+OCR's result shows a page image with the regions outlined on it: an SVG
+over the image, its `viewBox` the image's size in pixels, one `<rect>` per
+region (attributes, not styles, so the Content Security Policy allows
+them), coloured by type through the `rt-<type>` classes and the
+`--region-*` tokens. An outline and the block of its text share a
+`data-region`; `app.js` marks both while either is pointed at, and a click
+on an outline brings its text into view. Pages show one at a time in a
+`data-pager`. Page images and figures are job files (`listed=False`).
+
+## Tests
 ## Tests
 
 `tests/` here, run with the other tests (see `docs/dev/testing.md`):
@@ -182,7 +194,8 @@ the job runner (`test_jobs.py`), jobs through the web with the demo job
 (`test_job_pages.py`), uploads (`test_uploads.py`), the Transcription page
 and Home with a faked backend (`test_transcription_page.py`), Meeting Notes
 with a faked model (`test_meeting_notes_page.py`), Translation with
-faked models and the real service (`test_translation_page.py`) and the rules
+faked models and the real service (`test_translation_page.py`), OCR with
+the pipeline faked (`test_ocr_page.py`) and the rules
 (`test_rules.py`). The fake transcription backend is the `backend` fixture
 in `conftest.py`. The launcher and the Open OnDemand files are tested in
 `tests/test_launch.py` at the repository root.
