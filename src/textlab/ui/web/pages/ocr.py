@@ -5,19 +5,25 @@ and route, and their jobs share the list below. Built so far:
 
 - **Standard**, the default: one PDF or image, or a ZIP of them read as
   a batch, by the automatic pipeline (``features.ocr.service``): pages
-  with a usable
-  text layer are read from it, the others by the recognition model. The
-  result shows each page beside its text, with the regions outlined on the
-  page; the tables, the figures and the models used; and every download.
-  A batch gives a ZIP with a folder per file, and an overview.
+  with a usable text layer are read from it, the others by the
+  recognition model. The result shows each page beside its text, with the
+  regions outlined on the page; the tables, the figures and the models
+  used; and every download. A batch gives a ZIP with a folder per file,
+  and an overview.
+- **Choose an engine**: the same files, read by one engine the user picks
+  (EasyOCR, PaddleOCR, OlmOCR, GLM-OCR), with its language or what to
+  read. The result shows each page beside its text; the lines an engine
+  found are outlined on the page, and tables an engine wrote are shown as
+  tables.
 
-The manual engines, historic handwriting and Hugging Face models follow.
-Survey extraction is left out of the web UI (see the web UI plan).
+Historic handwriting and Hugging Face models follow. Survey extraction is
+left out of the web UI (see the web UI plan).
 """
 
 from __future__ import annotations
 
 import dataclasses
+import re
 from functools import partial
 from pathlib import Path, PurePosixPath
 
@@ -43,16 +49,19 @@ PAGE = "ocr"
 #: The OCR tools: their switcher value, name, and whether they are built.
 OCR_TOOLS = (
     ("standard", "Standard", True),
-    ("engine", "Choose an engine", False),
+    ("engine", "Choose an engine", True),
     ("handwriting", "Historic handwriting", False),
     ("huggingface", "Hugging Face model", False),
 )
 
-#: What the standard tool reads: documents and images, or a ZIP.
-STANDARD_EXTENSIONS = (*service.INPUT_EXTENSIONS, ".zip")
+#: What the Standard and engine tools read: documents and images, or a ZIP.
+DOCUMENT_EXTENSIONS = (*service.INPUT_EXTENSIONS, ".zip")
 
 #: The searchable PDF's language value when it is detected per page.
 DETECT = "auto"
+
+#: The engine tool's form: the engine's field.
+ENGINE_FIELD = "engine"
 
 #: The region types: their name, and how a count of them reads.
 REGION_LABELS = {
@@ -119,6 +128,101 @@ def region_counts(counts: dict[str, int]) -> list[str]:
     ]
 
 
+@dataclasses.dataclass(frozen=True)
+class EngineChoice:
+    """A manual engine, as the engine form offers it.
+
+    Attributes:
+        name: Its name, the form's value for it.
+        slug: Its name in field names and ids, such as ``"glm_ocr"``.
+        description: What it is good at.
+        languages: The languages to choose from, as name and code, by
+            name; empty when it has no language choice.
+        language: The code of the language chosen first.
+        modes: What it can be asked to read; empty when there is no
+            choice.
+        problem: Why it cannot run now, or ``None``.
+    """
+
+    name: str
+    slug: str
+    description: str
+    languages: tuple[tuple[str, str], ...]
+    language: str
+    modes: tuple[str, ...]
+    problem: str | None
+
+    @property
+    def language_field(self) -> str:
+        """The form field of its language."""
+        return f"language_{self.slug}"
+
+    @property
+    def mode_field(self) -> str:
+        """The form field of what to read."""
+        return f"mode_{self.slug}"
+
+
+def engine_slug(name: str) -> str:
+    """Return an engine's name as it is used in field names and ids.
+
+    Args:
+        name: The engine's name, such as "GLM-OCR".
+
+    Returns:
+        For example ``"glm_ocr"``.
+    """
+    return re.sub(r"\W+", "_", name.lower()).strip("_")
+
+
+def engine_choice(name: str) -> EngineChoice:
+    """Return how the engine form offers an engine.
+
+    Args:
+        name: A key of ``service.ENGINES``.
+
+    Returns:
+        The engine's choice, with whether it can run now.
+    """
+    engine = service.ENGINES[name]
+    languages = tuple(sorted(engine.languages.items()))
+    language = ""
+    if engine.languages:
+        label = engine.default_language
+        if label not in engine.languages:
+            label = next(iter(engine.languages))
+        language = engine.languages[label]
+    return EngineChoice(
+        name=name,
+        slug=engine_slug(name),
+        description=engine.description,
+        languages=languages,
+        language=language,
+        modes=tuple(engine.modes),
+        problem=engine.problem(),
+    )
+
+
+def engine_setting(name: str, options: service.EngineOptions) -> str:
+    """Return what an engine was asked to read with, for people.
+
+    Args:
+        name: The engine's name.
+        options: Its settings.
+
+    Returns:
+        The language's name or the mode, or "" for an engine without
+        either.
+    """
+    engine = service.ENGINES[name]
+    if engine.modes:
+        return options.mode
+    for label, code in engine.languages.items():
+        if code == options.language:
+            return label
+    return ""
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -140,7 +244,7 @@ def page(request: Request) -> HTMLResponse:
         "ocr/page.html",
         page_id=PAGE,
         ocr_tools=OCR_TOOLS,
-        accept=",".join(STANDARD_EXTENSIONS),
+        accept=",".join(DOCUMENT_EXTENSIONS),
         formats=" ".join(
             sorted(
                 {ext.lstrip(".").upper() for ext in service.INPUT_EXTENSIONS}
@@ -149,6 +253,7 @@ def page(request: Request) -> HTMLResponse:
         )
         + ", or a ZIP of them",
         languages=sorted(service.TESSERACT_LANGUAGES.items()),
+        engines=[engine_choice(name) for name in service.ENGINES],
         cards=Markup("".join(render_card(request, job) for job in jobs[::-1])),
     )
 
@@ -170,7 +275,7 @@ async def standard(request: Request, session: Checked) -> HTMLResponse:
             option is not valid.
     """
     form = await uploads.read_form(request, max_files=1)
-    upload = uploads.single_file(form, "file", suffixes=STANDARD_EXTENSIONS)
+    upload = uploads.single_file(form, "file", suffixes=DOCUMENT_EXTENSIONS)
     options = read_options(form)
     name = uploads.display_name(upload)
     batch = PurePosixPath(name).suffix.lower() == ".zip"
@@ -191,6 +296,83 @@ async def standard(request: Request, session: Checked) -> HTMLResponse:
     work = read_archive if batch else read_document
     runner.submit(job, partial(work, path, name, options))
     return HTMLResponse(render_card(request, job))
+
+
+@router.post("/ocr/engine")
+async def engine(request: Request, session: Checked) -> HTMLResponse:
+    """Read a document, an image or a ZIP of them with a chosen engine.
+
+    Args:
+        request: The form: ``file``, ``engine``, and the engine's
+            ``language_<slug>`` or ``mode_<slug>``.
+        session: The session, with its CSRF token checked.
+
+    Returns:
+        The new job's card.
+
+    Raises:
+        UploadError: If the file is missing or of another type, the engine
+            cannot run, or a setting is not valid.
+    """
+    form = await uploads.read_form(request, max_files=1)
+    upload = uploads.single_file(form, "file", suffixes=DOCUMENT_EXTENSIONS)
+    name, options = read_engine_options(form)
+    title = uploads.display_name(upload)
+    batch = PurePosixPath(title).suffix.lower() == ".zip"
+    runner = runner_of(request)
+    job = runner.create(
+        title=title,
+        page=PAGE,
+        gpu=gpu_manager.OCR,
+        ollama_model=service.ENGINES[name].ollama_model,
+        result_template="ocr/engine_batch_result.html"
+        if batch
+        else "ocr/engine_result.html",
+    )
+    try:
+        path = await run_in_threadpool(uploads.save, upload, job.inputs)
+    except BaseException:
+        runner.discard(job)
+        raise
+    work = read_archive_with_engine if batch else read_with_engine
+    runner.submit(job, partial(work, path, title, name, options))
+    return HTMLResponse(render_card(request, job))
+
+
+def read_engine_options(form: FormData) -> tuple[str, service.EngineOptions]:
+    """Read the chosen engine and its settings from the form.
+
+    Args:
+        form: The form.
+
+    Returns:
+        The engine's name and its settings; no previews are drawn, as the
+        result shows the page images and outlines itself.
+
+    Raises:
+        UploadError: If the engine is not one offered or cannot run now, or
+            its language or mode is not one offered.
+    """
+    name = str(form.get(ENGINE_FIELD) or "")
+    if name not in service.ENGINES:
+        raise uploads.UploadError("Choose an engine from the list.")
+    choice = engine_choice(name)
+    if choice.problem:
+        raise uploads.UploadError(f"{name} cannot run now. {choice.problem}")
+    language, mode = service.EngineOptions().language, ""
+    if choice.languages:
+        language = str(form.get(choice.language_field) or choice.language)
+        if language not in dict(choice.languages).values():
+            raise uploads.UploadError(
+                "Choose the document's language from the list."
+            )
+    if choice.modes:
+        mode = str(form.get(choice.mode_field) or choice.modes[0])
+        if mode not in choice.modes:
+            raise uploads.UploadError("Choose what to read from the list.")
+    return name, service.EngineOptions(
+        language=language, mode=mode, previews=False
+    )
 
 
 def read_options(form: FormData) -> service.OcrOptions:
@@ -389,4 +571,123 @@ def read_archive(
     )
     return ReadArchive(
         files=tuple(result.files), seconds=result.elapsed, options=options
+    )
+
+
+@dataclasses.dataclass(frozen=True)
+class EngineRead:
+    """A document read by a chosen engine: what its result shows.
+
+    Attributes:
+        run: The saved run: its pages, lines, tables and files.
+        setting: The language or what was read, or "".
+    """
+
+    run: service.SavedEngineRun
+    setting: str
+
+
+@dataclasses.dataclass(frozen=True)
+class EngineArchive:
+    """A ZIP read by a chosen engine: an overview of its files.
+
+    Attributes:
+        engine: The engine's name.
+        setting: The language or what was read, or "".
+        files: Each file's overview.
+        seconds: How long the batch took.
+    """
+
+    engine: str
+    setting: str
+    files: tuple[service.EngineBatchFile, ...]
+    seconds: float
+
+    @property
+    def pages(self) -> int:
+        """How many pages the engine returned, for all files."""
+        return sum(item.pages for item in self.files)
+
+
+def read_with_engine(
+    path: Path,
+    title: str,
+    name: str,
+    options: service.EngineOptions,
+    context: JobContext,
+) -> EngineRead:
+    """Read one PDF or image with a chosen engine and offer the outputs.
+
+    Args:
+        path: The upload, in the job's inputs.
+        title: Its name as uploaded.
+        name: The engine's name.
+        options: Its settings.
+        context: The job's context.
+
+    Returns:
+        The run to show.
+    """
+    context.report(Progress(f"Starting {name}", 0.0))
+    run = service.recognize_with_engine(
+        title,
+        path.read_bytes(),
+        name,
+        options,
+        on_progress=context.report,
+        cancel=context.cancel,
+    )
+    context.report(Progress("Saving the results", 1.0))
+    saved = service.save_engine_run(run, title, context.outputs)
+    for item in saved.files:
+        context.offer(
+            Download(
+                item.name,
+                item.label,
+                item.media_type,
+                path=item.path,
+                listed=item.listed,
+            )
+        )
+    return EngineRead(run=saved, setting=engine_setting(name, options))
+
+
+def read_archive_with_engine(
+    path: Path,
+    title: str,
+    name: str,
+    options: service.EngineOptions,
+    context: JobContext,
+) -> EngineArchive:
+    """Read every document and image in a ZIP with a chosen engine.
+
+    Args:
+        path: The ZIP, in the job's inputs.
+        title: Its name as uploaded.
+        name: The engine's name.
+        options: Its settings.
+        context: The job's context.
+
+    Returns:
+        The overview of the files.
+    """
+    context.report(Progress("Unpacking the archive", 0.0))
+    batch = service.recognize_batch_with_engine(
+        path,
+        name,
+        options,
+        on_progress=context.report,
+        cancel=context.cancel,
+    )
+    stem = PurePosixPath(title).stem
+    target = context.outputs / f"{stem}_{engine_slug(name)}.zip"
+    target.write_bytes(batch.zip_bytes)
+    context.offer(
+        Download(target.name, "All results", "application/zip", path=target)
+    )
+    return EngineArchive(
+        engine=name,
+        setting=engine_setting(name, options),
+        files=batch.files,
+        seconds=batch.seconds,
     )

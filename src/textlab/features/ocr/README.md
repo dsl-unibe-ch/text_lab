@@ -48,7 +48,13 @@ questionnaire, through the Survey feature (`survey.service`).
 Each engine is an adapter in `engines/` with the interface of
 `engines.base.Engine`: `prepare()` gets its model ready once per run, and
 `recognize()` reads one file and returns an `EngineOutput` (text per page,
-the engine's raw result, optional preview images).
+the engine's raw result, optional preview images). Each page (`PageText`)
+keeps the image it was read from and, for engines that find them, its text
+lines or blocks with their outlines (`TextLine`), so an interface can
+outline them on the page. An adapter also says what it is good at
+(`description`), whether it writes Markdown (`markdown`), the Ollama model
+it runs on (`ollama_model`), and why it cannot run now (`problem()`, such
+as GLM-OCR without its server).
 
 | Engine | Adapter | Runs | Reads |
 |---|---|---|---|
@@ -60,7 +66,15 @@ the engine's raw result, optional preview images).
 Engines that read page images subclass `engines.base.PageEngine`, which
 renders PDFs with `pdftoppm` first. The PaddleOCR worker may import only
 `engines/payloads.py` from `textlab`, since its environment does not have
-the app's packages; a test checks this.
+the app's packages; a test checks this. PaddleOCR straightens a page
+(turns it upright, unwarps it) before it finds the lines, so the worker
+also returns the straightened page (`read_png_b64`), which the outlines
+belong to.
+
+Every run writes, per document, `page_0001.txt` and `page_0001.json` per
+page, `page_0001_table_1.csv` per HTML table on a page (GLM-OCR writes
+tables as HTML), and the whole text and result as `<name>.txt` and
+`<name>.json` (OlmOCR: `<name>.jsonl`, its own record).
 
 To add an engine, write an adapter in `engines/` and add it to
 `manual.ENGINES`. The page lists the engines from there, with a language
@@ -82,9 +96,10 @@ uses `service.py` only):
 | `document_summary(document)` | Counts for an overview |
 | `process_document(path, workspace_dir, ...)` | The pipeline itself, on a file; used by Translation |
 | `TESSERACT_LANGUAGES`, `render_layout_preview`, ... | Re-exported for interfaces |
-| `ENGINES` | The manual engines by name, with their language and mode choices |
-| `recognize_with_engine(name, data, engine, options, on_progress=)` | One file with a manual engine; returns an `EngineRun` (text, JSON, previews, ZIP) |
-| `recognize_batch_with_engine(archive, engine, options, on_progress=)` | A ZIP of files with a manual engine; returns the result ZIP |
+| `ENGINES` | The manual engines by name, with their description, language and mode choices |
+| `recognize_with_engine(name, data, engine, options, on_progress=, cancel=)` | One file with a manual engine; returns an `EngineRun` (text, JSON, previews, ZIP, and the pages with their images and outlined lines) |
+| `recognize_batch_with_engine(archive, engine, options, on_progress=, cancel=)` | A ZIP of files with a manual engine; returns an `EngineBatch`: the result ZIP and an `EngineBatchFile` overview of each file |
+| `save_engine_run(run, name, folder)` | Writes a manual run's downloads, page images and table CSVs into a folder; returns a `SavedEngineRun` (its `SavedEnginePage`s with `SavedLine`s and `SavedPart`s, and `SavedFile`s) |
 | `EngineOptions`, `EngineError` | Settings of a manual engine run; its error, with `details` for developers |
 | `html_table`, `contains_html_table` | A table in a manual engine's text, as a data frame |
 
@@ -159,10 +174,14 @@ Results are returned in memory; nothing is written outside the workspace.
 | `TEXTLAB_VISION_MODEL` | Ollama model for figure descriptions |
 | `PADDLEX_HOME`, `PADDLE_PDX_CACHE_HOME` | PaddleX model store, mounted by the launch script |
 
-Both recognitions stop when their `cancel` event is set: the pipeline
+Every recognition stops when its `cancel` event is set: the pipeline
 checks it between pages (`process_document(..., cancel=)`), a batch between
 files, and the PaddleOCR-VL worker is killed at once (`run_vl_worker` and
 `VLWorkerSession.run` poll it), raising `common.progress.CancelledError`.
+The manual engines check it between pages (EasyOCR, GLM-OCR); PaddleOCR's
+worker and OlmOCR's pipeline are killed at once, with every process they
+started (`engines.base.run_process` gives each a process group of its own;
+OlmOCR starts a vLLM server).
 
 ## Tests
 
@@ -181,9 +200,12 @@ In `tests/`, without GPU or models unless marked:
   layout and overview, the shared worker session, cancelling, the files
   and regions `save_document` gives.
 - `test_engines.py`: the engine adapters with fake models and a stub
-  PaddleOCR worker; what the worker may import.
+  PaddleOCR worker; what the worker may import; outlined lines and page
+  images; text and tables told apart; cancelling between pages and
+  killing an engine process with its children.
 - `test_manual.py`: manual engine runs and batches with a fake engine:
-  outputs, ZIP layout, cleanup.
+  outputs, ZIP layout, table CSVs, the batch overview, cancelling,
+  cleanup, and what `save_engine_run` gives.
 - `test_ocr_page.py`: the page and `ui/streamlit/ocr/` import only the
   service and `doc_ir`, and use only names the service exports.
 

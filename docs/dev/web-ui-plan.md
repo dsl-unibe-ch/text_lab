@@ -242,7 +242,7 @@ Rules, checked by tests as for the Streamlit pages today:
 | 0. Spike (done) | A minimal FastAPI app in the sandbox, behind the Open OnDemand proxy: base path, login cookie, SSE progress, a 2 GB upload streamed to the workspace, a download | All of it works, or a fallback is chosen (HTMX polling every second instead of SSE) |
 | 1. Foundation (done) | The launcher and the redeployment files (deployed at the switch). In `ui/web/`: app factory, login, CSRF, CSP, layout, design system and components, job runner (queue, SSE, cancelling), upload and download helpers, error pages, test harness. Mockups of Home and Transcription | An empty app with login, navigation and a demo job runs in the sandbox, with tests, and the mockups are agreed |
 | 2. Pilot (done) | Home and Transcription: a recording or a ZIP batch, language and model, voice activity detection, speaker identification with speaker counts, the audio player with word highlighting, every download | Everything the Streamlit page does works, with tests, and the UI test passes |
-| 3. Pages (in progress) | One commit each, in this order: Meeting Notes, Translation, OCR (one page with a switcher, one commit per tool: Standard (the automatic pipeline), legacy engines, historic handwriting, Hugging Face models; survey extraction left out), Topic Modeling, Chat, Visualize Data, Knowledge Graph | As in phase 2, with the page's user guide drafted |
+| 3. Pages (in progress) | One commit each, in this order: Meeting Notes, Translation, OCR (one page with a switcher, one commit per tool: Standard (the automatic pipeline), Choose an engine (the legacy engines), historic handwriting, Hugging Face models; survey extraction left out), Topic Modeling, Chat, Visualize Data, Knowledge Graph | As in phase 2, with the page's user guide drafted |
 | 4. Switch | The branch merged into `main`; the new user guide replaces the old one; a release, the HPC redeploy, `TEXT_LAB_UI=web` in production | Users work in the new UI; Streamlit can still be selected as a rollback |
 | 5. Removal | `ui/streamlit/` and its tests are removed; Streamlit leaves the image | One release after the switch, without a rollback |
 
@@ -556,11 +556,62 @@ the rest of the service real, and in `features/ocr/tests/`):
   language for placing words (Tesseract's installed packs), not the
   recognition's.
 
-Still to do: try Standard in the sandbox against the Streamlit page (a
-born-digital PDF, a scan, a photo, a PDF with tables and figures, describe
-figures, highest quality, the searchable PDF in a reader, a ZIP batch,
-cancelling during recognition, a page with check boxes; narrow screens and
-the dark theme), then commit it. Next: Choose an engine, Historic
+Standard was tried in the sandbox and committed on 27 November.
+
+**Choose an engine** (the Streamlit page's "legacy engines" expander),
+built on 27 November 2026, with tests (`test_ocr_page.py`, with the
+engines' recognition faked and the rest real, and `test_engines.py`,
+`test_manual.py` in `features/ocr/tests/`):
+
+- **The form**: one drop zone (a PDF, an image, or a ZIP read as a batch,
+  as in Standard), the engines as choices with what each is good at, and
+  the chosen engine's settings: the language (EasyOCR 86, PaddleOCR 106,
+  by name) or what to read (GLM-OCR's three modes); OlmOCR has none. An
+  engine that cannot run is shown switched off with the reason (GLM-OCR
+  without the Ollama server). The button names the engine.
+- **The result** shows each page beside its text, as in Standard: the
+  lines (PaddleOCR) or blocks (EasyOCR) an engine found are outlined on
+  the page image the engine read, linked to the text; GLM-OCR's tables are
+  shown as tables (sanitized) with a CSV each, and its Markdown rendered;
+  OlmOCR's one Markdown text is shown without a page. A copy button per
+  page. The downloads: *Everything* (the Streamlit ZIP, now with table
+  CSVs), the text and the engine's JSON. The Streamlit page showed the
+  engines' drawn preview images instead; the web UI does not draw them.
+- **A batch** gives the result ZIP and an overview: pages, characters and
+  time per file.
+- **The engines** (`features/ocr/engines/`): each page keeps the image it
+  was read from and its outlined lines (`TextLine`); PaddleOCR's worker
+  also returns the straightened page, as PaddleOCR turns and unwarps
+  pages before it finds lines and gives their outlines on that image.
+  Adapters give a `description`, `markdown`, `ollama_model` (so GLM-OCR's
+  model stays loaded when the GPU is released) and `problem()`.
+  Cancelling: between pages for EasyOCR and GLM-OCR; PaddleOCR's worker
+  and OlmOCR's pipeline are killed at once with the processes they started
+  (`run_process` gives each a process group; OlmOCR starts vLLM).
+- **The service**: `cancel` for `recognize_with_engine` and
+  `recognize_batch_with_engine`, which now returns an `EngineBatch` (the
+  ZIP and the overview; the Streamlit page takes its ZIP), and
+  `save_engine_run`, which writes the downloads, page images (TIFF and BMP
+  as PNG) and table CSVs and returns the pages to show.
+- Shared with Standard: the pager bar (`ocr/macros.html`); the `markdown`
+  filter; nested switches re-apply the switches inside them; the
+  `dropzone` macro takes an `id`, for two drop zones on one page.
+- Checked against the image: PaddleOCR 3.3.3 runs its document
+  preprocessor (orientation and UVDoc unwarping) by default, so its
+  outlines belong to `doc_preprocessor_res.output_img`, which the worker
+  now returns. A smoke run on a GPU node (27 November) read a drawn page
+  with EasyOCR and PaddleOCR through the service and `save_engine_run`:
+  every outline sits on its text, PaddleOCR's on its straightened page,
+  where the text had moved about 50 px from the original (outlines on
+  the original would have been off by as much). Unwarping also bends a
+  flat page slightly, as on the Streamlit page.
+- The guide's draft: the *Choose an engine* section of `docs/next/ocr.md`.
+
+Still to do: try Choose an engine in the sandbox with each engine (a
+scan, a photo, a page with a table in GLM-OCR's table mode, a paper in
+OlmOCR, a ZIP batch, cancelling a PaddleOCR or OlmOCR run), checking that
+the PaddleOCR outlines sit on the lines of a real skewed scan; then
+commit it. Next: Historic
 handwriting, Hugging Face model.
 
 ## Testing

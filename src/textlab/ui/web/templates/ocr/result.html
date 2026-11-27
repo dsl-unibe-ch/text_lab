@@ -4,6 +4,7 @@
   the tables, the figures and the models used. The record's file listing
   below holds the downloads. -#}
 {% from "components/macros.html" import notice, spec %}
+{% from "ocr/macros.html" import pager_bar %}
 {% set recognized = job.result %}
 {% set document = recognized.document %}
 {% set pages = document.pages %}
@@ -30,20 +31,7 @@
 
     <div class="tabs__panel" role="tabpanel" id="{{ job.id }}-pages" aria-labelledby="{{ job.id }}-tab-pages">
       <div class="pager" data-pager>
-        {% if pages | length > 1 %}
-        <div class="pager__bar">
-          <button class="icon-button pager__step" type="button" data-pager-step="-1" aria-label="Previous page" disabled>{{ icon("arrow-left", size="sm") }}</button>
-          <label class="label" for="{{ job.id }}-page">Page</label>
-          <div class="select-wrap pager__select">
-            <select class="select" id="{{ job.id }}-page" data-pager-select>
-              {% for item in pages %}<option value="{{ loop.index0 }}">{{ item.number }}</option>{% endfor %}
-            </select>
-            {{ icon("chevron-down", size="sm") }}
-          </div>
-          <span class="label">of {{ pages | length }}</span>
-          <button class="icon-button pager__step" type="button" data-pager-step="1" aria-label="Next page">{{ icon("arrow-right", size="sm") }}</button>
-        </div>
-        {% endif %}
+        {{ pager_bar(job.id, pages) }}
 
         {% for item in pages %}
         <section class="ocr-page" data-pager-page="{{ loop.index0 }}" aria-label="Page {{ item.number }}"{% if not loop.first %} hidden{% endif %}>

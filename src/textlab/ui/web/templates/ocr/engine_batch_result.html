@@ -1,0 +1,35 @@
+{#- A ZIP read by a chosen engine, inside its record (job.result is an
+  EngineArchive): an overview of its files. The record's file listing
+  holds the ZIP of the results, a folder per file. -#}
+{% set batch = job.result %}
+<div class="result">
+  <ul class="facts" aria-label="About the result">
+    <li>{{ batch.engine }}{% if batch.setting %} · {{ batch.setting }}{% endif %}</li>
+    <li>{{ batch.files | length }} file{{ "s" if batch.files | length != 1 }}</li>
+    <li>Took {{ batch.seconds | duration }}</li>
+  </ul>
+  <div class="table-wrap">
+    <table class="table">
+      <caption class="visually-hidden">The files of {{ job.title }}</caption>
+      <thead>
+        <tr>
+          <th scope="col">File</th>
+          <th scope="col" class="table__num">Pages</th>
+          <th scope="col" class="table__num">Characters</th>
+          <th scope="col" class="table__num">Took</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in batch.files %}
+        <tr>
+          <td class="table__mono">{{ item.name }}</td>
+          <td class="table__num">{{ item.pages }}</td>
+          <td class="table__num">{{ "{:,}".format(item.characters) }}</td>
+          <td class="table__num">{{ item.seconds | duration }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="muted">The ZIP has a folder per file, as in the archive, each with the whole text (<code>.txt</code>), the engine's result (<code>.json</code>, or <code>.jsonl</code> for OlmOCR), and the text and result of each page, with a CSV of each table the engine wrote.</p>
+</div>

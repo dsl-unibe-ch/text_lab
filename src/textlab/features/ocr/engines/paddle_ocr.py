@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import json
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -22,10 +23,12 @@ from textlab.features.ocr.engines.base import (
     PageEngine,
     PageText,
     Preview,
+    TextLine,
     page_done,
     process_output,
     run_process,
 )
+from textlab.features.ocr.engines.payloads import paddle_lines
 
 WORKER_MODULE = "textlab.features.ocr.engines.paddle_ocr_worker"
 #: Prefix of the worker's result line on stdout.
@@ -38,6 +41,7 @@ def run_worker(
     *,
     backend_python: str | None = None,
     worker_path: str | None = None,
+    cancel: threading.Event | None = None,
 ) -> list[dict[str, Any]]:
     """Recognize page images in the PaddleOCR worker.
 
@@ -48,13 +52,16 @@ def run_worker(
             image's PaddleOCR environment, or ``PADDLE_BACKEND_PYTHON``.
         worker_path: Run this script instead of :data:`WORKER_MODULE`; for
             tests with a stub worker.
+        cancel: Kills the worker when set.
 
     Returns:
-        One dictionary per page with ``page``, ``image``, ``text``, ``raw``
-        and ``rendered_png_b64``.
+        One dictionary per page with ``page``, ``image``, ``text``, ``raw``,
+        ``rendered_png_b64`` and ``read_png_b64`` (the straightened page
+        the outlines in ``raw`` belong to, when PaddleOCR straightened it).
 
     Raises:
         EngineError: If the worker fails or prints no result.
+        CancelledError: If ``cancel`` was set.
     """
     python = backend_python or container.env_python(
         container.PADDLE_ENV, "PADDLE_BACKEND_PYTHON"
@@ -62,7 +69,7 @@ def run_worker(
     target = [worker_path] if worker_path else ["-m", WORKER_MODULE]
     command = [python, *target, "--lang", language, *map(str, images)]
     env = container.paddle_environment(jobs.worker_environment(python))
-    result = run_process(command, env)
+    result = run_process(command, env, cancel=cancel)
     if result.returncode != 0:
         raise EngineError(
             "PaddleOCR backend failed.", details=process_output(result)
@@ -90,6 +97,10 @@ class PaddleOcr(PageEngine):
     """PaddleOCR 2 with text-line orientation, in its worker."""
 
     name = "PaddleOCR"
+    description = (
+        "Printed text line by line, in over a hundred languages. Strong on "
+        "pages with several columns; straightens skewed pages first."
+    )
     languages = PADDLEOCR_LANGUAGE_MAPPING
 
     def recognize_pages(
@@ -97,13 +108,28 @@ class PaddleOcr(PageEngine):
         images: list[Path],
         options: EngineOptions,
         on_progress: ProgressCallback,
+        cancel: threading.Event | None = None,
     ) -> EngineOutput:
-        """Read page images (see :meth:`PageEngine.recognize_pages`)."""
-        pages = run_worker(images, options.language)
+        """Read page images (see :meth:`PageEngine.recognize_pages`).
+
+        The worker reads all pages at once; cancelling kills it.
+        """
+        pages = run_worker(images, options.language, cancel=cancel)
         output = EngineOutput(pages=[])
         for index, page in enumerate(pages, start=1):
             raw = page.get("raw", [])
-            output.pages.append(PageText(index, page.get("text", ""), raw))
+            lines = [
+                TextLine.of(text, points) for points, text in paddle_lines(raw)
+            ]
+            output.pages.append(
+                PageText(
+                    index,
+                    page.get("text", ""),
+                    raw,
+                    lines=lines,
+                    image=_decode_png(page.get("read_png_b64")),
+                )
+            )
             if options.previews:
                 preview = _decode_png(page.get("rendered_png_b64"))
                 if not preview:

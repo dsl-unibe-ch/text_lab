@@ -1,0 +1,73 @@
+{#- A document read by a chosen engine, inside its record (job.result is
+  an EngineRead): each page beside its text. The text blocks an engine
+  found are outlined on the page (pointing at one marks it in the text
+  too); tables an engine wrote are shown as tables, with their CSV. An
+  engine that reads whole PDFs (OlmOCR) gives one text, without a page
+  image. The record's file listing below holds the downloads. -#}
+{% from "ocr/macros.html" import pager_bar %}
+{% set read = job.result %}
+{% set run = read.run %}
+{% set pages = run.pages %}
+{% set imaged = pages | selectattr("image") | list %}
+{% set files = root ~ "/jobs/" ~ job.id ~ "/files/" %}
+<div class="result ocr-result">
+  <ul class="facts" aria-label="About the result">
+    <li>{{ run.engine }}{% if read.setting %} · {{ read.setting }}{% endif %}</li>
+    {% if imaged %}<li>{{ pages | length }} page{{ "s" if pages | length != 1 }}</li>{% endif %}
+    {% if run.lines %}<li>{{ run.lines }} text block{{ "s" if run.lines != 1 }} outlined</li>{% endif %}
+    {% if run.tables %}<li>{{ run.tables }} table{{ "s" if run.tables != 1 }}</li>{% endif %}
+  </ul>
+
+  <div class="pager" data-pager>
+    {{ pager_bar(job.id, pages) }}
+
+    {% for item in pages %}
+    <section class="ocr-page{% if not item.image %} ocr-page--text{% endif %}" data-pager-page="{{ loop.index0 }}" aria-label="Page {{ item.number }}"{% if not loop.first %} hidden{% endif %}>
+      {% if item.image %}
+      <div class="ocr-page__scan">
+        <div class="scan">
+          <img class="scan__image" src="{{ files }}{{ item.image | urlencode }}" width="{{ item.width }}" height="{{ item.height }}" alt="Page {{ item.number }} as the engine read it" loading="lazy">
+          {% if item.lines %}
+          <svg class="scan__boxes" viewBox="0 0 {{ item.width }} {{ item.height }}" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+            {% for line in item.lines %}
+            <polygon class="box rt-text" points="{{ line.points }}" data-region="{{ job.id }}-{{ line.id }}"><title>{{ line.text }}</title></polygon>
+            {% endfor %}
+          </svg>
+          {% endif %}
+        </div>
+        {% if item.lines %}<p class="label ocr-page__route">Each block of text the engine found is outlined</p>{% endif %}
+      </div>
+      {% endif %}
+
+      <div class="ocr-page__text">
+        <div class="ocr-page__head">
+          <span class="label">{{ "Page " ~ item.number if imaged else "The document" }}</span>
+          {% if item.text %}<button class="text-button" type="button" data-copy-from="{{ job.id }}-text-{{ item.number }}">{{ icon("copy", size="sm") }} Copy</button>{% endif %}
+        </div>
+        <pre id="{{ job.id }}-text-{{ item.number }}" hidden>{{ item.text }}</pre>
+        {% if item.lines %}
+        {% for line in item.lines %}
+        <p class="ocr-line rt-text" data-region="{{ job.id }}-{{ line.id }}">{{ line.text }}</p>
+        {% endfor %}
+        {% elif item.parts %}
+        {% for part in item.parts %}
+        {% if part.kind == "table" %}
+        <div class="ocr-part ocr-table-item">
+          {#- Sanitized by the service: table tags only, no attributes but spans. -#}
+          <div class="table-wrap ocr-table">{{ part.html | safe }}</div>
+          {% if part.csv %}<a class="text-button" href="{{ files }}{{ part.csv | urlencode }}" download>{{ icon("download", size="sm") }} CSV</a>{% endif %}
+        </div>
+        {% elif run.markdown %}
+        <div class="ocr-part prose">{{ part.text | markdown }}</div>
+        {% else %}
+        <p class="ocr-part ocr-plain">{{ part.text }}</p>
+        {% endif %}
+        {% endfor %}
+        {% else %}
+        <p class="muted ocr-part">No text was found on this page.</p>
+        {% endif %}
+      </div>
+    </section>
+    {% endfor %}
+  </div>
+</div>

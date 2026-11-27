@@ -3,9 +3,9 @@
 !!! note "Draft for the new interface"
     This guide describes the OCR page of the new Text Lab interface. It
     replaces [the current guide](../ocr.md) when the new interface goes
-    live. So far it covers **Standard**, the default; the other tools (choosing an
-    engine, historic handwriting, Hugging Face models) follow as they are
-    built.
+    live. So far it covers **Standard**, the default, and **Choose an
+    engine**; the other tools (historic handwriting, Hugging Face models)
+    follow as they are built.
 
 OCR reads the text in scans, photos and PDFs: the text in reading order,
 with headings, tables, formulas and figures, and keeps where each part
@@ -109,6 +109,42 @@ per file, as in your archive, each with `document.md`, `document.txt`,
 top lists every model that ran in the batch.
 
 **Cancel** stops a job at once; nothing is kept then.
+
+## Choose an engine
+
+**Standard** suits most documents. To compare, or for a document Standard
+reads poorly, choose **Choose an engine** above the form and read it with
+one engine of your choice. Each engine gives the text page by page,
+without the layout, tables and figures of Standard (GLM-OCR's tables
+apart), and reads every page, also pages with their own text.
+
+| Engine | Good at | Setting |
+|---|---|---|
+| **EasyOCR** | Printed text in many languages, block by block; quick, and good on photos and signs | The language of the document (86) |
+| **PaddleOCR** | Printed text line by line; strong on pages with several columns. It straightens skewed pages first | The language of the document (106) |
+| **OlmOCR** | A whole PDF to clean Markdown, with headings, lists and equations; made for scientific papers, mostly in English | None |
+| **GLM-OCR** | A vision model that reads one kind of content per run: text, tables or figures; best for complex layouts | What to read: *Text*, *Table* or *Figure Recognition* |
+
+GLM-OCR runs on the session's language model server; while that is not
+running, it is shown switched off. Each engine is loaded when its job
+starts, which can take a minute.
+
+**The result** shows each page beside its text. The blocks (EasyOCR) or
+lines (PaddleOCR) the engine found are outlined on the page; point at an
+outline or a line and both are marked, and click an outline to bring its
+line into view. PaddleOCR's page is shown as it read it, straightened.
+GLM-OCR's tables are shown as tables, each with a CSV, and its text and
+OlmOCR's are shown with their headings and lists. OlmOCR reads the whole
+document at once, so its result is one text, without pages. **Copy**
+copies a page's text.
+
+The downloads: **Everything** (a ZIP with the text and the engine's result
+for each page, and a CSV of each table), the **Plain text**, and the
+engine's result as **JSON** (OlmOCR: its own record, as JSON Lines).
+
+A ZIP is read as a batch with the engine loaded once; the record lists
+each file with its pages, characters and time, and the download is one
+ZIP with a folder per file.
 
 ## Your data
 

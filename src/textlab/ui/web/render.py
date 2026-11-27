@@ -259,7 +259,7 @@ class Renderer:
     - ``settings``, ``version``, the navigation (``tools``,
       ``tool_groups``, ``page_path``, ``page_label``, set by the app) and
       the filters ``file_size``, ``duration``, ``media_time``,
-      ``time_left`` and ``clock_time``.
+      ``time_left``, ``clock_time`` and ``markdown``.
     """
 
     def __init__(self, settings: WebSettings):
@@ -284,6 +284,7 @@ class Renderer:
             media_time=media_time,
             clock_time=clock_time,
             time_left=time_left,
+            markdown=markdown,
         )
 
     @functools.cache  # noqa: B019 - one renderer per app; files are fixed.

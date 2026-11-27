@@ -57,19 +57,21 @@
 
 {#- A file input as a drop zone. Dropping files on it or clicking it fills
   the input; app.js lists the chosen files and checks their size and
-  type. formats names the accepted types, for people. -#}
-{% macro dropzone(name, label, formats, accept="", multiple=false, required=true) %}
+  type. formats names the accepted types, for people. id sets the input's
+  id, which is its name unless a page has two drop zones of that name. -#}
+{% macro dropzone(name, label, formats, accept="", multiple=false, required=true, id=none) %}
+{% set field = id or name %}
 <div class="dropzone" data-dropzone data-max-bytes="{{ settings.upload_limit }}">
-  <input class="dropzone__input" id="{{ name }}" name="{{ name }}" type="file"{% if accept %} accept="{{ accept }}"{% endif %}{% if multiple %} multiple{% endif %}{% if required %} required{% endif %} aria-describedby="{{ name }}-formats">
+  <input class="dropzone__input" id="{{ field }}" name="{{ name }}" type="file"{% if accept %} accept="{{ accept }}"{% endif %}{% if multiple %} multiple{% endif %}{% if required %} required{% endif %} aria-describedby="{{ field }}-formats">
   <div>
-    <label class="dropzone__title" for="{{ name }}">{{ label }}</label>
+    <label class="dropzone__title" for="{{ field }}">{{ label }}</label>
     <p class="dropzone__hint">or click to choose {{ "files" if multiple else "a file" }}</p>
-    <p class="label" id="{{ name }}-formats">{{ formats }} · up to {{ settings.upload_limit | file_size }}</p>
+    <p class="label" id="{{ field }}-formats">{{ formats }} · up to {{ settings.upload_limit | file_size }}</p>
   </div>
   <span class="dropzone__icon">{{ icon("arrow-down", size="lg") }}</span>
 </div>
-<ul class="file-list" data-file-list="{{ name }}" aria-live="polite"></ul>
-<p class="field__error" data-file-error="{{ name }}" hidden></p>
+<ul class="file-list" data-file-list="{{ field }}" aria-live="polite"></ul>
+<p class="field__error" data-file-error="{{ field }}" hidden></p>
 {% endmacro %}
 
 {#- A list of name and value pairs: the models a result was made with, the

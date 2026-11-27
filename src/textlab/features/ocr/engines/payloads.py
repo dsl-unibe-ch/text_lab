@@ -172,14 +172,14 @@ def extract_polygons(payload: Any) -> list[np.ndarray]:
             if pts is not None:
                 polys.append(pts)
             return polys
-        if payload and isinstance(payload[0], list | tuple):
-            if all(
-                isinstance(p, list | tuple) and len(p) >= 2 for p in payload
-            ):
-                pts = polygon_points(payload)
-                if pts is not None:
-                    polys.append(pts)
-                return polys
+        # A list of points is one polygon; a list of polygons is not.
+        if payload and all(
+            is_number_list(point) and len(point) >= 2 for point in payload
+        ):
+            pts = polygon_points(payload)
+            if pts is not None:
+                polys.append(pts)
+            return polys
         for item in payload:
             polys.extend(extract_polygons(item))
         return polys
@@ -210,6 +210,42 @@ def paddle_core(raw: Any) -> dict:
     if isinstance(raw, dict) and isinstance(raw.get("res"), dict):
         return raw["res"]
     return raw if isinstance(raw, dict) else {}
+
+
+def paddle_lines(page_preds: Any) -> list[tuple[np.ndarray, str]]:
+    """Return the text lines of PaddleOCR's predictions for one page.
+
+    Args:
+        page_preds: The page's predictions, as objects or in their compact
+            form (:func:`compact_paddle_prediction`).
+
+    Returns:
+        Each line's outline, as returned by :func:`polygon_points`, and its
+        text, in reading order.
+    """
+    lines = []
+    for pred in page_preds or ():
+        core = paddle_core(prediction_dict(pred))
+        texts = core.get("rec_texts")
+        if not isinstance(texts, list):
+            texts = extract_texts(core)
+        polys_src = (
+            core.get("rec_polys")
+            or core.get("dt_polys")
+            or core.get("rec_boxes")
+            or core.get("boxes")
+        )
+        if polys_src is None:
+            polys = extract_polygons(core)
+        else:
+            polys = extract_polygons(polys_src)
+        for index, poly in enumerate(polys):
+            points = polygon_points(poly)
+            if points is None:
+                continue
+            text = str(texts[index]).strip() if index < len(texts) else ""
+            lines.append((points, text))
+    return lines
 
 
 def compact_paddle_prediction(pred: Any) -> dict:

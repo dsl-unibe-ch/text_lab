@@ -6,9 +6,12 @@ real worker's format.
 """
 
 import ast
+import base64
 import json
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -16,7 +19,7 @@ import numpy as np
 import pytest
 
 from textlab.common import gpu_manager
-from textlab.common.progress import Progress
+from textlab.common.progress import CancelledError, Progress
 from textlab.features.ocr.engines import (
     base,
     easy_ocr,
@@ -80,6 +83,16 @@ def test_polygons_are_found_in_flat_and_nested_form():
     }
     polygons = payloads.extract_polygons(payload)
     assert [p.shape for p in polygons] == [(4, 2), (4, 2)]
+
+
+def test_a_list_of_polygons_is_not_taken_for_one():
+    polygons = payloads.extract_polygons(
+        [
+            [[1, 2], [30, 2], [30, 9], [1, 9]],
+            [[1, 12], [40, 12], [40, 19], [1, 19]],
+        ]
+    )
+    assert [p.tolist()[0] for p in polygons] == [[1, 2], [1, 12]]
 
 
 def test_a_paddle_prediction_is_compacted():
@@ -192,6 +205,36 @@ def test_easyocr_reads_each_page(tmp_path, monkeypatch):
     assert len(output.previews) == 2
     assert all(p.layout is not None for p in output.previews)
     assert updates[-1] == Progress("Running EasyOCR... page 2/2", 1.0)
+    assert output.pages[0].lines == [
+        base.TextLine("text of a.png", ((0, 0), (10, 0), (10, 5), (0, 5))),
+        base.TextLine("more", ((0, 0), (10, 0), (10, 5), (0, 5))),
+    ]
+
+
+def test_a_page_keeps_the_image_it_was_read_from(tmp_path, monkeypatch):
+    monkeypatch.setattr(easy_ocr, "get_reader", lambda language: FakeReader())
+    image = write_png(tmp_path / "scan.png")
+    output = easy_ocr.EasyOcr().recognize(
+        image, tmp_path / "work", base.EngineOptions(previews=False)
+    )
+    assert output.pages[0].image == image.read_bytes()
+    assert output.previews == []
+
+
+def test_a_page_engine_stops_between_pages(tmp_path, monkeypatch):
+    cancel = threading.Event()
+
+    class Reader(FakeReader):
+        def readtext(self, path, detail, paragraph):
+            cancel.set()
+            return super().readtext(path, detail, paragraph)
+
+    monkeypatch.setattr(easy_ocr, "get_reader", lambda language: Reader())
+    images = [write_png(tmp_path / "a.png"), write_png(tmp_path / "b.png")]
+    with pytest.raises(CancelledError):
+        easy_ocr.EasyOcr().recognize_pages(
+            images, base.EngineOptions(), lambda update: None, cancel
+        )
 
 
 def test_easyocr_readers_are_released_by_the_gpu_manager():
@@ -263,7 +306,7 @@ def test_paddleocr_adapter_uses_the_rendered_preview(tmp_path, monkeypatch):
     monkeypatch.setattr(
         paddle_ocr,
         "run_worker",
-        lambda images, language: [
+        lambda images, language, cancel=None: [
             {"text": "x", "raw": [], "rendered_png_b64": "cmVuZGVyZWQ="}
         ],
     )
@@ -273,10 +316,62 @@ def test_paddleocr_adapter_uses_the_rendered_preview(tmp_path, monkeypatch):
     assert output.previews == [base.Preview(b"rendered")]
 
 
+def test_paddleocr_lines_belong_to_the_straightened_page(
+    tmp_path, monkeypatch
+):
+    straightened = base64.b64encode(b"straight").decode("ascii")
+    raw = [
+        {
+            "rec_texts": ["Title", "Body"],
+            "rec_polys": [
+                [[1, 2], [30, 2], [30, 9], [1, 9]],
+                [[1, 12], [40, 12], [40, 19], [1, 19]],
+            ],
+        }
+    ]
+    monkeypatch.setattr(
+        paddle_ocr,
+        "run_worker",
+        lambda images, language, cancel=None: [
+            {"text": "Title\nBody", "raw": raw, "read_png_b64": straightened}
+        ],
+    )
+    output = paddle_ocr.PaddleOcr().recognize(
+        write_png(tmp_path / "a.png"), tmp_path / "work", base.EngineOptions()
+    )
+    (page,) = output.pages
+    assert [line.text for line in page.lines] == ["Title", "Body"]
+    assert page.lines[0].points == ((1, 2), (30, 2), (30, 9), (1, 9))
+    assert page.image == b"straight"
+
+
+def test_a_page_paddleocr_did_not_straighten_keeps_its_image(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        paddle_ocr,
+        "run_worker",
+        lambda images, language, cancel=None: [{"text": "", "raw": []}],
+    )
+    image = write_png(tmp_path / "a.png")
+    output = paddle_ocr.PaddleOcr().recognize(
+        image, tmp_path / "work", base.EngineOptions()
+    )
+    assert output.pages[0].image == image.read_bytes()
+
+
+def test_paddle_lines_pair_outlines_with_texts():
+    lines = payloads.paddle_lines(
+        [{"res": {"rec_texts": ["a"], "rec_boxes": [[0, 0, 4, 2]]}}]
+    )
+    assert [text for _points, text in lines] == ["a"]
+    assert lines[0][0].tolist() == [[0, 0], [4, 0], [4, 2], [0, 2]]
+
+
 def test_paddleocr_worker_runs_as_a_module_in_its_environment(monkeypatch):
     calls = []
 
-    def fake_run(command, env):
+    def fake_run(command, env, cancel=None):
         calls.append((command, env))
         return subprocess.CompletedProcess(
             command, 0, 'TEXTLAB_PADDLEOCR_RESULT_JSON={"pages": []}\n', ""
@@ -300,7 +395,7 @@ def test_paddleocr_worker_runs_as_a_module_in_its_environment(monkeypatch):
 def fake_olmocr(returncode=0, record=None):
     calls = []
 
-    def run(command, env):
+    def run(command, env, cancel=None):
         calls.append(command)
         workspace = Path(command[3])
         if record is not None:
@@ -420,3 +515,78 @@ def test_glm_reads_each_page_with_the_chosen_mode(tmp_path, monkeypatch):
     assert output.pages[0].text == "<table></table>"
     assert output.pages[1].text == "[Error processing page 2: timeout]"
     assert len(output.previews) == 2
+
+
+def test_glm_says_when_its_server_is_not_running(monkeypatch):
+    monkeypatch.setattr(glm_ocr, "check_ollama_server", lambda attempts: False)
+    assert "not running" in glm_ocr.GlmOcr().problem()
+    monkeypatch.setattr(glm_ocr, "check_ollama_server", lambda attempts: True)
+    assert glm_ocr.GlmOcr().problem() is None
+
+
+def test_every_engine_says_what_it_is_good_at():
+    from textlab.features.ocr.manual import ENGINES
+
+    for engine in ENGINES.values():
+        assert engine.description.endswith(".")
+    assert ENGINES["GLM-OCR"].ollama_model == glm_ocr.MODEL
+    assert ENGINES["OlmOCR"].markdown and not ENGINES["EasyOCR"].markdown
+
+
+# --- Shared steps ----------------------------------------------------------
+
+
+def test_text_and_tables_are_told_apart():
+    text = "Intro\n<table><tr><td>1</td></tr></table>\n \n<TABLE>x</TABLE>"
+    assert base.text_parts(text) == [
+        ("text", "Intro"),
+        ("table", "<table><tr><td>1</td></tr></table>"),
+        ("table", "<TABLE>x</TABLE>"),
+    ]
+    assert base.text_parts("") == []
+
+
+def test_an_engine_process_returns_its_output():
+    result = base.run_process(
+        [
+            sys.executable,
+            "-c",
+            "import sys; print('out'); print('err', file=sys.stderr)",
+        ]
+    )
+    assert (result.returncode, result.stdout, result.stderr) == (
+        0,
+        "out\n",
+        "err\n",
+    )
+
+
+def stopped(pid):
+    """Return whether a process has ended (a zombie counts as ended)."""
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text()
+    except FileNotFoundError:
+        return True
+    return stat.rsplit(")", 1)[1].split()[0] in ("Z", "X")
+
+
+def test_cancelling_kills_an_engine_process_and_its_children(tmp_path):
+    pid_file = tmp_path / "child.pid"
+    script = (
+        "import subprocess, sys, time\n"
+        "child = subprocess.Popen([sys.executable, '-c', "
+        "'import time; time.sleep(60)'])\n"
+        f"open({str(pid_file)!r}, 'w').write(str(child.pid))\n"
+        "time.sleep(60)\n"
+    )
+    cancel = threading.Event()
+    threading.Timer(1.0, cancel.set).start()
+    started = time.monotonic()
+    with pytest.raises(CancelledError):
+        base.run_process([sys.executable, "-c", script], cancel=cancel)
+    assert time.monotonic() - started < 10
+    child = int(pid_file.read_text())
+    deadline = time.monotonic() + 5
+    while not stopped(child) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert stopped(child)

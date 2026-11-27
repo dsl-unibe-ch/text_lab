@@ -17,12 +17,9 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 from textlab.features.ocr.engines.payloads import (
-    extract_polygons,
-    extract_texts,
-    paddle_core,
+    paddle_lines,
     png_bytes,
     polygon_points,
-    prediction_dict,
     rendered_png,
 )
 
@@ -94,30 +91,11 @@ def render_paddle_preview(
     if image is None:
         return None, None
     left_png = None
-    text_items = []
     for pred in page_preds:
-        if left_png is None:
-            left_png = rendered_png(pred)
-        core = paddle_core(prediction_dict(pred))
-        texts = core.get("rec_texts")
-        if not isinstance(texts, list):
-            texts = extract_texts(core)
-        polys_src = (
-            core.get("rec_polys")
-            or core.get("dt_polys")
-            or core.get("rec_boxes")
-            or core.get("boxes")
-        )
-        if polys_src is None:
-            polys = extract_polygons(core)
-        else:
-            polys = extract_polygons(polys_src)
-        for i, poly in enumerate(polys):
-            pts = polygon_points(poly)
-            if pts is None:
-                continue
-            text = str(texts[i]).strip() if i < len(texts) else ""
-            text_items.append((pts, text))
+        left_png = rendered_png(pred)
+        if left_png is not None:
+            break
+    text_items = paddle_lines(page_preds)
     text_canvas = _draw_text_canvas(image.shape, text_items)
     if left_png is None:
         for pts, _ in text_items:

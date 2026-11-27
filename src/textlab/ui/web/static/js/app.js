@@ -381,8 +381,8 @@
 
   function listFiles(input) {
     var zone = input.closest("[data-dropzone]");
-    var list = document.querySelector("[data-file-list='" + input.name + "']");
-    var errorLine = document.querySelector("[data-file-error='" + input.name + "']");
+    var list = document.querySelector("[data-file-list='" + input.id + "']");
+    var errorLine = document.querySelector("[data-file-error='" + input.id + "']");
     var limit = zone ? Number(zone.getAttribute("data-max-bytes")) : 0;
     var accepted = (input.getAttribute("accept") || "")
       .split(",")
@@ -445,6 +445,13 @@
       });
       if (part.matches("button")) {
         part.disabled = !shown;
+      }
+    });
+    // Showing a part enabled every control in it, also those of the
+    // parts a switch inside it hides; let that switch hide them again.
+    form.querySelectorAll("[data-switch]").forEach(function (inner) {
+      if (inner.closest("[hidden]") === null) {
+        applySwitch(inner);
       }
     });
   }
@@ -1227,7 +1234,7 @@
     var box = target.closest(".box[data-region]");
     if (box) {
       var page = box.closest("[data-pager-page]") || document;
-      var block = page.querySelector(".ocr-block[data-region='" + box.getAttribute("data-region") + "']");
+      var block = page.querySelector("[data-region='" + box.getAttribute("data-region") + "']:not(.box)");
       if (block) {
         block.scrollIntoView({ block: "nearest", behavior: calm ? "auto" : "smooth" });
       }

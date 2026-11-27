@@ -11,12 +11,12 @@ batch of filled-in questionnaires against the form they share
 
 Uploads, page images and intermediate files go to a job folder in the
 workspace (area ``ocr``), which is removed when the run ends; results are
-returned in memory. :func:`save_document` writes a result's downloads, page
-images and figures to a folder an interface serves them from, and returns
-what it needs to show the result.
+returned in memory. :func:`save_document` and :func:`save_engine_run` write
+a result's downloads, page images, tables and figures to a folder an
+interface serves them from, and return what it needs to show the result.
 
-Both recognitions stop when their ``cancel`` event is set: between pages
-and files, and the recognition worker at once, by raising
+Every recognition stops when its ``cancel`` event is set: between pages
+and files, and a recognition worker or engine process at once, by raising
 :class:`~textlab.common.progress.CancelledError`.
 
 The few names interfaces need from other modules (Tesseract languages, the
@@ -60,13 +60,17 @@ from textlab.features.ocr.layout_preview import (
 )
 from textlab.features.ocr.manual import (
     ENGINES,
+    EngineBatch,
+    EngineBatchFile,
     EngineError,
     EngineOptions,
     EngineRun,
     contains_html_table,
     html_table,
+    page_tables,
     recognize_batch_with_engine,
     recognize_with_engine,
+    text_parts,
 )
 from textlab.features.ocr.pipeline import document_summary, process_document
 from textlab.features.ocr.searchable_pdf import (
@@ -104,13 +108,20 @@ __all__ = [
     "render_layout_preview",
     # Manual engine selection
     "ENGINES",
+    "EngineBatch",
+    "EngineBatchFile",
     "EngineError",
     "EngineOptions",
     "EngineRun",
+    "SavedEnginePage",
+    "SavedEngineRun",
+    "SavedLine",
+    "SavedPart",
     "contains_html_table",
     "html_table",
     "recognize_batch_with_engine",
     "recognize_with_engine",
+    "save_engine_run",
 ]
 
 #: Workspace area for job folders.
@@ -762,6 +773,235 @@ def save_document(result: DocumentResult, folder: Path) -> SavedDocument:
         summary=result.summary,
         models=tuple(models),
     )
+
+
+@dataclasses.dataclass(frozen=True)
+class SavedLine:
+    """A text line a manual engine found, as an interface shows it.
+
+    Attributes:
+        id: Its id, unique in the run, such as ``"p1-l3"``.
+        text: Its text.
+        points: Its outline as SVG polygon points (``"x,y x,y ..."``), in
+            pixels of the page image.
+    """
+
+    id: str
+    text: str
+    points: str
+
+
+@dataclasses.dataclass(frozen=True)
+class SavedPart:
+    """A part of a page's text from a manual engine: text, or a table.
+
+    Attributes:
+        kind: ``"text"`` or ``"table"``.
+        text: The text; for a table, the HTML the engine wrote.
+        html: For a table, its sanitized HTML (table tags only), safe to
+            show; empty for text.
+        csv: For a table that could be read, the file name of its CSV.
+    """
+
+    kind: str
+    text: str
+    html: str = ""
+    csv: str | None = None
+
+
+@dataclasses.dataclass(frozen=True)
+class SavedEnginePage:
+    """One page a manual engine read, as an interface shows it.
+
+    Attributes:
+        number: The page number, from 1.
+        text: The page's whole text, for copying.
+        image: The file name of the page image the engine read, or
+            ``None`` (OlmOCR reads whole PDFs).
+        width: The image's width in pixels; 0 without an image.
+        height: Its height in pixels; 0 without an image.
+        lines: The text lines with their outlines, for engines that find
+            lines; their texts make up ``text``.
+        parts: The text split into text and tables, for engines that find
+            no lines.
+    """
+
+    number: int
+    text: str
+    image: str | None
+    width: int
+    height: int
+    lines: tuple[SavedLine, ...]
+    parts: tuple[SavedPart, ...]
+
+
+@dataclasses.dataclass(frozen=True)
+class SavedEngineRun:
+    """What :func:`save_engine_run` wrote, and what to show of a run.
+
+    Attributes:
+        name: The document's name.
+        engine: The engine's name.
+        markdown: Whether the engine writes its text as Markdown.
+        pages: The pages, in order.
+        files: Every file written, downloads first.
+    """
+
+    name: str
+    engine: str
+    markdown: bool
+    pages: tuple[SavedEnginePage, ...]
+    files: tuple[SavedFile, ...]
+
+    @property
+    def lines(self) -> int:
+        """How many text lines were found, on all pages."""
+        return sum(len(page.lines) for page in self.pages)
+
+    @property
+    def tables(self) -> int:
+        """How many tables were found, on all pages."""
+        return sum(
+            1
+            for page in self.pages
+            for part in page.parts
+            if part.kind == "table"
+        )
+
+
+def save_engine_run(run: EngineRun, name: str, folder: Path) -> SavedEngineRun:
+    """Write a manual engine's downloads, page images and tables.
+
+    The downloads are everything in one ZIP, the text and the engine's
+    result; besides them each page image and each table's CSV gets a file
+    of its own, named after the document, so an interface can show and
+    link them. Page images an interface cannot show (TIFF, BMP) are saved
+    as PNG.
+
+    Args:
+        run: The result of :func:`recognize_with_engine`.
+        name: The document's name, as uploaded.
+        folder: An existing folder, such as a job's outputs.
+
+    Returns:
+        What was written, and the pages to show.
+    """
+    stem = run.stem
+    files: list[SavedFile] = []
+
+    def write(
+        file_name: str, data: bytes, label: str, media: str, listed=True
+    ):
+        path = folder / file_name
+        path.write_bytes(data)
+        files.append(SavedFile(file_name, label, media, path, listed))
+        return file_name
+
+    write(
+        f"{stem}_outputs.zip", run.zip_bytes, "Everything", "application/zip"
+    )
+    write(
+        run.text_name,
+        run.text.encode("utf-8"),
+        "Plain text",
+        "text/plain; charset=utf-8",
+    )
+    record = run.json_name.endswith(".jsonl")
+    write(
+        run.json_name,
+        run.json.encode("utf-8"),
+        f"{run.engine}'s record, JSON Lines" if record else "JSON, per page",
+        "application/x-ndjson" if record else "application/json",
+    )
+
+    pages = []
+    for page in run.pages:
+        prefix = f"{stem}_page-{page.page:04d}"
+        image, width, height = None, 0, 0
+        if page.image:
+            picture, extension, (width, height) = _web_image(page.image)
+            if picture:
+                image = write(
+                    f"{prefix}.{extension}",
+                    picture,
+                    f"Page {page.page}",
+                    f"image/{'jpeg' if extension == 'jpg' else extension}",
+                    listed=False,
+                )
+        lines = tuple(
+            SavedLine(
+                id=f"p{page.page}-l{index}",
+                text=line.text,
+                points=" ".join(f"{x:.1f},{y:.1f}" for x, y in line.points),
+            )
+            for index, line in enumerate(page.lines, start=1)
+        )
+        parts, tables = [], 0
+        if not lines:
+            for kind, value in text_parts(page.text):
+                if kind != "table":
+                    parts.append(SavedPart("text", value))
+                    continue
+                tables += 1
+                csv = None
+                found = page_tables(value)
+                if found:
+                    csv = write(
+                        f"{prefix}_table-{tables}.csv",
+                        found[0].to_csv(index=False).encode("utf-8"),
+                        f"Table {tables}, page {page.page}, CSV",
+                        "text/csv; charset=utf-8",
+                        listed=False,
+                    )
+                parts.append(
+                    SavedPart("table", value, sanitize_table_html(value), csv)
+                )
+        pages.append(
+            SavedEnginePage(
+                number=page.page,
+                text=page.text,
+                image=image,
+                width=width,
+                height=height,
+                lines=lines,
+                parts=tuple(parts),
+            )
+        )
+    adapter = ENGINES.get(run.engine)
+    return SavedEngineRun(
+        name=name,
+        engine=run.engine,
+        markdown=bool(adapter and adapter.markdown),
+        pages=tuple(pages),
+        files=tuple(files),
+    )
+
+
+def _web_image(data: bytes) -> tuple[bytes | None, str, tuple[int, int]]:
+    """Return an image as a browser shows it: PNG or JPEG data.
+
+    Args:
+        data: Image file data, in any format PIL reads.
+
+    Returns:
+        The data (converted to PNG unless it is PNG or JPEG), its file
+        extension and its ``(width, height)``; ``None`` data if it cannot
+        be read.
+    """
+    from PIL import Image
+
+    try:
+        with Image.open(io.BytesIO(data)) as picture:
+            size = picture.size
+            if picture.format == "PNG":
+                return data, "png", size
+            if picture.format == "JPEG":
+                return data, "jpg", size
+            buffer = io.BytesIO()
+            picture.convert("RGB").save(buffer, format="PNG")
+            return buffer.getvalue(), "png", size
+    except Exception:
+        return None, "png", (0, 0)
 
 
 def _saved_region(region: doc_ir.Region, stem: str, write) -> SavedRegion:

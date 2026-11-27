@@ -77,6 +77,96 @@
       <button class="btn btn--primary btn--lg" type="submit">Read the document {{ icon("arrow-right", size="sm") }}</button>
     </div>
   </form>
+
+  {#- One engine of the user's choice. The form is a switch of its own:
+    the chosen engine shows its settings, each under field names of its
+    own (language_<slug>, mode_<slug>). -#}
+  {% set ready = engines | rejectattr("problem") | list %}
+  {% set first = ready[0].name if ready else "" %}
+  <form data-when="engine" data-switch="engine" data-upload-form aria-label="OCR with an engine of your choice" hidden
+        hx-post="{{ root }}/ocr/engine" hx-encoding="multipart/form-data"
+        hx-target="#jobs" hx-swap="afterbegin" hx-disabled-elt="find button[type=submit]">
+    <ol class="steps">
+      <li class="step">
+        <div>
+          <span class="label step__num">01</span>
+          <h2 class="step__title">Document</h2>
+          <p class="step__hint">Every page is read by the engine, also pages with their own text. A ZIP is read as a batch, with the engine loaded once for all its files.</p>
+        </div>
+        <div class="step__body">
+          {{ dropzone("file", "Drop a document here", formats, accept=accept, id="engine-file") }}
+        </div>
+      </li>
+      <li class="step">
+        <div>
+          <span class="label step__num">02</span>
+          <h2 class="step__title">Engine</h2>
+          <p class="step__hint">Each engine gives the text page by page, without the layout, tables and figures of Standard. Choose one to compare, or for a document Standard reads poorly.</p>
+        </div>
+        <div class="step__body">
+          <fieldset class="field">
+            <legend class="visually-hidden">Engine</legend>
+            <div class="choices">
+              {% for engine in engines %}
+              <label class="choice{% if engine.problem %} choice--off{% endif %}">
+                <input class="radio" type="radio" name="engine" value="{{ engine.name }}" data-readout="engine-name" data-readout-text="{{ engine.name }}"{% if engine.name == first %} checked{% endif %}{% if engine.problem %} disabled{% endif %}>
+                <span class="choice__title">{{ engine.name }}</span>
+                <span class="choice__text">{{ engine.description }}{% if engine.problem %} <strong>{{ engine.problem }}</strong>{% endif %}</span>
+              </label>
+              {% endfor %}
+            </div>
+          </fieldset>
+        </div>
+      </li>
+      <li class="step">
+        <div>
+          <span class="label step__num">03</span>
+          <h2 class="step__title">Settings</h2>
+          <p class="step__hint">What the chosen engine needs to know.</p>
+        </div>
+        <div class="step__body">
+          {% for engine in engines %}
+          <div data-when="{{ engine.name }}"{% if engine.name != first %} hidden{% endif %}>
+            {% if engine.languages %}
+            <div class="field">
+              <label class="field__label" for="engine-language-{{ engine.slug }}">Language of the document</label>
+              <div class="select-wrap">
+                <select class="select" id="engine-language-{{ engine.slug }}" name="{{ engine.language_field }}" aria-describedby="engine-language-{{ engine.slug }}-help">
+                  {% for name, code in engine.languages %}<option value="{{ code }}"{% if code == engine.language %} selected{% endif %}>{{ name }}</option>{% endfor %}
+                </select>
+                {{ icon("chevron-down", size="sm") }}
+              </div>
+              <p class="field__help" id="engine-language-{{ engine.slug }}-help">{{ engine.name }} offers {{ engine.languages | length }} languages and reads the one chosen, with the letters and signs of its script.</p>
+            </div>
+            {% elif engine.modes %}
+            <fieldset class="field">
+              <legend class="field__label">What to read</legend>
+              <div class="switcher switcher--inline">
+                {% for mode in engine.modes %}
+                <label class="switcher__option"><input type="radio" name="{{ engine.mode_field }}" value="{{ mode }}"{% if loop.first %} checked{% endif %}><span>{{ mode }}</span></label>
+                {% endfor %}
+              </div>
+              <p class="field__help">One kind of content per run. Tables come back as tables, with a CSV of each.</p>
+            </fieldset>
+            {% else %}
+            <p class="muted">{{ engine.name }} has no settings: it reads the document as it is.</p>
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+      </li>
+    </ol>
+
+    <div class="upload-progress" data-upload-progress hidden>
+      <progress class="meter__bar" max="1" value="0"></progress>
+      <p class="label" data-upload-progress-text>Uploading</p>
+    </div>
+
+    <div class="sheet__submit">
+      <p class="sheet__note">Runs in the background: you can leave this page and come back. The engine is loaded first, which can take a minute.</p>
+      <button class="btn btn--primary btn--lg" type="submit"{% if not ready %} disabled{% endif %}>Read with <span id="engine-name">{{ first or "the engine" }}</span> {{ icon("arrow-right", size="sm") }}</button>
+    </div>
+  </form>
 </div>
 
 <section class="section" aria-labelledby="jobs-title">

@@ -2809,6 +2809,57 @@ kbd {
   font-size: var(--text-sm);
 }
 
+/* A page a chosen engine read: its text line by line, or as text and
+   tables; an engine that reads whole PDFs gives the text alone. */
+.ocr-page--text {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.ocr-page--text .ocr-page__text {
+  max-height: none;
+}
+
+.ocr-page__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  border-bottom: var(--hairline) solid var(--rule);
+}
+
+.ocr-line {
+  margin: 0;
+  padding: var(--space-1) var(--space-2);
+  border-bottom: var(--hairline) solid var(--rule);
+  font-size: 0.9375rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  scroll-margin: var(--space-4);
+}
+
+.ocr-line.is-linked {
+  background: var(--tint);
+  box-shadow: inset 3px 0 0 var(--region);
+}
+
+.ocr-part {
+  margin: 0;
+  padding: var(--space-3) 0;
+}
+
+.ocr-part + .ocr-part {
+  border-top: var(--hairline) solid var(--rule);
+}
+
+.ocr-plain {
+  font-size: 0.9375rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .ocr-latex {
   margin: 0;
   padding: var(--space-2) var(--space-3);

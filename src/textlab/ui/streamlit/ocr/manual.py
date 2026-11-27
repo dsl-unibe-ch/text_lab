@@ -312,7 +312,7 @@ def _run_batch(batch_zip, engine, options):
         st.session_state.manual_batch_zip = (
             service.recognize_batch_with_engine(
                 batch_zip, engine, options, on_progress=show
-            )
+            ).zip_bytes
         )
     except Exception as error:
         st.session_state.manual_error = f"Batch processing failed: {error}"

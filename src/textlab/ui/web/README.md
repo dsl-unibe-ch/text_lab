@@ -31,7 +31,7 @@ port, base path (`/node/<host>/<port>/`) and the portal's host name;
 | `auth.py` | Login with the session password, the session cookie, CSRF tokens; `LoggedIn`, `Checked` and `protected_router()` for routes |
 | `jobs.py` | The job runner (one job at a time, GPU release at start, cancelling), job cards, downloads, the event stream |
 | `uploads.py` | Reading forms with files, checking them, saving them into a job |
-| `render.py` | Templates, icons, links from the base path, number formats, Markdown from models (`markdown()`: raw HTML escaped, no images) |
+| `render.py` | Templates, icons, links from the base path, number formats, Markdown from models (`markdown()`, also a template filter: raw HTML escaped, no images) |
 | `settings.py` | The server's settings (`TOKEN`, `USER`, `TEXT_LAB_WEB_DEV`) |
 | `pages/` | One module per page (`home`, `transcription`, `meeting_notes`, `translation`, `ocr`, `placeholder` for the tools not built yet, `dev`), and `TOOLS`, the navigation |
 | `templates/` | `base.html` (layout), `components/macros.html` and `components/player.html` (the audio player), `jobs/`, one folder per page (`pages/` for Home and the placeholders, `transcription/`, `meeting_notes/`, `translation/`, `ocr/`); `mockups/` and `dev/` for the developer pages |
@@ -183,9 +183,21 @@ them), coloured by type through the `rt-<type>` classes and the
 `--region-*` tokens. An outline and the block of its text share a
 `data-region`; `app.js` marks both while either is pointed at, and a click
 on an outline brings its text into view. Pages show one at a time in a
-`data-pager`. Page images and figures are job files (`listed=False`).
+`data-pager`, with the bar of `ocr/macros.html`. Page images and figures
+are job files (`listed=False`).
 
-## Tests
+The engine tool's result is built the same way: the text lines or blocks
+an engine found are `<polygon>`s (engines give corners, not boxes), each
+linked to its line of text; tables an engine wrote are shown sanitized,
+and Markdown (OlmOCR, GLM-OCR) through the `markdown` filter.
+
+The OCR page holds several forms in one sheet: the tool switcher shows
+one, and the engine form is a switch of its own, showing the chosen
+engine's settings. Switches can be nested; each re-applies the switches
+inside it, so the controls of hidden parts stay disabled. Two drop zones
+of the same name on one page need their own `id` (the `dropzone` macro's
+`id` argument).
+
 ## Tests
 
 `tests/` here, run with the other tests (see `docs/dev/testing.md`):
@@ -195,7 +207,7 @@ the job runner (`test_jobs.py`), jobs through the web with the demo job
 and Home with a faked backend (`test_transcription_page.py`), Meeting Notes
 with a faked model (`test_meeting_notes_page.py`), Translation with
 faked models and the real service (`test_translation_page.py`), OCR with
-the pipeline faked (`test_ocr_page.py`) and the rules
+the pipeline and the engines faked (`test_ocr_page.py`) and the rules
 (`test_rules.py`). The fake transcription backend is the `backend` fixture
 in `conftest.py`. The launcher and the Open OnDemand files are tested in
 `tests/test_launch.py` at the repository root.

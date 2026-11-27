@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from pathlib import Path
 
 from textlab.common import container, jobs
@@ -31,6 +32,11 @@ class OlmOcr(Engine):
     """OlmOCR's pipeline on one PDF."""
 
     name = "OlmOCR"
+    description = (
+        "A whole PDF to clean Markdown, with headings, lists and "
+        "equations. Made for scientific papers, mostly in English."
+    )
+    markdown = True
 
     def recognize(
         self,
@@ -38,11 +44,12 @@ class OlmOcr(Engine):
         work_dir: Path,
         options: EngineOptions,
         on_progress: ProgressCallback = no_progress,
+        cancel: threading.Event | None = None,
     ) -> EngineOutput:
         """Read one PDF or image (see :meth:`Engine.recognize`).
 
         The whole document is returned as one page, with OlmOCR's own
-        result record.
+        result record. Cancelling kills the pipeline and its vLLM server.
         """
         on_progress(Progress(f"Running {self.name}..."))
         work_dir.mkdir(parents=True, exist_ok=True)
@@ -65,7 +72,9 @@ class OlmOcr(Engine):
             "--gpu-memory-utilization",
             GPU_MEMORY_UTILIZATION,
         ]
-        result = run_process(command, jobs.worker_environment(python))
+        result = run_process(
+            command, jobs.worker_environment(python), cancel=cancel
+        )
         if result.returncode != 0:
             raise EngineError(
                 f"OCR process failed. Code: {result.returncode}",
