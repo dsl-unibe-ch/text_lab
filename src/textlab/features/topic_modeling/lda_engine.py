@@ -1,5 +1,7 @@
 """Latent Dirichlet Allocation (LDA) engine based on gensim and pyLDAvis."""
 
+from typing import Any
+
 import gensim
 import gensim.corpora as corpora
 import pandas as pd
@@ -108,16 +110,29 @@ def extract_lda_topics(
         One entry per topic, numbered from 1. LDA has no hard topic sizes,
         so ``count`` is left empty.
     """
-    return [
-        TopicKeywords(
-            topic=i + 1,
-            keywords=[
-                word
-                for word, _ in lda_model.show_topic(i, topn=_TOP_N_KEYWORDS)
-            ],
+    topics = []
+    for i in range(num_topics):
+        pairs = lda_model.show_topic(i, topn=_TOP_N_KEYWORDS)
+        topics.append(
+            TopicKeywords(
+                topic=i + 1,
+                keywords=[word for word, _ in pairs],
+                weights=[float(probability) for _, probability in pairs],
+            )
         )
-        for i in range(num_topics)
-    ]
+    return topics
+
+
+def lda_topic_vectors(lda_model: gensim.models.LdaModel) -> Any:
+    """Return each topic's word distribution, for the overview's map.
+
+    Args:
+        lda_model: A trained gensim LDA model.
+
+    Returns:
+        One row per topic, in topic order, over the whole vocabulary.
+    """
+    return lda_model.get_topics()
 
 
 def generate_lda_document_topics_df(
@@ -177,12 +192,12 @@ def generate_lda_document_topics_df(
     return result_df[cols]
 
 
-def generate_lda_html(
+def prepare_ldavis(
     lda_model: gensim.models.LdaModel,
     corpus: BagOfWords,
     id2word: corpora.Dictionary,
-) -> str:
-    """Generate an HTML visualization for an LDA model using pyLDAvis.
+) -> Any:
+    """Prepare pyLDAvis's data for an LDA model.
 
     Topics are kept in model order (``sort_topics=False``) so that topic N in
     the dashboard is topic N in the keyword and document tables. pyLDAvis
@@ -194,13 +209,42 @@ def generate_lda_html(
         id2word: The gensim dictionary mapping word IDs to tokens.
 
     Returns:
-        An HTML string containing the pyLDAvis visualization.
+        pyLDAvis's ``PreparedData``: the topics' coordinates and shares,
+        the terms ranked for each, and each term's spread over the topics.
     """
-    vis = pyLDAvis.gensim_models.prepare(
+    return pyLDAvis.gensim_models.prepare(
         lda_model,
         corpus,
         id2word,
         mds="mmds",
         sort_topics=False,
     )
-    return pyLDAvis.prepared_data_to_html(vis)
+
+
+def generate_lda_html(prepared: Any) -> str:
+    """Generate pyLDAvis's interactive HTML visualization.
+
+    Args:
+        prepared: The data from :func:`prepare_ldavis`.
+
+    Returns:
+        An HTML string containing the pyLDAvis visualization.
+    """
+    return pyLDAvis.prepared_data_to_html(prepared)
+
+
+def lda_document_topics(
+    lda_model: gensim.models.LdaModel, corpus: BagOfWords
+) -> Any:
+    """Return each document's mixture of topics.
+
+    Args:
+        lda_model: A trained gensim LDA model.
+        corpus: The bag-of-words corpus, one row per document.
+
+    Returns:
+        One row per document, one column per topic, each row summing to 1
+        (the normalized variational parameters, as pyLDAvis computes them).
+    """
+    gamma, _ = lda_model.inference(corpus)
+    return gamma / gamma.sum(axis=1, keepdims=True)

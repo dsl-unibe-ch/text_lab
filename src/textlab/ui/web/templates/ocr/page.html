@@ -1,0 +1,297 @@
+{% extends "base.html" %}
+{% from "components/macros.html" import masthead, section_head, dropzone, notice with context %}
+{% block title %}OCR{% endblock %}
+{% block content %}
+{% set tool = tools | selectattr("id", "equalto", page_id) | first %}
+{{ masthead(tool.label, tool.summary, number=tool.number, kicker=tool.group, guide="https://text-lab.dsl.unibe.ch/ocr/") }}
+
+{#- The OCR tools share one sheet: the switcher shows one tool's form, and
+  only its controls are sent. Each form has its own route. -#}
+<div class="sheet" data-switch="tool">
+  <div class="switcher" role="radiogroup" aria-label="How to read the document">
+    {% for value, label in ocr_tools %}
+    <label class="switcher__option"><input type="radio" name="tool" value="{{ value }}"{% if loop.first %} checked{% endif %}><span>{{ label }}</span></label>
+    {% endfor %}
+  </div>
+
+  <form data-when="standard" data-upload-form aria-label="Standard OCR"
+        hx-post="{{ root }}/ocr/standard" hx-encoding="multipart/form-data"
+        hx-target="#jobs" hx-swap="afterbegin" hx-disabled-elt="find button[type=submit]">
+    <ol class="steps">
+      <li class="step">
+        <div>
+          <span class="label step__num">01</span>
+          <h2 class="step__title">Document</h2>
+          <p class="step__hint">Pages with their own text are read from it; scans and photos are read by a recognition model. A ZIP is read as a batch, with the model loaded once for all its files.</p>
+        </div>
+        <div class="step__body">
+          {{ dropzone("file", "Drop a document here", formats, accept=accept) }}
+        </div>
+      </li>
+      <li class="step">
+        <div>
+          <span class="label step__num">02</span>
+          <h2 class="step__title">Options</h2>
+          <p class="step__hint">The defaults are the fastest: only pages without their own text go to the model.</p>
+        </div>
+        <div class="step__body options">
+          <div class="option">
+            <input class="checkbox" type="checkbox" id="searchable-pdf" name="searchable_pdf" value="1" checked data-reveal="searchable-more" aria-describedby="searchable-text">
+            <label class="option__title" for="searchable-pdf">Searchable PDF</label>
+            <p class="option__text" id="searchable-text">The original pages with an invisible layer of the text, so you can search, select and copy it. Adds a pass per page that places each word.</p>
+            <div class="option__more" id="searchable-more">
+              <div class="field">
+                <label class="field__label" for="ocr-lang">Language, for placing the words</label>
+                <div class="select-wrap">
+                  <select class="select" id="ocr-lang" name="ocr_lang" aria-describedby="ocr-lang-help">
+                    <option value="auto" selected>Detect page by page</option>
+                    {% for name, code in languages %}<option value="{{ code }}">{{ name }}</option>{% endfor %}
+                  </select>
+                  {{ icon("chevron-down", size="sm") }}
+                </div>
+                <p class="field__help" id="ocr-lang-help">The recognition reads 109 languages by itself and needs no choice. This only helps place each word in the searchable PDF, with the languages installed for that; for other languages keep Detect, and the words are placed a little less precisely.</p>
+              </div>
+            </div>
+          </div>
+          <div class="option">
+            <input class="checkbox" type="checkbox" id="highest-quality" name="highest_quality" value="1" aria-describedby="quality-text">
+            <label class="option__title" for="highest-quality">Highest quality</label>
+            <p class="option__text" id="quality-text">Every page goes through the recognition model, also pages with their own text. Best for forms and complex layouts; slower. Pages with equations go to the model anyway.</p>
+          </div>
+          <div class="option">
+            <input class="checkbox" type="checkbox" id="describe-images" name="describe_images" value="1" aria-describedby="describe-text">
+            <label class="option__title" for="describe-images">Describe figures</label>
+            <p class="option__text" id="describe-text">A vision model describes each figure and reads the text in it. Its descriptions are generated, not part of the document. Loading it takes about a minute.</p>
+          </div>
+        </div>
+      </li>
+    </ol>
+
+    <div class="upload-progress" data-upload-progress hidden>
+      <progress class="meter__bar" max="1" value="0"></progress>
+      <p class="label" data-upload-progress-text>Uploading</p>
+    </div>
+
+    <div class="sheet__submit">
+      <p class="sheet__note">Runs in the background: you can leave this page and come back. A page takes from a second to about a minute.</p>
+      <button class="btn btn--primary btn--lg" type="submit">Read the document {{ icon("arrow-right", size="sm") }}</button>
+    </div>
+  </form>
+
+  {#- One engine of the user's choice. The form is a switch of its own:
+    the chosen engine shows its settings, each under field names of its
+    own (language_<slug>, mode_<slug>). -#}
+  {% set ready = engines | rejectattr("problem") | list %}
+  {% set first = ready[0].name if ready else "" %}
+  <form data-when="engine" data-switch="engine" data-upload-form aria-label="OCR with an engine of your choice" hidden
+        hx-post="{{ root }}/ocr/engine" hx-encoding="multipart/form-data"
+        hx-target="#jobs" hx-swap="afterbegin" hx-disabled-elt="find button[type=submit]">
+    <ol class="steps">
+      <li class="step">
+        <div>
+          <span class="label step__num">01</span>
+          <h2 class="step__title">Document</h2>
+          <p class="step__hint">Every page is read by the engine, also pages with their own text. A ZIP is read as a batch, with the engine loaded once for all its files.</p>
+        </div>
+        <div class="step__body">
+          {{ dropzone("file", "Drop a document here", formats, accept=accept, id="engine-file") }}
+        </div>
+      </li>
+      <li class="step">
+        <div>
+          <span class="label step__num">02</span>
+          <h2 class="step__title">Engine</h2>
+          <p class="step__hint">Each engine gives the text page by page, without the layout, tables and figures of Standard. Choose one to compare, or for a document Standard reads poorly.</p>
+        </div>
+        <div class="step__body">
+          <fieldset class="field">
+            <legend class="visually-hidden">Engine</legend>
+            <div class="choices">
+              {% for engine in engines %}
+              <label class="choice{% if engine.problem %} choice--off{% endif %}">
+                <input class="radio" type="radio" name="engine" value="{{ engine.name }}" data-readout="engine-name" data-readout-text="{{ engine.name }}"{% if engine.name == first %} checked{% endif %}{% if engine.problem %} disabled{% endif %}>
+                <span class="choice__title">{{ engine.name }}</span>
+                <span class="choice__text">{{ engine.description }}{% if engine.problem %} <strong>{{ engine.problem }}</strong>{% endif %}</span>
+              </label>
+              {% endfor %}
+            </div>
+          </fieldset>
+        </div>
+      </li>
+      <li class="step">
+        <div>
+          <span class="label step__num">03</span>
+          <h2 class="step__title">Settings</h2>
+          <p class="step__hint">What the chosen engine needs to know.</p>
+        </div>
+        <div class="step__body">
+          {% for engine in engines %}
+          <div data-when="{{ engine.name }}"{% if engine.name != first %} hidden{% endif %}>
+            {% if engine.languages %}
+            <div class="field">
+              <label class="field__label" for="engine-language-{{ engine.slug }}">Language of the document</label>
+              <div class="select-wrap">
+                <select class="select" id="engine-language-{{ engine.slug }}" name="{{ engine.language_field }}" aria-describedby="engine-language-{{ engine.slug }}-help">
+                  {% for name, code in engine.languages %}<option value="{{ code }}"{% if code == engine.language %} selected{% endif %}>{{ name }}</option>{% endfor %}
+                </select>
+                {{ icon("chevron-down", size="sm") }}
+              </div>
+              <p class="field__help" id="engine-language-{{ engine.slug }}-help">{{ engine.name }} offers {{ engine.languages | length }} languages and reads the one chosen, with the letters and signs of its script.</p>
+            </div>
+            {% elif engine.modes %}
+            <fieldset class="field">
+              <legend class="field__label">What to read</legend>
+              <div class="switcher switcher--inline">
+                {% for mode in engine.modes %}
+                <label class="switcher__option"><input type="radio" name="{{ engine.mode_field }}" value="{{ mode }}"{% if loop.first %} checked{% endif %}><span>{{ mode }}</span></label>
+                {% endfor %}
+              </div>
+              <p class="field__help">One kind of content per run. Tables come back as tables, with a CSV of each.</p>
+            </fieldset>
+            {% else %}
+            <p class="muted">{{ engine.name }} has no settings: it reads the document as it is.</p>
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+      </li>
+    </ol>
+
+    <div class="upload-progress" data-upload-progress hidden>
+      <progress class="meter__bar" max="1" value="0"></progress>
+      <p class="label" data-upload-progress-text>Uploading</p>
+    </div>
+
+    <div class="sheet__submit">
+      <p class="sheet__note">Runs in the background: you can leave this page and come back. The engine is loaded first, which can take a minute.</p>
+      <button class="btn btn--primary btn--lg" type="submit"{% if not ready %} disabled{% endif %}>Read with <span id="engine-name">{{ first or "the engine" }}</span> {{ icon("arrow-right", size="sm") }}</button>
+    </div>
+  </form>
+
+  {#- Historic handwriting: the lines of each page are found, then read one
+    by one by the model the user chooses. -#}
+  <form data-when="handwriting" data-upload-form aria-label="Historic handwriting" hidden
+        hx-post="{{ root }}/ocr/handwriting" hx-encoding="multipart/form-data"
+        hx-target="#jobs" hx-swap="afterbegin" hx-disabled-elt="find button[type=submit]">
+    <ol class="steps">
+      <li class="step">
+        <div>
+          <span class="label step__num">01</span>
+          <h2 class="step__title">Document</h2>
+          <p class="step__hint">Handwritten historical German, such as Kurrent from the 19th century or medieval manuscripts. A ZIP is read as a batch, with each model loaded once.</p>
+        </div>
+        <div class="step__body">
+          {{ dropzone("file", "Drop a document here", handwriting_formats, accept=handwriting_accept, id="handwriting-file") }}
+        </div>
+      </li>
+      <li class="step">
+        <div>
+          <span class="label step__num">02</span>
+          <h2 class="step__title">Model</h2>
+          <p class="step__hint">The lines of each page are found first ({{ line_detector }}), then read one by one. Choose the model trained on material closest to your documents.</p>
+        </div>
+        <div class="step__body">
+          {% if handwriting_problem %}
+          {% call notice("warning") %}<p>{{ handwriting_problem }}</p>{% endcall %}
+          {% else %}
+          <fieldset class="field">
+            <legend class="visually-hidden">Handwriting model</legend>
+            <div class="choices">
+              {% for model in handwriting_models %}
+              <label class="choice">
+                <input class="radio" type="radio" name="model" value="{{ model.key }}"{% if loop.first %} checked{% endif %}>
+                <span class="choice__title">{{ model.label }}</span>
+                <span class="choice__text">{{ model.description }}</span>
+                <span class="choice__text choice__meta">{{ model.recognition }}</span>
+              </label>
+              {% endfor %}
+            </div>
+          </fieldset>
+          {% endif %}
+        </div>
+      </li>
+    </ol>
+
+    <div class="upload-progress" data-upload-progress hidden>
+      <progress class="meter__bar" max="1" value="0"></progress>
+      <p class="label" data-upload-progress-text>Uploading</p>
+    </div>
+
+    <div class="sheet__submit">
+      <p class="sheet__note">Runs in the background: you can leave this page and come back. Loading the models takes about a minute; the first use of a model also downloads it. Check the lines against the page, especially for unusual hands.</p>
+      <button class="btn btn--primary btn--lg" type="submit"{% if handwriting_problem %} disabled{% endif %}>Transcribe {{ icon("arrow-right", size="sm") }}</button>
+    </div>
+  </form>
+
+  {#- A vision-language model the user names on Hugging Face, with a prompt
+    and a token limit; the user's downloaded models are listed with a
+    delete button each (ocr/hf_models.html). -#}
+  <form data-when="huggingface" data-upload-form aria-label="OCR with a Hugging Face model" hidden
+        hx-post="{{ root }}/ocr/huggingface" hx-encoding="multipart/form-data"
+        hx-target="#jobs" hx-swap="afterbegin" hx-disabled-elt="find button[type=submit]">
+    <ol class="steps">
+      <li class="step">
+        <div>
+          <span class="label step__num">01</span>
+          <h2 class="step__title">Document</h2>
+          <p class="step__hint">The model reads each page as a whole. A ZIP is read as a batch, with the model loaded once.</p>
+        </div>
+        <div class="step__body">
+          {{ dropzone("file", "Drop a document here", hf_formats, accept=hf_accept, id="hf-file") }}
+        </div>
+      </li>
+      <li class="step">
+        <div>
+          <span class="label step__num">02</span>
+          <h2 class="step__title">Model</h2>
+          <p class="step__hint">Any public vision-language model that Transformers reads directly (image-text-to-text), up to the size the GPU holds. Others are refused, with the reason. Check a model's license before you use its output.</p>
+        </div>
+        <div class="step__body stack">
+          <div class="field">
+            <label class="field__label" for="hf-repo">Hugging Face model</label>
+            <input class="input" id="hf-repo" name="repo" type="text" required autocomplete="off" spellcheck="false" placeholder="{{ hf_example }}" aria-describedby="hf-repo-help">
+            <p class="field__help" id="hf-repo-help">Its name as owner/name, or the link to its page on <a href="https://huggingface.co/models?pipeline_tag=image-text-to-text" target="_blank" rel="noopener noreferrer">Hugging Face</a>. It is downloaded into your own folder on first use; your documents stay on the cluster.</p>
+          </div>
+          {% include "ocr/hf_models.html" %}
+        </div>
+      </li>
+      <li class="step">
+        <div>
+          <span class="label step__num">03</span>
+          <h2 class="step__title">Instructions</h2>
+          <p class="step__hint">Sent with every page.</p>
+        </div>
+        <div class="step__body stack">
+          <div class="field">
+            <label class="field__label" for="hf-prompt">Prompt</label>
+            <textarea class="textarea" id="hf-prompt" name="prompt" rows="3" aria-describedby="hf-prompt-help">{{ hf_prompt }}</textarea>
+            <p class="field__help" id="hf-prompt-help">A model trained with a prompt of its own reads best with that one; its model card names it. Leave it empty for models that take no instruction.</p>
+          </div>
+          <div class="field">
+            <label class="field__label" for="hf-tokens">Most tokens per page</label>
+            <input class="input input--short" id="hf-tokens" name="max_new_tokens" type="number" min="1" max="{{ hf_tokens_limit }}" value="{{ hf_tokens }}" required aria-describedby="hf-tokens-help">
+            <p class="field__help" id="hf-tokens-help">The longest text the model may write for one page; a dense page needs about 1,000 to 2,000. Lower it if a model keeps repeating itself.</p>
+          </div>
+        </div>
+      </li>
+    </ol>
+
+    <div class="upload-progress" data-upload-progress hidden>
+      <progress class="meter__bar" max="1" value="0"></progress>
+      <p class="label" data-upload-progress-text>Uploading</p>
+    </div>
+
+    <div class="sheet__submit">
+      <p class="sheet__note">Runs in the background: you can leave this page and come back. The model is loaded first; its first use also downloads it, which can take several minutes for a large one. Check the text against the page: a model can leave out or invent text.</p>
+      <button class="btn btn--primary btn--lg" type="submit">Read with the model {{ icon("arrow-right", size="sm") }}</button>
+    </div>
+  </form>
+</div>
+
+<section class="section" aria-labelledby="jobs-title">
+  {{ section_head("Your documents", "Kept until you remove them or the session ends", id="jobs-title") }}
+  <div class="records" id="jobs">
+    {{ cards }}
+  </div>
+</section>
+{% endblock %}

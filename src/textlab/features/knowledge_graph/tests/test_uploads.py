@@ -6,7 +6,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 import pytest
 
 from textlab.common.storage import Workspace
-from textlab.features.knowledge_graph import service
+from textlab.features.knowledge_graph import service, staging
 
 PDF = b"%PDF-1.7\nA small test paper."
 
@@ -22,7 +22,7 @@ def archive_bytes(members):
 @pytest.fixture(autouse=True)
 def workspace(monkeypatch, tmp_path):
     workspace = Workspace(tmp_path / "workspace")
-    monkeypatch.setattr(service, "get_workspace", lambda: workspace)
+    monkeypatch.setattr(staging, "get_workspace", lambda: workspace)
     return workspace
 
 

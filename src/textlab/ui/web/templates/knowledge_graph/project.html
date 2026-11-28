@@ -1,0 +1,208 @@
+{% extends "base.html" %}
+{% from "components/macros.html" import masthead, section_head, notice with context %}
+{% from "knowledge_graph/macros.html" import papers_source, topic_model with context %}
+{% block title %}{{ project.name }} · Knowledge Graph{% endblock %}
+{% block content %}
+{#- A project (project: the page's OpenProject; data: its papers and
+  topics as saved): its graph, papers and topics in tabs, the tools that
+  update it, and its jobs. The graph's options post to /graph, which
+  answers with the graph's panel (knowledge_graph/graph.html). They post
+  a moment after a change, once the view's switch has enabled the
+  options it shows (app.js handles the change after htmx). -#}
+{% set tool = tools | selectattr("id", "equalto", page_id) | first %}
+{% set base = root ~ "/knowledge-graph/" ~ project.id %}
+{% set count = data.papers | length %}
+{% set papers_text = "{:,}".format(count) ~ (" paper" if count == 1 else " papers") %}
+<p class="backlink"><a href="{{ root }}/knowledge-graph">{{ icon("arrow-left", size="sm") }} All projects</a></p>
+{{ masthead(project.name, "Saved in " ~ project.folder, number=tool.number, kicker=tool.label, guide="https://text-lab.dsl.unibe.ch/knowledge_graph/") }}
+
+{% if not data.papers %}
+{% call notice("info", "This project has no papers yet") %}<p>Add them under <em>Project tools</em> below. If a build is running, its record shows how far it is.</p>{% endcall %}
+{% else %}
+<ul class="facts project-facts" aria-label="The project">
+  <li>{{ papers_text }}</li>
+  <li>{% if data.records %}topics for {{ "{:,}".format(data.with_topics) }}{% else %}no topics yet{% endif %}</li>
+</ul>
+{% if not data.records %}
+{% call notice("info", "The topics are not extracted yet") %}<p>The papers are saved. Extract their topics under <em>Project tools</em> below to draw the graph.</p>{% endcall %}
+{% elif data.topics_stale %}
+{% call notice("warning", "The topics are of another set of papers") %}<p>Papers were added or read again since the topics were extracted. The graph shows the topics extracted last; extract them again under <em>Project tools</em> to include every paper.</p>{% endcall %}
+{% endif %}
+
+<div class="tabs project-tabs">
+  <div class="tabs__list" role="tablist" aria-label="{{ project.name }}">
+    <button class="tabs__tab" type="button" role="tab" id="kg-tab-graph" aria-selected="true" aria-controls="kg-graph">Graph</button>
+    <button class="tabs__tab" type="button" role="tab" id="kg-tab-papers" aria-selected="false" aria-controls="kg-papers" tabindex="-1">Papers</button>
+    <button class="tabs__tab" type="button" role="tab" id="kg-tab-topics" aria-selected="false" aria-controls="kg-topics" tabindex="-1">Topics</button>
+  </div>
+
+  <div class="tabs__panel" role="tabpanel" id="kg-graph" aria-labelledby="kg-tab-graph">
+    {% if data.records %}
+    {% set paper_ids = data.records | map(attribute="paper_id") | list %}
+    <form class="graph-controls" aria-label="What the graph shows" data-switch="view"
+          hx-post="{{ base }}/graph" hx-trigger="change delay:150ms" hx-target="#graph" hx-swap="innerHTML" hx-sync="this:replace">
+      <div class="graph-controls__row">
+        <div class="switcher switcher--inline" role="radiogroup" aria-label="View">
+          <label class="switcher__option"><input type="radio" name="view" value="collection" checked><span>Whole collection</span></label>
+          <label class="switcher__option"><input type="radio" name="view" value="paper"><span>One paper</span></label>
+        </div>
+        <div class="select-wrap graph-controls__paper" data-when="paper" hidden>
+          <label class="visually-hidden" for="graph-paper">Paper</label>
+          <select class="select" id="graph-paper" name="paper">
+            {% for record in data.records %}<option value="{{ record.paper_id }}">{{ record.paper_id }} · {{ record.get("title") or record.get("pdf_filename") or "Untitled" }}</option>{% endfor %}
+          </select>
+          {{ icon("chevron-down", size="sm") }}
+        </div>
+      </div>
+      <div class="graph-controls__row">
+        <fieldset class="graph-controls__show">
+          <legend class="label">Show</legend>
+          <label class="check"><input class="checkbox" type="checkbox" name="show" value="authors"{% if defaults.authors %} checked{% endif %}><span>Authors</span></label>
+          <label class="check"><input class="checkbox" type="checkbox" name="show" value="topics"{% if defaults.topics %} checked{% endif %}><span>Topics</span></label>
+          <label class="check"><input class="checkbox" type="checkbox" name="show" value="cited_papers"{% if defaults.cited_papers %} checked{% endif %}><span>Cited papers</span></label>
+          <label class="check"><input class="checkbox" type="checkbox" name="show" value="cited_authors"{% if defaults.cited_authors %} checked{% endif %}><span>Cited authors</span></label>
+        </fieldset>
+        <div class="field graph-controls__confidence" data-when="collection">
+          <label class="label" for="graph-confidence">Topic confidence at least <output data-output-of="graph-confidence">{{ defaults.min_confidence }}</output></label>
+          <input class="range" type="range" id="graph-confidence" name="confidence" min="0" max="1" step="0.1" value="{{ defaults.min_confidence }}">
+        </div>
+      </div>
+      <details class="disclosure" data-when="collection">
+        <summary>Papers shown: <span data-check-count="papers">{{ paper_ids | length }} of {{ paper_ids | length }}</span></summary>
+        <div class="graph-controls__papers">
+          <div class="graph-controls__tools">
+            <button class="text-button" type="button" data-check="all" data-check-name="papers">All</button>
+            <button class="text-button" type="button" data-check="none" data-check-name="papers">None</button>
+          </div>
+          <ul class="graph-controls__list">
+            {% for record in data.records %}
+            <li><label class="check"><input class="checkbox" type="checkbox" name="papers" value="{{ record.paper_id }}" checked><span><span class="graph-controls__id">{{ record.paper_id }}</span> {{ record.get("title") or record.get("pdf_filename") or "Untitled" }}</span></label></li>
+            {% endfor %}
+          </ul>
+        </div>
+      </details>
+    </form>
+    <div class="graph-view" id="graph" aria-live="polite">
+      {% include "knowledge_graph/graph.html" %}
+    </div>
+    <ul class="graph-key" aria-label="What the shapes are">
+      <li><svg class="graph-key__mark graph-key__mark--paper" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="5"/></svg>Paper of the project</li>
+      <li><svg class="graph-key__mark graph-key__mark--author" viewBox="0 0 12 12" aria-hidden="true"><polygon points="6,1 11.5,11 0.5,11"/></svg>Author</li>
+      <li><svg class="graph-key__mark graph-key__mark--category" viewBox="0 0 12 12" aria-hidden="true"><rect x="0.5" y="2.5" width="11" height="7"/></svg>Category</li>
+      <li><svg class="graph-key__mark graph-key__mark--topic" viewBox="0 0 12 12" aria-hidden="true"><ellipse cx="6" cy="6" rx="5.5" ry="3.5"/></svg>Topic</li>
+      <li><svg class="graph-key__mark graph-key__mark--cited" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="5"/></svg>Cited paper, outside the project</li>
+      <li><svg class="graph-key__mark graph-key__mark--category" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="5"/></svg>Cited paper of the project (one paper)</li>
+      <li><svg class="graph-key__mark graph-key__mark--cited-author" viewBox="0 0 12 12" aria-hidden="true"><polygon points="6,1 11.5,11 0.5,11"/></svg>Cited author</li>
+    </ul>
+    {% else %}
+    <p class="muted">The graph is drawn once the topics are extracted.</p>
+    {% endif %}
+  </div>
+
+  <div class="tabs__panel" role="tabpanel" id="kg-papers" aria-labelledby="kg-tab-papers" hidden>
+    <div class="project-table__bar">
+      <p class="label">{{ papers_text }}</p>
+      <a class="text-button" href="{{ base }}/papers.csv" download>{{ icon("download", size="sm") }} Paper table (CSV)</a>
+    </div>
+    <div class="table-wrap project-table">
+      <table class="table">
+        <caption class="visually-hidden">The papers of {{ project.name }}</caption>
+        <thead>
+          <tr><th scope="col">ID</th><th scope="col">Title</th><th scope="col">Authors</th><th scope="col">Published</th><th scope="col">PDF</th></tr>
+        </thead>
+        <tbody>
+          {% for paper in data.papers %}
+          <tr>
+            <td class="table__mono">{{ paper.get("paper_id", "") }}</td>
+            <td>{{ paper.get("title", "") }}</td>
+            <td>{{ paper.get("authors", "") }}</td>
+            <td class="table__mono">{{ paper.get("publication_date", "") }}</td>
+            <td class="table__mono">{{ paper.get("pdf_filename", "") }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="tabs__panel" role="tabpanel" id="kg-topics" aria-labelledby="kg-tab-topics" hidden>
+    {% if data.records %}
+    <div class="project-table__bar">
+      <p class="label">Topics of {{ "{:,}".format(data.with_topics) }} {{ "paper" if data.with_topics == 1 else "papers" }}</p>
+      <a class="text-button" href="{{ base }}/topics.json" download>{{ icon("download", size="sm") }} Papers with topics (JSON)</a>
+    </div>
+    <div class="table-wrap project-table">
+      <table class="table">
+        <caption class="visually-hidden">The topics of each paper of {{ project.name }}</caption>
+        <thead>
+          <tr><th scope="col">Paper</th><th scope="col">Topic</th><th scope="col">Category</th><th scope="col" class="table__num">Confidence</th><th scope="col">Why</th></tr>
+        </thead>
+        <tbody>
+          {% for record in data.records %}
+          {% for topic in record.get("topics") or [] %}
+          <tr>
+            <td><span class="graph-controls__id">{{ record.get("paper_id", "") }}</span> {{ record.get("title", "") }}</td>
+            <td>{{ topic.get("label", "") }}</td>
+            <td>{{ topic.get("category", "") }}</td>
+            <td class="table__num">{{ "%.2f" | format(topic.get("confidence") or 0) }}</td>
+            <td class="project-table__why">{{ topic.get("rationale", "") }}</td>
+          </tr>
+          {% endfor %}
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="muted">No topics yet.</p>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+<details class="disclosure project-tools" id="tools"{% if not data.papers or not data.records %} open{% endif %}>
+  <summary>Project tools</summary>
+  <div class="stack">
+    {% if grobid %}
+    {% call notice("warning", "New papers cannot be read in this session", details=grobid) %}<p>Grobid, which reads the PDFs, cannot be started here. You can still extract the topics again.</p>{% endcall %}
+    {% endif %}
+    <form class="sheet project-tool" data-upload-form aria-label="Add papers"
+          hx-post="{{ base }}/update" hx-encoding="multipart/form-data"
+          hx-target="#jobs" hx-swap="afterbegin" hx-disabled-elt="find button[type=submit]">
+      <div class="project-tool__head">
+        <h2 class="step__title">Add papers</h2>
+        <p class="step__hint">New PDFs are read; those read before are reused, and those that failed are tried again. Then every paper's topics are extracted.</p>
+      </div>
+      {{ papers_source("update") }}
+      {{ topic_model("update") }}
+      <div class="project-tool__submit"><button class="btn btn--primary" type="submit">Add papers {{ icon("arrow-right", size="sm") }}</button></div>
+    </form>
+
+    {% if data.papers %}
+    <form class="sheet project-tool" aria-label="Extract the topics again"
+          hx-post="{{ base }}/topics" hx-target="#jobs" hx-swap="afterbegin" hx-disabled-elt="find button[type=submit]">
+      <div class="project-tool__head">
+        <h2 class="step__title">Extract the topics again</h2>
+        <p class="step__hint">With another model, say, or after topic extraction failed. The PDFs are not read again; the topics before stay until every paper has new ones.</p>
+      </div>
+      {{ topic_model("topics") }}
+      <div class="project-tool__submit"><button class="btn btn--primary" type="submit">Extract the topics {{ icon("arrow-right", size="sm") }}</button></div>
+    </form>
+    {% endif %}
+
+    <div class="project-tool project-tool--plain">
+      <div class="project-tool__head">
+        <h2 class="step__title">Rebuild the paper table</h2>
+        <p class="step__hint">From the papers read, as saved in their folders: if the table is missing or was changed. The topics stay as they are.</p>
+      </div>
+      <div class="project-tool__submit"><button class="btn" type="button" hx-post="{{ base }}/table" hx-disabled-elt="this">Rebuild the table</button></div>
+    </div>
+  </div>
+</details>
+
+<section class="section" aria-labelledby="jobs-title">
+  {{ section_head("Updates", "Kept until you remove them or the session ends", id="jobs-title") }}
+  <div class="records" id="jobs">
+    {{ cards }}
+  </div>
+</section>
+{% endblock %}

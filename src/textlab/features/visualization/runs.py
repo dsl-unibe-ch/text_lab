@@ -1,10 +1,12 @@
-"""Running an analysis in the background, so a page stays responsive.
+"""Running an analysis: in the background, or in the caller's thread.
 
 :func:`start_analysis` starts the agent (:func:`.viz_agent.run_analysis`)
 in a daemon thread and returns an :class:`AnalysisRun` that an interface
-polls: its status, its activity log and, when it is done, its result. The
-heavy work happens outside this process anyway, in the Ollama server and in
-the agent's MCP server process.
+polls: its status, its activity log and, when it is done, its result.
+:func:`analyze` runs it in the caller's thread instead, for callers with a
+thread of their own, such as a web UI job, and passes on the log as it
+grows. The heavy work happens outside this process anyway, in the Ollama
+server and in the agent's MCP server process.
 """
 
 from __future__ import annotations
@@ -14,11 +16,15 @@ import contextlib
 import os
 import threading
 import uuid
+from collections.abc import Callable
 from typing import Any
 
-import ollama
-
-from textlab.common.ollama import model_installed
+from textlab.common.ollama import model_installed, pull_model
+from textlab.common.progress import (
+    CancelledError,
+    ProgressCallback,
+    no_progress,
+)
 from textlab.common.storage import get_workspace
 from textlab.features.visualization.models import (
     AnalysisRequest,
@@ -44,6 +50,10 @@ TIMEOUT = "timeout"
 ERROR = "error"
 
 
+#: Receives an entry of a run's activity log: its level and message.
+LogCallback = Callable[[str, str], None]
+
+
 class AnalysisRun:
     """An analysis running in a background thread.
 
@@ -58,14 +68,29 @@ class AnalysisRun:
         error: What went wrong, once the status is ``"error"``.
     """
 
-    def __init__(self, run_id: str):
-        """Create a run that has not started yet."""
+    def __init__(
+        self,
+        run_id: str,
+        *,
+        cancel: threading.Event | None = None,
+        on_log: LogCallback | None = None,
+    ):
+        """Create a run that has not started yet.
+
+        Args:
+            run_id: Identifies the run.
+            cancel: The event that stops the run when set; a new one if
+                not given.
+            on_log: Receives every entry of the activity log as it is
+                added.
+        """
         self.run_id = run_id
         self.status = RUNNING
         self.logs: list[tuple[str, str]] = []
         self.result: AnalysisResult | None = None
         self.error: str | None = None
-        self._cancel = threading.Event()
+        self._cancel = cancel if cancel is not None else threading.Event()
+        self._on_log = on_log
 
     @property
     def running(self) -> bool:
@@ -79,6 +104,8 @@ class AnalysisRun:
     def log(self, level: str, message: str) -> None:
         """Add an entry to the activity log."""
         self.logs.append((level, message))
+        if self._on_log is not None:
+            self._on_log(level, message)
 
     def _fail(self, message: str) -> None:
         self.error = message
@@ -118,6 +145,43 @@ def start_analysis(
         args=(run, request, data, data_path, timeout),
         daemon=True,
     ).start()
+    return run
+
+
+def analyze(
+    request: AnalysisRequest,
+    data_path: str,
+    *,
+    on_progress: ProgressCallback = no_progress,
+    on_log: LogCallback | None = None,
+    cancel: threading.Event | None = None,
+    run_prefix: str = "ds",
+    timeout: float = ANALYSIS_TIMEOUT_SECONDS,
+) -> AnalysisRun:
+    """Analyze a table in the caller's thread, until the run ends.
+
+    The agents write their charts next to the table, and the result holds
+    them, so give each analysis a folder of its own and remove it after.
+
+    Args:
+        request: What to analyze and how.
+        data_path: The table file; its extension picks the reader.
+        on_progress: Receives the model's download, if the server does not
+            have it yet.
+        on_log: Receives every entry of the activity log as it is added.
+        cancel: Set to stop: the agents stop after their current step, and
+            the run ends as cancelled.
+        run_prefix: Start of the run ID, which names the downloads.
+        timeout: Seconds before the run is stopped.
+
+    Returns:
+        The finished run: its status (never ``"running"``), its log, and
+        its result or error.
+    """
+    run = AnalysisRun(
+        f"{run_prefix}-{uuid.uuid4().hex[:8]}", cancel=cancel, on_log=on_log
+    )
+    _execute(run, request, None, data_path, timeout, on_progress)
     return run
 
 
@@ -198,6 +262,7 @@ def _execute(
     data: bytes | None,
     data_path: str | None,
     timeout: float,
+    on_progress: ProgressCallback = no_progress,
 ) -> None:
     """Run the analysis; the body of the background thread."""
     from textlab.features.visualization.viz_agent import run_analysis
@@ -205,7 +270,12 @@ def _execute(
     try:
         if not model_installed(request.model):
             run.log("info", f"Pulling model '{request.model}'...")
-            ollama.pull(request.model)
+            pull_model(
+                request.model, on_progress=on_progress, cancel=run._cancel
+            )
+    except CancelledError:
+        run.status = CANCELLED
+        return
     except Exception as exc:
         run._fail(f"Failed to pull model '{request.model}': {exc}")
         return

@@ -68,6 +68,9 @@ from `models.py`, `transcript.py` and `citations.py` (see `__all__`).
 |---|---|
 | `Segment`, `CitedSummary` | A transcript line; a summary with checked citations |
 | `SUMMARY_MODES` | The summary types, with labels, descriptions and prompts |
+| `summarize(model, segments, mode, speaker_context=, output_language=, on_progress=, on_text=, cancel=)` | The whole summary in one call: one request or chunks as needed, the text so far through `on_text`, cancellable between tokens and chunks; the web UI uses it |
+| `summary_models()` | The models to choose from on this session's GPU (`common/models.json`) |
+| `server_ready(attempts=1)` | Whether the session's Ollama server answers |
 | `needs_chunking(segments)` | Whether a transcript must be summarized in chunks |
 | `get_summary_stream(model, segments, mode, speaker_context, output_language)` | Stream a single-pass summary |
 | `get_partial_notes(..., on_progress=)` | Cited notes per chunk, with progress |

@@ -8,6 +8,7 @@ never asked about a document it cannot see.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from collections.abc import Sequence
 from io import BytesIO
@@ -23,6 +24,43 @@ MAX_TABLE_ROWS = 100
 
 #: File extensions read as context, without the dot.
 DOCUMENT_TYPES = ("pdf", "txt", "json", "csv", "tsv", "xls", "xlsx")
+
+#: Most files a conversation can have attached at a time.
+MAX_FILES = 4
+
+#: Extensions of the tables among :data:`DOCUMENT_TYPES`.
+TABLE_TYPES = ("csv", "tsv", "xls", "xlsx")
+
+
+@dataclasses.dataclass(frozen=True)
+class Document:
+    """An attached file, read for the model.
+
+    Attributes:
+        name: The file's name.
+        size: Its size in bytes.
+        text: Its text for the model; empty if it could not be read.
+        problem: Why it could not be read, for users; empty if it was.
+    """
+
+    name: str
+    size: int
+    text: str = ""
+    problem: str = ""
+
+    @property
+    def kind(self) -> str:
+        """The file's type for people: ``"PDF"``, ``"Table"``, ``"Text"``."""
+        suffix = (
+            self.name.rsplit(".", 1)[-1].lower() if "." in self.name else ""
+        )
+        if suffix in TABLE_TYPES:
+            return "Table"
+        if suffix == "pdf":
+            return "PDF"
+        if suffix == "json":
+            return "JSON"
+        return "Text"
 
 
 def read_pdf(file_bytes: bytes) -> str:
@@ -130,6 +168,73 @@ def _read_file(name: str, file_bytes: bytes) -> str:
     raise ValueError("this file type is not supported")
 
 
+def read_document(name: str, data: bytes) -> Document:
+    """Read one attached file for the model.
+
+    Args:
+        name: The file's name; its extension gives its type.
+        data: Its content.
+
+    Returns:
+        The document, with its text, or with the problem that kept it from
+        being read: a file larger than :data:`MAX_FILE_MB`, a file that
+        cannot be read, or a PDF without a text layer.
+    """
+    size = len(data)
+    file_size_mb = size / (1024 * 1024)
+    if file_size_mb > MAX_FILE_MB:
+        return Document(
+            name,
+            size,
+            problem=(
+                f"File '{name}' exceeds the {MAX_FILE_MB}MB limit "
+                f"({file_size_mb:.1f}MB). Skipped."
+            ),
+        )
+
+    try:
+        text = _read_file(name, data)
+    except Exception as e:
+        return Document(
+            name,
+            size,
+            problem=f"File '{name}' could not be read ({e}). Skipped.",
+        )
+
+    if not text.strip():
+        if name.lower().endswith(".pdf"):
+            problem = (
+                f"File '{name}' contains no text, probably because it "
+                "is scanned. Convert it with OCR first. Skipped."
+            )
+        else:
+            problem = f"File '{name}' is empty. Skipped."
+        return Document(name, size, problem=problem)
+    return Document(name, size, text=text)
+
+
+def document_context(documents: Sequence[Document]) -> str:
+    """Return the text of read documents as one context block.
+
+    Args:
+        documents: The documents, as :func:`read_document` returns them;
+            those without text are left out.
+
+    Returns:
+        Each document's text between start and end markers, under a
+        heading; empty if no document has text.
+    """
+    readable = [document for document in documents if document.text]
+    if not readable:
+        return ""
+    file_context = "### User Uploaded File Content:\n"
+    for document in readable:
+        file_context += f"\n--- Start of file: {document.name} ---\n"
+        file_context += document.text
+        file_context += f"\n--- End of file: {document.name} ---\n"
+    return file_context
+
+
 def read_documents(
     files: Sequence[tuple[str, bytes]],
 ) -> tuple[str, list[str]]:
@@ -146,44 +251,6 @@ def read_documents(
         The context, with each file's text between start and end markers
         (empty if no file had text), and warnings for users.
     """
-    if not files:
-        return "", []
-
-    file_context = "### User Uploaded File Content:\n"
-    warnings = []
-    has_valid_text = False
-
-    for name, file_bytes in files:
-        file_size_mb = len(file_bytes) / (1024 * 1024)
-        if file_size_mb > MAX_FILE_MB:
-            warnings.append(
-                f"File '{name}' exceeds the {MAX_FILE_MB}MB limit "
-                f"({file_size_mb:.1f}MB). Skipped."
-            )
-            continue
-
-        try:
-            extracted_text = _read_file(name, file_bytes)
-        except Exception as e:
-            warnings.append(f"File '{name}' could not be read ({e}). Skipped.")
-            continue
-
-        if not extracted_text.strip():
-            if name.lower().endswith(".pdf"):
-                warnings.append(
-                    f"File '{name}' contains no text, probably because it "
-                    "is scanned. Convert it with OCR first. Skipped."
-                )
-            else:
-                warnings.append(f"File '{name}' is empty. Skipped.")
-            continue
-
-        has_valid_text = True
-        file_context += f"\n--- Start of file: {name} ---\n"
-        file_context += extracted_text
-        file_context += f"\n--- End of file: {name} ---\n"
-
-    if not has_valid_text:
-        return "", warnings
-
-    return file_context, warnings
+    documents = [read_document(name, data) for name, data in files]
+    warnings = [document.problem for document in documents if document.problem]
+    return document_context(documents), warnings

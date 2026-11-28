@@ -1,0 +1,46 @@
+{#- The topics over time, as BERTopic's chart: one line per topic, all on
+  one count axis, in grey; pointing at a topic (its line or the list)
+  draws it in the accent. Each point's tooltip gives the interval, the
+  count and the topic's words then. A table holds the same counts. -#}
+<div class="trend-view">
+  <figure class="trend-chart">
+    <svg viewBox="0 0 600 260" role="img" aria-label="Documents of each topic over time">
+      {% for y, label in chart.ticks_y %}
+      <line class="grid" x1="{{ chart.left }}" x2="{{ chart.right }}" y1="{{ y }}" y2="{{ y }}"/>
+      <text class="axis__label" x="{{ chart.label_x }}" y="{{ y }}" text-anchor="end" dominant-baseline="central">{{ label }}</text>
+      {% endfor %}
+      <line class="axis" x1="{{ chart.left }}" x2="{{ chart.right }}" y1="{{ chart.bottom }}" y2="{{ chart.bottom }}"/>
+      {% for x, label, anchor in chart.ticks_x %}<text class="axis__label" x="{{ x }}" y="{{ chart.label_y }}" text-anchor="{{ anchor }}">{{ label }}</text>{% endfor %}
+      {% for trend in chart.trends %}
+      <g class="trend" data-region="{{ trend.topic.region }}">
+        <polyline class="trend__line" points="{{ trend.line }}"/>
+        {% for point in trend.points %}<circle class="trend__point" cx="{{ point.x }}" cy="{{ point.y }}" r="3"><title>{{ point.title }}</title></circle>{% endfor %}
+      </g>
+      {% endfor %}
+    </svg>
+    <figcaption class="label">Documents per interval · point at a line or a topic</figcaption>
+  </figure>
+  <ol class="topic-list topic-list--compact">
+    {% for trend in chart.trends %}
+    <li class="topic topic--compact" data-region="{{ trend.topic.region }}">
+      <div class="topic__head">
+        <span class="label topic__number">Topic {{ trend.topic.topic }}</span>
+        <span class="topic__title">{{ trend.topic.title }}</span>
+        <span class="label topic__size">{% if trend.peak %}peak {{ trend.peak }}, {{ trend.peak_at }}{% else %}none{% endif %}</span>
+      </div>
+    </li>
+    {% endfor %}
+  </ol>
+</div>
+<details class="disclosure">
+  <summary>As a table</summary>
+  <div class="table-wrap">
+    <table class="table">
+      <caption class="visually-hidden">Documents of each topic per interval</caption>
+      <thead><tr><th scope="col">Topic</th>{% for label in chart.labels %}<th scope="col" class="table__num">{{ label }}</th>{% endfor %}</tr></thead>
+      <tbody>
+        {% for trend in chart.trends %}<tr><th scope="row">{{ trend.topic.topic }} · {{ trend.topic.title }}</th>{% for count in trend.counts %}<td class="table__num">{{ count }}</td>{% endfor %}</tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+</details>

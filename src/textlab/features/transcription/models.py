@@ -121,6 +121,72 @@ class SkippedFile:
     reason: str
 
 
+@dataclasses.dataclass(frozen=True)
+class TimedWord:
+    """A word of a transcript, with its place in the recording.
+
+    Attributes:
+        text: The word as transcribed.
+        start: Where it starts, in seconds; ``None`` if alignment gave it
+            no time (numbers and symbols often get none).
+        end: Where it ends, in seconds, or ``None``.
+    """
+
+    text: str
+    start: float | None = None
+    end: float | None = None
+
+
+@dataclasses.dataclass(frozen=True)
+class Turn:
+    """A passage of a transcript: a segment, or one speaker's part of it.
+
+    Interfaces show a transcript as turns, for example next to an audio
+    player that marks the word being spoken.
+
+    Attributes:
+        start: Where the passage starts, in seconds.
+        end: Where it ends, in seconds.
+        text: The passage's text.
+        words: Its words with their times; empty when only the passage's
+            times are known (a segment table).
+        speaker: The speaker's label from diarization (``"SPEAKER_00"``),
+            ``"UNKNOWN"`` for words diarization could not attribute, or
+            ``None`` when speakers were not identified.
+        speaker_number: The speaker's number in order of appearance,
+            starting at 1; 0 for an unknown or no speaker.
+    """
+
+    start: float
+    end: float
+    text: str
+    words: tuple[TimedWord, ...] = ()
+    speaker: str | None = None
+    speaker_number: int = 0
+
+
+@dataclasses.dataclass(frozen=True)
+class Playback:
+    """A recording prepared for an audio player in the browser.
+
+    Attributes:
+        path: The recording as an MP3 file, which every browser plays.
+        duration_seconds: The recording's length.
+        levels: The waveform: the loudness of equal parts of the
+            recording, each from 1 (quiet) to :data:`WAVEFORM_LEVELS`.
+        wav: A 16 kHz WAV copy, if one was asked for (ELAN reads WAV).
+    """
+
+    path: Path
+    duration_seconds: float
+    levels: tuple[int, ...]
+    wav: Path | None = None
+
+
+#: Steps of loudness in :attr:`Playback.levels`.
+WAVEFORM_LEVELS = 8
+
+
 @dataclasses.dataclass
 class TranscriptionResult:
     """Everything a transcription run produced.

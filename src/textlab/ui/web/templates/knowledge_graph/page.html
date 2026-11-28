@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% from "components/macros.html" import masthead, section_head, notice with context %}
+{% from "knowledge_graph/macros.html" import papers_source, topic_model with context %}
+{% block title %}Knowledge Graph{% endblock %}
+{% block content %}
+{% set tool = tools | selectattr("id", "equalto", page_id) | first %}
+{{ masthead(tool.label, tool.summary, number=tool.number, kicker=tool.group, guide="https://text-lab.dsl.unibe.ch/knowledge_graph/") }}
+
+{% if projects %}
+<section class="section" aria-labelledby="projects-title">
+  {{ section_head("Your projects", "Opened or built in this session", id="projects-title") }}
+  <ul class="project-list">
+    {% for project in projects %}
+    <li>
+      <a class="project-list__item" href="{{ root }}/knowledge-graph/{{ project.id }}">
+        <span class="project-list__name">{{ project.name }}</span>
+        <span class="project-list__folder">{{ project.folder }}</span>
+        {{ icon("arrow-right", size="sm") }}
+      </a>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+{#- Two forms in one sheet: a new project, built by a job, or a saved one,
+  found in a folder and opened. -#}
+<div class="sheet" data-switch="start">
+  <div class="switcher" role="radiogroup" aria-label="Start">
+    <label class="switcher__option"><input type="radio" name="start" value="new" checked><span>New project</span></label>
+    <label class="switcher__option"><input type="radio" name="start" value="open"><span>Open a project</span></label>
+  </div>
+
+  <form data-when="new" data-upload-form aria-label="New project"
+        hx-post="{{ root }}/knowledge-graph/build" hx-encoding="multipart/form-data"
+        hx-target="#jobs" hx-swap="afterbegin" hx-disabled-elt="find button[type=submit]">
+    {% if grobid %}
+    {% call notice("warning", "New papers cannot be read in this session", details=grobid) %}<p>Grobid, which reads the PDFs, cannot be started here. You can still open saved projects.</p>{% endcall %}
+    {% endif %}
+    <ol class="steps">
+      <li class="step">
+        <div>
+          <span class="label step__num">01</span>
+          <h2 class="step__title">Papers</h2>
+          <p class="step__hint">Research papers as PDFs with their text, not scans. Each needs a file name of its own: a paper read once is known by it, and reused.</p>
+        </div>
+        <div class="step__body">
+          {{ papers_source("new") }}
+        </div>
+      </li>
+
+      <li class="step">
+        <div>
+          <span class="label step__num">02</span>
+          <h2 class="step__title">Project</h2>
+          <p class="step__hint">A folder on the cluster keeps what is read and found, so you can come back to it in another session.</p>
+        </div>
+        <div class="step__body stack">
+          <div class="field">
+            <label class="field__label" for="new-name">Name</label>
+            <input class="input" id="new-name" name="name" type="text" autocomplete="off" placeholder="Literature review" aria-describedby="new-name-help">
+            <p class="field__help" id="new-name-help">The folder is called <code>&lt;name&gt;_project_corpus</code>. Without a name, a folder of papers names the project.</p>
+          </div>
+          <div class="field">
+            <label class="field__label" for="new-save-in">Save in</label>
+            <input class="input" id="new-save-in" name="save_in" type="text" autocomplete="off" spellcheck="false" placeholder="{{ home }}" aria-describedby="new-save-in-help">
+            <p class="field__help" id="new-save-in-help">A folder on the cluster that stays, such as your research storage. Empty: next to the folder of papers, or your home folder for an upload. A project that is there already is updated.</p>
+          </div>
+        </div>
+      </li>
+
+      <li class="step">
+        <div>
+          <span class="label step__num">03</span>
+          <h2 class="step__title">Topics</h2>
+          <p class="step__hint">A language model reads each paper's title and abstract and names its research topics, each in a broader category.</p>
+        </div>
+        <div class="step__body">
+          {{ topic_model("new") }}
+        </div>
+      </li>
+    </ol>
+    <div class="sheet__submit">
+      <p class="sheet__note">Runs in the background: you can leave this page and come back. Papers read once are reused when you build the project again.</p>
+      <button class="btn btn--primary btn--lg" type="submit">Build the knowledge graph {{ icon("arrow-right", size="sm") }}</button>
+    </div>
+  </form>
+
+  <form data-when="open" aria-label="Open a project" hidden
+        hx-get="{{ root }}/knowledge-graph/projects-in" hx-target="#found" hx-swap="innerHTML">
+    <ol class="steps">
+      <li class="step">
+        <div>
+          <span class="label step__num">01</span>
+          <h2 class="step__title">Where</h2>
+          <p class="step__hint">Saved projects open without their PDFs, and without reading anything again.</p>
+        </div>
+        <div class="step__body stack">
+          <div class="field">
+            <label class="field__label" for="open-location">A project folder, or a folder that holds projects</label>
+            <div class="find">
+              <input class="input" id="open-location" name="location" type="text" autocomplete="off" spellcheck="false" value="{{ home }}">
+              <button class="btn" type="submit">Find projects</button>
+            </div>
+          </div>
+          <div id="found" aria-live="polite"></div>
+        </div>
+      </li>
+    </ol>
+  </form>
+</div>
+
+<section class="section" aria-labelledby="jobs-title">
+  {{ section_head("Your builds", "Kept until you remove them or the session ends", id="jobs-title") }}
+  <div class="records" id="jobs">
+    {{ cards }}
+  </div>
+</section>
+{% endblock %}

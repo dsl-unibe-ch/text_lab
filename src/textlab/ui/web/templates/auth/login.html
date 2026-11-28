@@ -1,0 +1,34 @@
+{% extends "auth/layout.html" %}
+{% block title %}Sign in{% endblock %}
+{% block content %}
+<h1 class="auth__title">Sign in to this session</h1>
+{% if failed %}
+<div class="notice notice--error" role="alert">
+  <p class="label notice__label">Error</p>
+  <div class="notice__body">
+    <p class="notice__title">That is not this session's password.</p>
+  </div>
+</div>
+{% endif %}
+<p class="auth__text">
+  Open Text Lab with <strong>Connect to Text Lab</strong> on your session's
+  card in Open OnDemand. It signs you in to this session.
+</p>
+{% if settings.public_host %}
+<a class="btn btn--primary btn--block" href="https://{{ settings.public_host }}/pun/sys/dashboard/batch_connect/sessions">
+  My Interactive Sessions {{ icon("arrow-up-right", size="sm") }}
+</a>
+{% endif %}
+<details class="auth__more">
+  <summary>Sign in with the session password</summary>
+  <form class="stack" method="post" action="{{ root }}/login">
+    <input type="hidden" name="next" value="{{ next_path }}">
+    <div class="field">
+      <label class="field__label" for="password">Session password</label>
+      <input class="input" id="password" name="password" type="password" autocomplete="current-password" required>
+      <p class="field__help">Only you, the session's owner, can see it: it is in the connection.yml file of the session's folder.</p>
+    </div>
+    <button class="btn btn--secondary btn--block" type="submit">Sign in</button>
+  </form>
+</details>
+{% endblock %}

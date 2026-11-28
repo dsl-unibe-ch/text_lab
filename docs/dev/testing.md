@@ -6,8 +6,16 @@
   `src/textlab/features/<feature>/tests/`.
 - **Cross-cutting tests** live in `tests/`: checks that no user data is
   written outside the job workspace and that no site-specific values are
-  hardcoded (`test_data_footprint.py`), and that the site configuration
-  provides every setting (`test_site_config.py`).
+  hardcoded (`test_data_footprint.py`), that the site configuration
+  provides every setting (`test_site_config.py`), and that the launcher and
+  the Open OnDemand files start the interface `TEXT_LAB_UI` names
+  (`test_launch.py`).
+- **Web UI tests** live in `src/textlab/ui/web/tests/`. They call the
+  routes with FastAPI's test client, logged in or not: login, CSRF tokens,
+  every page, jobs from submission to download (with a demo job that needs
+  no model and only the tests serve, `demo_job.py`), uploads, and rules
+  for the templates and static files (no inline scripts or styles, every
+  icon vendored).
 
 Shared code has its tests in `src/textlab/common/tests/`. Each `tests/`
 folder is a package (it has an `__init__.py`), so a test can import helpers

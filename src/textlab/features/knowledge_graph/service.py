@@ -1,10 +1,13 @@
 """Graphs of a paper collection: the Knowledge Graph feature's API.
 
-Interfaces call this module, in three steps: :func:`build_corpus` parses
-the PDFs of a folder with Grobid into a corpus folder, :func:`extract_topics`
-adds topics to each paper with an LLM, and :func:`build_paper_ego_graph` and
-:func:`build_full_corpus_graph` draw the corpus. Every step reads and writes
-the corpus folder, so it can be resumed in a later session.
+Interfaces call this module. A project is a corpus folder that the steps
+read and write, so work can resume in a later session:
+:func:`build_project` reads the PDFs of a folder with Grobid and extracts
+each paper's topics with an LLM (or, step by step, :func:`build_corpus`
+and :func:`extract_topics`); :func:`read_project` reads a project back;
+:func:`draw_graph` gives a view of it to draw (or, for the Streamlit page,
+:func:`build_paper_ego_graph` and :func:`build_full_corpus_graph`).
+Uploaded PDFs and ZIPs are staged with :func:`stage_papers`.
 
 The work happens outside the app process (Grobid and the model run in
 servers of their own), so the steps run in the caller's process. NetworkX,
@@ -13,17 +16,15 @@ Pyvis and the OpenAI client are imported only when they are used.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from contextlib import contextmanager
-from io import BytesIO
-from pathlib import Path, PurePosixPath
-from zipfile import BadZipFile, ZipFile
-
 from textlab.common.gpu_manager import get_gpu_name
-from textlab.common.model_config import get_available_models
-from textlab.common.storage import get_workspace
-from textlab.common.upload_safety import safe_upload_name, safe_zip_members
+from textlab.common.model_config import (
+    ModelOptions,
+    get_available_models,
+    model_options,
+)
+from textlab.common.ollama import check_ollama_server
 from textlab.features.knowledge_graph.corpus import (
+    CORPUS_SUFFIX,
     TABLE_CSV,
     TABLE_JSONL,
     TOPICS_JSONL,
@@ -36,16 +37,36 @@ from textlab.features.knowledge_graph.corpus import (
     topics_json,
 )
 from textlab.features.knowledge_graph.graphs import (
+    GraphOptions,
+    GraphView,
     build_full_corpus_graph,
     build_paper_ego_graph,
     count_nodes,
+    draw_graph,
     save_graph_html,
 )
 from textlab.features.knowledge_graph.grobid import (
     GrobidError,
     ensure_grobid_server,
+    grobid_problem,
 )
 from textlab.features.knowledge_graph.models import CorpusSummary, TopicSummary
+from textlab.features.knowledge_graph.projects import (
+    BuildSummary,
+    Project,
+    TopicModel,
+    build_project,
+    extract_topics_with,
+    gpustack_ready,
+    is_project,
+    project_folder_name,
+    project_name,
+    read_project,
+)
+from textlab.features.knowledge_graph.staging import (
+    stage_papers,
+    staged_papers,
+)
 from textlab.features.knowledge_graph.topics import (
     GPUSTACK_MODEL,
     extract_topics,
@@ -54,28 +75,46 @@ from textlab.features.knowledge_graph.topics import (
 )
 
 __all__ = [
+    "BuildSummary",
     "CorpusSummary",
+    "GraphOptions",
+    "GraphView",
     "GrobidError",
+    "ModelOptions",
+    "Project",
+    "TopicModel",
     "TopicSummary",
     "build_corpus",
     "build_corpus_table",
     "build_full_corpus_graph",
     "build_paper_ego_graph",
+    "build_project",
     "corpus_folder_name",
     "count_nodes",
+    "draw_graph",
     "ensure_grobid_server",
     "extract_topics",
+    "extract_topics_with",
     "find_corpora",
     "gpustack_client",
+    "gpustack_ready",
+    "grobid_problem",
+    "is_project",
     "list_pdfs",
+    "model_options",
     "ollama_client",
     "ollama_models",
-    "read_records",
     "project_folder_name",
-    "staged_papers",
+    "project_name",
+    "read_project",
+    "read_records",
     "save_graph_html",
+    "server_ready",
+    "stage_papers",
+    "staged_papers",
     "topics_json",
     # Re-exported for interfaces
+    "CORPUS_SUFFIX",
     "GPUSTACK_MODEL",
     "TABLE_CSV",
     "TABLE_JSONL",
@@ -96,86 +135,14 @@ def ollama_models() -> list[str]:
     return get_available_models(get_gpu_name())
 
 
-def project_folder_name(name: str) -> str:
-    """Return a corpus folder name from a user-supplied project name.
+def server_ready(attempts: int = 1) -> bool:
+    """Return whether the session's Ollama server accepts connections.
 
     Args:
-        name: A single folder name, without a path.
+        attempts: How many times to try, half a second apart; the server
+            may still be starting when a session begins.
 
     Returns:
-        The name with the corpus suffix appended.
-
-    Raises:
-        ValueError: If the name is empty or contains path components.
+        True if it does.
     """
-    name = name.strip()
-    if not name or name in {".", ".."} or any(c in name for c in "/\\\0"):
-        raise ValueError("Enter a project name without slashes or a path.")
-    return f"{name}_project_corpus"
-
-
-def _write_pdf(path: Path, data: bytes) -> None:
-    """Write a PDF after checking its header."""
-    if b"%PDF-" not in data[:1024]:
-        raise ValueError(f"{path.name} does not contain a PDF header.")
-    path.write_bytes(data)
-
-
-@contextmanager
-def staged_papers(name: str, data: bytes) -> Iterator[Path]:
-    """Stage a PDF or ZIP in a private folder removed after processing.
-
-    ZIP subfolders are flattened, preserving PDF basenames for corpus reuse.
-    Duplicate basenames are refused to avoid overwriting or skipping papers.
-    Archive paths and expanded sizes use the shared upload safeguards.
-
-    Args:
-        name: The browser-supplied filename.
-        data: The uploaded PDF or ZIP bytes.
-
-    Yields:
-        A temporary folder containing the uploaded PDF papers.
-
-    Raises:
-        ValueError: If the input is invalid, unsafe, or contains no PDFs.
-    """
-    name = safe_upload_name(name)
-    extension = Path(name).suffix.lower()
-    if extension not in {".pdf", ".zip"}:
-        raise ValueError("Upload a PDF document or ZIP archive of PDFs.")
-    with get_workspace().temp_dir("knowledge_graph", prefix="upload-") as root:
-        if extension == ".pdf":
-            _write_pdf(root / name, data)
-        else:
-            try:
-                with ZipFile(BytesIO(data)) as archive:
-                    members = safe_zip_members(
-                        archive, allowed_extensions={".pdf"}
-                    )
-                    seen: set[str] = set()
-                    for member in members:
-                        relative = PurePosixPath(
-                            member.filename.replace("\\", "/")
-                        )
-                        if (
-                            "__MACOSX" in relative.parts
-                            or relative.name.startswith("._")
-                        ):
-                            continue
-                        filename = safe_upload_name(member.filename)
-                        if filename.casefold() in seen:
-                            raise ValueError(
-                                f"More than one PDF is named {filename}. "
-                                "Give each paper a unique filename."
-                            )
-                        seen.add(filename.casefold())
-                        _write_pdf(root / filename, archive.read(member))
-                    if not seen:
-                        raise ValueError(
-                            "The ZIP archive contains no PDF papers."
-                        )
-            except BadZipFile as exc:
-                raise ValueError(
-                    "The uploaded ZIP archive is not valid."
-                ) from exc
-        yield root
+    return check_ollama_server(attempts=attempts)

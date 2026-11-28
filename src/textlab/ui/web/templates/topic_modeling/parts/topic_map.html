@@ -1,0 +1,19 @@
+{#- The intertopic distance map, as BERTopic draws it: each topic a bubble
+  sized by its documents, alike topics close; beside it the topics to
+  point at. A click on a bubble brings its topic into view. -#}
+{% from "topic_modeling/macros.html" import topic_list %}
+<div class="topic-view">
+  <figure class="topic-map">
+    <svg viewBox="0 0 100 100" role="img" aria-label="Intertopic distance map: alike topics lie close; larger bubbles have more documents">
+      {% for topic in topics | sort(attribute="r", reverse=true) %}
+      <g class="box topic-dot" data-region="{{ topic.region }}">
+        <circle cx="{{ topic.x }}" cy="{{ topic.y }}" r="{{ topic.r }}"/>
+        <text x="{{ topic.x }}" y="{{ topic.y }}" text-anchor="middle" dominant-baseline="central">{{ topic.topic }}</text>
+        <title>Topic {{ topic.topic }}: {{ topic.title }}, {{ topic.documents }} document{{ "s" if topic.documents != 1 }}</title>
+      </g>
+      {% endfor %}
+    </svg>
+    <figcaption class="label">Alike topics lie close (multidimensional scaling of their similarity); bubble area: documents</figcaption>
+  </figure>
+  {{ topic_list(topics) }}
+</div>

@@ -1,0 +1,52 @@
+{#- A transcript beside its recording, inside its record: the result of one
+  transcription and of a review (job.result is a Listening). app.js plays
+  the recording, marks the passage and the word being spoken, and jumps
+  to a passage or word when it is clicked. -#}
+{% from "components/macros.html" import notice, spec %}
+{% import "components/player.html" as player with context %}
+{% set view = job.result %}
+<div class="result">
+  <ul class="facts" aria-label="About the result">
+    {% if view.language %}<li>{{ view.language }}{% if view.detected %}, detected{% endif %}</li>{% endif %}
+    {% if view.source %}<li>{{ view.source }}</li>{% endif %}
+    <li>{{ view.duration | media_time }} of audio</li>
+    {% if view.speakers %}<li>{{ view.speakers }} speaker{{ "s" if view.speakers != 1 }}</li>{% endif %}
+    <li>{{ "{:,}".format(view.words) }} word{{ "s" if view.words != 1 }}</li>
+  </ul>
+
+  {% if not view.turns %}
+  {% call notice("warning", "No speech found") %}<p>The recording holds no speech the model could transcribe. Check that it is the right file and that it can be heard, or try another language.</p>{% endcall %}
+  {% endif %}
+  {% for note in view.notes %}
+  {% call notice("info") %}<p>{{ note }}</p>{% endcall %}
+  {% endfor %}
+
+  <div class="tabs">
+    <div class="tabs__list" role="tablist" aria-label="Result of {{ job.title }}">
+      <button class="tabs__tab" type="button" role="tab" id="{{ job.id }}-tab-listen" aria-selected="true" aria-controls="{{ job.id }}-listen">Listen and read</button>
+      <button class="tabs__tab" type="button" role="tab" id="{{ job.id }}-tab-text" aria-selected="false" aria-controls="{{ job.id }}-text" tabindex="-1">Text</button>
+      {% if view.models %}
+      <button class="tabs__tab" type="button" role="tab" id="{{ job.id }}-tab-models" aria-selected="false" aria-controls="{{ job.id }}-models" tabindex="-1">Models</button>
+      {% endif %}
+    </div>
+
+    <div class="tabs__panel stack" role="tabpanel" id="{{ job.id }}-listen" aria-labelledby="{{ job.id }}-tab-listen" data-player data-duration="{{ '%.2f' | format(view.duration) }}">
+      {{ player.controls(job, view) }}
+      {{ player.transcript(view) }}
+    </div>
+
+    <div class="tabs__panel" role="tabpanel" id="{{ job.id }}-text" aria-labelledby="{{ job.id }}-tab-text" hidden>
+      <div class="plain-text">
+        {% for turn in view.turns %}
+        <p>{% if turn.speaker_number %}<span class="speaker speaker--{{ (turn.speaker_number - 1) % 4 + 1 }}">Speaker {{ turn.speaker_number }}</span> {% endif %}{{ turn.text }}</p>
+        {% endfor %}
+      </div>
+    </div>
+
+    {% if view.models %}
+    <div class="tabs__panel" role="tabpanel" id="{{ job.id }}-models" aria-labelledby="{{ job.id }}-tab-models" hidden>
+      {{ spec(view.models, mono=true) }}
+    </div>
+    {% endif %}
+  </div>
+</div>

@@ -1,0 +1,42 @@
+{#- Parts the Topic Modeling result's views share. -#}
+
+{#- A tab of a result's tab list: key names its panel; the first tab is
+  selected. -#}
+{% macro tab(job_id, key, label, first=false) %}
+<button class="tabs__tab" type="button" role="tab" id="{{ job_id }}-tab-{{ key }}" aria-selected="{{ 'true' if first else 'false' }}" aria-controls="{{ job_id }}-{{ key }}"{% if not first %} tabindex="-1"{% endif %}>{{ label }}</button>
+{%- endmacro %}
+
+{#- A tab's panel, around what the call gives; hidden unless first. -#}
+{% macro panel(job_id, key, first=false, class="") %}
+<div class="tabs__panel{% if class %} {{ class }}{% endif %}" role="tabpanel" id="{{ job_id }}-{{ key }}" aria-labelledby="{{ job_id }}-tab-{{ key }}"{% if not first %} hidden{% endif %}>
+  {{ caller() }}
+</div>
+{%- endmacro %}
+
+{#- The topics as a list to point at: number, name, size and a size bar.
+  Each shares its topic's data-region, so pointing at it marks the
+  topic's marks in the chart beside it. -#}
+{% macro topic_list(topics) %}
+<ol class="topic-list topic-list--compact">
+  {% for topic in topics %}
+  <li class="topic topic--compact" data-region="{{ topic.region }}">
+    <div class="topic__head">
+      <span class="label topic__number">Topic {{ topic.topic }}</span>
+      <span class="topic__title">{{ topic.title }}</span>
+      <span class="label topic__size">{{ "{:,}".format(topic.documents) }} · {{ "%.0f" | format(topic.share * 100) }}%</span>
+    </div>
+    <svg class="bar topic__bar" viewBox="0 0 100 2" preserveAspectRatio="none" aria-hidden="true" focusable="false"><rect width="{{ topic.bar }}" height="2"/></svg>
+  </li>
+  {% endfor %}
+</ol>
+{%- endmacro %}
+
+{#- A topic's example documents, folded. -#}
+{% macro examples(topic) %}
+{% if topic.examples %}
+<details class="disclosure topic__examples">
+  <summary>Examples ({{ topic.examples | length }})</summary>
+  {% for text in topic.examples %}<blockquote class="topic__example">{{ text }}</blockquote>{% endfor %}
+</details>
+{% endif %}
+{%- endmacro %}

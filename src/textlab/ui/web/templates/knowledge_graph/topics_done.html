@@ -1,0 +1,4 @@
+{#- Topics extracted again (job.result: the page's Extracted). -#}
+{% set summary = job.result.summary %}
+<p class="record__line">Topics for {{ summary.processed }} {{ "paper" if summary.processed == 1 else "papers" }}{% if summary.skipped %}; {{ summary.skipped }} without an abstract have none{% endif %}.</p>
+<a class="btn" href="{{ root }}/knowledge-graph/{{ job.result.project_id }}">Show the new graph {{ icon("arrow-right", size="sm") }}</a>

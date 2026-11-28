@@ -1,0 +1,25 @@
+{#- The user's downloaded Hugging Face models (hf_stored is a StoredModels),
+  inside the Hugging Face form: each with its size, a button that puts its
+  name into the model field, and one that deletes it. A delete sends only
+  the model's name and swaps this list for the new one. -#}
+<div class="hf-models" id="hf-models">
+  <p class="label">Your downloaded models{% if hf_stored.models %} · {{ hf_stored.models | length }}, {{ hf_stored.total }}{% endif %}</p>
+  {% if hf_stored.models %}
+  <ul class="hf-models__list">
+    {% for repo, size in hf_stored.models %}
+    <li class="hf-models__item">
+      <span class="hf-models__name">{{ repo }}</span>
+      <span class="label hf-models__size">{{ size }}</span>
+      <button class="text-button" type="button" data-fill="hf-repo" data-fill-value="{{ repo }}">Use</button>
+      <button class="text-button" type="button"
+              hx-post="{{ root }}/ocr/huggingface/models/delete" hx-vals='{"repo": {{ repo | tojson }}}' hx-params="repo"
+              hx-target="#hf-models" hx-swap="outerHTML"
+              hx-confirm="Delete {{ repo }}? It is downloaded again on its next use.">Delete</button>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">None yet.</p>
+  {% endif %}
+  <p class="field__help">Kept in <code>{{ hf_stored.folder }}</code>, which counts towards your storage quota.</p>
+</div>

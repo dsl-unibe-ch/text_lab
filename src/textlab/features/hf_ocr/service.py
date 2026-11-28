@@ -13,19 +13,40 @@ A run reads one document or a whole batch with a model the user names:
 
 The worker exits when it is done, so the GPU is free afterwards. Each run
 works in a job folder in the workspace (area ``hf_ocr``), removed when the
-run ends; results are returned in memory.
+run ends; results are returned in memory. :func:`save_run` writes a run's
+downloads and page images to a folder an interface serves them from, and
+returns what it needs to show the result.
+
+A run stops when its ``cancel`` event is set: between files, and the
+worker at once, by raising :class:`~textlab.common.progress.CancelledError`.
+
+The user's own folder of downloaded models (:mod:`.store`) is reached
+through this module too.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import io
 import os
+import threading
 from collections.abc import Callable
 from pathlib import Path
 from typing import BinaryIO
 
 from textlab.common import container, jobs, pages
-from textlab.common.progress import Progress, ProgressCallback, no_progress
+from textlab.common.outputs import (
+    OutputFolder,
+    SavedFile,
+    image_media_type,
+    web_image,
+)
+from textlab.common.progress import (
+    Progress,
+    ProgressCallback,
+    check_cancelled,
+    no_progress,
+)
 from textlab.common.storage import get_workspace
 from textlab.common.upload_safety import (
     safe_upload_name,
@@ -36,6 +57,7 @@ from textlab.features.hf_ocr.models import (
     DEFAULT_MAX_NEW_TOKENS,
     DEFAULT_PROMPT,
     MAX_NEW_TOKENS_LIMIT,
+    BatchFile,
     BatchRun,
     DocumentText,
     HfOcrError,
@@ -47,19 +69,38 @@ from textlab.features.hf_ocr.models import (
     parse_repo_id,
     result_json,
 )
+from textlab.features.hf_ocr.store import (
+    StoredModel,
+    delete_model,
+    format_size,
+    models_dir,
+    stored_models,
+)
 
 __all__ = [
     "DEFAULT_MAX_NEW_TOKENS",
     "DEFAULT_PROMPT",
     "INPUT_EXTENSIONS",
     "MAX_NEW_TOKENS_LIMIT",
+    "BatchFile",
     "BatchRun",
     "HfOcrError",
     "HfOcrOptions",
+    "ModelUsed",
     "OcrRun",
+    "SavedFile",
+    "SavedHfPage",
+    "SavedHfRun",
     "parse_repo_id",
     "read_batch",
     "read_document",
+    "save_run",
+    # The user's model folder
+    "StoredModel",
+    "delete_model",
+    "format_size",
+    "models_dir",
+    "stored_models",
 ]
 
 #: File types read, alone or inside a ZIP archive.
@@ -85,6 +126,7 @@ def read_document(
     options: HfOcrOptions,
     *,
     on_progress: ProgressCallback = no_progress,
+    cancel: threading.Event | None = None,
 ) -> OcrRun:
     """Read one PDF or image with the chosen model.
 
@@ -93,6 +135,7 @@ def read_document(
         data: The file's content.
         options: The model, prompt and token limit.
         on_progress: Receives progress updates.
+        cancel: Stops the run when set.
 
     Returns:
         The text and its downloads.
@@ -101,6 +144,7 @@ def read_document(
         HfOcrError: If the file cannot be read or the model cannot be
             used.
         textlab.common.jobs.WorkerError: If the worker fails otherwise.
+        CancelledError: If ``cancel`` was set.
     """
     upload_name = safe_upload_name(name)
     stem = Path(upload_name).stem or "document"
@@ -111,7 +155,10 @@ def read_document(
         on_progress(Progress("Preparing pages...", 0.0))
         images = _page_images(input_path, job / "pages")
         texts, model = read_pages(
-            images, options, on_progress=_scaled(on_progress, _PAGES_END, 1)
+            images,
+            options,
+            on_progress=_scaled(on_progress, _PAGES_END, 1),
+            cancel=cancel,
         )
         document = _document(upload_name, texts)
         out_dir = job / "output"
@@ -137,6 +184,7 @@ def read_batch(
     options: HfOcrOptions,
     *,
     on_progress: ProgressCallback = no_progress,
+    cancel: threading.Event | None = None,
 ) -> BatchRun:
     """Read every PDF and image in a ZIP archive with the chosen model.
 
@@ -147,14 +195,17 @@ def read_batch(
         archive: The ZIP archive, as a file object or path.
         options: The model, prompt and token limit.
         on_progress: Receives progress updates.
+        cancel: Stops the batch when set.
 
     Returns:
-        A ZIP with one folder per file, mirroring the archive.
+        A ZIP with one folder per file, mirroring the archive, and an
+        overview of the files.
 
     Raises:
         HfOcrError: If the archive holds no supported files, a file cannot
             be read or the model cannot be used.
         textlab.common.jobs.WorkerError: If the worker fails otherwise.
+        CancelledError: If ``cancel`` was set.
     """
     with get_workspace().temp_dir(WORKSPACE_AREA, prefix="batch-") as job:
         input_dir = (job / "input").resolve()
@@ -170,6 +221,7 @@ def read_batch(
             )
         images, counts = [], []
         for index, path in enumerate(files):
+            check_cancelled(cancel)
             on_progress(
                 Progress(
                     f"Preparing pages... {path.name}",
@@ -180,15 +232,20 @@ def read_batch(
             images.extend(file_images)
             counts.append(len(file_images))
         texts, model = read_pages(
-            images, options, on_progress=_scaled(on_progress, _PAGES_END, 1)
+            images,
+            options,
+            on_progress=_scaled(on_progress, _PAGES_END, 1),
+            cancel=cancel,
         )
 
         out_dir = job / "output"
         used: set[str] = set()
         start = 0
+        items = []
         for path, count in zip(files, counts, strict=True):
             name = path.relative_to(input_dir).as_posix()
             document = _document(name, texts[start : start + count])
+            items.append(BatchFile(name, count, len(document.text)))
             start += count
             folder = out_dir / unique_output_directory(name, used)
             _write_outputs(
@@ -200,7 +257,11 @@ def read_batch(
         zip_bytes = pages.zip_folder(out_dir)
     on_progress(Progress("Done.", 1.0))
     return BatchRun(
-        zip_bytes=zip_bytes, files=len(files), pages=len(images), model=model
+        zip_bytes=zip_bytes,
+        files=len(files),
+        pages=len(images),
+        model=model,
+        items=tuple(items),
     )
 
 
@@ -211,6 +272,7 @@ def read_pages(
     on_progress: ProgressCallback = no_progress,
     backend_python: str | None = None,
     cache_dir: Path | None = None,
+    cancel: threading.Event | None = None,
 ) -> tuple[list[str], ModelUsed]:
     """Read page images with a model, in the worker.
 
@@ -223,6 +285,7 @@ def read_pages(
             ``HF_OCR_BACKEND_PYTHON``.
         cache_dir: Where the model is downloaded to; by default the user's
             folder (:func:`.store.models_dir`).
+        cancel: Stops the worker when set.
 
     Returns:
         One text per image, and the model that read them.
@@ -248,6 +311,7 @@ def read_pages(
             request,
             area=WORKSPACE_AREA,
             on_progress=on_progress,
+            cancel=cancel,
             python=python,
         )
     except jobs.WorkerError as error:
@@ -303,6 +367,109 @@ def _preview_png(image: Path) -> bytes:
     buffer = io.BytesIO()
     preview.save(buffer, format="PNG")
     return buffer.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# Results for interfaces
+# ---------------------------------------------------------------------------
+
+
+@dataclasses.dataclass(frozen=True)
+class SavedHfPage:
+    """A page a model read, as an interface shows it.
+
+    Attributes:
+        number: The page number, from 1.
+        text: What the model returned for it, as written.
+        image: The file name of the page image, scaled down, or ``None``.
+        width: The image's width in pixels; 0 without an image.
+        height: Its height in pixels.
+    """
+
+    number: int
+    text: str
+    image: str | None
+    width: int
+    height: int
+
+
+@dataclasses.dataclass(frozen=True)
+class SavedHfRun:
+    """What :func:`save_run` wrote, and what to show of a run.
+
+    Attributes:
+        name: The document's name.
+        model: The model that read it.
+        prompt: The instruction sent with every page.
+        pages: The pages, in order.
+        files: Every file written, downloads first.
+    """
+
+    name: str
+    model: ModelUsed
+    prompt: str
+    pages: tuple[SavedHfPage, ...]
+    files: tuple[SavedFile, ...]
+
+
+def save_run(run: OcrRun, folder: Path) -> SavedHfRun:
+    """Write a run's downloads and page images into a folder.
+
+    The downloads are everything in one ZIP (with ``model_used.txt``), the
+    text and the JSON; besides them each page image gets a file of its
+    own, named after the document, so an interface can show it.
+
+    Args:
+        run: The result of :func:`read_document`.
+        folder: An existing folder, such as a job's outputs.
+
+    Returns:
+        What was written, and the pages to show.
+    """
+    output = OutputFolder(folder)
+    output.write(
+        f"{run.stem}_hf_ocr.zip",
+        run.zip_bytes,
+        "Everything",
+        "application/zip",
+    )
+    output.write(
+        f"{run.stem}.txt",
+        run.document.text.encode("utf-8"),
+        "Plain text",
+        "text/plain; charset=utf-8",
+    )
+    output.write(
+        f"{run.stem}.json",
+        run.to_json().encode("utf-8"),
+        "JSON, with the model and prompt",
+        "application/json",
+    )
+    saved_pages = []
+    for index, page in enumerate(run.document.pages):
+        image, width, height = None, 0, 0
+        if index < len(run.previews):
+            picture, extension, (width, height) = web_image(
+                run.previews[index]
+            )
+            if picture:
+                image = output.write(
+                    f"{run.stem}_page-{page.page:04d}.{extension}",
+                    picture,
+                    f"Page {page.page}",
+                    image_media_type(extension),
+                    listed=False,
+                )
+        saved_pages.append(
+            SavedHfPage(page.page, page.text, image, width, height)
+        )
+    return SavedHfRun(
+        name=run.document.name,
+        model=run.model,
+        prompt=run.prompt,
+        pages=tuple(saved_pages),
+        files=tuple(output.files),
+    )
 
 
 def _scaled(

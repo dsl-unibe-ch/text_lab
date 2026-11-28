@@ -19,6 +19,13 @@ so can a batch job that already runs in that environment.
 
 Uploaded recordings are first written to the job workspace with
 :func:`staged_uploads` or :func:`staged_zip`, which remove them again.
+
+For interfaces, this module also gathers what they need around a run:
+the languages and their models, the exports (:func:`save_transcript_files`,
+:func:`save_zip`), the passages for an audio player (:func:`turns`,
+:func:`turns_from_table`) and the recording prepared for the browser
+(:func:`prepare_playback`). Interfaces import only the names in
+:data:`__all__`.
 """
 
 from __future__ import annotations
@@ -36,8 +43,12 @@ from typing import Any, BinaryIO
 import numpy as np
 
 from textlab.common import container
-from textlab.common.config import get_settings
+from textlab.common.config import MissingSettingError, get_settings
 from textlab.common.jobs import run_worker
+from textlab.common.language_mappings import (
+    TRANSCRIBE_LANGUAGE_CODE_TO_NAME,
+    TRANSCRIBE_LANGUAGE_MAPPING,
+)
 from textlab.common.progress import (
     Progress,
     ProgressCallback,
@@ -46,23 +57,86 @@ from textlab.common.progress import (
 )
 from textlab.common.storage import get_workspace
 from textlab.common.upload_safety import safe_upload_name
-from textlab.features.transcription import audio
+from textlab.features.transcription import audio, formats
+from textlab.features.transcription.audio import AudioDecodeError
+from textlab.features.transcription.formats import (
+    base_name,
+    format_duration,
+    turns,
+    turns_from_table,
+)
 from textlab.features.transcription.models import (
     AudioFile,
+    Playback,
     SkippedFile,
+    TimedWord,
     Transcript,
     TranscriptionOptions,
     TranscriptionResult,
+    Turn,
 )
 from textlab.features.transcription.whisper_models import (
+    DEFAULT_MODEL,
     alignment_language,
+    converted_model_missing,
+    default_model,
     model_label,
 )
+
+__all__ = [
+    # Data classes
+    "AudioFile",
+    "Playback",
+    "SkippedFile",
+    "TimedWord",
+    "Transcript",
+    "TranscriptionOptions",
+    "TranscriptionResult",
+    "Turn",
+    # Errors
+    "AudioDecodeError",
+    "MissingSettingError",
+    # Inputs
+    "AUDIO_EXTENSIONS",
+    "TABLE_EXTENSIONS",
+    "staged_uploads",
+    "staged_zip",
+    "zip_recordings",
+    # Languages and models
+    "DEFAULT_MODEL",
+    "DIARIZATION_MODEL",
+    "LANGUAGES",
+    "converted_model_missing",
+    "default_model",
+    "language_name",
+    "model_label",
+    "writes_spaces",
+    # Running
+    "run_transcription",
+    # Results
+    "base_name",
+    "format_duration",
+    "prepare_playback",
+    "save_transcript_files",
+    "save_zip",
+    "turns",
+    "turns_from_table",
+]
 
 #: Audio formats accepted in uploads and ZIP batches.
 AUDIO_EXTENSIONS = (
     ".wav", ".mp3", ".flac", ".m4a", ".ogg", ".webm", ".oga", ".opus",
 )  # fmt: skip
+
+#: Transcript tables the review of a transcript reads.
+TABLE_EXTENSIONS = (".csv", ".tsv")
+
+#: The languages to choose from, by name, with their Text Lab codes.
+LANGUAGES: dict[str, str] = dict(TRANSCRIBE_LANGUAGE_MAPPING)
+
+#: Languages written without spaces between words; WhisperX's words are
+#: their characters.
+UNSPACED_LANGUAGES = frozenset({"zh", "ja", "th", "lo", "km", "my", "bo"})
 
 #: Module run by :func:`run_transcription`.
 WORKER_MODULE = "textlab.features.transcription.worker"
@@ -367,6 +441,144 @@ def _plain(value: Any) -> Any:
 
 
 # ---------------------------------------------------------------------------
+# Languages
+# ---------------------------------------------------------------------------
+
+
+def language_name(code: str | None) -> str:
+    """Return a language's name for people.
+
+    Args:
+        code: A Text Lab language code, or a code Whisper detected.
+
+    Returns:
+        The name, such as ``"German"``; the code itself for languages that
+        are not in :data:`LANGUAGES`; ``""`` for ``None``.
+    """
+    if not code:
+        return ""
+    return TRANSCRIBE_LANGUAGE_CODE_TO_NAME.get(code, code)
+
+
+def writes_spaces(code: str | None) -> bool:
+    """Return whether a language puts spaces between its words.
+
+    Args:
+        code: The language a transcript was aligned as (e.g. ``"de"``).
+
+    Returns:
+        False for Chinese, Japanese, Thai and other languages written
+        without spaces, whose words are joined directly.
+    """
+    return code not in UNSPACED_LANGUAGES
+
+
+# ---------------------------------------------------------------------------
+# Results
+# ---------------------------------------------------------------------------
+
+
+def save_transcript_files(
+    transcript: Transcript, folder: Path, name: str | None = None
+) -> dict[str, Path]:
+    """Write every export of a transcript into a folder.
+
+    Args:
+        transcript: The transcript.
+        folder: Where to write the files.
+        name: Stem of the file names; by default the recording's name
+            without its extension.
+
+    Returns:
+        The files by name, in download order: the plain text, the
+        subtitles, the segment and word tables and the ELAN table.
+    """
+    stem = name or base_name(transcript.name)
+    texts = formats.transcript_files(transcript, stem)
+    order = [
+        f"{stem}_text.txt",
+        f"{stem}.srt",
+        f"{stem}.vtt",
+        f"{stem}_transcription.csv",
+        f"{stem}_words.csv",
+        f"{stem}_ELAN_compatible.tsv",
+    ]
+    saved = {}
+    for file_name in order + [key for key in texts if key not in order]:
+        path = folder / file_name
+        path.write_text(texts[file_name], encoding="utf-8")
+        saved[file_name] = path
+    return saved
+
+
+def save_zip(files: dict[str, Path], target: Path) -> Path:
+    """Pack files into a compressed ZIP archive on disk.
+
+    Files are read from disk one at a time, so large recordings never sit
+    in memory whole.
+
+    Args:
+        files: Paths inside the archive mapped to the files on disk.
+        target: The archive to write.
+
+    Returns:
+        ``target``.
+    """
+    with zipfile.ZipFile(
+        target, "w", compression=zipfile.ZIP_DEFLATED
+    ) as archive:
+        for name, path in files.items():
+            archive.write(path, name)
+    return target
+
+
+def prepare_playback(
+    source: Path,
+    folder: Path,
+    name: str,
+    *,
+    wav: bool = False,
+    cancel: threading.Event | None = None,
+) -> Playback:
+    """Prepare a recording for an audio player in the browser.
+
+    The recording is decoded once, written as an MP3 that every browser
+    plays (:func:`audio.write_mp3`) and measured for a waveform. Runs in
+    the app's own environment: it needs ffmpeg, not WhisperX.
+
+    Args:
+        source: The recording, in any format ffmpeg reads.
+        folder: Where to write the MP3 (and the WAV).
+        name: Stem of the files' names.
+        wav: Also write a 16 kHz WAV copy, as the Streamlit page offered
+            for ELAN.
+        cancel: Checked between the steps.
+
+    Returns:
+        The MP3, the recording's length, its waveform and the WAV copy.
+
+    Raises:
+        AudioDecodeError: If the recording cannot be decoded or encoded.
+        textlab.common.progress.CancelledError: If ``cancel`` was set.
+    """
+    samples = audio.load_audio(source)
+    check_cancelled(cancel)
+    mp3 = folder / f"{name}.mp3"
+    audio.write_mp3(samples, mp3)
+    wav_path = None
+    if wav:
+        check_cancelled(cancel)
+        wav_path = folder / f"{name}.wav"
+        audio.write_wav(samples, wav_path)
+    return Playback(
+        path=mp3,
+        duration_seconds=len(samples) / float(audio.SAMPLE_RATE),
+        levels=audio.waveform_levels(samples),
+        wav=wav_path,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Staging uploads in the workspace
 # ---------------------------------------------------------------------------
 
@@ -426,6 +638,37 @@ def staged_zip(archive: BinaryIO | Path) -> Iterator[list[AudioFile]]:
                     shutil.copyfileobj(source, target, length=1024 * 1024)
                 files.append(AudioFile(path, path.name))
         yield files
+
+
+def zip_recordings(archive: Path) -> list[str]:
+    """Return the names of the recordings a ZIP archive holds.
+
+    Reads only the archive's table of contents, so it is quick; use it to
+    check an upload before queueing it. :func:`staged_zip` extracts the
+    same files.
+
+    Args:
+        archive: The ZIP file.
+
+    Returns:
+        The recordings' file names, without folders, in archive order.
+
+    Raises:
+        ValueError: If the file is not a ZIP archive.
+    """
+    try:
+        with zipfile.ZipFile(archive) as zf:
+            infos = zf.infolist()
+    except zipfile.BadZipFile as error:
+        raise ValueError(f"{archive.name} is not a ZIP file.") from error
+    names = []
+    for info in infos:
+        name = PurePosixPath(info.filename.replace("\\", "/")).name
+        if info.is_dir() or name.startswith("._"):
+            continue
+        if name.lower().endswith(AUDIO_EXTENSIONS):
+            names.append(name)
+    return names
 
 
 def _unique_path(folder: Path, name: str, used: set[str]) -> Path:

@@ -1,0 +1,2 @@
+{% set active = session_jobs | selectattr("active") | list %}
+<span class="count{% if not active %} count--empty{% endif %}" id="job-count"{% if active %} data-job-active{% endif %}{% if oob %} hx-swap-oob="true"{% endif %}>{{ active | length }}<span class="visually-hidden"> active</span></span>

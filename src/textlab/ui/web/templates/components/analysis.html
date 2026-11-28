@@ -1,0 +1,56 @@
+{#- The data agents' charts and statistical results, as Chat's replies and
+  Visualize Data's analyses show them. Import with
+    {% from "components/analysis.html" import charts, statistics with context %}
+
+  charts() takes a job and its charts (label, file, interactive, code,
+  r_code): an interactive chart is a Plotly figure among the job's files,
+  fetched and drawn by app.js with the vendored plotly.js, which it loads
+  only then; the others are images. statistics() takes dictionaries with
+  title, result (Markdown), code and r_code. Each result comes with the
+  code that makes it; r_note says why a chart has no R code, when R code
+  was asked for. -#}
+
+{% macro code(python, r_code="", r_note="") %}
+{% if python %}
+<details class="code-block">
+  <summary class="code-block__summary">Python code</summary>
+  <pre><code>{{ python }}</code></pre>
+</details>
+{% endif %}
+{% if r_code %}
+<details class="code-block">
+  <summary class="code-block__summary">R code</summary>
+  <pre><code>{{ r_code }}</code></pre>
+</details>
+{% elif r_note %}
+<p class="code-block__note">{{ r_note }}</p>
+{% endif %}
+{% endmacro %}
+
+{% macro charts(job, items, r_note="") %}
+{% set plotly = static('vendor/plotly-3.7.0/plotly-strict.min.js') %}
+{% set plotly_css = static('vendor/plotly-3.7.0/plotly.css') %}
+{% for chart in items %}
+<figure class="chart">
+  <figcaption class="label chart__label">{{ chart.label }}</figcaption>
+  {% if chart.interactive %}
+  <div class="chart__plot" data-chart="{{ root }}/jobs/{{ job.id }}/files/{{ chart.file | urlencode }}" data-plotly="{{ plotly }}" data-plotly-css="{{ plotly_css }}" role="img" aria-label="{{ chart.label }}, interactive">
+    <p class="chart__loading">Drawing the chart</p>
+  </div>
+  {% else %}
+  <img class="chart__image" src="{{ root }}/jobs/{{ job.id }}/files/{{ chart.file | urlencode }}" alt="{{ chart.label }}" loading="lazy">
+  {% endif %}
+  {{ code(chart.code, chart.r_code, r_note) }}
+</figure>
+{% endfor %}
+{% endmacro %}
+
+{% macro statistics(items, open=false) %}
+{% for item in items %}
+<details class="stat"{% if open %} open{% endif %}>
+  <summary class="stat__summary">{{ item.get("title") or "Statistical result" }}</summary>
+  <div class="prose stat__result">{{ (item.get("result") or "") | markdown }}</div>
+  {{ code(item.get("code"), item.get("r_code")) }}
+</details>
+{% endfor %}
+{% endmacro %}

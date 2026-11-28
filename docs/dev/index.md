@@ -22,6 +22,8 @@ The rest of the site is the user guide.
   model stores, logs, releases and rollbacks.
 - [Data handling](data-handling.md): where user data may be written, the
   job workspace, and the tests that keep the privacy promise true.
+- [Web UI plan](web-ui-plan.md): the planned move from Streamlit to a web
+  UI built with FastAPI and HTMX: decisions, architecture, phases.
 
 ## Repository at a glance
 

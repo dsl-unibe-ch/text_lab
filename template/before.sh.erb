@@ -17,3 +17,10 @@ export SERVER_PORT="$port"
 export SERVER_BASEURLPATH="/node/${host}/${port}/"
 export TOKEN="$password"
 
+# The interface this session runs: TEXT_LAB_UI from the configuration that
+# script.sh loads (config.sh), "streamlit" or "web". The Connect button
+# depends on it: view.html.erb receives it as text_lab_ui (conn_params in
+# submit.yml.erb). The web UI takes the password from the button, Streamlit
+# asks the user for it.
+text_lab_ui="$(source "$(dirname "${BASH_SOURCE[0]}")/config.sh" > /dev/null 2>&1 \
+  && ui="${TEXT_LAB_UI:-streamlit}" && echo "${ui,,}")"

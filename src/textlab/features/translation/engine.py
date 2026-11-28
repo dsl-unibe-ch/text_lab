@@ -64,12 +64,22 @@ class Backend:
         model_id: The Hugging Face model; per language pair for OPUS-MT
             (:func:`opus_mt_model_for`) and chosen by the user for Ollama.
         formality: Whether a formality preference changes the output.
+        title: A short name, for interfaces that explain the backend
+            separately; ``label`` when empty.
+        description: What the backend is good at, in a sentence or two.
     """
 
     label: str
     family: str
     model_id: str | None = None
     formality: bool = False
+    title: str = ""
+    description: str = ""
+
+    @property
+    def name(self) -> str:
+        """The short name, or the label if there is none."""
+        return self.title or self.label
 
 
 #: Every backend, in the order the page lists them; the first is the default.
@@ -78,25 +88,45 @@ BACKENDS: dict[str, Backend] = {
         "NLLB-200 Distilled (600M, fast, 200 languages)",
         "nllb",
         "facebook/nllb-200-distilled-600M",
+        title="NLLB-200, 600M",
+        description="Fast, for 200 languages. A good start.",
     ),
     "nllb-large": Backend(
         "NLLB-200 (3.3B, higher quality, needs bigger GPU)",
         "nllb",
         "facebook/nllb-200-3.3B",
+        title="NLLB-200, 3.3B",
+        description=(
+            "Better translations than the 600M model; slower, and it needs "
+            "a GPU with much memory."
+        ),
     ),
     "madlad-3b": Backend(
         "MADLAD-400 (3B, strong on low-resource languages)",
         "madlad",
         "google/madlad400-3b-mt",
+        title="MADLAD-400, 3B",
+        description="Strong on languages with little written text online.",
     ),
     "opus-mt": Backend(
         "OPUS-MT / MarianMT (small, bilingual per pair)",
         "opus-mt",
+        title="OPUS-MT",
+        description=(
+            "Small and fast models, one per language pair; not every pair "
+            "has one."
+        ),
     ),
     "ollama": Backend(
         "LLM (Ollama) - prompt-based, good for dialects",
         "ollama",
         formality=True,
+        title="Language model",
+        description=(
+            "A large language model on this session's Ollama server: "
+            "slower, good with dialects, and it can write formally or "
+            "informally."
+        ),
     ),
 }
 

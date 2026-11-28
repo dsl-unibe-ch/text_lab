@@ -1,0 +1,23 @@
+{#- The files attached to the conversation, sent with every message, and
+  why files that were just chosen were left out (no text in them). The
+  first table is the one the data agents analyze. -#}
+{% from "components/macros.html" import notice %}
+{% set analyzed = conversation.table %}
+<div class="composer__files" id="chat-files">
+  {% if conversation.attachments %}
+  <ul class="attachments" aria-label="Attached files">
+    {% for item in conversation.attachments %}
+    <li class="attachment">
+      <span class="label attachment__kind">{{ item.document.kind }}</span>
+      <span class="attachment__name" title="{{ item.document.name }}">{{ item.document.name }}</span>
+      <span class="attachment__size">{{ item.document.size | file_size }}</span>
+      {% if item.table and item.table == analyzed %}<span class="label attachment__tools" title="Ask for charts or statistics, and the data agents analyze this table">Charts</span>{% endif %}
+      <button class="icon-button attachment__remove" type="button" hx-post="{{ root }}/chat/{{ conversation.id }}/files/{{ item.id }}/remove" hx-params="none" hx-target="#chat-files" hx-swap="outerHTML" aria-label="Remove {{ item.document.name }}">{{ icon("x", size="sm") }}</button>
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  {% for problem in problems %}
+  {% call notice("warning", dismissible=true) %}<p>{{ problem }}</p>{% endcall %}
+  {% endfor %}
+</div>

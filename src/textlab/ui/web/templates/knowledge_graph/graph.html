@@ -1,0 +1,28 @@
+{#- A view of the project's graph (drawn: the page's DrawnGraph), or why
+  there is none (problem): its counts, its actions, and the canvas that
+  app.js draws it on with vis-network, loaded only then. In the whole
+  collection, a click on a node brings out its connections. -#}
+{% if problem %}
+<p class="graph-view__problem">{{ problem }}</p>
+{% elif drawn %}
+{% set view = drawn.view %}
+{% set link = root ~ "/knowledge-graph/" ~ project.id ~ "/graphs/" ~ drawn.key %}
+{% set whole = not drawn.options.paper_id %}
+<div class="graph-view__bar">
+  <ul class="facts" aria-label="The graph shown">
+    <li>{{ "{:,}".format(view.nodes) }} {{ "node" if view.nodes == 1 else "nodes" }}</li>
+    <li>{{ "{:,}".format(view.edges) }} {{ "connection" if view.edges == 1 else "connections" }}</li>
+    <li>{{ "{:,}".format(view.papers) }} {{ "paper" if view.papers == 1 else "papers" }}</li>
+  </ul>
+  <div class="graph-view__actions">
+    <button class="text-button" type="button" data-graph-fit>Fit to view</button>
+    <a class="text-button" href="{{ link }}.html" download>{{ icon("download", size="sm") }} Graph (HTML)</a>
+  </div>
+</div>
+{#- vis-network empties its container, so the status line is beside it. -#}
+<div class="graph-view__stage">
+  <div class="graph-view__canvas" data-graph="{{ link }}.json" data-vis="{{ static('vendor/vis-network-9.1.2/vis-network.min.js') }}" data-vis-css="{{ static('vendor/vis-network-9.1.2/vis-network.min.css') }}"{% if whole %} data-graph-focus{% endif %} role="img" aria-label="The graph of {{ project.name }}: {{ view.nodes }} nodes and {{ view.edges }} connections"></div>
+  <p class="graph-view__status" data-graph-status>Drawing the graph</p>
+</div>
+<p class="field__help">Point at a node for its details; drag the background to move, scroll to zoom, or drag a node to place it.{% if whole %} Click a node to bring out its direct connections; click empty space to see all again.{% endif %}</p>
+{% endif %}

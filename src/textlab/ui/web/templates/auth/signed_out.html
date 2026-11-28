@@ -1,0 +1,16 @@
+{% extends "auth/layout.html" %}
+{% block title %}Signed out{% endblock %}
+{% block content %}
+<h1 class="auth__title">Signed out</h1>
+<p class="auth__text">
+  This browser is signed out of the session. The session itself still runs,
+  with your jobs and results, until it ends or you delete it in
+  Open OnDemand. Use <strong>Connect to Text Lab</strong> on its card to
+  come back.
+</p>
+{% if settings.public_host %}
+<a class="btn btn--primary btn--block" href="https://{{ settings.public_host }}/pun/sys/dashboard/batch_connect/sessions">
+  My Interactive Sessions {{ icon("arrow-up-right", size="sm") }}
+</a>
+{% endif %}
+{% endblock %}

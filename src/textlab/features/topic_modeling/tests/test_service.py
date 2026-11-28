@@ -21,8 +21,11 @@ from textlab.features.topic_modeling import embeddings, service, worker
 from textlab.features.topic_modeling.models import (
     Algorithm,
     Notice,
+    TopicKeywords,
     TopicModelingConfig,
     TopicModelingResult,
+    TopicOverview,
+    TopicSummary,
 )
 
 
@@ -62,8 +65,25 @@ def test_a_configuration_survives_the_trip_to_the_worker():
     assert TopicModelingConfig.from_dict(data) == config
 
 
+OVERVIEW = TopicOverview(
+    documents=4,
+    outliers=1,
+    topics=[
+        TopicSummary(1, ["tax", "budget"], [1.0, 0.5], 2, ["taxes rise"]),
+        TopicSummary(2, ["cup"], [1.0], 1, ["the cup"]),
+    ],
+    similarity=[[1.0, 0.2], [0.2, 1.0]],
+    positions=[[0.1, 0.5], [0.9, 0.5]],
+    time_labels=["2020", "2021"],
+    over_time=[[1, 1], [0, 1]],
+)
+
+
 def test_a_result_survives_the_trip_from_the_worker():
-    result = make_result()
+    result = make_result(overview=OVERVIEW)
+    data = pickle.loads(pickle.dumps(result.to_dict()))
+    rebuilt = TopicModelingResult.from_dict(data, b"zip")
+    assert rebuilt.overview == OVERVIEW
     rebuilt = TopicModelingResult.from_dict(result.to_dict(), b"zip")
     assert rebuilt.algorithm is Algorithm.BERTOPIC
     assert rebuilt.topic_df["Topic"].tolist() == ["Outlier", 1]
@@ -83,6 +103,25 @@ def test_an_empty_table_is_refused():
 def test_fully_empty_rows_are_dropped():
     table = service.load_table("data.csv", b"Text,Year\nhello,2020\n,\n")
     assert len(table) == 1
+
+
+def test_a_table_is_described_for_choosing_its_columns():
+    table = service.load_table(
+        "data.csv",
+        b"Id,Answer,Year\n1,a long answer about taxes,2020\n2,short,2021\n",
+    )
+    summary = service.summarize_table(table)
+    assert summary.documents == 2
+    assert summary.columns == ("Id", "Answer", "Year")
+    assert summary.text_column == "Answer"
+    assert summary.preview[0] == ("1", "a long answer about taxes", "2020")
+
+
+def test_long_cells_are_shortened_in_the_preview():
+    table = pd.DataFrame({"Text": ["x" * 200], "Note": [None]})
+    (row,) = service.summarize_table(table).preview
+    assert len(row[0]) == 80 and row[0].endswith("\u2026")
+    assert row[1] == ""
 
 
 def test_an_archive_without_text_files_is_refused():
@@ -324,3 +363,97 @@ def test_the_worker_writes_the_zip_and_returns_the_rest(tmp_path, monkeypatch):
     assert seen == [(1, Algorithm.BERTOPIC, "data.csv")]
     assert (tmp_path / "out.zip").read_bytes() == b"zip"
     assert "zip_bytes" not in data
+
+
+def test_a_run_draws_its_overview(modeling, monkeypatch):
+    import numpy as np
+
+    def run_pipeline(df, config, **kwargs):
+        return {
+            "topic_df": pd.DataFrame(
+                {"Topic": [1, 2], "Count": [3, 2], "Keywords": ["a", "b"]}
+            ),
+            "docs_df": df.assign(Dominant_Topic=[1, 1, 1, 2, 2]),
+            "dashboard_assets": {},
+            "topic_keywords": [["a"], ["b"]],
+            "topics": [
+                TopicKeywords(1, ["a"], 3, [0.4]),
+                TopicKeywords(2, ["b"], 2, [0.2]),
+            ],
+            "topic_vectors": np.eye(2),
+            "document_vectors": np.eye(5)[:, :3],
+            "document_topics": np.full((5, 2), 0.5),
+        }
+
+    pipeline = sys.modules["textlab.features.topic_modeling.pipeline"]
+    monkeypatch.setattr(pipeline, "run_topic_modeling_pipeline", run_pipeline)
+    config = TopicModelingConfig(
+        algorithm=Algorithm.LDA, language="English", text_column="Text"
+    )
+    table = pd.DataFrame({"Text": list("abcde")})
+    result = service.analyze_table(table, config, source_name="data.csv")
+    found = TopicModelingResult.from_dict(result.to_dict(), b"zip").overview
+    assert [topic.documents for topic in found.topics] == [3, 2]
+    assert found.similarity == [[1.0, 0.0], [0.0, 1.0]]
+    assert found.topics[0].examples == ["a", "b", "c"]
+    assert found.topics[0].mixtures[0] == [[0, 0.5], [1, 0.5]]
+    assert len(found.hierarchy.order) == 2
+    assert len(found.document_map.points) == 5
+
+
+def test_a_broken_overview_keeps_the_rest_of_the_run(modeling, monkeypatch):
+    def run_pipeline(df, config, **kwargs):
+        return {
+            "topic_df": pd.DataFrame({"Topic": [1], "Keywords": ["a"]}),
+            "docs_df": df,
+            "dashboard_assets": {},
+            "topic_keywords": [["a"]],
+            "topics": "not topics",
+        }
+
+    pipeline = sys.modules["textlab.features.topic_modeling.pipeline"]
+    monkeypatch.setattr(pipeline, "run_topic_modeling_pipeline", run_pipeline)
+    config = TopicModelingConfig(
+        algorithm=Algorithm.LDA, language="English", text_column="Text"
+    )
+    result = service.analyze_table(
+        pd.DataFrame({"Text": list("abcde")}), config, source_name="d.csv"
+    )
+    assert result.overview is None
+    assert "could not be drawn" in result.notices[-1].message
+    assert result.zip_bytes
+
+
+def zip_with(members):
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        for name, data in members.items():
+            archive.writestr(name, data)
+    return buffer.getvalue()
+
+
+def test_a_result_is_saved_with_its_downloads(tmp_path):
+    result = make_result(
+        overview=OVERVIEW,
+        zip_bytes=zip_with(
+            {
+                "document_topics.csv": "Text,Dominant_Topic\na,1\n",
+                "topic_keywords.csv": "Topic,Keywords\n1,tax\n",
+                "run_configuration.txt": "settings",
+                "topic_barchart.html": "<html></html>",
+            }
+        ),
+    )
+    saved = service.save_result(result, "answers.xlsx", tmp_path)
+    assert [(item.name, item.listed) for item in saved.files] == [
+        ("answers_topics.zip", True),
+        ("answers_document_topics.csv", True),
+        ("answers_topic_keywords.csv", True),
+        ("answers_run_report.txt", True),
+    ]
+    assert (tmp_path / "answers_run_report.txt").read_text() == "settings"
+    assert saved.columns == ("Topic", "Count", "Keywords")
+    assert saved.rows == (("Outlier", 3.0, "a, b"), (1, "", "c"))
+    assert saved.overview == OVERVIEW
+    assert saved.metrics == {"Topic Diversity": 0.5, "Coherence (C_v)": None}
+    assert saved.notices == (Notice("warning", "careful"),)

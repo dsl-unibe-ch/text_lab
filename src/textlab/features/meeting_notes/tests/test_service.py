@@ -212,3 +212,100 @@ def test_summary_document_layout():
     assert "- point [^1]" in document
     assert "[^1]: [01:02] Anna: hi" in document
     assert document.endswith("## Full Transcript\n\n[01:02] Anna: hi\n")
+
+
+# ---------------------------------------------------------------------------
+# summarize: one call for interfaces
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def loaded(monkeypatch):
+    """Pretend the model is loaded, so no loading message comes first."""
+    monkeypatch.setattr(service, "is_model_loaded", lambda name: True)
+
+
+def test_summarize_streams_a_short_transcript_in_one_request(
+    fake_chat, loaded
+):
+    updates, texts = [], []
+    summary = service.summarize(
+        "m",
+        _segments("hi", "yes"),
+        "general",
+        on_progress=updates.append,
+        on_text=texts.append,
+    )
+    assert summary == "sumnotes 1"
+    assert len(fake_chat) == 1
+    assert [u.message for u in updates] == ["Writing the summary"]
+    assert texts[-1] == summary
+
+
+def test_summarize_chunks_a_long_transcript(fake_chat, loaded, monkeypatch):
+    monkeypatch.setattr(service, "needs_chunking", lambda segments: True)
+    monkeypatch.setattr(
+        service, "_group_by_budget", lambda lines, budget: [[x] for x in lines]
+    )
+    updates = []
+    summary = service.summarize(
+        "m", _segments("a", "b"), "general", on_progress=updates.append
+    )
+    # Two chunks, then the synthesis, streamed.
+    assert len(fake_chat) == 3
+    assert summary == "sumnotes 3"
+    assert updates[-1].message == (
+        "Writing the summary from the notes of all parts"
+    )
+    assert updates[-1].fraction == pytest.approx(2 / 3)
+
+
+def test_summarize_shows_the_text_as_it_grows(monkeypatch, loaded):
+    tokens = ["x" * 150] * 4
+    monkeypatch.setattr(
+        service, "get_summary_stream", lambda *args: iter(tokens)
+    )
+    texts = []
+    service.summarize("m", _segments("hi"), "general", on_text=texts.append)
+    assert [len(text) for text in texts] == [300, 600, 600]
+
+
+def test_summarize_stops_when_cancelled(monkeypatch, loaded):
+    import threading
+
+    from textlab.common.progress import CancelledError
+
+    cancel = threading.Event()
+    closed = []
+
+    def stream(*args):
+        try:
+            yield "one"
+            cancel.set()
+            yield "two"
+            yield "three"
+        finally:
+            closed.append(True)
+
+    monkeypatch.setattr(service, "get_summary_stream", stream)
+    with pytest.raises(CancelledError):
+        service.summarize("m", _segments("hi"), "general", cancel=cancel)
+    assert closed == [True]
+
+
+def test_summarize_says_when_the_model_loads_first(fake_chat, monkeypatch):
+    monkeypatch.setattr(service, "is_model_loaded", lambda name: False)
+    updates = []
+    service.summarize(
+        "big:70b", _segments("hi"), "general", on_progress=updates.append
+    )
+    assert updates[0].message.startswith("Loading big:70b into GPU memory")
+
+
+def test_the_models_follow_the_gpu(monkeypatch):
+    monkeypatch.setattr(service, "_gpu_name", lambda: "NVIDIA H100 80GB")
+    large = service.summary_models()
+    monkeypatch.setattr(service, "_gpu_name", lambda: "NVIDIA RTX 4090")
+    small = service.summary_models()
+    assert small and large
+    assert set(small) != set(large)

@@ -1,0 +1,21 @@
+{#- Top2Vec's word clouds: for each topic, its words sized by how close
+  they lie to it, and its example documents. -#}
+{% from "topic_modeling/macros.html" import examples %}
+<ol class="topic-cards">
+  {% for topic in topics %}
+  <li class="topic-card" data-region="{{ topic.region }}">
+    <div class="topic-card__head">
+      <span class="label">Topic {{ topic.topic }}</span>
+      <span class="label topic__size">{{ "{:,}".format(topic.documents) }} · {{ "%.0f" | format(topic.share * 100) }}%</span>
+    </div>
+    {% if topic.cloud %}
+    <p class="cloud" aria-label="Words of topic {{ topic.topic }}, the closest first">
+      {% for word, size in topic.cloud %}<span class="cloud__word cloud__word--{{ size }}">{{ word }}</span> {% endfor %}
+    </p>
+    {% else %}
+    <h4 class="topic-card__title">{{ topic.title }}</h4>
+    {% endif %}
+    {{ examples(topic) }}
+  </li>
+  {% endfor %}
+</ol>

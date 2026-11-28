@@ -1,0 +1,141 @@
+{#- A document read by the automatic pipeline, inside its record
+  (job.result is a Recognized): each page beside its text, the regions
+  outlined on the page (pointing at one marks it in the text too), then
+  the tables, the figures and the models used. The record's file listing
+  below holds the downloads. -#}
+{% from "components/macros.html" import notice, spec %}
+{% from "ocr/macros.html" import pager_bar %}
+{% set recognized = job.result %}
+{% set document = recognized.document %}
+{% set pages = document.pages %}
+{% set files = root ~ "/jobs/" ~ job.id ~ "/files/" %}
+<div class="result ocr-result">
+  <ul class="facts" aria-label="About the result">
+    <li>{{ pages | length }} page{{ "s" if pages | length != 1 }}</li>
+    {% if document.text_layer_pages %}<li>{{ document.text_layer_pages }} read from {{ "its" if document.text_layer_pages == 1 else "their" }} text layer</li>{% endif %}
+    {% if pages | length - document.text_layer_pages %}<li>{{ pages | length - document.text_layer_pages }} read by the model</li>{% endif %}
+    {% for count in recognized.counts[:4] %}<li>{{ count }}</li>{% endfor %}
+  </ul>
+
+  {% for remark in recognized.notices %}
+  {% call notice("warning") %}<p>{{ remark }}</p>{% endcall %}
+  {% endfor %}
+
+  <div class="tabs">
+    <div class="tabs__list" role="tablist" aria-label="Result of {{ job.title }}">
+      <button class="tabs__tab" type="button" role="tab" id="{{ job.id }}-tab-pages" aria-selected="true" aria-controls="{{ job.id }}-pages">Pages</button>
+      <button class="tabs__tab" type="button" role="tab" id="{{ job.id }}-tab-tables" aria-selected="false" aria-controls="{{ job.id }}-tables" tabindex="-1">Tables ({{ document.tables | length }})</button>
+      <button class="tabs__tab" type="button" role="tab" id="{{ job.id }}-tab-figures" aria-selected="false" aria-controls="{{ job.id }}-figures" tabindex="-1">Figures ({{ document.figures | length }})</button>
+      <button class="tabs__tab" type="button" role="tab" id="{{ job.id }}-tab-models" aria-selected="false" aria-controls="{{ job.id }}-models" tabindex="-1">Models</button>
+    </div>
+
+    <div class="tabs__panel" role="tabpanel" id="{{ job.id }}-pages" aria-labelledby="{{ job.id }}-tab-pages">
+      <div class="pager" data-pager>
+        {{ pager_bar(job.id, pages) }}
+
+        {% for item in pages %}
+        <section class="ocr-page" data-pager-page="{{ loop.index0 }}" aria-label="Page {{ item.number }}"{% if not loop.first %} hidden{% endif %}>
+          <div class="ocr-page__scan">
+            {% if item.image %}
+            <div class="scan">
+              <img class="scan__image" src="{{ files }}{{ item.image | urlencode }}" width="{{ item.width }}" height="{{ item.height }}" alt="Page {{ item.number }} as an image" loading="lazy">
+              <svg class="scan__boxes" viewBox="0 0 {{ item.width }} {{ item.height }}" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+                {% for region in item.regions if region.box %}
+                <rect class="box rt-{{ region.type }}" x="{{ '%.1f' | format(region.box[0]) }}" y="{{ '%.1f' | format(region.box[1]) }}" width="{{ '%.1f' | format(region.box[2]) }}" height="{{ '%.1f' | format(region.box[3]) }}" data-region="{{ job.id }}-{{ region.id }}"><title>{{ recognized.label(region.type) }}</title></rect>
+                {% endfor %}
+              </svg>
+            </div>
+            {% set kinds = recognized.types(item) %}
+            {% if kinds %}
+            <ul class="legend" aria-label="Outlined on the page">
+              {% for kind in kinds %}<li class="rt-{{ kind }}">{{ recognized.label(kind) }}</li>{% endfor %}
+            </ul>
+            {% endif %}
+            {% else %}
+            <p class="muted">There is no image of this page.</p>
+            {% endif %}
+            <p class="label ocr-page__route">{{ "Read from its text layer" if item.text_layer else "Read by the recognition model" }}</p>
+          </div>
+
+          <div class="ocr-page__text">
+            {% for region in item.regions %}
+            {% if region.text or region.html or region.image %}
+            <div class="ocr-block rt-{{ region.type }}" data-region="{{ job.id }}-{{ region.id }}">
+              <span class="ocr-block__type">{{ recognized.label(region.type) }}</span>
+              <div class="ocr-block__body">
+                {% if region.type == "title" %}
+                <p class="ocr-block__title">{{ region.text }}</p>
+                {% elif region.type == "table" and region.html %}
+                {#- Sanitized by the service: table tags only, no attributes but spans. -#}
+                <div class="table-wrap ocr-table">{{ region.html | safe }}</div>
+                {% elif region.type == "formula" %}
+                <pre class="ocr-latex">{{ region.latex or region.text }}</pre>
+                {% elif region.image %}
+                <figure class="ocr-figure">
+                  <img src="{{ files }}{{ region.image | urlencode }}" alt="{{ region.text or recognized.label(region.type) }}" loading="lazy">
+                  {% if region.text %}<figcaption>{{ region.text }}</figcaption>{% endif %}
+                </figure>
+                {% if region.description %}<p class="ocr-generated"><span class="label">Generated description</span> {{ region.description }}</p>{% endif %}
+                {% elif region.type == "checkbox" %}
+                <p class="ocr-mark"><span class="mark mark--{{ region.mark }}" role="img" aria-label="{{ region.mark | capitalize }}"></span> {{ region.text }}</p>
+                {% elif region.type in ("header", "footer", "footnote", "reference") %}
+                <p class="ocr-block__small">{{ region.text }}</p>
+                {% else %}
+                <p>{{ region.text }}</p>
+                {% endif %}
+              </div>
+            </div>
+            {% endif %}
+            {% else %}
+            <p class="muted">No text was found on this page.</p>
+            {% endfor %}
+          </div>
+        </section>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="tabs__panel stack-lg" role="tabpanel" id="{{ job.id }}-tables" aria-labelledby="{{ job.id }}-tab-tables" hidden>
+      {% for table in document.tables %}
+      <div class="ocr-table-item">
+        <div class="document__head">
+          <h4 class="document__name">Table {{ loop.index }} · page {{ table.page }}</h4>
+          {% if table.csv %}<a class="text-button" href="{{ files }}{{ table.csv | urlencode }}" download>{{ icon("download", size="sm") }} CSV</a>{% endif %}
+        </div>
+        {% if table.region.html %}
+        <div class="table-wrap ocr-table">{{ table.region.html | safe }}</div>
+        {% else %}
+        <p>{{ table.region.text }}</p>
+        {% endif %}
+      </div>
+      {% else %}
+      <p class="muted">No tables were found in this document.</p>
+      {% endfor %}
+    </div>
+
+    <div class="tabs__panel" role="tabpanel" id="{{ job.id }}-figures" aria-labelledby="{{ job.id }}-tab-figures" hidden>
+      {% if document.figures %}
+      <ul class="figure-grid">
+        {% for number, region in document.figures %}
+        <li class="figure-card">
+          <img src="{{ files }}{{ region.image | urlencode }}" alt="{{ region.text or recognized.label(region.type) }}" loading="lazy">
+          <p class="label">{{ recognized.label(region.type) }} · page {{ number }}</p>
+          {% if region.text %}<p class="figure-card__caption">{{ region.text }}</p>{% endif %}
+          {% if region.description %}
+          <p class="ocr-generated"><span class="label">Generated description{% if region.described_by %} · {{ region.described_by }}{% endif %}</span> {{ region.description }}</p>
+          {% if region.visible_text %}<p class="ocr-generated"><span class="label">Text in the figure</span> {{ region.visible_text }}</p>{% endif %}
+          {% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="muted">No figures, charts or seals were found.</p>
+      {% endif %}
+    </div>
+
+    <div class="tabs__panel stack" role="tabpanel" id="{{ job.id }}-models" aria-labelledby="{{ job.id }}-tab-models" hidden>
+      {{ spec(document.models, mono=true) }}
+      <p class="muted">For citation. Printed text is transcribed by the recognition; figure descriptions are generated by a vision model and are not part of the document. The same list is in <code>models_used.txt</code> in the Everything download, and under <code>models</code> in the JSON.</p>
+    </div>
+  </div>
+</div>

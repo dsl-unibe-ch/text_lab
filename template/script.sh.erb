@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 #
-# Start a Text Lab session: Ollama and the Streamlit app inside the Apptainer
-# image. Open OnDemand runs this script in the session's job directory.
+# Start a Text Lab session: Ollama and the app inside the Apptainer image.
+# Open OnDemand runs this script in the session's job directory.
 #
 # Nothing here is specific to a cluster: site values (paths, images, model
 # stores, host names) come from the site configuration, deploy/site.env,
-# whose live copy is read from TEXT_LAB_SITE_ENV below.
+# whose live copy config.sh loads.
 
 set -euo pipefail
 
@@ -15,26 +15,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # 1. Configuration
 # ----------------------------------------------------------------------------
 
-# Optional developer overrides for a sandbox app, e.g. TEXT_LAB_SRC pointing
-# at a working tree or TEXT_LAB_SITE_ENV at the repository's site.env. Open
-# OnDemand copies template/ into the job directory, so template/dev.env ends
-# up next to this script. It is gitignored and never part of a production
-# deployment; see template/dev.env.example.
-if [[ -f "$SCRIPT_DIR/dev.env" ]]; then
-  echo "Loading developer overrides from $SCRIPT_DIR/dev.env"
-  # shellcheck source=/dev/null
-  source "$SCRIPT_DIR/dev.env"
-fi
-
-# The site configuration. This default is the only site-specific value in
-# the files the HPC team deploys.
-TEXT_LAB_SITE_ENV="${TEXT_LAB_SITE_ENV:-/storage/research/dsl_shared/solutions/ondemand/text_lab/site.env}"
-if [[ ! -f "$TEXT_LAB_SITE_ENV" ]]; then
-  echo "Error: site configuration not found at $TEXT_LAB_SITE_ENV" >&2
-  exit 1
-fi
+# The developer overrides (sandbox apps only) and the site configuration.
+# config.sh also holds the location of the live site configuration
+# (TEXT_LAB_SITE_ENV); before.sh.erb reads the same files.
 # shellcheck source=/dev/null
-source "$TEXT_LAB_SITE_ENV"
+source "$SCRIPT_DIR/config.sh"
 
 missing=()
 for name in TEXT_LAB_SRC TL_CONTAINER TEXT_LAB_OOD_HOST \
@@ -46,7 +31,7 @@ if (( ${#missing[@]} )); then
   echo "Error: $TEXT_LAB_SITE_ENV does not set: ${missing[*]}" >&2
   exit 1
 fi
-if [[ ! -f "$TEXT_LAB_SRC/textlab/ui/streamlit/Home.py" ]]; then
+if [[ ! -f "$TEXT_LAB_SRC/textlab/__init__.py" ]]; then
   echo "Error: TEXT_LAB_SRC=$TEXT_LAB_SRC does not hold the textlab package" >&2
   exit 1
 fi
@@ -100,9 +85,9 @@ trap 'exit 130' INT
 
 # Logs stay with the session, in the user's own job directory next to
 # output.log, where the user can find them and send them with a problem
-# report (see the user guide).
+# report (see the user guide). The app's log is streamlit.log or
+# textlab.log, depending on the interface.
 TEXT_LAB_LOG_DIR="${TEXT_LAB_LOG_DIR:-$SCRIPT_DIR}"
-STREAMLIT_LOG="$TEXT_LAB_LOG_DIR/streamlit.log"
 OLLAMA_LOG="$TEXT_LAB_LOG_DIR/ollama.log"
 
 # ----------------------------------------------------------------------------
@@ -132,7 +117,8 @@ echo "Site configuration: $TEXT_LAB_SITE_ENV"
 echo "Source tree: $TEXT_LAB_SRC"
 echo "Container: $TL_CONTAINER"
 echo "Workspace: $TEXT_LAB_WORKDIR"
-echo "Logs: $STREAMLIT_LOG, $OLLAMA_LOG"
+echo "Interface: ${TEXT_LAB_UI:-streamlit}"
+echo "Logs: $TEXT_LAB_LOG_DIR"
 echo "Ollama host: $OLLAMA_HOST"
 echo "Grobid port: $GROBID_PORT"
 echo "Assigned GPU(s): $CUDA_VISIBLE_DEVICES"
@@ -157,6 +143,29 @@ if [[ -n "${TEXT_LAB_EXTRA_BINDS:-}" ]]; then
   binds+=(--bind "$TEXT_LAB_EXTRA_BINDS")
 fi
 
+# The launcher starts the interface that TEXT_LAB_UI names, Streamlit by
+# default, and writes its log. Releases from before the launcher start
+# Streamlit directly, as this script did then, so a rollback to one works.
+PYTHON="/opt/conda/envs/text_lab_main/bin/python"
+if [[ -f "$TEXT_LAB_SRC/textlab/ui/launch.py" ]]; then
+  start_app="$PYTHON -u -m textlab.ui.launch \
+    --port '$TEXT_LAB_PORT' \
+    --base-path '$SERVER_BASEURLPATH' \
+    --public-host '$TEXT_LAB_OOD_HOST' \
+    --log-dir '$TEXT_LAB_LOG_DIR'"
+else
+  start_app="$PYTHON -u -m streamlit run '$TEXT_LAB_SRC/textlab/ui/streamlit/Home.py' \
+    --server.address 0.0.0.0 \
+    --server.port '$TEXT_LAB_PORT' \
+    --server.baseUrlPath '$SERVER_BASEURLPATH' \
+    --server.headless true \
+    --server.maxUploadSize 10000 \
+    --browser.serverAddress '$TEXT_LAB_OOD_HOST' \
+    --browser.gatherUsageStats false \
+    --logger.level info \
+    --client.showErrorDetails true > '$TEXT_LAB_LOG_DIR/streamlit.log' 2>&1"
+fi
+
 # Exported variables, including the app settings from the site
 # configuration and the session TOKEN from before.sh, pass into the image.
 apptainer exec \
@@ -178,13 +187,4 @@ apptainer exec \
   "$TL_CONTAINER" \
   bash -c "ollama serve > '$OLLAMA_LOG' 2>&1 & \
            while ! curl -s http://$OLLAMA_HOST/api/tags > /dev/null; do sleep 1; done && \
-           /opt/conda/envs/text_lab_main/bin/python -u -m streamlit run '$TEXT_LAB_SRC/textlab/ui/streamlit/Home.py' \
-             --server.address 0.0.0.0 \
-             --server.port '$TEXT_LAB_PORT' \
-             --server.baseUrlPath '$SERVER_BASEURLPATH' \
-             --server.headless true \
-             --server.maxUploadSize 10000 \
-             --browser.serverAddress '$TEXT_LAB_OOD_HOST' \
-             --browser.gatherUsageStats false \
-             --logger.level info \
-             --client.showErrorDetails true > '$STREAMLIT_LOG' 2>&1"
+           $start_app"

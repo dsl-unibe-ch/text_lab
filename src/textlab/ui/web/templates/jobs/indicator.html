@@ -1,0 +1,14 @@
+{#- The job indicator in the status bar: how many jobs wait or run, and a
+  list of all jobs of the session. Its count and list are replaced from the
+  event stream (jobs/indicator_parts.html). -#}
+<div class="jobs-menu">
+  <button class="statusbar__button" type="button" data-popover="jobs-panel" aria-expanded="false" aria-controls="jobs-panel">
+    <span class="statusbar__key">Jobs</span>
+    {% with oob = false %}{% include "jobs/indicator_count.html" %}{% endwith %}
+  </button>
+  <div class="popover" id="jobs-panel" hidden>
+    <p class="label popover__title">Jobs in this session</p>
+    {% with oob = false %}{% include "jobs/indicator_list.html" %}{% endwith %}
+    <p class="popover__note">Results stay here until you remove them or the session ends.</p>
+  </div>
+</div>

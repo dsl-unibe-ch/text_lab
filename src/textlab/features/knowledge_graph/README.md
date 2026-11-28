@@ -3,19 +3,30 @@
 Interactive graphs of a collection of scientific papers: Grobid parses the
 PDFs into metadata, references and text, an LLM extracts research topics
 from each abstract, and the papers are drawn with their authors, topics and
-citations. Used by the Knowledge Graph page.
+citations. Used by the Knowledge Graph page, in the web UI and in
+Streamlit.
 
 ## Pipeline
 
-The backend has three stages; each reads and writes a corpus folder in a
-location the user chooses. The page presents one **Build knowledge graph**
-action and opens saved projects directly into an explorer. PDF extractions
+The backend has three stages; each reads and writes a corpus folder (a
+*project*) in a location the user chooses. The pages present one **Build**
+action and open saved projects directly into an explorer. PDF extractions
 are reused by filename; topic extraction processes the collection again
 with the chosen model. Optional updates and table repair live in Project
 tools. Opening saved results requires neither the source PDFs nor running
 Grobid or model services. New projects accept either a PDF/ZIP upload or a
 cluster folder. Uploads require a project name and save location; their PDFs
 are staged privately, while the corpus remains in the chosen save location.
+
+`projects.build_project` runs the first two stages in the caller's thread,
+as a web UI job does: it starts Grobid, reads the new PDFs, and extracts
+the topics with a `TopicModel` (the session's Ollama model, downloaded
+first if missing, or GPUStack's with an API key). If only the topics fail,
+it returns the counts with `topic_error`, as the papers are saved. Both
+stages can be stopped between papers (`cancel`): the papers read until
+then are kept with the tables, and the topics before stay.
+`projects.read_project` reads a project back (`Project`: papers, records
+with topics, whether the topics are of another set of papers).
 
 1. **Corpus** (`corpus.build_corpus`): every PDF in the papers folder that
    is not in the corpus yet (matched by file name) is sent to the Grobid
@@ -32,6 +43,11 @@ are staged privately, while the corpus remains in the chosen save location.
    cited papers and cited authors) or the graph of all papers, where shared
    authors, topics and categories connect papers. Graphs are NetworkX
    graphs drawn by Pyvis as a self-contained HTML page (vis.js embedded).
+   `graphs.draw_graph` gives one view (`GraphOptions`: one paper or the
+   whole collection, the node types, the least confidence, the papers) as
+   a `GraphView`: the nodes, edges and options vis.js draws, the counts,
+   and the page to download. Edges from topics to their categories and to
+   cited authors are dashed (`dashes`, which vis.js reads).
 
 Grobid runs as its own Apptainer container, started on a build or update
 (detached, so page reloads find it running); the models run in Ollama or on
@@ -47,7 +63,9 @@ Notes. `common/models.json` defines the lists for standard and high-memory
 GPUs; `models.local.json` can override them. The first configured model is
 the initial choice, and an old selection outside the current list is reset.
 Installed Ollama models are not used as the source of selectable models.
-GPUStack continues to use its separately configured fixed model.
+GPUStack continues to use its separately configured fixed model. The web
+UI takes the same list through `model_options()` (the shared
+`common.model_config.ModelOptions`, with the GPU's name).
 
 ## Public API
 
@@ -55,14 +73,18 @@ Interfaces use `service.py`:
 
 | Name | Purpose |
 |---|---|
-| `ensure_grobid_server()`, `GrobidError` | Start Grobid, or say why it cannot run |
-| `staged_papers(name, data)`, `project_folder_name(name)` | Stage a PDF/ZIP with cleanup; validate an uploaded project name |
+| `ensure_grobid_server()`, `GrobidError`, `grobid_problem()` | Start Grobid, or say why it cannot run; say so without starting it |
+| `build_project(pdfs, corpus, topic_model, on_progress=, cancel=)`, `BuildSummary`, `TopicModel` | Stages 1 and 2 in one go |
+| `extract_topics_with(corpus, topic_model, ...)` | Stage 2 with the session's model (downloaded if missing) or GPUStack's |
+| `read_project(folder)`, `Project`, `is_project(folder)`, `project_name(folder)` | A project's papers and topics, read back |
+| `stage_papers(upload, folder, name)`, `staged_papers(name, data)`, `project_folder_name(name)` | Stage a PDF/ZIP on disk or in memory; validate a project name |
 | `list_pdfs(folder)`, `corpus_folder_name(folder)`, `find_corpora(location, required=)` | Papers and corpus folders |
 | `build_corpus(pdfs, corpus, on_progress=)` | Step 1; returns a `CorpusSummary` |
 | `build_corpus_table(corpus)` | Step 1b; the corpus table as a DataFrame |
-| `ollama_models()`, `ollama_client()`, `gpustack_client(api_key)`, `GPUSTACK_MODEL` | Model choice |
+| `ollama_models()`, `model_options()`, `server_ready()`, `gpustack_ready()`, `ollama_client()`, `gpustack_client(api_key)`, `GPUSTACK_MODEL` | Model choice |
 | `extract_topics(corpus, client, model, on_progress=)` | Step 2; returns a `TopicSummary` |
 | `read_records(path)`, `topics_json(corpus)` | The table with topics, as records or a JSON download |
+| `draw_graph(records, options)`, `GraphOptions`, `GraphView` | Step 3 for an interface: one view, with its counts and download |
 | `build_paper_ego_graph(record, all_records=, ...)`, `build_full_corpus_graph(records, ...)` | Step 3; `(graph, network)` |
 | `save_graph_html(network, path)`, `count_nodes(graph, node_type)` | Graph page and statistics |
 
@@ -84,7 +106,9 @@ service.save_graph_html(network, corpus / "full_corpus_graph.html")
 
 ```
 knowledge_graph/
-├── service.py  # the API above, including temporary PDF/ZIP staging
+├── service.py  # the API above
+├── projects.py # a build in one go, reading a project back
+├── staging.py  # uploaded PDFs and ZIPs, staged
 ├── models.py   # CorpusSummary, TopicSummary
 ├── grobid.py   # the Grobid server
 ├── tei.py      # metadata, references and text from TEI XML
@@ -103,12 +127,14 @@ written.
 | What | Where | Removed |
 |---|---|---|
 | The corpus: per paper `P0001/` etc. with `fulltext.tei.xml`, `fulltext.txt`, `metadata.json` or `error.txt`; `corpus_metadata.json`, `corpus_table.csv`, `corpus_table.jsonl`, `corpus_table.with_topics.jsonl` | `<papers folder>_project_corpus` in the location the user chooses | When the user deletes it |
-| Graph pages (`<paper>_ego_graph.html`, `full_corpus_graph.html`) | The corpus folder | When the user deletes them |
+| Graph pages (`<paper>_ego_graph.html`, `full_corpus_graph.html`), Streamlit page | The corpus folder | When the user deletes them |
 | PDFs Grobid is processing | `grobid` area of the job workspace (Grobid's tmp folder) | When the session ends |
 
 PDFs from cluster folders are read where they are and not copied. Uploaded
 PDFs and ZIP contents use `knowledge_graph/upload-*` in the private job
-workspace, removed after the build attempt, even on errors. ZIP extraction
+workspace (the web UI: the job's inputs), removed after the build attempt,
+even on errors. The web UI writes no graph pages into the corpus folder:
+its view is downloaded as it is shown. ZIP extraction
 uses shared path and size safeguards, ignores non-PDF and macOS metadata
 files, and rejects duplicate PDF basenames (including case variants), since
 corpus reuse is based on filename. PDF bytes must contain a PDF header.
@@ -135,6 +161,10 @@ In `tests/`, without Grobid, models or GPU:
   client, the clients' endpoints.
 - `test_graphs.py`: ego and full graphs of sample records, the HTML page.
 - `test_grobid.py`: starting the server and sending PDFs, with fakes.
+- `test_projects.py`: staging uploads from disk, a build in one go (topics,
+  failed topics, reused and failed papers, stopping), the session's model
+  downloaded or GPUStack's key, reading a project back, views of the
+  graph, Grobid's problem.
 - `test_uploads.py`: PDF/ZIP staging, nested and uppercase filenames, archive
   validation, duplicate basenames, cleanup on success and failure, reuse of
   saved extractions, and project name validation.

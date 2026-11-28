@@ -1,0 +1,30 @@
+{#- A BERTopic run, with BERTopic's own charts: each topic's keyword
+  scores, the topic map, the documents placed by meaning, the hierarchy of
+  topics, the similarity heatmap and, if asked for, the topics over time;
+  and the scores. Expects view, job and topics. -#}
+{% from "topic_modeling/macros.html" import tab, panel %}
+{% set heatmap = view.heatmap(job.id) %}
+{% set tree = view.dendrogram(job.id) %}
+{% set plot = view.document_plot(job.id) %}
+{% set chart = view.trends(job.id) %}
+<div class="tabs">
+  <div class="tabs__list" role="tablist" aria-label="Result of {{ job.title }}">
+    {{ tab(job.id, "topics", "Topics", first=true) }}
+    {% if overview.positions %}{{ tab(job.id, "map", "Topic map") }}{% endif %}
+    {% if plot %}{{ tab(job.id, "documents", "Documents") }}{% endif %}
+    {% if tree %}{{ tab(job.id, "hierarchy", "Hierarchy") }}{% endif %}
+    {% if heatmap %}{{ tab(job.id, "similarity", "Similarity") }}{% endif %}
+    {% if chart %}{{ tab(job.id, "time", "Over time") }}{% endif %}
+    {{ tab(job.id, "quality", "Quality") }}
+  </div>
+  {% call panel(job.id, "topics", first=true) %}
+  {% include "topic_modeling/parts/topic_bars.html" %}
+  <p class="muted">Each bar is a word's c-TF-IDF score, as BERTopic weighs it, relative to the topic's first word. The size counts the documents in the topic.</p>
+  {% endcall %}
+  {% if overview.positions %}{% call panel(job.id, "map") %}{% include "topic_modeling/parts/topic_map.html" %}{% endcall %}{% endif %}
+  {% if plot %}{% call panel(job.id, "documents") %}{% include "topic_modeling/parts/documents.html" %}{% endcall %}{% endif %}
+  {% if tree %}{% call panel(job.id, "hierarchy") %}{% include "topic_modeling/parts/hierarchy.html" %}{% endcall %}{% endif %}
+  {% if heatmap %}{% call panel(job.id, "similarity") %}{% include "topic_modeling/parts/heatmap.html" %}{% endcall %}{% endif %}
+  {% if chart %}{% call panel(job.id, "time") %}{% include "topic_modeling/parts/trends.html" %}{% endcall %}{% endif %}
+  {% call panel(job.id, "quality", class="stack") %}{% include "topic_modeling/metrics.html" %}{% endcall %}
+</div>

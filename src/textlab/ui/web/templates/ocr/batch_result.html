@@ -1,0 +1,38 @@
+{#- A ZIP read by the automatic pipeline, inside its record (job.result is
+  a ReadArchive): an overview of its files. The record's file listing
+  holds the ZIP of the results, a folder per file. -#}
+{% set batch = job.result %}
+<div class="result">
+  <ul class="facts" aria-label="About the result">
+    <li>{{ batch.files | length }} file{{ "s" if batch.files | length != 1 }}</li>
+    <li>{{ batch.pages }} page{{ "s" if batch.pages != 1 }}</li>
+    {% if batch.options.searchable_pdf %}<li>With searchable PDFs</li>{% endif %}
+    {% if batch.options.describe_images %}<li>Figures described</li>{% endif %}
+  </ul>
+  <div class="table-wrap">
+    <table class="table">
+      <caption class="visually-hidden">The files of {{ job.title }}</caption>
+      <thead>
+        <tr>
+          <th scope="col">File</th>
+          <th scope="col" class="table__num">Pages</th>
+          <th scope="col" class="table__num">From text layer</th>
+          <th scope="col">Found</th>
+          <th scope="col" class="table__num">Took</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in batch.files %}
+        <tr>
+          <td class="table__mono">{{ item.name }}</td>
+          <td class="table__num">{{ item.pages }}</td>
+          <td class="table__num">{{ item.text_layer_pages }}</td>
+          <td>{{ batch.counts(item) }}</td>
+          <td class="table__num">{{ item.seconds | duration }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="muted">The ZIP has a folder per file, as in the archive, each with <code>document.md</code>, <code>document.json</code>, the tables as CSV and the figures{% if batch.options.searchable_pdf %}, and <code>document_searchable.pdf</code>{% endif %}. <code>models_used.txt</code> lists the models, for citation.</p>
+</div>

@@ -1,0 +1,20 @@
+{#- The tools as a catalogue: groups, numbers, names and what they do. -#}
+<div class="catalog">
+  {% for group, items in tool_groups %}
+  <div class="catalog__group">
+    <p class="label catalog__group-name">{{ group }}</p>
+    <ul class="catalog__list">
+      {% for tool in items %}
+      <li>
+        <a class="catalog__link" href="{{ root }}{{ tool.path }}">
+          <span class="catalog__num">{{ tool.number }}</span>
+          <span class="catalog__name">{{ tool.label }}</span>
+          <span class="catalog__text">{{ tool.summary }}</span>
+          <span class="catalog__go">{{ icon("arrow-right") }}</span>
+        </a>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endfor %}
+</div>

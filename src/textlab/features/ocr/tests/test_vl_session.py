@@ -8,9 +8,12 @@ which is the very cost these tests exist to keep paid only once.
 import pathlib
 import sys
 import tempfile
+import threading
+import time
 
 import pytest
 
+from textlab.common.progress import CancelledError
 from textlab.features.ocr import vl_session
 
 STUB = '''
@@ -33,6 +36,10 @@ def load():
         fh.write("load\\n")
 
 def answer(images, serving):
+    if os.environ.get("STUB_HANG"):
+        import time
+        print(f"{PROGRESS}0/{len(images)}", flush=True)
+        time.sleep(120)
     for index, image in enumerate(images, start=1):
         print(f"{PROGRESS}{index}/{len(images)}", flush=True)
     if serving and os.environ.get("STUB_DIE_ON") in set(images):
@@ -170,6 +177,51 @@ def test_the_one_shot_worker_still_works_without_a_session(stub):
     assert _loads(counter) == 1
 
 
+def cancelled_soon(seconds=0.5):
+    """A cancel event that a timer sets after ``seconds``."""
+    cancel = threading.Event()
+    threading.Timer(seconds, cancel.set).start()
+    return cancel
+
+
+def test_cancelling_kills_a_resident_worker_at_once(stub, monkeypatch):
+    worker, counter = stub
+    monkeypatch.setenv("STUB_HANG", "1")
+    session = vl_session.VLWorkerSession(
+        backend_python=sys.executable, worker_path=worker
+    )
+    started = time.monotonic()
+    try:
+        with pytest.raises(CancelledError):
+            vl_session.run_vl_worker(
+                [pathlib.Path("a.png")],
+                backend_python=sys.executable,
+                worker_path=worker,
+                session=session,
+                cancel=cancelled_soon(),
+            )
+        assert time.monotonic() - started < 10
+        assert session._proc is None
+        # No fallback to a one-shot worker after a cancel.
+        assert _loads(counter) == 1
+    finally:
+        session.close()
+
+
+def test_cancelling_kills_a_one_shot_worker(stub, monkeypatch):
+    worker, _ = stub
+    monkeypatch.setenv("STUB_HANG", "1")
+    started = time.monotonic()
+    with pytest.raises(CancelledError):
+        vl_session.run_vl_worker(
+            [pathlib.Path("a.png")],
+            backend_python=sys.executable,
+            worker_path=worker,
+            cancel=cancelled_soon(),
+        )
+    assert time.monotonic() - started < 10
+
+
 def test_no_images_never_starts_a_worker(stub):
     worker, counter = stub
     assert (
@@ -218,3 +270,15 @@ def test_close_reaps_a_worker_after_forced_termination():
     assert process.reaped
     assert process.wait_calls == 2
     assert session._proc is None
+
+
+def test_the_worker_runs_with_one_thread_whatever_the_session_says(
+    monkeypatch,
+):
+    # More threads stalled the worker for the whole stall limit.
+    monkeypatch.setenv("OMP_NUM_THREADS", "16")
+    monkeypatch.setenv("MKL_NUM_THREADS", "16")
+    env = vl_session._worker_env(sys.executable)
+    assert env["OMP_NUM_THREADS"] == "1"
+    assert env["MKL_NUM_THREADS"] == "1"
+    assert env["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] == "True"

@@ -11,7 +11,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "textlab"
-version = "3.0.1"
+version = "4.0.0"
 description = "AI and NLP tools for research data, served through Open OnDemand"
 readme = "readme.MD"
 license = "MIT"
@@ -121,3 +121,9 @@ name = "Backend never imports a user interface"
 type = "forbidden"
 source_modules = ["textlab.features", "textlab.common"]
 forbidden_modules = ["streamlit", "textlab.ui"]
+
+[[tool.importlinter.contracts]]
+name = "The web UI never imports Streamlit"
+type = "forbidden"
+source_modules = ["textlab.ui.web"]
+forbidden_modules = ["streamlit", "textlab.ui.streamlit"]

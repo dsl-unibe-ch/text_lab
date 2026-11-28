@@ -1,0 +1,38 @@
+{#- A ZIP of handwritten documents, inside its record (job.result is a
+  HandwritingArchive): an overview of its files and the models used. The
+  record's file listing holds the ZIP of the results, a folder per file. -#}
+{% from "components/macros.html" import spec %}
+{% set batch = job.result %}
+<div class="result">
+  <ul class="facts" aria-label="About the result">
+    <li>{{ batch.files | length }} file{{ "s" if batch.files | length != 1 }}</li>
+    <li>{{ batch.pages }} page{{ "s" if batch.pages != 1 }}</li>
+    <li>{{ batch.lines }} line{{ "s" if batch.lines != 1 }}</li>
+  </ul>
+  <div class="table-wrap">
+    <table class="table">
+      <caption class="visually-hidden">The files of {{ job.title }}</caption>
+      <thead>
+        <tr>
+          <th scope="col">File</th>
+          <th scope="col" class="table__num">Pages</th>
+          <th scope="col" class="table__num">Lines</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in batch.files %}
+        <tr>
+          <td class="table__mono">{{ item.name }}</td>
+          <td class="table__num">{{ item.pages }}</td>
+          <td class="table__num">{{ item.lines }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="stack">
+    <h4 class="label">Models used, for citation</h4>
+    {{ spec(batch.models, mono=true) }}
+    <p class="muted">The ZIP has a folder per file, as in the archive, each with the text, the JSON with each line's box, and a PAGE XML file per page. <code>models_used.txt</code> lists the models.</p>
+  </div>
+</div>

@@ -71,6 +71,12 @@ Modeling writes the table it hands to its worker, and the result ZIP, to
 `topic_modeling/run-*`. Visualize Data keeps each run's table and charts in
 `visualization/run-*`, and Chat a conversation's table and charts in
 `chat/conversation-*`, removed when the user starts a new chat.
+The web UI keeps each job in `web-jobs/<id>`: its uploads in `inputs/`,
+removed when the job ends, and its results in `outputs/` (for a
+transcription the exports, their ZIP and the MP3 its player plays),
+removed when the user removes the job or the server stops. A transcript
+review reads recordings and tables that the user names by their paths on
+the cluster where they are, without copying them.
 Temporary folders are removed even when a tool left read-only files in them
 (`storage.remove_tree`). Without `TEXT_LAB_WORKDIR` (tests, scripts run by
 hand), the workspace is a private folder under the system temporary

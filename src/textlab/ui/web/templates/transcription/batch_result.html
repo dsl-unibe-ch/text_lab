@@ -1,0 +1,50 @@
+{#- The result of a ZIP of recordings, inside its record (job.result is a
+  BatchSummary): what was transcribed, what was skipped. The transcripts
+  are in the ZIP, a folder per recording. -#}
+{% from "components/macros.html" import notice %}
+{% set summary = job.result %}
+<div class="result">
+  <ul class="facts" aria-label="About the result">
+    <li>{{ summary.recordings | length }} recording{{ "s" if summary.recordings | length != 1 }} transcribed</li>
+    {% if summary.skipped %}<li>{{ summary.skipped | length }} skipped</li>{% endif %}
+    <li>{{ summary.duration | media_time }} of audio</li>
+    <li>{{ summary.model }}</li>
+  </ul>
+
+  {% for note in summary.notes %}
+  {% call notice("info") %}<p>{{ note }}</p>{% endcall %}
+  {% endfor %}
+  {% if summary.skipped %}
+  {% call notice("warning", "Some recordings could not be read") %}
+  <ul class="plain-list">
+    {% for item in summary.skipped %}<li>{{ item.name }}: {{ item.reason }}</li>{% endfor %}
+  </ul>
+  {% endcall %}
+  {% endif %}
+
+  <div class="table-wrap">
+    <table class="table">
+      <caption class="visually-hidden">Recordings transcribed</caption>
+      <thead>
+        <tr>
+          <th scope="col">Recording</th>
+          <th scope="col">Folder in the ZIP</th>
+          <th scope="col">Language</th>
+          <th scope="col" class="table__num">Length</th>
+          <th scope="col" class="table__num">Speakers</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in summary.recordings %}
+        <tr>
+          <td>{{ item.name }}</td>
+          <td class="table__mono">{{ item.folder }}/</td>
+          <td>{{ item.language }}</td>
+          <td class="table__num">{{ item.duration | media_time }}</td>
+          <td class="table__num">{{ item.speakers if item.speakers is not none else "–" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>

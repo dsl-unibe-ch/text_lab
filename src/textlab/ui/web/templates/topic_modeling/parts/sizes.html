@@ -1,0 +1,12 @@
+{#- The topics' sizes, as Top2Vec reports them: ranked bars, the largest
+  topic first, each with its count at the bar's end. -#}
+<ol class="sizes" aria-label="Documents per topic, the largest topic first">
+  {% for topic in view.ranked(job.id) %}
+  <li class="size" data-region="{{ topic.region }}">
+    <span class="label size__number">Topic {{ topic.topic }}</span>
+    <span class="size__title">{{ topic.title }}</span>
+    <span class="size__bar"><svg class="bar" viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true" focusable="false"><rect width="{{ topic.bar }}" height="6"/></svg></span>
+    <span class="size__value">{{ "{:,}".format(topic.documents) }}</span>
+  </li>
+  {% endfor %}
+</ol>

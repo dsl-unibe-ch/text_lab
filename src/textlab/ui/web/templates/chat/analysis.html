@@ -1,0 +1,7 @@
+{#- The data agents' charts and statistics in a reply (answer: the page's
+  Answer), drawn by the shared macros (components/analysis.html). -#}
+{% from "components/analysis.html" import charts, statistics with context %}
+<div class="analysis">
+  {{ charts(job, answer.charts) }}
+  {{ statistics(answer.stats) }}
+</div>

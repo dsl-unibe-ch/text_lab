@@ -15,6 +15,11 @@ GPU.
   source language so repeated sentences are translated once.
 * :func:`load_backend`, :func:`backend_ready` and :func:`load_signature`
   load a backend ahead of use and check that it is still loaded.
+* :func:`languages`, :func:`ollama_models` and :func:`server_ready` give
+  interfaces what to offer.
+
+Both translations stop when their ``cancel`` event is set, by raising
+:class:`~textlab.common.progress.CancelledError`.
 
 The few names interfaces need from other modules (the backend table,
 language detection, the GPU profile, error types and messages) are
@@ -24,13 +29,25 @@ re-exported here, so interfaces import only this module.
 from __future__ import annotations
 
 import dataclasses
+import functools
 import io
 import os
+import threading
 import time
 import zipfile
 from collections.abc import Callable, Iterable, Mapping
 
-from textlab.common.progress import Progress, ProgressCallback, no_progress
+from textlab.common.language_mappings import (
+    TRANSLATE_LANGUAGE_CODE_TO_NAME,
+    TRANSLATE_LANGUAGE_MAPPING,
+)
+from textlab.common.progress import (
+    CancelledError,
+    Progress,
+    ProgressCallback,
+    check_cancelled,
+    no_progress,
+)
 
 from .chunking import TranslationLimitError
 from .documents.markdown import reflow_soft_wraps, translate_markdown
@@ -69,15 +86,22 @@ __all__ = [
     "PDFTranslationResult",
     "TranslationOptions",
     "UnpackedUploads",
-    # Backends
+    # Backends and languages
     "BACKENDS",
     "FORMALITY_CAPABLE_BACKENDS",
     "FORMALITY_CHOICES",
     "TRANSLATION_BACKENDS",
     "backend_ready",
+    "language_name",
+    "languages",
     "load_backend",
     "load_signature",
+    "ollama_models",
+    "server_ready",
     "supports_pair",
+    # Documents
+    "PDF_OUTPUTS",
+    "SUPPORTED_EXTENSIONS",
     # Translation
     "translate_document",
     "translate_documents",
@@ -199,6 +223,9 @@ class DocumentResults:
         total: Number of source files.
         target_code: FLORES-200 code of the target language.
         elapsed: Duration of the run in seconds.
+        pairs: For each translated source file, its ``(source,
+            translation)`` units in document order, as in its review file
+            (also when no review file was asked for).
     """
 
     file_outputs: list[tuple[str, list[NamedFile]]]
@@ -208,6 +235,9 @@ class DocumentResults:
     total: int
     target_code: str
     elapsed: float = 0.0
+    pairs: dict[str, list[tuple[str, str]]] = dataclasses.field(
+        default_factory=dict
+    )
 
     @property
     def outputs(self) -> list[NamedFile]:
@@ -314,6 +344,54 @@ def supports_pair(backend: str, source_code: str, target_code: str) -> bool:
     return bool(flores_to_iso2(source_code) and flores_to_iso2(target_code))
 
 
+def languages() -> list[tuple[str, str]]:
+    """Return the languages to translate from and into.
+
+    Returns:
+        ``(code, name)`` pairs with FLORES-200 codes, the most used first,
+        as in ``language_mappings.TRANSLATE_LANGUAGE_MAPPING``.
+    """
+    return [(code, name) for name, code in TRANSLATE_LANGUAGE_MAPPING.items()]
+
+
+def language_name(code: str) -> str:
+    """Return a language's name.
+
+    Args:
+        code: Its FLORES-200 code.
+
+    Returns:
+        The name, such as ``"German"``; the code itself if it is unknown.
+    """
+    return TRANSLATE_LANGUAGE_CODE_TO_NAME.get(code, code)
+
+
+def ollama_models() -> list[str]:
+    """Return the language models to choose from for the ``ollama`` backend.
+
+    Returns:
+        The Ollama model names of the site's model list (``models.json``)
+        for this session's GPU; the first is the default.
+    """
+    from textlab.common.model_config import get_available_models
+
+    return get_available_models(_gpu_name())
+
+
+def server_ready(attempts: int = 1) -> bool:
+    """Return whether the session's Ollama server accepts connections.
+
+    Args:
+        attempts: How many times to try, half a second apart.
+
+    Returns:
+        True if it does.
+    """
+    from textlab.common.ollama import check_ollama_server
+
+    return check_ollama_server(attempts=attempts)
+
+
 # ---------------------------------------------------------------------------
 # Text
 # ---------------------------------------------------------------------------
@@ -325,6 +403,7 @@ def translate_text(
     *,
     on_progress: ProgressCallback = no_progress,
     on_notice: Callable[[str], None] | None = None,
+    cancel: threading.Event | None = None,
 ) -> str:
     """Translate pasted text.
 
@@ -338,6 +417,7 @@ def translate_text(
         on_progress: Receives an update after each chunk.
         on_notice: Receives notices for the user, such as a retry with
             smaller chunks.
+        cancel: Set to stop the translation after the current chunk.
 
     Returns:
         The translation.
@@ -347,9 +427,12 @@ def translate_text(
             within the model's limits.
         ProtectedContentError: If protected content (links, code, glossary
             terms) did not survive the translation.
+        CancelledError: If ``cancel`` was set.
     """
+    check_cancelled(cancel)
 
     def report(done: int, total: int) -> None:
+        check_cancelled(cancel)
         if total > 0:
             on_progress(
                 Progress(
@@ -413,12 +496,15 @@ def translate_documents(
     document_options: DocumentOptions | None = None,
     *,
     on_progress: ProgressCallback = no_progress,
+    cancel: threading.Event | None = None,
 ) -> DocumentResults:
     """Translate documents into the target language, each in its format.
 
     A failing document is reported in the results and does not stop the
     others. Documents that are already in the target language are reported
-    rather than translated.
+    rather than translated. Without a source language (an empty
+    ``options.source_code``), each document's language is detected, and a
+    document whose language cannot be told is reported.
 
     Args:
         files: File names and contents, with ZIP archives already unpacked
@@ -428,13 +514,18 @@ def translate_documents(
             files; the defaults of :class:`DocumentOptions` when omitted.
         on_progress: Receives updates; the message names the file and the
             step, the fraction is the share of that step done.
+        cancel: Set to stop the batch at its next progress update; nothing
+            is returned then.
 
     Returns:
         The output files, errors and reports of the batch.
+
+    Raises:
+        CancelledError: If ``cancel`` was set.
     """
     document_options = document_options or DocumentOptions()
     started = time.monotonic()
-    progress = _DocumentProgress(on_progress)
+    progress = _DocumentProgress(on_progress, cancel=cancel)
     results = DocumentResults(
         file_outputs=[],
         errors=[],
@@ -462,18 +553,28 @@ def translate_documents(
         prefix = f"[{index}/{len(files)}] {name}"
         progress.stage(prefix, (index - 1) / len(files))
         source_code, source_name = options.source_code, options.source_name
-        if document_options.detect_source:
+        if document_options.detect_source or not source_code:
             progress.stage(f"{prefix}: detecting language")
             detection = detect_document_language(name, data)
             if detection is not None and detection.display_name:
                 source_code = detection.flores_code
                 source_name = detection.display_name
                 results.languages[name] = f"{source_name} (detected)"
-            else:
+            elif source_code:
                 results.languages[name] = (
                     f"{options.source_name} (not detected, using your "
                     "selection)"
                 )
+            else:
+                results.languages[name] = "not detected"
+                results.errors.append(
+                    (
+                        name,
+                        "Its language could not be told. Choose the "
+                        "language it is in and translate it again.",
+                    )
+                )
+                continue
         if source_code == options.target_code:
             results.errors.append(
                 (
@@ -500,10 +601,10 @@ def translate_documents(
                     math_ocr=document_options.math_ocr,
                     backend=options.backend,
                 )
+            if results.pdf_reports and results.pdf_reports[-1][0] == name:
+                # Whole PDF paragraphs read better than Markdown lines.
+                pairs = results.pdf_reports[-1][1].pairs
             if document_options.review:
-                if results.pdf_reports and results.pdf_reports[-1][0] == name:
-                    # Whole PDF paragraphs read better than Markdown lines.
-                    pairs = results.pdf_reports[-1][1].pairs
                 outputs += review_files(
                     name,
                     pairs,
@@ -512,6 +613,9 @@ def translate_documents(
                     options.target_code,
                 )
             results.file_outputs.append((name, outputs))
+            results.pairs[name] = list(pairs)
+        except CancelledError:
+            raise
         except Exception as error:
             results.errors.append(
                 (name, describe_error(error, options.backend))
@@ -762,22 +866,33 @@ def _ignore_progress(done: int, total: int, stage: str) -> None:
     """Discard a ``(done, total, stage)`` progress update."""
 
 
+@functools.cache
+def _gpu_name() -> str:
+    """Return the session's GPU, asked once (it does not change)."""
+    from textlab.common import gpu_manager
+
+    return gpu_manager.get_gpu_name()
+
+
 class _DocumentProgress:
     """Turn the document translators' callbacks into progress updates.
 
     Parsers report every line; each update costs the interface a redraw,
     so updates of one stage are limited to one per
     :data:`PROGRESS_INTERVAL`. While sentences are translated, the message
-    includes an estimate of the time left.
+    includes an estimate of the time left. Every update first checks the
+    cancel event, so a cancelled batch stops at its next update.
     """
 
     def __init__(
         self,
         on_progress: ProgressCallback,
         clock: Callable[[], float] = time.monotonic,
+        cancel: threading.Event | None = None,
     ) -> None:
         self._on_progress = on_progress
         self._clock = clock
+        self._cancel = cancel
         self._last_time = 0.0
         self._last_stage: str | None = None
         self._rate_start = 0.0
@@ -786,12 +901,14 @@ class _DocumentProgress:
 
     def stage(self, message: str, fraction: float | None = None) -> None:
         """Report a new step, without limiting the rate."""
+        check_cancelled(self._cancel)
         self._on_progress(Progress(message, fraction))
 
     def step(
         self, done: int, total: int, stage: str, label: str | None = None
     ) -> None:
         """Report ``done`` of ``total`` units of a stage, rate-limited."""
+        check_cancelled(self._cancel)
         now = self._clock()
         if (
             stage == self._last_stage

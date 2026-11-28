@@ -1,0 +1,41 @@
+{#- A topic modeling run inside its record (job.result is a TopicsView):
+  its facts and notices, then the views of its algorithm, as its library
+  draws them (topic_modeling/view_<algorithm>.html): LDA as pyLDAvis shows
+  it, BERTopic and Top2Vec with their usual charts. All drawn in SVG from
+  the run's numbers; the libraries' interactive charts are in the
+  Everything download, which the record's file listing holds. Without an
+  overview, the topic table and the scores. -#}
+{% from "components/macros.html" import notice %}
+{% set view = job.result %}
+{% set overview = view.overview %}
+{% set topics = view.topics(job.id) %}
+<div class="result topics-result">
+  <ul class="facts" aria-label="About the result">
+    <li>{{ view.algorithm }}</li>
+    <li>{{ view.config.language }}</li>
+    {% if overview %}
+    <li>{{ topics | length }} topic{{ "s" if topics | length != 1 }}</li>
+    <li>{{ "{:,}".format(overview.documents) }} document{{ "s" if overview.documents != 1 }}</li>
+    {% if overview.outliers %}<li>{{ "{:,}".format(overview.outliers) }} in no topic</li>{% endif %}
+    {% endif %}
+  </ul>
+
+  {% for item in view.saved.notices %}
+  {% call notice("warning" if item.level == "warning" else "info") %}{{ item.message | markdown }}{% endcall %}
+  {% endfor %}
+
+  {% if topics %}
+  {% include "topic_modeling/view_" ~ view.kind ~ ".html" %}
+  {% else %}
+  <div class="table-wrap">
+    <table class="table">
+      <caption class="visually-hidden">The topics of {{ job.title }}</caption>
+      <thead><tr>{% for column in view.saved.columns %}<th scope="col">{{ column }}</th>{% endfor %}</tr></thead>
+      <tbody>
+        {% for row in view.saved.rows %}<tr>{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% include "topic_modeling/metrics.html" %}
+  {% endif %}
+</div>

@@ -1,0 +1,27 @@
+{#- Home's list of the session's jobs, newest first: one line each, linked
+  to the job's record on its page. Swapped in out of band as jobs change. -#}
+<ul class="ledger" id="recent-jobs"{% if oob %} hx-swap-oob="true"{% endif %}>
+  {% for job in session_jobs | reverse %}
+  <li>
+    <a class="ledger__item" href="{{ root }}{{ page_path(job.page) }}#job-{{ job.id }}">
+      <span class="status status--{{ job.state }}">{{ job.state.label }}</span>
+      <span class="ledger__name">{{ job.title }}</span>
+      <span class="ledger__page">{{ page_label(job.page) }}</span>
+      <span class="ledger__when">
+        {%- if job.state == "running" -%}
+        {% if job.progress and job.progress.fraction is not none %}{{ (job.progress.fraction * 100) | round | int }}% · {% endif %}{{ job.elapsed(now) | duration }}
+        {%- elif job.state == "waiting" -%}
+        since {{ job.submitted | clock_time }}
+        {%- elif job.started -%}
+        {{ job.finished | clock_time }} · took {{ job.elapsed() | duration }}
+        {%- else -%}
+        {{ job.finished | clock_time }}
+        {%- endif -%}
+      </span>
+      {{ icon("arrow-right", size="sm") }}
+    </a>
+  </li>
+  {% else %}
+  <li class="ledger__empty">No jobs yet. What you start on any page is listed here, and in the status bar.</li>
+  {% endfor %}
+</ul>

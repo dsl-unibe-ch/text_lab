@@ -21,13 +21,16 @@ from pathlib import Path
 
 from textlab.features.ocr.engines.payloads import (
     compact_paddle_prediction,
+    png_bytes,
     rendered_png,
 )
 
 # Paddle crashes in OpenBLAS with more than one thread, and must not try to
-# reach the internet for model checks.
-os.environ.setdefault("OMP_NUM_THREADS", "1")
-os.environ.setdefault("MKL_NUM_THREADS", "1")
+# reach the internet for model checks. The parent sets this before the
+# worker starts (common.container.paddle_environment); this covers runs by
+# hand.
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
 os.environ.setdefault("DISABLE_MODEL_SOURCE_CHECK", "True")
 os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
 
@@ -40,6 +43,25 @@ def rendered_png_b64(preds) -> str | None:
     """Return the first result image of a page's predictions, as base64."""
     for pred in preds:
         png = rendered_png(pred)
+        if png:
+            return base64.b64encode(png).decode("ascii")
+    return None
+
+
+def read_png_b64(preds) -> str | None:
+    """Return the page image the outlines belong to, as base64 PNG.
+
+    PaddleOCR straightens a page (turns it upright, unwarps it) before it
+    finds the lines, and gives their outlines on the straightened image.
+    Returns ``None`` when it did not straighten the page; the outlines then
+    belong to the page image as it was given.
+    """
+    for pred in preds:
+        try:
+            image = pred["doc_preprocessor_res"]["output_img"]
+        except (KeyError, TypeError, IndexError):
+            continue
+        png = png_bytes(image)
         if png:
             return base64.b64encode(png).decode("ascii")
     return None
@@ -84,6 +106,7 @@ def main() -> None:
                 "text": "\n".join(line for line in lines if line),
                 "raw": compact_preds,
                 "rendered_png_b64": rendered_png_b64(preds),
+                "read_png_b64": read_png_b64(preds),
             }
         )
 

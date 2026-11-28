@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% from "components/macros.html" import masthead, section_head, dropzone, notice with context %}
+{% block title %}Visualize Data{% endblock %}
+{% block content %}
+{% set tool = tools | selectattr("id", "equalto", page_id) | first %}
+{{ masthead(tool.label, tool.summary, number=tool.number, kicker=tool.group, guide="https://text-lab.dsl.unibe.ch/visualize_data/") }}
+
+{% if not options.models %}
+{% call notice("error", "No language models are set up for Visualize Data") %}<p>The site's model list names none. Please tell support.</p>{% endcall %}
+{% elif not ready %}
+{% call notice("warning", "The language model server does not answer yet") %}<p>It may still be starting, as it does at the beginning of a session: you can choose the table now, and start the analysis in a minute. If it keeps failing, send ollama.log from the session's folder to support.</p>{% endcall %}
+{% endif %}
+
+{#- One form. Choosing a file uploads it at once (the drop zone's wrapper
+  posts only the file, and the previous table's id to replace it): its
+  columns come back into #table, and requests that name them into
+  #examples. Starting an analysis sends everything else, not the file
+  again. -#}
+<form class="sheet" aria-label="Analyze a table"
+      hx-post="{{ root }}/visualize-data" hx-params="not file"
+      hx-target="#jobs" hx-swap="afterbegin" hx-disabled-elt="find button[type=submit]">
+  <ol class="steps">
+    <li class="step">
+      <div>
+        <span class="label step__num">01</span>
+        <h2 class="step__title">Table</h2>
+        <p class="step__hint">One row per observation, one column per variable, and the column names in the first row. The agents analyze up to the first {{ "{:,}".format(max_rows) }} rows.</p>
+      </div>
+      <div class="step__body">
+        <div hx-post="{{ root }}/visualize-data/table" hx-trigger="change" hx-encoding="multipart/form-data"
+             hx-params="file,table" hx-target="#table" hx-swap="innerHTML">
+          {{ dropzone("file", "Drop a table here", formats, accept=accept, required=false) }}
+        </div>
+        <div class="upload-progress" data-upload-progress hidden>
+          <progress class="meter__bar" max="1" value="0"></progress>
+          <p class="label" data-upload-progress-text>Uploading</p>
+        </div>
+        <div class="dataset" id="table" aria-live="polite">
+          <p class="muted">Its columns appear here once it is read, to choose the ones to analyze.</p>
+        </div>
+      </div>
+    </li>
+
+    <li class="step">
+      <div>
+        <span class="label step__num">02</span>
+        <h2 class="step__title">Request</h2>
+        <p class="step__hint">Ask for charts, statistical tests or both, in your own words. Name the columns, and the chart or the test if you know it.</p>
+      </div>
+      <div class="step__body stack">
+        <div class="field">
+          <label class="field__label" for="viz-request">What would you like to see?</label>
+          <textarea class="textarea" id="viz-request" name="request" rows="4" placeholder="Compare income between the regions with a test, and show it as box plots." aria-describedby="viz-request-help"></textarea>
+          <p class="field__help" id="viz-request-help">Left empty, the agents explore the table: a few interactive charts of how its columns are distributed and related.</p>
+        </div>
+        <div class="asks" id="examples" hidden></div>
+        <details class="disclosure">
+          <summary>What the agents can do</summary>
+          <dl class="spec">
+            <dt>Interactive charts</dt>
+            <dd>Histograms, scatter plots, box plots, line and bar charts, scatter matrices and correlation heatmaps, to zoom and point at in the browser. The default.</dd>
+            <dt>Figures</dt>
+            <dd>Static, publication-ready images (PNG, 300 dpi), pair plots and word clouds. Ask for "static" or "publication" figures.</dd>
+            <dt>Statistics</dt>
+            <dd>Correlations, group comparisons (t-test, ANOVA, Mann-Whitney, Kruskal-Wallis), associations of categories (chi-square, Fisher) and linear and logistic regression, with their assumptions checked where it applies.</dd>
+          </dl>
+          <p class="muted">A supervisor plans your request and hands it to an agent for each; they work at the same time. When no ready-made chart fits, an agent writes its own code, which runs sealed off with only a copy of your table.</p>
+        </details>
+      </div>
+    </li>
+
+    <li class="step">
+      <div>
+        <span class="label step__num">03</span>
+        <h2 class="step__title">Model and code</h2>
+        <p class="step__hint">Every result comes with the Python code that makes it, to run again on your own computer.</p>
+      </div>
+      <div class="step__body stack">
+        <div class="field">
+          <label class="field__label" for="viz-model">Model</label>
+          <div class="select-wrap">
+            <select class="select" id="viz-model" name="model" aria-describedby="viz-model-help">
+              {% for name in options.models %}<option{% if name == model %} selected{% endif %}>{{ name }}</option>{% endfor %}
+            </select>
+            {{ icon("chevron-down", size="sm") }}
+          </div>
+          <p class="field__help" id="viz-model-help">{% if options.large %}Models for a GPU with much memory ({{ options.gpu }}){% else %}Models for this session's GPU ({{ options.gpu }}){% endif %}. If the agents cannot carry out a request, another model may.</p>
+        </div>
+        <div class="option">
+          <input class="checkbox" type="checkbox" id="viz-r-code" name="r_code" value="1" aria-describedby="viz-r-code-text">
+          <label class="option__title" for="viz-r-code">Also write R code</label>
+          <p class="option__text" id="viz-r-code-text">R code beside the Python code of each result: ggplot2 for charts, base R for statistics, to reproduce and check the analysis in R. Charts the agents draw with their own code have no R version.</p>
+        </div>
+      </div>
+    </li>
+  </ol>
+  <div class="sheet__submit">
+    <p class="sheet__note">Runs in the background, for at most {{ minutes }} minutes: you can leave this page and come back. Ask about the same table again as often as you like.</p>
+    <button class="btn btn--primary btn--lg" type="submit">Analyze {{ icon("arrow-right", size="sm") }}</button>
+  </div>
+</form>
+
+<section class="section" aria-labelledby="jobs-title">
+  {{ section_head("Your analyses", "Kept until you remove them or the session ends", id="jobs-title") }}
+  <div class="records" id="jobs">
+    {{ cards }}
+  </div>
+</section>
+{% endblock %}

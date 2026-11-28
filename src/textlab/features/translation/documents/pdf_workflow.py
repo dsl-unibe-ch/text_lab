@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass, field
 
+from textlab.common.progress import CancelledError
+
 from ..messages import describe_error
 from ..shield import record_translations
 from .pdf import translate_pdf
@@ -125,6 +127,8 @@ def translate_pdf_outputs(
             result.pairs = markdown_pairs
             data, name = pack_markdown_bundle(markdown, assets, stem=stem)
             result.outputs.append((name, data))
+        except CancelledError:
+            raise
         except Exception as error:
             blocked("Markdown", error)
 
@@ -145,6 +149,8 @@ def translate_pdf_outputs(
             result.pairs = pdf_pairs
             result.warnings.extend(layout_warnings)
             result.outputs.append((f"{stem}.pdf", data))
+        except CancelledError:
+            raise
         except Exception as error:
             blocked("Reconstructed PDF", error)
     return result

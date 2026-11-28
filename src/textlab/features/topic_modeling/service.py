@@ -1,11 +1,13 @@
 """Finding topics in a collection of texts: the Topic Modeling feature's API.
 
 Interfaces call this module. :func:`load_table` and :func:`load_archive`
-read an upload; :func:`run_topic_modeling` analyzes it in a worker process
+read an upload, and :func:`summarize_table` describes it for choosing its
+columns; :func:`run_topic_modeling` analyzes it in a worker process
 (:mod:`.worker`), so all GPU memory is released when the run ends and the
 modeling libraries are never imported by the app. :func:`analyze_table` is
 the analysis itself, in the calling process, for the worker and for batch
-jobs.
+jobs. :func:`save_result` writes a result's downloads to a folder an
+interface serves them from, and returns what it needs to show the result.
 
 This module and the names it re-exports import only pandas; the modeling
 modules are imported inside :func:`analyze_table`.
@@ -13,14 +15,26 @@ modules are imported inside :func:`analyze_table`.
 
 from __future__ import annotations
 
+import dataclasses
+import io
+import logging
 import threading
+import zipfile
+from pathlib import Path, PurePosixPath
+from typing import Any
 
 import pandas as pd
 
 from textlab.common.jobs import WorkerError, run_worker
+from textlab.common.outputs import OutputFolder, SavedFile
 from textlab.common.progress import Progress, ProgressCallback, no_progress
 from textlab.common.storage import get_workspace
-from textlab.features.topic_modeling.data import load_archive, load_table
+from textlab.features.topic_modeling.data import (
+    TableSummary,
+    load_archive,
+    load_table,
+    summarize_table,
+)
 from textlab.features.topic_modeling.models import (
     DEFAULT_EMBEDDING_MODEL_ENGLISH,
     DEFAULT_EMBEDDING_MODEL_MULTILINGUAL,
@@ -33,6 +47,7 @@ from textlab.features.topic_modeling.models import (
     Notice,
     TopicModelingConfig,
     TopicModelingResult,
+    TopicOverview,
 )
 
 __all__ = [
@@ -40,6 +55,13 @@ __all__ = [
     "load_archive",
     "load_table",
     "run_topic_modeling",
+    "save_result",
+    "summarize_table",
+    # Results for interfaces
+    "SavedFile",
+    "SavedTopics",
+    "TableSummary",
+    "TopicOverview",
     # Re-exported for interfaces
     "DEFAULT_EMBEDDING_MODEL_ENGLISH",
     "DEFAULT_EMBEDDING_MODEL_MULTILINGUAL",
@@ -53,6 +75,8 @@ __all__ = [
     "TopicModelingConfig",
     "TopicModelingResult",
 ]
+
+LOGGER = logging.getLogger(__name__)
 
 WORKER_MODULE = "textlab.features.topic_modeling.worker"
 
@@ -153,6 +177,7 @@ def analyze_table(
         drop_empty_text_rows,
         prepare_timestamps,
     )
+    from textlab.features.topic_modeling.overview import build_overview
 
     notices = []
     prepared = drop_empty_text_rows(table, config.text_column)
@@ -225,6 +250,33 @@ def analyze_table(
             precomputed_embeddings=vectors,
         )
 
+    overview = None
+    if "topics" in run:
+        try:
+            on_progress(Progress("Drawing the topics..."))
+            overview = build_overview(
+                run["topics"],
+                run["docs_df"],
+                config.text_column,
+                topic_vectors=run.get("topic_vectors"),
+                timestamps=timestamps,
+                time_bins=config.time_bins,
+                time_rows=run.get("time_rows"),
+                document_vectors=run.get("document_vectors"),
+                ldavis=run.get("ldavis"),
+                document_topics=run.get("document_topics"),
+                topic_words=run.get("topic_words"),
+            )
+        except Exception:  # the charts are extra; keep the run's results
+            LOGGER.exception("Could not build the topic overview.")
+            notices.append(
+                Notice(
+                    "warning",
+                    "The charts of this run could not be drawn; the topic "
+                    "table and the download are complete.",
+                )
+            )
+
     report = reports.generate_metadata_report(
         filename=source_name,
         config=config,
@@ -245,4 +297,117 @@ def analyze_table(
         evaluation_metrics=metrics,
         zip_bytes=zip_bytes,
         notices=notices,
+        overview=overview,
     )
+
+
+# ---------------------------------------------------------------------------
+# Results for interfaces
+# ---------------------------------------------------------------------------
+
+#: The files of the result ZIP offered on their own: name in the ZIP, the
+#: suffix of the download, and what it is.
+ZIP_DOWNLOADS = (
+    (
+        "document_topics.csv",
+        "_document_topics.csv",
+        "Documents with their topic, CSV",
+        "text/csv; charset=utf-8",
+    ),
+    (
+        "topic_keywords.csv",
+        "_topic_keywords.csv",
+        "Topics and keywords, CSV",
+        "text/csv; charset=utf-8",
+    ),
+    (
+        "run_configuration.txt",
+        "_run_report.txt",
+        "Settings and scores",
+        "text/plain; charset=utf-8",
+    ),
+)
+
+
+@dataclasses.dataclass(frozen=True)
+class SavedTopics:
+    """What :func:`save_result` wrote, and what to show of a run.
+
+    The result without its ZIP and HTML charts, which are in the files.
+
+    Attributes:
+        algorithm: The algorithm that ran.
+        enable_dtm: Whether topics over time were analyzed.
+        columns: The topic table's columns.
+        rows: The topic table's rows.
+        metrics: Metric values by name; ``None`` when one could not be
+            computed.
+        notices: What users should know about the run.
+        overview: The topics, their map and timeline, to draw, or
+            ``None``.
+        files: Every file written, downloads first.
+    """
+
+    algorithm: Algorithm
+    enable_dtm: bool
+    columns: tuple[str, ...]
+    rows: tuple[tuple[Any, ...], ...]
+    metrics: dict[str, float | None]
+    notices: tuple[Notice, ...]
+    overview: TopicOverview | None
+    files: tuple[SavedFile, ...]
+
+
+def save_result(
+    result: TopicModelingResult, source_name: str, folder: Path
+) -> SavedTopics:
+    """Write a result's downloads into a folder.
+
+    The downloads are everything in one ZIP (with the interactive charts),
+    and, from it, the documents with their topic, the topics with their
+    keywords and the run's settings and scores.
+
+    Args:
+        result: The result of :func:`run_topic_modeling`.
+        source_name: The analyzed file's name, which names the downloads.
+        folder: An existing folder, such as a job's outputs.
+
+    Returns:
+        What was written, and what to show.
+    """
+    stem = PurePosixPath(source_name).stem or "collection"
+    output = OutputFolder(folder)
+    output.write(
+        f"{stem}_topics.zip",
+        result.zip_bytes,
+        "Everything, with the interactive charts",
+        "application/zip",
+    )
+    with zipfile.ZipFile(io.BytesIO(result.zip_bytes)) as archive:
+        names = set(archive.namelist())
+        for member, suffix, label, media_type in ZIP_DOWNLOADS:
+            if member in names:
+                output.write(
+                    f"{stem}{suffix}", archive.read(member), label, media_type
+                )
+    table = result.topic_df
+    return SavedTopics(
+        algorithm=result.algorithm,
+        enable_dtm=result.enable_dtm,
+        columns=tuple(str(column) for column in table.columns),
+        rows=tuple(
+            tuple(_plain(value) for value in row)
+            for row in table.itertuples(index=False)
+        ),
+        metrics=dict(result.evaluation_metrics),
+        notices=tuple(result.notices),
+        overview=result.overview,
+        files=tuple(output.files),
+    )
+
+
+def _plain(value: Any) -> Any:
+    """Return a table cell as a plain value; missing values as ``""``."""
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return ""
+    return value.item() if hasattr(value, "item") else value

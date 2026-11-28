@@ -1,0 +1,165 @@
+/*
+ * Design tokens of the Text Lab web UI.
+ *
+ * The look is typographic: ink on paper, structure from rules and a grid
+ * rather than boxes and shadows, the red of the Text Lab logo as the one
+ * accent. IBM Plex Sans carries the text (condensed for titles), IBM Plex
+ * Mono the labels, numbers, times and file names.
+ *
+ * Every other style sheet uses these custom properties, never raw values.
+ * Light is the default; dark follows the system unless the user picked a
+ * theme in the status bar (data-theme on <html>, set by js/theme.js).
+ *
+ * Colours meet WCAG 2.1 AA: text at least 4.5:1 on the surfaces it sits
+ * on, controls and focus rings at least 3:1.
+ */
+
+:root {
+  color-scheme: light;
+
+  /* Paper and ink. */
+  --paper: #f5f3ee;
+  --sheet: #fdfcf9;
+  --tint: #ebe8e1;
+  --rule: #d8d4cb;
+  --rule-strong: #a9a499;
+  --ink: #151514;
+  --ink-2: #484743;
+  --ink-3: #686660;
+  /* Muted chart marks (a reference bar, a second part, data in no group):
+     3:1 on the sheet, and apart from the accent also with colour-vision
+     deficiency (checked with the data-viz palette validator). */
+  --ink-4: #8f8b82;
+  --on-ink: #f5f3ee;
+  --hatch: rgb(21 21 20 / 0.09);
+
+  /* The Text Lab red: marks, live jobs, focus. Buttons keep the logo's
+     red in both themes, which carries white text. */
+  --red: #d6002b;
+  --red-text: #bf0026;
+  --red-wash: #f9e5e7;
+  --red-button: #d6002b;
+  --on-red: #ffffff;
+
+  /* Results. */
+  --green: #1b7243;
+  --green-wash: #e2eee5;
+  --amber: #8c5a00;
+  --amber-wash: #f5ead2;
+
+  /* Speakers in transcripts. */
+  --speaker-1: #1f5fb4;
+  --speaker-2: #b04a0c;
+  --speaker-3: #7a3cc0;
+  --speaker-4: #0b766a;
+
+  /* Region types on a page read by OCR: the same hues, so they follow the
+     theme. Only text that people read gets a colour of its own. */
+  --region-text: var(--ink-3);
+  --region-title: var(--speaker-1);
+  --region-table: var(--red-text);
+  --region-figure: var(--speaker-2);
+  --region-formula: var(--speaker-3);
+  --region-list: var(--speaker-4);
+  --region-checkbox: var(--green);
+  --region-seal: var(--amber);
+
+  /* Type. */
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --condensed: 85%;
+  --text-label: 0.6875rem;
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-md: 1rem;
+  --text-lg: 1.1875rem;
+  --text-xl: 1.5rem;
+  --text-title: clamp(2.25rem, 1.5rem + 2.6vw, 3.5rem);
+  --text-display: clamp(3.25rem, 1.75rem + 6vw, 6.5rem);
+  --leading: 1.55;
+  --tracking-label: 0.1em;
+
+  /* Space. */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --space-8: 4.5rem;
+
+  /* Shape: square corners, hairlines. */
+  --radius: 2px;
+  --hairline: 1px;
+  --rule-heavy: 2px;
+
+  /* Layout. */
+  --sidebar-width: 15.5rem;
+  --content-width: 78rem;
+  --statusbar-height: 2.75rem;
+  --gutter: 3rem;
+  --z-statusbar: 20;
+  --z-sidebar: 30;
+  --z-popover: 40;
+  --z-toast: 50;
+  --speed: 120ms;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --paper: #131312;
+  --sheet: #1b1b19;
+  --tint: #252522;
+  --rule: #34332f;
+  --rule-strong: #5a5852;
+  --ink: #edebe5;
+  --ink-2: #bebbb3;
+  --ink-3: #96938b;
+  --ink-4: #7e7b74;
+  --on-ink: #131312;
+  --hatch: rgb(237 235 229 / 0.08);
+  --red: #f2294d;
+  --red-text: #ff6f83;
+  --red-wash: #3a1219;
+  --red-button: #d6002b;
+  --on-red: #ffffff;
+  --green: #62c48c;
+  --green-wash: #142a1d;
+  --amber: #e5b053;
+  --amber-wash: #2e2410;
+  --speaker-1: #86b3ff;
+  --speaker-2: #ffa267;
+  --speaker-3: #c49dff;
+  --speaker-4: #52cfbd;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --paper: #131312;
+    --sheet: #1b1b19;
+    --tint: #252522;
+    --rule: #34332f;
+    --rule-strong: #5a5852;
+    --ink: #edebe5;
+    --ink-2: #bebbb3;
+    --ink-3: #96938b;
+    --ink-4: #7e7b74;
+    --on-ink: #131312;
+    --hatch: rgb(237 235 229 / 0.08);
+    --red: #f2294d;
+    --red-text: #ff6f83;
+    --red-wash: #3a1219;
+    --red-button: #d6002b;
+    --on-red: #ffffff;
+    --green: #62c48c;
+    --green-wash: #142a1d;
+    --amber: #e5b053;
+    --amber-wash: #2e2410;
+    --speaker-1: #86b3ff;
+    --speaker-2: #ffa267;
+    --speaker-3: #c49dff;
+    --speaker-4: #52cfbd;
+  }
+}

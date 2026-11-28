@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import threading
 import traceback
 from collections.abc import Callable
 from pathlib import Path
@@ -20,7 +21,12 @@ from typing import Any
 
 import pandas as pd
 
-from textlab.common.progress import Progress, ProgressCallback, no_progress
+from textlab.common.progress import (
+    CancelledError,
+    Progress,
+    ProgressCallback,
+    no_progress,
+)
 from textlab.features.knowledge_graph import grobid
 from textlab.features.knowledge_graph.models import CorpusSummary
 from textlab.features.knowledge_graph.tei import (
@@ -101,6 +107,7 @@ def build_corpus(
     corpus: str | Path,
     on_progress: ProgressCallback = no_progress,
     parse: Callable[[Path], str] = grobid.process_pdf,
+    cancel: threading.Event | None = None,
 ) -> CorpusSummary:
     """Parse new papers into a corpus folder and rebuild its tables.
 
@@ -115,9 +122,14 @@ def build_corpus(
         corpus: The corpus folder, created if needed.
         on_progress: Receives a :class:`Progress` update per paper.
         parse: Returns the TEI XML of a PDF (Grobid; replaced in tests).
+        cancel: Set to stop before the next paper. The papers parsed until
+            then are kept, with the tables, and skipped next time.
 
     Returns:
         The counts and the rebuilt corpus table.
+
+    Raises:
+        CancelledError: If ``cancel`` was set.
     """
     corpus = Path(corpus)
     corpus.mkdir(parents=True, exist_ok=True)
@@ -127,6 +139,11 @@ def build_corpus(
     processed = skipped = errors = 0
     total = len(pdfs)
     for index, pdf in enumerate(pdfs, start=1):
+        if cancel is not None and cancel.is_set():
+            build_corpus_table(corpus)
+            raise CancelledError(
+                f"Stopped after {processed} new papers; they are kept."
+            )
         fraction = (index - 1) / total
         if pdf.name in done:
             on_progress(

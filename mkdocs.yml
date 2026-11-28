@@ -33,6 +33,11 @@ theme:
   logo: assets/text_lab_logo.png
   favicon: assets/icon.png
 
+# Guides for the new interface, drafted page by page; published when it
+# replaces the current one (see dev/web-ui-plan.md).
+exclude_docs: |
+  next/
+
 # Navigation Structure
 nav:
   - Home: index.md
@@ -52,6 +57,7 @@ nav:
     - Testing: dev/testing.md
     - Deployment: dev/deployment.md
     - Data Handling: dev/data-handling.md
+    - Web UI Plan: dev/web-ui-plan.md
 
 # Extensions to make Markdown look better
 markdown_extensions:

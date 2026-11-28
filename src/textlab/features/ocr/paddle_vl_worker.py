@@ -33,8 +33,11 @@ from pathlib import Path
 import numpy as np
 
 # ---- offline hygiene: the same policy as engines/paddle_ocr_worker.py -------
-os.environ.setdefault("OMP_NUM_THREADS", "1")
-os.environ.setdefault("MKL_NUM_THREADS", "1")
+# One thread: Paddle stalls with more. The parent sets this before the
+# worker starts (common.container.paddle_environment), which is what counts,
+# since numpy above has read it already; this covers runs by hand.
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
 os.environ.setdefault("DISABLE_MODEL_SOURCE_CHECK", "True")
 os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
 

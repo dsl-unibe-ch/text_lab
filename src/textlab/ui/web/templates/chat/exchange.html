@@ -1,0 +1,15 @@
+{#- A message of the user and its reply. card is the reply's job card
+  (chat/answer.html), rendered by the job runner, so that the page's event
+  stream can replace it while the reply is written. -#}
+<article class="exchange" id="exchange-{{ exchange.id }}">
+  <div class="message">
+    <h2 class="visually-hidden">You</h2>
+    {% if exchange.files %}
+    <ul class="message__files" aria-label="Files attached">
+      {% for name in exchange.files %}<li>{{ name }}</li>{% endfor %}
+    </ul>
+    {% endif %}
+    <div class="message__text">{{ exchange.question }}</div>
+  </div>
+  {{ card }}
+</article>

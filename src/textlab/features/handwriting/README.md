@@ -10,7 +10,9 @@ printed documents; the two share no code.
 Users reach it on the OCR page, in the **Historic German handwriting**
 expander below the legacy engines. The UI is in `ui/streamlit/handwriting/`
 (`panel.handwriting_expander`), which shows the models a run will use
-(`HandwritingModel.models_used`) before the user uploads anything.
+(`HandwritingModel.models_used`) before the user uploads anything. In the
+new web interface it is the OCR page's **Historic handwriting** tool
+(`ui/web/pages/ocr_handwriting.py`).
 
 ## Pipeline
 
@@ -95,14 +97,18 @@ Interfaces use `service.py`:
 |---|---|
 | `available_models()` | The configured models (`HandwritingModel`), in order |
 | `HandwritingOptions(model, previews=True)` | Model key, and whether to draw page previews |
-| `transcribe_document(name, data, options, on_progress=)` | One PDF or image; returns a `TranscriptionRun` (document, text, JSON, previews, ZIP) |
-| `transcribe_batch(archive, options, on_progress=)` | A ZIP archive; returns a `BatchRun` (result ZIP, counts, models used) |
+| `transcribe_document(name, data, options, on_progress=, cancel=)` | One PDF or image; returns a `TranscriptionRun` (document, text, JSON, previews, ZIP, and the page images scaled down for display) |
+| `transcribe_batch(archive, options, on_progress=, cancel=)` | A ZIP archive; returns a `BatchRun` (result ZIP, counts, models used, and a `BatchFile` overview of each file) |
+| `save_transcription(run, folder)` | Writes a run's downloads and page images into a folder; returns a `SavedTranscription` (its `SavedPage`s with `SavedLine`s and their boxes, the models used, `SavedFile`s) |
+| `cited_models(models_used)` | The models used, as role and model for people |
 | `INPUT_EXTENSIONS` | The file types read |
 | `LINE_DETECTOR` | Name of the line detector, for display |
 | `HandwritingError` | A failure with a message for users |
 
 A worker failure raises `common.jobs.WorkerError`, with the worker's
-traceback in `details`.
+traceback in `details`. A run stops when its `cancel` event is set:
+between pages and steps, and a worker at once (`common.jobs.run_worker`
+stops it), raising `common.progress.CancelledError`.
 
 ```python
 from textlab.features.handwriting import service
@@ -156,7 +162,9 @@ In `tests/`, without GPU or models:
   batching and the out-of-memory fallback.
 - `test_documents.py`: TIFF frames, crops, previews, PAGE XML, ZIPs.
 - `test_service.py`: the service with fake workers: steps, outputs, batch
-  layout, cleanup.
+  layout and overview, cancelling, cleanup, and what
+  `save_transcription` gives (page images scaled down, boxes kept in the
+  full page's pixels).
 - `test_workers.py`: what the detection worker may import; the detection
   worker run through `common.jobs` with fake `kraken` and `torch`
   modules; reading kraken's line boundaries; the recognition worker with

@@ -1,0 +1,29 @@
+{#- The layout of pages shown without login: one sheet. -#}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>{% block title %}{% endblock %} · Text Lab</title>
+  {% include "partials/head.html" %}
+</head>
+<body>
+  <main class="auth" id="main">
+    <div class="auth__sheet">
+      <div class="auth__head">
+        {% include "partials/brand_mark.html" %}
+        <span class="wordmark__text">
+          <span class="wordmark__name">Text Lab</span>
+          <span class="wordmark__by">Data Science Lab</span>
+        </span>
+      </div>
+      {% block content %}{% endblock %}
+    </div>
+    <p class="auth__foot label">
+      Data Science Lab, University of Bern ·
+      <a href="mailto:support.dsl@unibe.ch">support.dsl@unibe.ch</a>
+    </p>
+  </main>
+</body>
+</html>

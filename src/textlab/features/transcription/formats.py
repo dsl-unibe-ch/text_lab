@@ -5,18 +5,21 @@ into the files users download: a segment table, a word table, an ELAN
 import table, SubRip and WebVTT subtitles and plain text. Tables are
 tab-separated even when named ``.csv``, as before. The readers load a
 segment or word table for the review mode and for summarization.
+:func:`turns` and :func:`turns_from_table` give the passages an audio
+player shows next to the recording.
 """
 
 from __future__ import annotations
 
 import csv
+import dataclasses
 import io
 import os
 import zipfile
 from collections.abc import Iterable, Iterator, Mapping
 from typing import Any
 
-from textlab.features.transcription.models import Transcript
+from textlab.features.transcription.models import TimedWord, Transcript, Turn
 
 #: Speaker label for words diarization could not attribute.
 UNKNOWN_SPEAKER = "UNKNOWN"
@@ -412,6 +415,206 @@ def load_transcript_items(
             )
         items.append(item)
     return items, has_speakers
+
+
+def turns(transcript: Transcript) -> list[Turn]:
+    """Return a transcript's passages with their words, for a player.
+
+    Without speakers, each segment is a passage. With speakers, segments
+    are split where the speaker changes, as in the segment table
+    (:func:`transcription_csv`), so the two agree.
+
+    Args:
+        transcript: The transcript.
+
+    Returns:
+        The passages in order, without empty ones. Speakers are numbered
+        in order of appearance.
+    """
+    found: list[Turn] = []
+    for segment in transcript.segments:
+        words = [
+            word
+            for word in segment.get("words", [])
+            if _word_text(word).strip()
+        ]
+        if not words:
+            text = str(segment.get("text", "")).strip()
+            if text:
+                speaker = None
+                if transcript.has_speakers:
+                    speaker = segment.get("speaker") or UNKNOWN_SPEAKER
+                found.append(
+                    _turn(
+                        segment.get("start"),
+                        segment.get("end"),
+                        text,
+                        [],
+                        speaker,
+                    )
+                )
+            continue
+        if not transcript.has_speakers:
+            found.append(
+                _turn(
+                    segment.get("start"),
+                    segment.get("end"),
+                    str(segment.get("text", "")).strip(),
+                    words,
+                )
+            )
+            continue
+        for speaker, part in _runs(
+            words, lambda word: word.get("speaker") or UNKNOWN_SPEAKER
+        ):
+            found.append(_turn(None, None, None, part, speaker))
+    return _numbered(found)
+
+
+def turns_from_table(text: str) -> list[Turn]:
+    """Read a word table or a segment table into passages, for a player.
+
+    A word table (``words.csv``) gives passages with timed words, grouped
+    by its ``segment_id``. A segment table (``transcription.csv``, the
+    ELAN table, or a table of ``Start``, ``End``, ``Text`` from elsewhere)
+    gives passages with their times only.
+
+    Args:
+        text: The table, tab-separated with a header row. Comma-separated
+            tables with the same columns are read too.
+
+    Returns:
+        The passages in order, without empty ones. Speakers are numbered
+        in order of appearance; a ``Speaker`` column of ``UNKNOWN`` only
+        counts as no speakers.
+
+    Raises:
+        ValueError: If the table has no ``Start`` column and no text
+            column (``Text`` or ``Word``).
+    """
+    rows = load_tsv_rows(text)
+    if rows and len(rows[0]) == 1:
+        rows = list(csv.DictReader(io.StringIO(text)))
+    columns = {name.strip().lower() for name in rows[0]} if rows else set()
+    if "start" not in columns or not columns & {"text", "word"}:
+        raise ValueError(
+            "This is not a transcript table: it needs the columns Start, "
+            "End and Text (or Word), as Text Lab writes them."
+        )
+    rows = [
+        {
+            key.strip().lower(): (value or "").strip()
+            for key, value in row.items()
+        }
+        for row in rows
+    ]
+    speakers = {row.get("speaker", "") for row in rows} - {"", UNKNOWN_SPEAKER}
+
+    def speaker_of(row: dict[str, str]) -> str | None:
+        if not speakers:
+            return None
+        return row.get("speaker") or UNKNOWN_SPEAKER
+
+    found: list[Turn] = []
+    if "word" in columns:
+        for key, part in _runs(
+            rows, lambda row: (row.get("segment_id", ""), speaker_of(row))
+        ):
+            words = [
+                {
+                    "word": row["word"],
+                    "start": parse_timestamp(row.get("start")),
+                    "end": parse_timestamp(row.get("end")),
+                }
+                for row in part
+                if row.get("word")
+            ]
+            if words:
+                found.append(_turn(None, None, None, words, key[1]))
+    else:
+        for row in rows:
+            if row.get("text"):
+                found.append(
+                    _turn(
+                        parse_timestamp(row.get("start")),
+                        parse_timestamp(row.get("end")),
+                        row["text"],
+                        [],
+                        speaker_of(row),
+                    )
+                )
+    return _numbered(found)
+
+
+def _word_text(word: Mapping[str, Any]) -> str:
+    """Return a WhisperX word's text."""
+    return str(word.get("word", word.get("text", "")))
+
+
+def _time(value: Any) -> float | None:
+    """Return a time in seconds as a float, or ``None`` if there is none."""
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _runs(items: list[Any], key: Any) -> Iterator[tuple[Any, list[Any]]]:
+    """Yield ``(key, items)`` for each run of items with the same key."""
+    run: list[Any] = []
+    current: Any = None
+    for item in items:
+        item_key = key(item)
+        if run and item_key != current:
+            yield current, run
+            run = []
+        current = item_key
+        run.append(item)
+    if run:
+        yield current, run
+
+
+def _turn(
+    start: Any,
+    end: Any,
+    text: str | None,
+    words: list[Mapping[str, Any]],
+    speaker: str | None = None,
+) -> Turn:
+    """Build a passage; missing times and text come from its words."""
+    timed = tuple(
+        TimedWord(
+            _word_text(word).strip(),
+            _time(word.get("start")),
+            _time(word.get("end")),
+        )
+        for word in words
+    )
+    starts = [word.start for word in timed if word.start is not None]
+    ends = [word.end for word in timed if word.end is not None]
+    first = _time(start)
+    last = _time(end)
+    if first is None:
+        first = min(starts) if starts else 0.0
+    if last is None:
+        last = max(ends) if ends else first
+    if text is None:
+        text = " ".join(word.text for word in timed)
+    return Turn(start=first, end=last, text=text, words=timed, speaker=speaker)
+
+
+def _numbered(found: list[Turn]) -> list[Turn]:
+    """Number the speakers of passages in order of appearance."""
+    numbers: dict[str, int] = {}
+    result = []
+    for turn in found:
+        number = 0
+        if turn.speaker is not None and turn.speaker != UNKNOWN_SPEAKER:
+            number = numbers.setdefault(turn.speaker, len(numbers) + 1)
+        result.append(dataclasses.replace(turn, speaker_number=number))
+    return result
 
 
 def transcription_text_from_csv(text: str) -> str:

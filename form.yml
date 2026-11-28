@@ -4,6 +4,7 @@ cluster: "ubelix"
 form:
   - auto_accounts
   - time
+  - bc_email_on_started
   - advanced_mode
   - partition
   - qos
@@ -21,6 +22,12 @@ attributes:
     step: 1
     value: "1"
     help: "Total time you plan to use Text Lab for in hours. e.g. 1 means 1:00:00 hour."
+
+  # Open OnDemand's own option: Slurm mails the user when the session
+  # starts (--mail-type=BEGIN), to the address the cluster has for them.
+  bc_email_on_started:
+    label: "Email on start"
+    help: "Get an email when your session starts, so you need not wait on this page while it is queued."
 
   advanced_mode:
     widget: "check_box"

@@ -1,0 +1,22 @@
+{#- Parts the OCR results share. -#}
+
+{#- The bar above a result's pages: the previous page, a choice of page,
+  the next (app.js shows one page at a time). id makes the choice's id
+  unique; pages are the pages, each with its number. Nothing is drawn for
+  a single page. -#}
+{% macro pager_bar(id, pages) %}
+{% if pages | length > 1 %}
+<div class="pager__bar">
+  <button class="icon-button pager__step" type="button" data-pager-step="-1" aria-label="Previous page" disabled>{{ icon("arrow-left", size="sm") }}</button>
+  <label class="label" for="{{ id }}-page">Page</label>
+  <div class="select-wrap pager__select">
+    <select class="select" id="{{ id }}-page" data-pager-select>
+      {% for item in pages %}<option value="{{ loop.index0 }}">{{ item.number }}</option>{% endfor %}
+    </select>
+    {{ icon("chevron-down", size="sm") }}
+  </div>
+  <span class="label">of {{ pages | length }}</span>
+  <button class="icon-button pager__step" type="button" data-pager-step="1" aria-label="Next page">{{ icon("arrow-right", size="sm") }}</button>
+</div>
+{% endif %}
+{% endmacro %}

@@ -29,6 +29,29 @@ KRAKEN_ENV = "kraken_backend"
 HF_OCR_ENV = "hf_ocr_backend"
 
 
+def paddle_environment(env: dict[str, str]) -> dict[str, str]:
+    """Add the settings Paddle's workers need to their environment.
+
+    Paddle stalls or crashes in its OpenMP and BLAS threads with more than
+    one thread (a worker spun one core for 15 minutes with the GPU idle
+    when the session's ``OMP_NUM_THREADS=16`` reached it), so the thread
+    counts are set to 1 whatever the caller's environment says. They have
+    to be set before the worker starts: numpy's BLAS reads them when it is
+    imported. Model source checks over the internet are turned off.
+
+    Args:
+        env: A worker's environment, changed in place.
+
+    Returns:
+        The same environment.
+    """
+    env["OMP_NUM_THREADS"] = "1"
+    env["MKL_NUM_THREADS"] = "1"
+    env.setdefault("DISABLE_MODEL_SOURCE_CHECK", "True")
+    env.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
+    return env
+
+
 def env_python(env: str, *overrides: str) -> str:
     """Return the Python interpreter of one of the image's environments.
 

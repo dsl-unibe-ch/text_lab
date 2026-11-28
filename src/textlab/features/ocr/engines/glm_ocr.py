@@ -7,13 +7,22 @@ text, tables (returned as HTML) or figures. The model is pulled on first use.
 from __future__ import annotations
 
 import os
+import threading
 from pathlib import Path
 from typing import Any
 
 import ollama
 
-from textlab.common.ollama import message_text, model_installed
-from textlab.common.progress import Progress, ProgressCallback
+from textlab.common.ollama import (
+    check_ollama_server,
+    message_text,
+    model_installed,
+)
+from textlab.common.progress import (
+    Progress,
+    ProgressCallback,
+    check_cancelled,
+)
 from textlab.features.ocr.engines.base import (
     EngineError,
     EngineOptions,
@@ -87,7 +96,19 @@ class GlmOcr(PageEngine):
     """GLM-OCR on the Ollama server, one request per page."""
 
     name = "GLM-OCR"
+    description = (
+        "A vision model that reads one kind of content at a time: text, "
+        "tables (as real tables) or figures. Best for complex layouts."
+    )
     modes = MODES
+    markdown = True
+    ollama_model = MODEL
+
+    def problem(self) -> str | None:
+        """Return a note if the Ollama server is not running."""
+        if check_ollama_server(attempts=1):
+            return None
+        return "The language model server is not running."
 
     def prepare(
         self, options: EngineOptions, on_progress: ProgressCallback
@@ -100,6 +121,7 @@ class GlmOcr(PageEngine):
         images: list[Path],
         options: EngineOptions,
         on_progress: ProgressCallback,
+        cancel: threading.Event | None = None,
     ) -> EngineOutput:
         """Read page images (see :meth:`PageEngine.recognize_pages`).
 
@@ -109,6 +131,7 @@ class GlmOcr(PageEngine):
         prompt = options.mode or MODES[0]
         output = EngineOutput(pages=[])
         for index, image_path in enumerate(images, start=1):
+            check_cancelled(cancel)
             png = page_png(image_path)
             if png is None:
                 text = "[Error encoding image]"

@@ -4,9 +4,10 @@ import os
 from types import SimpleNamespace
 
 import fitz
+import ollama
 import pytest
 
-from textlab.common.progress import Progress
+from textlab.common.progress import CancelledError, Progress
 from textlab.common.storage import Workspace
 from textlab.features.chat import (
     context_window,
@@ -15,6 +16,7 @@ from textlab.features.chat import (
     router,
     service,
 )
+from textlab.features.chat.generation import Piece
 
 # --- documents -----------------------------------------------------------
 
@@ -205,12 +207,13 @@ def test_texts_are_grouped_by_budget():
 def test_a_short_context_is_put_before_the_question(monkeypatch):
     sent = []
 
-    def respond(model, messages, num_ctx):
+    def respond(model, messages, num_ctx, cancel=None):
         sent.append((model, messages, num_ctx))
-        yield "Hi"
-        yield " there"
+        yield Piece("Let me see.", thinking=True)
+        yield Piece("Hi")
+        yield Piece(" there")
 
-    monkeypatch.setattr(service, "get_response_generator", respond)
+    monkeypatch.setattr(service, "stream_reply", respond)
     monkeypatch.setenv("TEXTLAB_CHAT_NUM_CTX", "16384")
     history = [{"role": "user", "content": "Earlier", "analysis": {}}]
     reply = "".join(service.answer("m", history, "What is it?", "### Context"))
@@ -229,11 +232,11 @@ def test_a_short_context_is_put_before_the_question(monkeypatch):
 def test_old_turns_that_do_not_fit_are_left_out(monkeypatch):
     sent = []
 
-    def respond(model, messages, num_ctx):
+    def respond(model, messages, num_ctx, cancel=None):
         sent.append(messages)
-        yield "ok"
+        yield Piece("ok")
 
-    monkeypatch.setattr(service, "get_response_generator", respond)
+    monkeypatch.setattr(service, "stream_reply", respond)
     monkeypatch.setattr(service, "text_budget", lambda: 300)
     history = [
         {"role": "user", "content": "old " * 400},  # 400 tokens
@@ -249,14 +252,14 @@ def test_old_turns_that_do_not_fit_are_left_out(monkeypatch):
 def test_a_context_that_fits_is_not_split(monkeypatch):
     sent = []
 
-    def respond(model, messages, num_ctx):
+    def respond(model, messages, num_ctx, cancel=None):
         sent.append(messages)
-        yield "ok"
+        yield Piece("ok")
 
     def fail(*args, **kwargs):
         raise AssertionError("the context was split")
 
-    monkeypatch.setattr(service, "get_response_generator", respond)
+    monkeypatch.setattr(service, "stream_reply", respond)
     monkeypatch.setattr(service, "get_chunk_answer", fail)
     context = "x" * 40_000  # 10,000 tokens, within the default budget
     "".join(service.answer("m", [], "Summarize", context))
@@ -267,21 +270,23 @@ def test_a_long_context_is_answered_part_by_part(monkeypatch):
     partial = []
     windows = set()
 
-    def chunk_answer(model, chunk, index, total, question, history, num_ctx):
+    def chunk_answer(
+        model, chunk, index, total, question, history, num_ctx, cancel=None
+    ):
         partial.append((chunk, index, total))
         windows.add(num_ctx)
         return f"answer {index}"
 
-    def synthesis(model, answers, question, history, num_ctx):
+    def synthesis(model, answers, question, history, num_ctx, cancel=None):
         windows.add(num_ctx)
-        yield " + ".join(answers)
+        yield Piece(" + ".join(answers))
 
     monkeypatch.setattr(service, "text_budget", lambda: 1)
     monkeypatch.setattr(
         service, "chunk_text", lambda text, chunk_size_tokens: ["one", "two"]
     )
     monkeypatch.setattr(service, "get_chunk_answer", chunk_answer)
-    monkeypatch.setattr(service, "get_synthesis_generator", synthesis)
+    monkeypatch.setattr(service, "stream_synthesis", synthesis)
     updates = []
     reply = "".join(
         service.answer(
@@ -309,12 +314,14 @@ def test_parts_fill_the_budget(monkeypatch):
     monkeypatch.setattr(service, "text_budget", lambda: 1000)
     monkeypatch.setattr(service, "chunk_text", chunk_text)
     monkeypatch.setattr(
-        service, "get_chunk_answer", lambda *args: "partial answer"
+        service, "get_chunk_answer", lambda *args, **kwargs: "partial answer"
     )
     monkeypatch.setattr(
         service,
-        "get_synthesis_generator",
-        lambda model, answers, question, history, num_ctx: iter(answers),
+        "stream_synthesis",
+        lambda model, answers, question, history, num_ctx, cancel=None: (
+            Piece(answer) for answer in answers
+        ),
     )
     history = [{"role": "user", "content": "h" * 400}]  # 100 tokens
     "".join(service.answer("m", history, "q" * 40, "x" * 8000))
@@ -324,20 +331,22 @@ def test_parts_fill_the_budget(monkeypatch):
 def test_partial_answers_too_long_together_are_combined(monkeypatch):
     combined = []
 
-    def combine(model, answers, question, history, num_ctx):
+    def combine(model, answers, question, history, num_ctx, cancel=None):
         combined.append(list(answers))
         return "c" * 40  # 10 tokens
 
-    def synthesis(model, answers, question, history, num_ctx):
-        yield "|".join(answers)
+    def synthesis(model, answers, question, history, num_ctx, cancel=None):
+        yield Piece("|".join(answers))
 
     monkeypatch.setattr(service, "text_budget", lambda: 70)
     monkeypatch.setattr(
         service, "chunk_text", lambda text, chunk_size_tokens: ["1", "2", "3"]
     )
-    monkeypatch.setattr(service, "get_chunk_answer", lambda *args: "a" * 120)
+    monkeypatch.setattr(
+        service, "get_chunk_answer", lambda *args, **kwargs: "a" * 120
+    )
     monkeypatch.setattr(service, "get_combined_answer", combine)
-    monkeypatch.setattr(service, "get_synthesis_generator", synthesis)
+    monkeypatch.setattr(service, "stream_synthesis", synthesis)
     reply = "".join(service.answer("m", [], "", "x" * 1000))
     # Three 30-token answers exceed the budget (69 tokens beside the
     # question): the first two are combined.
@@ -360,12 +369,10 @@ def test_every_model_call_sets_the_context_window(monkeypatch):
 
     monkeypatch.setattr(generation.ollama, "chat", chat)
     history = [{"role": "user", "content": "h"}]
-    assert "".join(generation.get_response_generator("m", history, 4)) == (
-        "text"
-    )
+    assert list(generation.stream_reply("m", history, 4)) == [Piece("text")]
     assert generation.get_chunk_answer("m", "c", 1, 2, "q", [], 5) == "text"
     assert generation.get_combined_answer("m", ["a"], "q", [], 6) == "text"
-    assert "".join(generation.get_synthesis_generator("m", ["a"], "q", [], 7))
+    assert list(generation.stream_synthesis("m", ["a"], "q", [], 7))
     assert [c["options"]["num_ctx"] for c in calls] == [4, 5, 6, 7]
     assert all(c["messages"][0]["role"] == "system" for c in calls)
 
@@ -484,3 +491,296 @@ def test_a_data_question_starts_an_agent_run(monkeypatch):
     ((request, data_path, prefix),) = started
     assert (request.model, request.prompt) == ("m", "Plot age")
     assert (data_path, prefix, run.run_id) == ("/w/data.csv", "chat", "chat-1")
+
+
+# --- attachments one by one ------------------------------------------------
+
+
+def test_each_attachment_is_read_on_its_own():
+    note = service.read_document("notes.txt", b"Hello.")
+    scan = service.read_document("scan.pdf", pdf_bytes())
+    assert (note.name, note.size, note.text, note.problem) == (
+        "notes.txt",
+        6,
+        "Hello.",
+        "",
+    )
+    assert scan.text == "" and "OCR" in scan.problem
+    assert (note.kind, scan.kind) == ("Text", "PDF")
+    assert service.read_document("data.xlsx", b"").kind == "Table"
+    context = service.document_context([note, scan])
+    assert (
+        context
+        == service.read_documents(
+            [("notes.txt", b"Hello."), ("scan.pdf", pdf_bytes())]
+        )[0]
+    )
+    assert "scan.pdf" not in context
+    assert service.document_context([scan]) == ""
+
+
+# --- streaming, thinking and stopping --------------------------------------
+
+
+def test_thinking_and_answer_come_apart(monkeypatch):
+    chunks = [
+        {"message": {"thinking": "Hm", "content": None}},
+        {"message": {"thinking": "...", "content": ""}},
+        {"message": {"content": "Yes"}},
+        SimpleNamespace(message=SimpleNamespace(thinking=None, content=".")),
+    ]
+    monkeypatch.setattr(
+        generation.ollama, "chat", lambda **request: iter(chunks)
+    )
+    assert list(generation.stream_reply("m", [], 8)) == [
+        Piece("Hm", thinking=True),
+        Piece("...", thinking=True),
+        Piece("Yes"),
+        Piece("."),
+    ]
+    # Answers that are not streamed leave the thinking out.
+    assert generation.get_chunk_answer("m", "c", 1, 1, "q", [], 8) == "Yes."
+    assert "".join(service.answer("m", [], "q")) == "Yes."
+
+
+def test_a_reply_stops_at_once_even_while_the_model_loads(monkeypatch):
+    import threading
+
+    release = threading.Event()
+    closed = threading.Event()
+
+    def chat(**request):
+        def stream():
+            try:
+                release.wait(5)  # the model is loading
+                yield {"message": {"content": "late"}}
+                yield {"message": {"content": "never"}}
+            finally:
+                closed.set()
+
+        return stream()
+
+    monkeypatch.setattr(generation, "CANCEL_POLL", 0.01)
+    monkeypatch.setattr(generation.ollama, "chat", chat)
+    cancel = threading.Event()
+    cancel.set()
+    pieces = generation.stream_reply("m", [], 8, cancel)
+    with pytest.raises(CancelledError):
+        next(pieces)
+    # The request is closed when its next piece arrives.
+    release.set()
+    assert closed.wait(5)
+
+
+def test_errors_of_a_stream_reach_the_reader(monkeypatch):
+    import threading
+
+    def chat(**request):
+        def stream():
+            yield {"message": {"content": "Hel"}}
+            raise generation.ollama.ResponseError("model not found", 404)
+
+        return stream()
+
+    monkeypatch.setattr(generation.ollama, "chat", chat)
+    with pytest.raises(generation.ollama.ResponseError):
+        list(generation.stream_reply("m", [], 8, threading.Event()))
+
+
+# --- replying to a message --------------------------------------------------
+
+
+@pytest.fixture
+def model_server(monkeypatch):
+    """A model server that has the model, loaded, and answers with pieces."""
+    calls = []
+
+    def stream_reply(model, messages, num_ctx, cancel=None):
+        calls.append(messages)
+        yield Piece("Think", thinking=True)
+        yield Piece("The answer")
+        yield Piece(" is 42.")
+
+    monkeypatch.setattr(service, "model_installed", lambda model: True)
+    monkeypatch.setattr(service, "is_model_loaded", lambda model: True)
+    monkeypatch.setattr(service, "stream_reply", stream_reply)
+    return calls
+
+
+def test_a_reply_keeps_its_thinking_apart(model_server):
+    drafts, updates = [], []
+    reply = service.respond(
+        "m",
+        [{"role": "user", "content": "Hi"}],
+        "What is it?",
+        context="### Context",
+        on_progress=updates.append,
+        on_draft=drafts.append,
+    )
+    assert (reply.model, reply.text, reply.thinking) == (
+        "m",
+        "The answer is 42.",
+        "Think",
+    )
+    assert not reply.stopped and reply.analysis is None
+    assert drafts[-1] == service.Draft("Think", "The answer is 42.")
+    assert drafts[0] == service.Draft("Think", "")
+    assert updates == [Progress("Waiting for the model")]
+    assert reply.message() == {
+        "role": "assistant",
+        "content": "The answer is 42.",
+    }
+    assert model_server[0][-1]["content"].startswith("### Context")
+
+
+def test_a_stopped_reply_keeps_what_was_written(monkeypatch, model_server):
+    import threading
+
+    cancel = threading.Event()
+
+    def stream_reply(model, messages, num_ctx, cancel=None):
+        yield Piece("Half an")
+        cancel.set()
+        raise CancelledError("stopped")
+
+    monkeypatch.setattr(service, "stream_reply", stream_reply)
+    reply = service.respond("m", [], "Q?", cancel=cancel)
+    assert reply.stopped and reply.text == "Half an"
+
+
+def test_a_missing_model_is_downloaded_first(monkeypatch, model_server):
+    pulled = []
+
+    def pull(model, stream):
+        pulled.append(model)
+        yield {"status": "pulling", "total": 4, "completed": 1}
+        yield {"status": "success"}
+
+    monkeypatch.setattr(service, "model_installed", lambda model: False)
+    monkeypatch.setattr(service, "is_model_loaded", lambda model: False)
+    monkeypatch.setattr(ollama, "pull", pull)
+    updates = []
+    service.respond("big:1b", [], "Q?", on_progress=updates.append)
+    assert pulled == ["big:1b"]
+    assert updates[:2] == [
+        Progress("Downloading big:1b"),
+        Progress("Downloading big:1b", 0.25),
+    ]
+    assert updates[2].message.startswith("Loading big:1b")
+
+
+class FakeRun:
+    """An agents' run that ends after it was looked at twice."""
+
+    def __init__(self, status, result=None, error=None):
+        self.logs = [("info", "Planning")]
+        self.final = status
+        self.status = service.visualization.RUNNING
+        self.result = result
+        self.error = error
+        self.looks = 0
+        self.cancelled = False
+
+    @property
+    def running(self):
+        self.looks += 1
+        if self.looks > 2:
+            self.status = self.final
+            return False
+        return True
+
+    def cancel(self):
+        self.cancelled = True
+
+
+TABLE = service.DataTable("data.csv", "/w/data.csv", "age: int")
+
+
+def test_a_data_question_is_answered_by_the_agents(monkeypatch, model_server):
+    result = SimpleNamespace(
+        summary="Age is normal.",
+        to_payload=lambda: {"artifacts": [], "stats": [], "run_id": "r"},
+    )
+    started = []
+
+    def start(instruction, data_path, model):
+        started.append((instruction, data_path, model))
+        return FakeRun(service.visualization.DONE, result)
+
+    monkeypatch.setattr(service, "ANALYSIS_POLL", 0)
+    monkeypatch.setattr(
+        service, "decide_tool_use", lambda *args, **kwargs: (True, "Plot age")
+    )
+    monkeypatch.setattr(service, "start_data_analysis", start)
+    drafts = []
+    reply = service.respond(
+        "m", [], "Show me age", table=TABLE, on_draft=drafts.append
+    )
+    assert started == [("Plot age", "/w/data.csv", "m")]
+    assert reply.text == "Age is normal."
+    assert reply.analysis == {"artifacts": [], "stats": [], "run_id": "r"}
+    assert reply.activity == (("info", "Planning"),)
+    assert drafts == [service.Draft(activity=(("info", "Planning"),))]
+    assert reply.message()["analysis"]["run_id"] == "r"
+    assert model_server == []  # the chat model did not answer
+
+
+def test_other_questions_about_a_table_go_to_the_chat_model(
+    monkeypatch, model_server
+):
+    monkeypatch.setattr(
+        service, "decide_tool_use", lambda *args, **kwargs: (False, "")
+    )
+    reply = service.respond("m", [], "What is the first row?", table=TABLE)
+    assert reply.text == "The answer is 42." and reply.analysis is None
+
+
+@pytest.mark.parametrize(
+    ("status", "message"),
+    [("timeout", "took longer than 10 minutes"), ("error", "failed: boom")],
+)
+def test_agents_that_fail_raise_a_message(
+    monkeypatch, model_server, status, message
+):
+    monkeypatch.setattr(service, "ANALYSIS_POLL", 0)
+    monkeypatch.setattr(
+        service, "decide_tool_use", lambda *args, **kwargs: (True, "")
+    )
+    monkeypatch.setattr(
+        service,
+        "start_data_analysis",
+        lambda *args: FakeRun(status, error="boom"),
+    )
+    with pytest.raises(service.AnalysisError, match=message):
+        service.respond("m", [], "Plot", table=TABLE)
+
+
+def test_stopping_the_agents_waits_for_their_step(monkeypatch, model_server):
+    import threading
+
+    run = FakeRun(service.visualization.CANCELLED)
+    monkeypatch.setattr(service, "ANALYSIS_POLL", 0)
+    monkeypatch.setattr(
+        service, "decide_tool_use", lambda *args, **kwargs: (True, "Plot")
+    )
+    cancel = threading.Event()
+
+    def start(*args):
+        cancel.set()
+        return run
+
+    monkeypatch.setattr(service, "start_data_analysis", start)
+    reply = service.respond("m", [], "Plot", table=TABLE, cancel=cancel)
+    assert run.cancelled and reply.stopped and reply.text == ""
+
+
+def test_tables_are_kept_apart_and_discarded(tmp_path):
+    first = service.keep_table("a.csv", b"x,y\n1,2\n", str(tmp_path))
+    second = service.keep_table("b.csv", b"x,y\n3,4\n", str(tmp_path))
+    assert first.path != second.path
+    with open(first.path, "rb") as file:
+        assert file.read() == b"x,y\n1,2\n"
+    assert first.name == "a.csv" and "x" in first.schema
+    service.discard_table(first)
+    assert not os.path.exists(first.path)
+    assert os.path.exists(second.path)

@@ -15,11 +15,19 @@ from __future__ import annotations
 import functools
 import os
 import socket
+import threading
 import time
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
 import ollama
+
+from textlab.common.progress import (
+    CancelledError,
+    Progress,
+    ProgressCallback,
+    no_progress,
+)
 
 #: Address used when ``OLLAMA_HOST`` is not set (Ollama's own default).
 DEFAULT_HOST = "127.0.0.1"
@@ -107,13 +115,23 @@ def message_text(message: Any) -> str:
     Returns:
         The message content as a string.
     """
-    if message is None:
-        return ""
-    if isinstance(message, Mapping):
-        content = message.get("content")
-    else:
-        content = getattr(message, "content", None)
-    return content or ""
+    return _field(message, "content") or ""
+
+
+def message_thinking(message: Any) -> str:
+    """Return the reasoning of a chat message, or ``""`` when it has none.
+
+    Reasoning models stream their thinking in the message's ``thinking``
+    field before the answer (Ollama 0.28 and later), so an interface can
+    show it apart from the answer.
+
+    Args:
+        message: A message object or dictionary, or ``None``.
+
+    Returns:
+        The thinking as a string.
+    """
+    return _field(message, "thinking") or ""
 
 
 def chat_no_think(
@@ -366,6 +384,34 @@ def model_installed(model: str, client: Any = ollama) -> bool:
     """
     installed = installed_model_names(client)
     return installed is not None and canonical_model_name(model) in installed
+
+
+def pull_model(
+    model: str,
+    *,
+    on_progress: ProgressCallback = no_progress,
+    cancel: threading.Event | None = None,
+) -> None:
+    """Download a model to the Ollama server.
+
+    Args:
+        model: The model.
+        on_progress: Receives the share downloaded so far.
+        cancel: Set to stop the download; the server keeps what it has
+            downloaded, and a later pull goes on from there.
+
+    Raises:
+        CancelledError: If ``cancel`` was set.
+        ollama.ResponseError: If the download fails.
+    """
+    on_progress(Progress(f"Downloading {model}"))
+    for update in ollama.pull(model=model, stream=True):
+        if cancel is not None and cancel.is_set():
+            raise CancelledError(f"The download of {model} was stopped.")
+        # Updates are ProgressResponse objects, which also answer get().
+        total, completed = update.get("total"), update.get("completed")
+        if total and completed is not None:
+            on_progress(Progress(f"Downloading {model}", completed / total))
 
 
 def _field(value: Any, name: str) -> Any:

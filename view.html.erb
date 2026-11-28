@@ -1,3 +1,22 @@
+<%#
+  The Connect button on a Text Lab session's card.
+
+  text_lab_ui (set in template/before.sh.erb) names the interface the
+  session runs. The web UI takes the session password from the button,
+  which posts it to the app's login: the password still protects the
+  session, and only this card, which only the session's owner sees, holds
+  it. Streamlit cannot take a posted password, so for it the card shows the
+  password to copy into the app's login form. Sessions started before
+  text_lab_ui existed lack it and run Streamlit.
+%>
+<% if defined?(text_lab_ui) && text_lab_ui.to_s == "web" %>
+<form action="/node/<%= host %>/<%= port %>/login" method="post" target="_blank">
+  <input type="hidden" name="password" value="<%= password %>">
+  <button class="btn btn-primary" type="submit">
+    <i class="fa fa-cogs"></i> Connect to Text Lab
+  </button>
+</form>
+<% else %>
 <form action="/node/<%= host %>/<%= port %>/" method="get" target="_blank">
   <p>Your session is ready. Copy the session password and connect to Text Lab</p>
 
@@ -43,3 +62,4 @@ function copyPassword(btn, passwordText) {
   }, 2000);
 }
 </script>
+<% end %>

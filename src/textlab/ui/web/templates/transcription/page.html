@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% from "components/macros.html" import masthead, section_head, dropzone with context %}
+{% block title %}Transcription{% endblock %}
+{% block content %}
+{% set tool = tools | selectattr("id", "equalto", page_id) | first %}
+{{ masthead(tool.label, tool.summary, number=tool.number, kicker=tool.group, guide="https://text-lab.dsl.unibe.ch/transcription/") }}
+
+<form class="sheet" data-switch="mode" data-upload-form aria-label="New transcription"
+      hx-post="{{ root }}/transcription" hx-encoding="multipart/form-data"
+      hx-target="#jobs" hx-swap="afterbegin" hx-disabled-elt="find button[type=submit]">
+  <div class="switcher" role="radiogroup" aria-label="What to transcribe">
+    <label class="switcher__option"><input type="radio" name="mode" value="one" checked><span>One recording</span></label>
+    <label class="switcher__option"><input type="radio" name="mode" value="batch"><span>A ZIP of recordings</span></label>
+    <label class="switcher__option"><input type="radio" name="mode" value="review"><span>Review a transcript</span></label>
+  </div>
+
+  <ol class="steps">
+    <li class="step" data-when="one">
+      <div>
+        <span class="label step__num">01</span>
+        <h2 class="step__title">Recording</h2>
+        <p class="step__hint">One audio file. Video files need their sound saved as audio first.</p>
+      </div>
+      <div class="step__body">
+        {{ dropzone("recording", "Drop a recording here", audio_formats, accept=audio_accept) }}
+      </div>
+    </li>
+
+    <li class="step" data-when="batch" hidden>
+      <div>
+        <span class="label step__num">01</span>
+        <h2 class="step__title">Recordings</h2>
+        <p class="step__hint">A ZIP file. Every recording in it is transcribed with the settings below; the results come back as one ZIP.</p>
+      </div>
+      <div class="step__body">
+        {{ dropzone("archive", "Drop a ZIP file here", "ZIP of " ~ audio_formats, accept=".zip") }}
+      </div>
+    </li>
+
+    <li class="step" data-when="review" hidden>
+      <div>
+        <span class="label step__num">01</span>
+        <h2 class="step__title">Recording and transcript</h2>
+        <p class="step__hint">Listen to a recording with a transcript Text Lab made earlier, for example to check names and difficult passages. Nothing is transcribed again.</p>
+      </div>
+      <div class="step__body">
+        {{ dropzone("review_audio", "Drop the recording here", audio_formats, accept=audio_accept, required=false) }}
+        {{ dropzone("review_transcript", "Drop the transcript here", "CSV TSV from a Text Lab transcription: the words table marks each word as it is spoken", accept=table_accept, required=false) }}
+        <details class="disclosure">
+          <summary>Use files on the cluster instead</summary>
+          <div class="form-grid">
+            <div class="field">
+              <label class="field__label" for="audio-path">Recording</label>
+              <input class="input" id="audio-path" name="audio_path" placeholder="/storage/research/..." autocomplete="off" spellcheck="false">
+            </div>
+            <div class="field">
+              <label class="field__label" for="transcript-path">Transcript</label>
+              <input class="input" id="transcript-path" name="transcript_path" placeholder="/storage/research/..." autocomplete="off" spellcheck="false">
+            </div>
+          </div>
+          <p class="field__help">Full paths of files you can read. They are read where they are, not copied.</p>
+        </details>
+      </div>
+    </li>
+
+    <li class="step" data-when="one batch">
+      <div>
+        <span class="label step__num">02</span>
+        <h2 class="step__title">Language and model</h2>
+        <p class="step__hint">The model follows from the language.</p>
+      </div>
+      <div class="step__body">
+        <div class="form-grid">
+          <div class="field">
+            <label class="field__label" for="language">Language</label>
+            <div class="select-wrap">
+              <select class="select" id="language" name="language" data-readout="model-readout" aria-describedby="language-help">
+                <option value="" data-readout-text="{{ default_model }}" selected>Detect from the recording</option>
+                {% for code, name, model in languages %}
+                <option value="{{ code }}" data-readout-text="{{ model or 'not installed' }}"{% if not model %} disabled{% endif %}>{{ name }}</option>
+                {% endfor %}
+              </select>
+              {{ icon("chevron-down", size="sm") }}
+            </div>
+            <p class="field__help" id="language-help">Detection listens to the first 30 seconds of each recording. It hears Swiss German as German: choose Swiss German yourself.</p>
+          </div>
+          <div class="field">
+            <span class="field__label">Model</span>
+            <p class="readout" id="model-readout" aria-live="polite">{{ default_model }}</p>
+            <p class="field__help">Whisper, for most languages; Swiss German has models of its own.</p>
+          </div>
+        </div>
+        <details class="disclosure">
+          <summary>Use another model</summary>
+          <div class="field">
+            <label class="field__label" for="model">Model name or folder</label>
+            <input class="input" id="model" name="model" placeholder="large-v3" autocomplete="off" spellcheck="false" aria-describedby="model-help">
+            <p class="field__help" id="model-help">A Whisper model WhisperX can load, by name or as the full path of a folder. It replaces the model above.</p>
+          </div>
+        </details>
+      </div>
+    </li>
+
+    <li class="step" data-when="one batch">
+      <div>
+        <span class="label step__num">03</span>
+        <h2 class="step__title">Options</h2>
+        <p class="step__hint">Both can stay as they are.</p>
+      </div>
+      <div class="step__body options">
+        <div class="option">
+          <input class="checkbox" type="checkbox" id="vad" name="vad" value="1" data-reveal="vad-more" aria-describedby="vad-text">
+          <label class="option__title" for="vad">Skip silence first</label>
+          <p class="option__text" id="vad-text">Voice activity detection finds the speech, and only that is transcribed. Helps with long pauses and background noise.</p>
+          <div class="option__more" id="vad-more" hidden>
+            <label class="field__label" for="vad-pause">Join speech across pauses up to <output for="vad-pause" data-output-of="vad-pause">{{ vad_pause[2] }}</output> s</label>
+            <input class="range" type="range" id="vad-pause" name="vad_pause" min="{{ vad_pause[0] }}" max="{{ vad_pause[1] }}" step="0.05" value="{{ vad_pause[2] }}">
+          </div>
+        </div>
+        <div class="option">
+          <span class="option__mark" aria-hidden="true"></span>
+          <p class="option__title">Speakers are told apart</p>
+          <p class="option__text">Each passage is marked with who speaks. If you know how many people speak, say so: it makes the result more reliable.</p>
+          <div class="option__more inline-fields">
+            <div class="field">
+              <label class="field__label" for="min-speakers">At least</label>
+              <input class="input input--short" type="number" id="min-speakers" name="min_speakers" min="1" max="{{ max_speakers }}" step="1" placeholder="any">
+            </div>
+            <div class="field">
+              <label class="field__label" for="max-speakers">At most</label>
+              <input class="input input--short" type="number" id="max-speakers" name="max_speakers" min="1" max="{{ max_speakers }}" step="1" placeholder="any">
+            </div>
+          </div>
+        </div>
+      </div>
+    </li>
+  </ol>
+
+  <div class="upload-progress" data-upload-progress hidden>
+    <progress class="meter__bar" max="1" value="0"></progress>
+    <p class="label" data-upload-progress-text>Uploading</p>
+  </div>
+
+  <div class="sheet__submit">
+    <p class="sheet__note" data-when="one batch">Runs in the background: you can leave this page and come back.</p>
+    <p class="sheet__note" data-when="review" hidden>Opens beside the transcriptions; it does not wait for them.</p>
+    <button class="btn btn--primary btn--lg" type="submit"><span data-when="one batch">Transcribe</span><span data-when="review" hidden>Open in the player</span> {{ icon("arrow-right", size="sm") }}</button>
+  </div>
+</form>
+
+<section class="section" aria-labelledby="jobs-title">
+  {{ section_head("Your transcriptions", "Kept until you remove them or the session ends", id="jobs-title") }}
+  <div class="records" id="jobs">
+    {{ cards }}
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,19 @@
+{#- A run's quality scores (view is a TopicsView): each with what it says,
+  and how they are computed. -#}
+{% if view.metrics %}
+<dl class="metrics">
+  {% for name, shown, meaning in view.metrics %}
+  <div class="metric">
+    <dt class="label">{{ name }}</dt>
+    <dd class="metric__value">{{ shown }}</dd>
+    {% if meaning %}<dd class="metric__text">{{ meaning }}</dd>{% endif %}
+  </div>
+  {% endfor %}
+</dl>
+<details class="disclosure">
+  <summary>How the scores are computed</summary>
+  <div class="prose">{{ view.explanation | markdown }}</div>
+</details>
+{% else %}
+<p class="muted">No scores were computed for this run.</p>
+{% endif %}

@@ -452,17 +452,51 @@ def extract_bertopic_topics(topic_model: BERTopic) -> list[TopicKeywords]:
             continue
 
         words = topic_model.get_topic(topic_id) or []
-        keywords = [word for word, _ in words[:_TOP_N_KEYWORDS] if word]
-        if keywords:
+        pairs = [
+            (word, score) for word, score in words[:_TOP_N_KEYWORDS] if word
+        ]
+        if pairs:
             topics.append(
                 TopicKeywords(
                     topic=display_topic_id(topic_id),
-                    keywords=keywords,
+                    keywords=[word for word, _ in pairs],
                     count=int(row["Count"]),
+                    weights=[float(score) for _, score in pairs],
                 )
             )
 
     return topics
+
+
+def bertopic_topic_vectors(
+    topic_model: BERTopic, topics: list[TopicKeywords]
+) -> np.ndarray | None:
+    """Return one vector per topic, for the overview's map.
+
+    The topic embeddings (the mean of each topic's document embeddings)
+    when BERTopic has them, else the c-TF-IDF rows.
+
+    Args:
+        topic_model: A fitted BERTopic model.
+        topics: The topics, as :func:`extract_bertopic_topics` gives them.
+
+    Returns:
+        The vectors in the order of ``topics``, or ``None`` if the model's
+        rows do not match its topics.
+    """
+    ids = sorted(topic_model.get_topics())
+    vectors = getattr(topic_model, "topic_embeddings_", None)
+    if vectors is None:
+        vectors = getattr(topic_model, "c_tf_idf_", None)
+    if vectors is None:
+        return None
+    if hasattr(vectors, "toarray"):
+        vectors = vectors.toarray()
+    vectors = np.asarray(vectors)
+    if len(vectors) != len(ids):
+        return None
+    rows = [ids.index(int(topic.topic) - 1) for topic in topics]
+    return vectors[rows]
 
 
 def generate_bertopic_document_topics_df(
@@ -595,25 +629,24 @@ def generate_bertopic_visualizations(topic_model: BERTopic) -> dict[str, str]:
     return visualizations
 
 
-def generate_topics_over_time_html(
+def topics_over_time_frame(
     topic_model: BERTopic,
     texts: list[str],
     timestamps: list[Any],
     nr_bins: int | None = None,
-) -> str:
-    """Return an HTML chart of topics over time from a BERTopic model.
+) -> pd.DataFrame:
+    """Return each topic's frequency and words per interval of time.
 
     Args:
         topic_model: A fitted BERTopic model.
-        texts: A list of input texts used for the topics-over-time analysis.
-        timestamps: A list of timestamps corresponding to each input text.
+        texts: The analyzed texts.
+        timestamps: Each text's timestamp.
         nr_bins: Number of equal-width time intervals to group the
             timestamps into, or ``None`` to keep every distinct timestamp.
 
     Returns:
-        An HTML string containing the topics-over-time visualization. If an
-        error occurs during generation, an HTML error message is returned
-        instead.
+        BERTopic's table: ``Topic``, ``Words``, ``Frequency`` and
+        ``Timestamp`` (the interval's start) per topic and interval.
 
     Raises:
         ValueError: If the number of texts does not match the number of
@@ -624,15 +657,46 @@ def generate_topics_over_time_html(
             f"Text count ({len(texts)}) does not match "
             f"timestamp count ({len(timestamps)})."
         )
+    return topic_model.topics_over_time(texts, timestamps, nr_bins=nr_bins)
 
+
+def topics_over_time_rows(frame: pd.DataFrame) -> list[list[Any]]:
+    """Return BERTopic's topics over time as plain rows.
+
+    Args:
+        frame: The table from :func:`topics_over_time_frame`.
+
+    Returns:
+        ``[topic number, the interval's start in nanoseconds, words]`` per
+        row, with topics numbered as the page shows them.
+    """
+    return [
+        [
+            display_topic_id(int(row.Topic)),
+            int(pd.Timestamp(row.Timestamp).value),
+            str(row.Words),
+        ]
+        for row in frame.itertuples(index=False)
+    ]
+
+
+def generate_topics_over_time_html(
+    topic_model: BERTopic, frame: pd.DataFrame
+) -> str:
+    """Return BERTopic's HTML chart of topics over time.
+
+    Args:
+        topic_model: A fitted BERTopic model.
+        frame: The table from :func:`topics_over_time_frame`.
+
+    Returns:
+        An HTML string containing the topics-over-time visualization. If an
+        error occurs during generation, an HTML error message is returned
+        instead.
+    """
     try:
-        topics_over_time = topic_model.topics_over_time(
-            texts,
-            timestamps,
-            nr_bins=nr_bins,
-        )
         fig = topic_model.visualize_topics_over_time(
-            topics_over_time,
+            frame,
             custom_labels=True,
         )
         _renumber_hover_text(fig)

@@ -49,6 +49,44 @@ class GrobidError(Exception):
     """The Grobid server cannot be started or cannot parse a PDF."""
 
 
+def grobid_problem() -> str:
+    """Return why the Grobid server cannot run here, without starting it.
+
+    Returns:
+        The reason, as :func:`ensure_grobid_server` would raise it; empty
+        if the server runs or can be started.
+    """
+    if _port_open(GROBID_HOST, GROBID_PORT):
+        return ""
+    try:
+        _launcher()
+    except GrobidError as exc:
+        return str(exc)
+    return ""
+
+
+def _launcher() -> tuple[str, str]:
+    """Return the Apptainer command and the Grobid image to start.
+
+    Raises:
+        GrobidError: If the image is not set or missing, or there is no
+            Apptainer.
+    """
+    try:
+        container = str(get_settings().require("grobid_container"))
+    except MissingSettingError as exc:
+        raise GrobidError(str(exc)) from exc
+    apptainer = next(
+        (cmd for cmd in ("apptainer", "singularity") if shutil.which(cmd)),
+        None,
+    )
+    if apptainer is None:
+        raise GrobidError(NO_APPTAINER_MESSAGE)
+    if not os.path.exists(container):
+        raise GrobidError(f"Grobid container SIF not found at: {container}")
+    return apptainer, container
+
+
 def ensure_grobid_server() -> None:
     """Start the Grobid server unless it is already running.
 
@@ -60,21 +98,8 @@ def ensure_grobid_server() -> None:
         LOGGER.info("Grobid is already running on port %s", GROBID_PORT)
         return
 
-    try:
-        container = str(get_settings().require("grobid_container"))
-    except MissingSettingError as exc:
-        raise GrobidError(str(exc)) from exc
+    apptainer, container = _launcher()
     tmp_dir = get_workspace().dir("grobid")
-
-    apptainer = next(
-        (cmd for cmd in ("apptainer", "singularity") if shutil.which(cmd)),
-        None,
-    )
-    if apptainer is None:
-        raise GrobidError(NO_APPTAINER_MESSAGE)
-    if not os.path.exists(container):
-        raise GrobidError(f"Grobid container SIF not found at: {container}")
-
     command = server_command(apptainer, container, tmp_dir)
     LOGGER.info("Starting Grobid: %s", " ".join(command))
     try:

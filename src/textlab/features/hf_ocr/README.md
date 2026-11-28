@@ -7,7 +7,8 @@ the three share no code apart from `common/`.
 
 Users reach it on the OCR page, in the **Hugging Face OCR models**
 expander below historic handwriting. The UI is in `ui/streamlit/hf_ocr/`
-(`panel.hf_ocr_expander`).
+(`panel.hf_ocr_expander`). In the new web interface it is the OCR page's
+**Hugging Face model** tool (`ui/web/pages/ocr_huggingface.py`).
 
 ## Pipeline
 
@@ -58,13 +59,18 @@ counts towards the user's quota.
 
 | Name | Module | Purpose |
 |---|---|---|
-| `read_document(name, data, options, on_progress=)` | `service` | Read one PDF or image; returns an `OcrRun` |
-| `read_batch(archive, options, on_progress=)` | `service` | Read a ZIP archive; returns a `BatchRun` |
-| `read_pages(images, options, ...)` | `service` | Run the worker on page images |
+| `read_document(name, data, options, on_progress=, cancel=)` | `service` | Read one PDF or image; returns an `OcrRun` |
+| `read_batch(archive, options, on_progress=, cancel=)` | `service` | Read a ZIP archive; returns a `BatchRun`, with a `BatchFile` overview of each file |
+| `read_pages(images, options, ..., cancel=)` | `service` | Run the worker on page images |
+| `save_run(run, folder)` | `service` | Writes a run's downloads and page images into a folder; returns a `SavedHfRun` (`SavedHfPage`s, the model and prompt, `SavedFile`s) |
 | `HfOcrOptions(repo_id, prompt, max_new_tokens)` | `models` | What to run; checks the values |
 | `parse_repo_id(text)` | `models` | `owner/name` from a name or a Hub link |
 | `HfOcrError` | `models` | A run could not be done, with a message for users |
-| `stored_models()`, `delete_model(repo_id)`, `models_dir()` | `store` | The user's model folder |
+| `stored_models()`, `delete_model(repo_id)`, `models_dir()`, `format_size()` | `store`, re-exported by `service` | The user's model folder |
+
+A run stops when its `cancel` event is set: between files, and the worker
+at once (`common.jobs.run_worker` stops it), raising
+`common.progress.CancelledError`.
 
 ## Layout
 
@@ -106,7 +112,8 @@ In `tests/`, without GPU, network or models:
   missing-model checks against a fake Hub; reading a page with a fake
   model and processor, with and without a chat template.
 - `test_service.py`: the service with a fake worker: outputs, batch
-  layout, errors for users, the interpreter.
+  layout and overview, errors for users, the interpreter, cancelling,
+  what `save_run` gives, the model folder through the service.
 - `test_panel.py`: the panel uses only the service and the store.
 
 ## Possible extensions

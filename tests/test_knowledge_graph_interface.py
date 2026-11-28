@@ -8,7 +8,7 @@ from zipfile import ZipFile
 import pytest
 from streamlit.testing.v1 import AppTest
 
-from textlab.features.knowledge_graph import service
+from textlab.features.knowledge_graph import service, staging
 from textlab.features.knowledge_graph.corpus import build_corpus
 from textlab.features.knowledge_graph.tests import conftest as samples
 from textlab.features.knowledge_graph.tests.test_knowledge_graph_page import (
@@ -225,7 +225,7 @@ def test_uploaded_project_builds_and_reopens_after_temporary_pdfs_are_removed(
     upload.name = f"Paper.{extension}"
     monkeypatch.setattr(st, "file_uploader", lambda *args, **kwargs: upload)
     workspace = Workspace(tmp_path / "private-workspace")
-    monkeypatch.setattr(service, "get_workspace", lambda: workspace)
+    monkeypatch.setattr(staging, "get_workspace", lambda: workspace)
     monkeypatch.setattr(service, "ensure_grobid_server", lambda: None)
     monkeypatch.setattr(service, "ollama_client", lambda: object())
     monkeypatch.setattr(gpu, "free_gpu_for", lambda *args, **kwargs: None)
