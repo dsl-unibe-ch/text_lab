@@ -1,0 +1,1813 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Documentation for the Text Lab NLP Service at University of Bern">
+      
+      
+      
+        <link rel="canonical" href="https://text-lab.dsl.unibe.ch/ocr/">
+      
+      
+        <link rel="prev" href="../transcription/">
+      
+      
+        <link rel="next" href="../translate/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/icon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>OCR - Text Lab Guide</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="red" data-md-color-accent="red">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#optical-character-recognition-ocr" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Text Lab Guide" class="md-header__button md-logo" aria-label="Text Lab Guide" data-md-component="logo">
+      
+  <img src="../assets/text_lab_logo.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Text Lab Guide
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              OCR
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="red" data-md-color-accent="red"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="red" data-md-color-accent="red"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/dsl-unibe-ch/text_lab" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    dsl-unibe-ch/text_lab
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../launch/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Launching Text Lab
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../transcription/" class="md-tabs__link">
+          
+  
+  
+  Features
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../dev/" class="md-tabs__link">
+          
+  
+  
+  Developer Guide
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Text Lab Guide" class="md-nav__button md-logo" aria-label="Text Lab Guide" data-md-component="logo">
+      
+  <img src="../assets/text_lab_logo.png" alt="logo">
+
+    </a>
+    Text Lab Guide
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/dsl-unibe-ch/text_lab" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    dsl-unibe-ch/text_lab
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../launch/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Launching Text Lab
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Features
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Features
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../transcription/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Transcription
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OCR
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OCR
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#supported-input" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Supported Input
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#automatic-mode-default" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Automatic mode (default)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Automatic mode (default)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#downloads" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Downloads
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#which-models-produced-the-result-for-citation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Which models produced the result (for citation)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#batch-processing-zip" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Batch processing (ZIP)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#surveyform-response-extraction-not-enabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Survey/form response extraction (not enabled)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#advanced-legacy-engines" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Advanced: legacy engines
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#historic-german-handwriting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Historic German handwriting
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Historic German handwriting">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#models" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Models
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#how-it-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How it works
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#use" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Use
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#downloads_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Downloads
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#limitations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Limitations
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#hugging-face-ocr-models-choose-your-own-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Hugging Face OCR models (choose your own model)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Hugging Face OCR models (choose your own model)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#use_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Use
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#which-models-work" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Which models work
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#your-downloaded-models" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Your downloaded models
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#downloads_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Downloads
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#limitations_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Limitations
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-privacy-security" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data Privacy &amp; Security
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../translate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Translate
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../meeting_notes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Meeting Notes Generator
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../knowledge_graph/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Knowledge Graph
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../topic_modeling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Topic Modeling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../chat/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Chat
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../visualize_data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Visualize Data
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dev/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dev/architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dev/testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dev/deployment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dev/data-handling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Handling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dev/web-ui-plan/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Web UI Plan
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#supported-input" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Supported Input
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#automatic-mode-default" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Automatic mode (default)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Automatic mode (default)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#downloads" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Downloads
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#which-models-produced-the-result-for-citation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Which models produced the result (for citation)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#batch-processing-zip" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Batch processing (ZIP)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#surveyform-response-extraction-not-enabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Survey/form response extraction (not enabled)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#advanced-legacy-engines" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Advanced: legacy engines
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#historic-german-handwriting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Historic German handwriting
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Historic German handwriting">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#models" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Models
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#how-it-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How it works
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#use" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Use
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#downloads_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Downloads
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#limitations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Limitations
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#hugging-face-ocr-models-choose-your-own-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Hugging Face OCR models (choose your own model)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Hugging Face OCR models (choose your own model)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#use_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Use
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#which-models-work" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Which models work
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#your-downloaded-models" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Your downloaded models
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#downloads_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Downloads
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#limitations_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Limitations
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-privacy-security" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data Privacy &amp; Security
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="optical-character-recognition-ocr">Optical Character Recognition (OCR)</h1>
+<p>The OCR tool extracts editable text, tables, figures, and formulas from scanned PDFs or images, and preserves the document's layout in a structured result. Optional local analysis can describe figures.</p>
+<h2 id="supported-input">Supported Input</h2>
+<ul>
+<li><strong>Documents:</strong> PDF (<code>.pdf</code>). <em>Note: For multi-page PDFs, processing may take a while per page depending on layout density.</em></li>
+<li><strong>Images:</strong> PNG, JPG, JPEG, BMP, TIFF</li>
+<li><strong>Archives:</strong> ZIP (<code>.zip</code>) <em>(for batch processing multiple documents or images at once).</em></li>
+</ul>
+<h2 id="automatic-mode-default">Automatic mode (default)</h2>
+<p>The recommended workflow is fully automatic — <strong>there is no engine, language, or mode to choose.</strong> Just upload a file and press <strong>Parse document</strong>.</p>
+<p>Under the hood, Text Lab:</p>
+<ul>
+<li><strong>Detects layout</strong> with a single multilingual model (PaddleOCR-VL, 109 languages), classifying every region as text, title, table, image/chart, formula, footnote, header/footer, seal, or <strong>checkbox</strong>.</li>
+<li><strong>Reads structure</strong>, not just text: tables become spreadsheets, formulas become LaTeX, and figures are cropped out.</li>
+<li><strong>Takes a fast lane for born-digital PDFs:</strong> pages that already contain a real text layer are read directly (no AI vision needed); only scanned/image pages go through the vision model.</li>
+<li>Optionally <strong>describes detected figures/images</strong> with Text Lab's local vision-language model. Generated descriptions and visible-text transcriptions remain separate from printed OCR content.</li>
+</ul>
+<p>Results are shown in tabs:</p>
+<ul>
+<li><strong>Document</strong> — the full text rendered in reading order, with tables, figures, and formulas inline.</li>
+<li><strong>Tables</strong> — each detected table as an interactive spreadsheet, with a per-table CSV download.</li>
+<li><strong>Figures</strong> — cropped images, charts, and seals, plus generated descriptions when requested.</li>
+<li><strong>Layout preview</strong> — the page image with colour-coded boxes for each region type.</li>
+</ul>
+<h3 id="downloads">Downloads</h3>
+<ul>
+<li>
+<p><strong>Searchable PDF:</strong> the original pages, unchanged to the eye, with an invisible text layer so the scan becomes selectable and searchable. Produced automatically for a single document; for a batch it is a tick-box, since the cost multiplies by the number of files. The indexed text is Text Lab's own OCR result — Tesseract runs a second pass purely to locate each word, and never overrides what was transcribed. Table cells are included, since they really are printed; formulas are left out, because the exported LaTeX is not what the reader sees. Tables align less precisely than prose — the reading order of a grid and of flowing text do not always agree — so a mis-set cell stays searchable but highlights a wider span.</p>
+<p>The document language is detected automatically, per page, from the text Text Lab already extracted, so mixed-language documents are handled page by page. It only affects how precisely each word is positioned: on a scanned German questionnaire, using <code>deu</code> placed 87.6% of words on their exact box against 82.1% for <code>eng</code>. Pages with too little text keep the English default, and you can always set the language explicitly.
+* <strong>Plain text (.txt):</strong> the text in reading order, with tables rendered as aligned columns and no markup. Best for text analysis or pasting elsewhere.
+* <strong>Word (.docx):</strong> an editable document with real headings, Word tables, and embedded figures — for revising or citing the result.
+* <strong>Markdown + assets (.zip):</strong> clean Markdown with the cropped figures alongside. Best for LLM/RAG ingestion.
+* <strong>JSON:</strong> the canonical structured representation (regions, bounding boxes, confidence, markup states) for developers and further analysis.
+* <strong>Tables (.csv .zip):</strong> one CSV per detected table.
+* <strong>Full bundle (.zip):</strong> Markdown, plain text, <code>.docx</code>, JSON, assets, and table CSVs together.</p>
+</li>
+</ul>
+<p>Formats are generated from the same structured result, so they always agree; nothing is re-OCR'd per download.</p>
+<h3 id="which-models-produced-the-result-for-citation">Which models produced the result (for citation)</h3>
+<p>Expand <strong>Models used (for citation)</strong> under the downloads to see exactly which models ran on your document. The same summary is written as <code>models_used.txt</code> in the bundle, once at the root of a batch result, and as a <code>models</code> block in each document's JSON. It is read off what actually ran rather than restated, so it stays correct if the configured models change:</p>
+<ul>
+<li><strong>Text recognition</strong> — <code>PaddleOCR-VL 1.6 (PaddleOCR 3.7 / PaddleX 3.7)</code> for scanned pages and images. Born-digital pages taken by the fast lane report <code>PyMuPDF text extraction (no recognition model)</code>, because no recognition model is involved in reading an existing text layer.</li>
+<li><strong>Figure descriptions</strong> — the local vision-language model, by name and tag (by default <code>qwen3-vl:30b-a3b-instruct</code>, served through Ollama), listed only when descriptions were actually generated.</li>
+<li><strong>Searchable-PDF word geometry</strong> — <code>Tesseract</code>, with its version and the language pack used. It supplies word positions only and never contributes text.</li>
+</ul>
+<p>When quoting results in a publication, keep the distinction: printed text is <em>transcribed</em> by the recognition model, while figure descriptions are <em>generated</em> by a vision-language model and are not part of the source document.</p>
+<h3 id="batch-processing-zip">Batch processing (ZIP)</h3>
+<p>Choose <strong>Batch OCR (ZIP)</strong>, upload a <code>.zip</code> of PDFs/images, and press <strong>Parse batch</strong>. The result ZIP mirrors your original folder structure and each file gets every format the single-document page offers, written by the same code: <code>document.md</code>, <code>document.txt</code>, <code>document.docx</code>, <code>document.json</code>, <code>document_searchable.pdf</code> (when the tick-box is set), plus <code>tables/</code> and <code>assets/</code> folders. A single <code>models_used.txt</code> sits at the root of the result rather than in every folder, listing every model that ran anywhere in the batch — a batch can mix scans and born-digital PDFs, which take different lanes.</p>
+<h3 id="surveyform-response-extraction-not-enabled">Survey/form response extraction (not enabled)</h3>
+<p>A question-level survey/form response extractor is present in the codebase but <strong>switched off in the interface</strong> while it is validated against a representative multi-document benchmark. It renders complete 300-DPI question sections to the local vision-language model, assigns its own IDs, verifies each marked position against an echoed choice label, derives selection constraints independently, and flags empty or inconsistent responses; OCR text and table HTML are never modified by it. Developers can reach it through <code>OcrOptions(extract_survey=True)</code> in <code>textlab.features.ocr.service</code>, or re-expose the UI controls, the <strong>Responses</strong> tab, and the form-responses CSV by setting <code>SURVEY_EXTRACTION_UI_ENABLED = True</code> in <code>src/textlab/ui/streamlit/ocr/state.py</code>.</p>
+<h2 id="advanced-legacy-engines">Advanced: legacy engines</h2>
+<p>The previous engine-picker workflow is still available under the <strong>“Advanced: legacy engines”</strong> expander for cases where you want a specific engine's plain-text output:</p>
+<ol>
+<li><strong>EasyOCR:</strong> general-purpose text across many languages.</li>
+<li><strong>PaddleOCR:</strong> strong on complex or multi-column layouts.</li>
+<li><strong>OlmOCR:</strong> tuned for converting scientific PDFs into clean Markdown.</li>
+<li><strong>GLM-OCR:</strong> a large vision model with selectable Text / Table / Figure extraction modes.</li>
+</ol>
+<p>Each legacy engine returns plain text (or Markdown) per page. For most documents — and for anything with tables or checkboxes — the automatic mode above is recommended.</p>
+<p>The downloads of a single document are the whole text (<code>.txt</code>), the engine's result with positions and scores (<code>.json</code>; OlmOCR gives its own <code>.jsonl</code> record), and a ZIP with both plus one text and JSON file per page. In a batch, each file gets a folder with the same files, mirroring your ZIP's folders. If an engine fails on one file, the batch stops with an error naming it.</p>
+<blockquote>
+<p><em>Warning:</em> Do not close the tab while a "Running" indicator is active.</p>
+</blockquote>
+<h2 id="historic-german-handwriting">Historic German handwriting</h2>
+<p>The <strong>"Historic German handwriting (Kurrent / medieval manuscripts)"</strong>
+expander, below the legacy engines, transcribes <strong>handwritten historical
+German documents</strong> such as letters, minutes and charters. It uses
+handwriting recognition models of the Digital Humanities group of the
+University of Bern (<a href="https://huggingface.co/dh-unibe">dh-unibe</a>), trained
+specifically on such material. The rest of the OCR page is unaffected, and
+the two keep their results apart.</p>
+<h3 id="models">Models</h3>
+<p>Choose the model trained on material closest to your documents. The
+<strong>Models used</strong> box under the model choice shows, before you upload
+anything, which models will process your documents, with links to their
+pages on Hugging Face.</p>
+<table>
+<thead>
+<tr>
+<th>Choice in Text Lab</th>
+<th>Model</th>
+<th>Trained on</th>
+<th>Character error rate</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>German Kurrent, 19th century</strong></td>
+<td><a href="https://huggingface.co/dh-unibe/qwen3vl-german-xix-v2"><code>dh-unibe/qwen3vl-german-xix-v2</code></a></td>
+<td>Handwritten German in Kurrent script, 19th century, mainly Swiss records such as Federal Council minutes and parliamentary protocols</td>
+<td>7.7% on hands it has not seen (Federal Council minutes 1848-1903)</td>
+</tr>
+<tr>
+<td><strong>Medieval German, 14th-17th century</strong></td>
+<td><a href="https://huggingface.co/dh-unibe/qwen3vl-medieval-german-v3"><code>dh-unibe/qwen3vl-medieval-german-v3</code></a></td>
+<td>Medieval and early modern German hands: the Rats- und Richtebücher, the Bullinger correspondence, the Königsfelden charters and the AAEB collections</td>
+<td>about 14%</td>
+</tr>
+</tbody>
+</table>
+<p>Both are fine-tuned versions (LoRA adapters) of the vision-language model
+<a href="https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct"><code>Qwen/Qwen3-VL-4B-Instruct</code></a>.
+The text lines are found by the baseline segmenter of
+<a href="https://kraken.re">kraken</a> (<code>blla</code>, its default model), which was trained
+on historical manuscripts.</p>
+<p>A character error rate of 7.7% means that about one character in thirteen
+is wrong; 14% is about one in seven.</p>
+<h3 id="how-it-works">How it works</h3>
+<ol>
+<li><strong>Find the lines.</strong> kraken finds every text line on each page, also
+   slanted or curved ones, and puts the lines in reading order. It first
+   finds the text regions, such as columns and marginal notes, and orders
+   the lines region by region.</li>
+<li><strong>Read each line.</strong> The chosen model reads every line separately. The
+   models were trained on single lines and cannot read a whole page at
+   once, which is why the page is split first.</li>
+</ol>
+<h3 id="use">Use</h3>
+<ul>
+<li><strong>Input:</strong> PDF (rendered at 300 DPI), PNG, JPG, JPEG, TIFF (every page of
+  a multi-page TIFF) and BMP, or a ZIP of these. Scans at 300 DPI or more
+  give the best results.</li>
+<li><strong>Single document:</strong> upload a file and press <strong>Transcribe</strong>. The result
+  shows, page by page, the image with the detected lines outlined and
+  numbered, next to the numbered transcription.</li>
+<li><strong>Batch (ZIP):</strong> upload a <code>.zip</code> and press <strong>Transcribe batch</strong>. The
+  result ZIP mirrors your folders, with one folder per file.</li>
+</ul>
+<h3 id="downloads_1">Downloads</h3>
+<ul>
+<li><strong>Text (.txt):</strong> one line per detected line, pages separated by a blank
+  line.</li>
+<li><strong>JSON:</strong> every line with its position on the page (in pixels of the page
+  image).</li>
+<li><strong>All files with PAGE XML (.zip):</strong> the text and JSON, plus one PAGE XML
+  file per page in <code>page_xml/</code>, which can be imported into
+  <a href="https://escriptorium.inria.fr/">eScriptorium</a> or Transkribus to correct
+  the transcription against the image. For a PDF or a multi-page TIFF the
+  page images the positions refer to are included next to the XML; for a
+  single image the XML refers to your uploaded file.</li>
+<li><strong>Citation:</strong> <code>models_used.txt</code> in the ZIP, and <strong>Models used (for
+  citation)</strong> under the downloads, name the line detector and the
+  recognition model with the base model it adapts, for example
+  <code>dh-unibe/qwen3vl-german-xix-v2 (LoRA adapter on Qwen/Qwen3-VL-4B-Instruct)</code>.</li>
+</ul>
+<h3 id="limitations">Limitations</h3>
+<p>Treat the result as a draft to correct, not as an edition.</p>
+<ul>
+<li><strong>Errors are expected.</strong> The error rates above were measured on the
+  models' test material; on hands, scribes or periods unlike the training
+  data they are higher. The models are language models, so a wrong reading
+  can still look like fluent, plausible German. Check names, numbers and
+  dates against the image in particular.</li>
+<li><strong>German historical handwriting only.</strong> The models were trained on
+  19th-century Kurrent and on medieval and early modern German hands. They
+  are not meant for print, modern handwriting or other languages; use the
+  automatic mode above for those.</li>
+<li><strong>Check the detected lines.</strong> kraken was trained on manuscripts, but it
+  can still miss faint or very short lines, split a line in two, or join
+  lines that touch, most often in dense writing. A missed line is missing
+  from the text, and two lines detected as one are read as one, so compare
+  the outlined, numbered lines with the page.</li>
+<li><strong>Reading order, no further layout.</strong> Lines are ordered region by
+  region, which usually keeps columns and marginal notes apart. On unusual
+  layouts the order can still be wrong, and interlinear additions are
+  placed by their position, not by where they belong in the text.
+  Paragraphs, tables, headings and figures are not recognised.</li>
+<li><strong>No context between lines.</strong> Each line is read on its own, so a word
+  hyphenated across two lines is not joined, and the model cannot use the
+  previous line to resolve an unclear word.</li>
+<li><strong>Transcription conventions.</strong> Abbreviations, special characters and
+  spelling follow the conventions of the training transcriptions, which may
+  differ from your editorial guidelines.</li>
+<li><strong>No confidence scores and no searchable PDF.</strong> Unlike the automatic
+  mode, there is no per-word confidence and no searchable PDF export.</li>
+<li><strong>Speed.</strong> Every run first loads the model onto the GPU, which takes
+  about a minute; after that, a page takes a few seconds. A large batch can
+  take a long time.</li>
+</ul>
+<h2 id="hugging-face-ocr-models-choose-your-own-model">Hugging Face OCR models (choose your own model)</h2>
+<p>The <strong>Hugging Face OCR models</strong> expander, below historic handwriting, reads
+documents with a vision-language model <strong>you choose</strong> from
+<a href="https://huggingface.co/models?pipeline_tag=image-text-to-text">Hugging Face</a>,
+for example a model fine-tuned on a script, a language or a kind of
+document that the built-in tools do not cover. It is separate from the
+rest of the OCR page and does not change it.</p>
+<h3 id="use_1">Use</h3>
+<ol>
+<li><strong>Enter the model</strong> as <code>owner/name</code> (for example
+   <code>Qwen/Qwen2.5-VL-3B-Instruct</code>) or paste the link to its page. A link to
+   the model's page appears below; read its model card.</li>
+<li><strong>Prompt:</strong> the instruction sent with every page. A model trained with a
+   specific prompt reads best with that one; its model card usually names
+   it. Leave the field empty for models that take no instruction.</li>
+<li><strong>Most tokens per page:</strong> the upper limit of the text generated for one
+   page. A dense page needs about 1,000 to 2,000; lower it if a model keeps
+   repeating itself.</li>
+<li>Upload a PDF or image (<strong>Single document</strong>) or a ZIP of them (<strong>Batch
+   (ZIP)</strong>) and press <strong>Read document</strong> or <strong>Read batch</strong>. The model reads
+   each page as a whole.</li>
+</ol>
+<p>The first run with a model downloads it, which can take several minutes for
+a large one; later runs only load it onto the GPU.</p>
+<h3 id="which-models-work">Which models work</h3>
+<ul>
+<li><strong>Vision-language models that Transformers supports directly</strong>, listed on
+  Hugging Face under <em>Image-Text-to-Text</em>: for example the Qwen2.5-VL and
+  Qwen3-VL families and models fine-tuned from them (such as olmOCR), or
+  SmolVLM. Text Lab treats every model the same way, so how well a model
+  reads depends on the model; try it on a few pages first.</li>
+<li><strong>Not supported</strong>, with a message before anything is downloaded or
+  loaded:<ul>
+<li>models that need code from their own repository (the model card asks
+  for <code>trust_remote_code=True</code>), because Text Lab does not run code
+  from model repositories;</li>
+<li>gated models, which require accepting conditions with a Hugging Face
+  account, and private models: Text Lab downloads only public models,
+  without an account;</li>
+<li>adapters (LoRA) published without their base model merged in: Text
+  Lab loads full models only;</li>
+<li>models too large for the GPU of your session. A model needs about
+  2 GB of GPU memory per billion parameters, so on a 24 GB GPU models
+  up to about 9 billion parameters fit.</li>
+</ul>
+</li>
+<li>Some models need Python packages that Text Lab's image does not have
+  yet; the error message then names the package. Tell the Text Lab team,
+  who can add it.</li>
+</ul>
+<h3 id="your-downloaded-models">Your downloaded models</h3>
+<p>Models are downloaded into your own folder, <code>~/.cache/textlab/hf_ocr_models</code>
+in your home directory, not into Text Lab's shared model store. They count
+towards your storage quota and can take several GB each. <strong>Your downloaded
+models</strong> lists them with their size; delete one you no longer need, and it
+is downloaded again on its next use.</p>
+<h3 id="downloads_2">Downloads</h3>
+<ul>
+<li><strong>Text (.txt):</strong> the text of every page, pages separated by a blank line.</li>
+<li><strong>JSON:</strong> the text page by page, with the model and the prompt.</li>
+<li><strong>All files (.zip):</strong> both, plus <code>model_used.txt</code>. A batch gives one
+  folder per file, mirroring the ZIP.</li>
+<li><strong>Citation:</strong> <strong>Model used (for citation)</strong> and <code>model_used.txt</code> name the
+  model with the exact revision that was downloaded, and the prompt.</li>
+</ul>
+<h3 id="limitations_1">Limitations</h3>
+<ul>
+<li><strong>Check the output.</strong> A vision-language model can leave out text, repeat
+  it or invent plausible text that is not on the page, more so for
+  handwriting, damaged pages or scripts it was not trained on.</li>
+<li><strong>Text only.</strong> The result is the text the model writes, often in
+  Markdown or HTML for tables. There are no positions on the page, no
+  PAGE XML, no confidence scores and no searchable PDF.</li>
+<li><strong>The model's license applies.</strong> You are responsible for using the model
+  and its output as its license allows.</li>
+</ul>
+<hr />
+<h2 id="data-privacy-security">Data Privacy &amp; Security</h2>
+<p>Text Lab is designed to handle highly sensitive, confidential, and proprietary documents (including unredacted PDFs, medical records, or unpublished manuscripts). We utilize a strict <strong>"Local-Only, Self-Cleaning"</strong> architecture to ensure your documents remain secure.</p>
+<p>Here is exactly what happens to your data when you use the OCR tool:</p>
+<ul>
+<li><strong>100% Local Processing:</strong> Your documents are <strong>never</strong> sent to external cloud services or APIs (like Adobe, Google Cloud Vision, or AWS). All text extraction is performed entirely on the University of Bern's secure UBELIX high-performance computing nodes.</li>
+<li><strong>Private session workspace:</strong> The automatic pipeline, advanced AI vision models (like OlmOCR), historic German handwriting, and Batch ZIP processing all need to read files from disk (uploads, rasterised pages, cropped regions and line crops). Text Lab keeps these in a private workspace that is created for your session on the compute node and that only your user account can open. Your documents are never written to your home directory; the only thing stored there is a model you choose in the Hugging Face OCR models tool.</li>
+<li><strong>Automatic deletion:</strong> As soon as the extraction finishes, or fails, the working folder of that run is deleted, including your original documents, intermediate images and raw data files. If a run is interrupted, for example because the session ends, the whole session workspace is deleted when the session ends.</li>
+<li><strong>Results in your browser session:</strong> The extracted text and tables shown on the page are kept only in your open session (Streamlit's <code>st.session_state</code>). When you close the tab, reload the page, or your Text Lab session ends, they are gone. Download anything you want to keep.</li>
+<li><strong>No AI Training:</strong> The vision models only perform <em>inference</em> (looking at the image to extract text). They do not learn from your documents, and your data is never used to train or improve the AI.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

@@ -1,0 +1,2828 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Documentation for the Text Lab NLP Service at University of Bern">
+      
+      
+      
+        <link rel="canonical" href="https://text-lab.dsl.unibe.ch/dev/web-ui-plan/">
+      
+      
+        <link rel="prev" href="../data-handling/">
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/icon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Web UI Plan - Text Lab Guide</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="red" data-md-color-accent="red">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#web-ui-migration-plan" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Text Lab Guide" class="md-header__button md-logo" aria-label="Text Lab Guide" data-md-component="logo">
+      
+  <img src="../../assets/text_lab_logo.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Text Lab Guide
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Web UI Plan
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="red" data-md-color-accent="red"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="red" data-md-color-accent="red"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/dsl-unibe-ch/text_lab" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    dsl-unibe-ch/text_lab
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../launch/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Launching Text Lab
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../transcription/" class="md-tabs__link">
+          
+  
+  
+  Features
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../" class="md-tabs__link">
+          
+  
+  
+  Developer Guide
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Text Lab Guide" class="md-nav__button md-logo" aria-label="Text Lab Guide" data-md-component="logo">
+      
+  <img src="../../assets/text_lab_logo.png" alt="logo">
+
+    </a>
+    Text Lab Guide
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/dsl-unibe-ch/text_lab" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    dsl-unibe-ch/text_lab
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../launch/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Launching Text Lab
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Features
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Features
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../transcription/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Transcription
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ocr/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OCR
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../translate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Translate
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../meeting_notes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Meeting Notes Generator
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../knowledge_graph/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Knowledge Graph
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../topic_modeling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Topic Modeling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../chat/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Chat
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../visualize_data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Visualize Data
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../deployment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../data-handling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Handling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Web UI Plan
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Web UI Plan
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#why" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decisions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decisions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architecture
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Architecture">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#how-a-page-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How a page works
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Server
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#design" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Design
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#jobs-and-the-gpu" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Jobs and the GPU
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#security" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deployment-and-the-switch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deployment and the switch
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phases" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phases
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Phases">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-is-rebuilt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What is rebuilt
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-0-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 0 results
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-1-progress" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 1 progress
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-2-progress" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 2 progress
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-3-progress" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 3 progress
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Phase 3 progress">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#meeting-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Meeting Notes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#translation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Translation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ocr" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        OCR
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#topic-modeling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Topic Modeling
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#chat" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Chat
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#visualize-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Visualize Data
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#knowledge-graph" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Knowledge Graph
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#clean-up-before-the-switch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Clean-up before the switch
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#testing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Testing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#documentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Documentation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#risks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Risks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#out-of-scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Out of scope
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#open-questions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Open questions
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#why" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decisions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decisions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architecture
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Architecture">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#how-a-page-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How a page works
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Server
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#design" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Design
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#jobs-and-the-gpu" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Jobs and the GPU
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#security" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deployment-and-the-switch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deployment and the switch
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phases" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phases
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Phases">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-is-rebuilt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What is rebuilt
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-0-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 0 results
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-1-progress" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 1 progress
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-2-progress" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 2 progress
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-3-progress" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 3 progress
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Phase 3 progress">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#meeting-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Meeting Notes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#translation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Translation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ocr" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        OCR
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#topic-modeling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Topic Modeling
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#chat" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Chat
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#visualize-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Visualize Data
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#knowledge-graph" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Knowledge Graph
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#clean-up-before-the-switch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Clean-up before the switch
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#testing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Testing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#documentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Documentation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#risks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Risks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#out-of-scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Out of scope
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#open-questions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Open questions
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="web-ui-migration-plan">Web UI migration plan</h1>
+<div class="admonition note">
+<p class="admonition-title">Status</p>
+<p>Plan agreed on 26 November 2026; phase 0 done the same day (see
+<a href="#phase-0-results">Phase 0 results</a>). Phase 1 built the foundation, the
+launcher and the redeployment files, and the mockups of Home and
+Transcription were agreed on 27 November (see
+<a href="#phase-1-progress">Phase 1 progress</a>). Phase 2, the pilot, was tried
+in the sandbox and committed on 27 November (see
+<a href="#phase-2-progress">Phase 2 progress</a>). Phase 3 started with Meeting
+Notes; every page followed, each tried in the sandbox and committed,
+the last, Knowledge Graph, on 27 November, followed by a
+<a href="#clean-up-before-the-switch">clean-up</a> (see
+<a href="#phase-3-progress">Phase 3 progress</a>). Next is phase 4, the switch.
+The work happens on the local branch <code>feat/web-ui</code>, one commit per
+phase or page, and reaches <code>main</code> when the whole UI is done. Update
+this page when a phase ends or a decision changes.</p>
+</div>
+<p>Text Lab's user interface moves from Streamlit to a web UI built with
+<a href="https://fastapi.tiangolo.com/">FastAPI</a>, Jinja2 templates and
+<a href="https://htmx.org/">HTMX</a>, with a fresh, modern and responsive design. The
+backend (<code>features/</code>, <code>common/</code>) stays as it is: since version 3.0.0 every
+page calls only its feature's <code>service.py</code>, and the new pages do the same.</p>
+<h2 id="why">Why</h2>
+<ul>
+<li><strong>Long runs tie up the page.</strong> A Streamlit page runs a transcription or
+  an OCR batch inside the page script: the tab has to stay open until the
+  run ends, and reloading the page loses its result.</li>
+<li><strong>Two runs can break each other.</strong> Starting a feature releases the GPU
+  for it (<code>gpu_manager.prepare_gpu</code>), which stops the GPU workers of other
+  features, including a run still going in another browser tab.</li>
+<li><strong>Every click reruns the page script</strong>, which makes pages slow and their
+  state fragile (session-state keys, <code>st.rerun</code>).</li>
+<li><strong>The look is Streamlit's.</strong> Layout, components and behaviour on small
+  screens can hardly be changed beyond what Streamlit offers.</li>
+<li><strong>Pages cannot be tested.</strong> Tests can only read the page sources; the
+  routes of a web app can be called and checked with FastAPI's test client.</li>
+</ul>
+<h2 id="decisions">Decisions</h2>
+<table>
+<thead>
+<tr>
+<th>Question</th>
+<th>Decision</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>How users switch</td>
+<td><strong>At once</strong>, when every page exists in the new UI. Streamlit stays selectable for one release as a rollback, then it is removed</td>
+<td>A fresh design next to Streamlit pages would feel like two apps, and keeping two UIs doubles every UI change</td>
+</tr>
+<tr>
+<td>How it is built</td>
+<td><strong>Page by page on one local branch</strong> (<code>feat/web-ui</code>), committed per phase or page, merged into <code>main</code> once every page exists; then one release and one HPC redeploy</td>
+<td>One developer, no reviewers to wait for; production is stable and <code>main</code> sees no changes meanwhile (should a fix land on <code>main</code>, merge it into the branch)</td>
+</tr>
+<tr>
+<td>Design</td>
+<td><strong>Fresh</strong>: modern, responsive, easy to use, accessible</td>
+<td></td>
+</tr>
+<tr>
+<td>Long runs</td>
+<td><strong>Background jobs</strong>, one GPU job at a time, results kept for the session</td>
+<td>Users can leave or reload a page, and runs can no longer take the GPU from each other</td>
+</tr>
+<tr>
+<td>First pages</td>
+<td><strong>Home and Transcription</strong></td>
+<td>Transcription has the cleanest service: a worker process, progress reports and cancelling</td>
+</tr>
+</tbody>
+</table>
+<p>Considered and rejected:</p>
+<ul>
+<li><strong>Both UIs in one server.</strong> Streamlit 1.61's <code>st.App</code> can mount other
+  routes, so FastAPI pages could replace Streamlit pages one at a time. That
+  only helps a page-by-page switch, which mixes two designs.</li>
+<li><strong>Streamlit as a permanent second option</strong>: two UIs to keep working for
+  every change.</li>
+</ul>
+<p>During the migration the Streamlit pages get bug fixes only. New behaviour
+goes into the services, where both UIs use it, or into the new pages.</p>
+<h2 id="architecture">Architecture</h2>
+<div class="highlight"><pre><span></span><code>src/textlab/ui/
+├── launch.py          # starts the UI that TEXT_LAB_UI names
+├── streamlit/         # the current UI, removed after the switch
+└── web/
+    ├── app.py         # app factory: routes, middleware, static files
+    ├── auth.py        # login with the session password, cookie, CSRF
+    ├── jobs.py        # job queue, progress, cancelling, SSE
+    ├── uploads.py     # streams uploads into the job workspace
+    ├── render.py      # templates, icons, links from the base path
+    ├── settings.py    # the server's settings
+    ├── server.py      # uvicorn, started by the launcher
+    ├── pages/         # one module per page: its routes; the navigation
+    ├── templates/     # Jinja2: base layout, components, one folder per page
+    ├── static/
+    │   ├── css/       # design system: tokens, layout, components
+    │   ├── js/        # app.js (live updates, forms), theme.js
+    │   └── vendor/    # htmx, icons, later plotly.js (pinned)
+    ├── tests/
+    └── README.md      # how a page is built
+</code></pre></div>
+<h3 id="how-a-page-works">How a page works</h3>
+<ol>
+<li><code>GET /transcription</code> returns the whole page: the base layout
+   (navigation, header, job indicator) around the page's template.</li>
+<li>The form is sent with HTMX (<code>hx-post</code>, multipart). The route checks the
+   options, streams the upload into the workspace, submits a job and returns
+   a job card for the page's result area.</li>
+<li>The page follows its jobs over server-sent events (SSE), in one stream
+   for all of them (<code>/events?page=&lt;id&gt;</code>; <a href="#phase-0-results">phase 0</a> shows
+   why). <code>static/js/app.js</code> opens it while one of the session's jobs waits
+   or runs, and closes it when the server says that none does. Each event
+   carries the changed job cards and the job indicator as out-of-band
+   fragments; the card of a finished job holds its result.</li>
+<li>Downloads are plain links (<code>/jobs/&lt;id&gt;/files/&lt;name&gt;</code>).</li>
+</ol>
+<p>Rules, checked by tests as for the Streamlit pages today:</p>
+<ul>
+<li>A page module imports only the features' <code>service</code> modules, and uses
+  only the names they export in <code>__all__</code>. What a page needs beyond that
+  goes into the service.</li>
+<li>No processing in routes or templates.</li>
+<li>No inline scripts: JavaScript lives in files under <code>static/</code>.</li>
+</ul>
+<h3 id="server">Server</h3>
+<ul>
+<li>uvicorn with one worker process: logins, jobs and results live in
+  memory, and each Open OnDemand session has one user.</li>
+<li>Routes that call services are plain <code>def</code> functions, which FastAPI runs
+  in a thread pool. The heavy work already runs in worker processes or in
+  Ollama.</li>
+</ul>
+<h2 id="design">Design</h2>
+<ul>
+<li><strong>A design system in plain CSS</strong>, typographic rather than boxy: ink on
+  paper, structure from rules and a grid instead of cards and shadows,
+  the red of the Text Lab logo as the one accent. IBM Plex Sans carries
+  the text (condensed for titles) and IBM Plex Mono the labels, numbers,
+  times and file names; both are vendored (SIL Open Font License), so no
+  fonts are loaded from elsewhere. Custom properties for colours, type,
+  spacing; light and dark themes that follow the system setting, with a
+  switch. The first draft used system fonts and rounded cards, and looked
+  like every other web app; the second (27 November 2026) gave the UI a
+  character of its own.</li>
+<li><strong>Responsive layout</strong>: the navigation is a numbered index of the tools,
+  grouped by what they work on (audio, documents, text, data), on the
+  left on wide screens and behind a menu button on narrow ones. A status
+  bar on top shows when the session ends (Slurm's <code>SLURM_JOB_END_TIME</code>),
+  the jobs, the theme and signing out. Text keeps a readable width; pages
+  work from a phone to a wide monitor.</li>
+<li><strong>Shared components</strong>: page masthead, forms as sheets of numbered
+  steps, file drop zone (drag and drop, the chosen files with their
+  sizes), options with their explanations, job records with status and
+  progress (current step, elapsed time, cancel), result tabs, file
+  listings for downloads, notices (information, warning, error with
+  details for support), "Models used" lists, job indicator.</li>
+<li><strong>Icons</strong>: few, from a vendored open-source SVG set (Lucide, ISC
+  licence), for arrows, downloads, playing and closing. No emojis.</li>
+<li><strong>Accessibility</strong>: WCAG 2.1 AA contrast, everything usable with the
+  keyboard, visible focus, labelled fields, progress announced to screen
+  readers, reduced motion respected.</li>
+<li><strong>No build step and no CDN.</strong> htmx 2.0.11 (the current release on npm,
+  where htmx 4 is tagged <code>next</code>, not <code>latest</code>), the Lucide icons (1.71.0,
+  only those used), the IBM Plex fonts (5.3.0) and later plotly.js are
+  vendored in <code>static/vendor/</code>.
+  Each is pinned and checked against the registry's checksum, with its
+  version, source and licence in <code>static/vendor/README.md</code>. Browsers fetch
+  nothing from outside the cluster. htmx's SSE extension is not used: the
+  page's one stream opens and closes with the session's active jobs, which
+  a few lines of <code>app.js</code> handle.</li>
+<li><strong>Mockups first.</strong> Static mockups of Home and Transcription are agreed
+  before the pilot pages are built.</li>
+</ul>
+<h2 id="jobs-and-the-gpu">Jobs and the GPU</h2>
+<ul>
+<li><strong>A job is one run</strong>: a recording or a ZIP batch to transcribe, a
+  document or a batch to read, a topic model to fit. A page submits it and
+  shows its progress; the user can leave the page or reload it and find the
+  result again.</li>
+<li><strong>One GPU job at a time.</strong> Further jobs wait in order, and their card
+  says so ("waiting, 1 job ahead"). The runner calls
+  <code>gpu_manager.prepare_gpu(&lt;feature&gt;)</code> when a job starts, not when it is
+  submitted, so a waiting job never stops a running one.</li>
+<li><strong>Short GPU requests</strong> (a chat message, the translation editor, a meeting
+  summary) also wait for a running job; the page says which job is running
+  and offers to cancel it. If this proves too strict, measure whether a
+  small LLM fits on the GPU next to a running job. The translation editor
+  and Chat run each request as a job that is not listed (<code>listed=False</code>)
+  and show it in place (their own <code>card_template</code>): a request held open
+  while a model loads could pass the proxy's timeout, and a job reports
+  progress and can be stopped.</li>
+<li><strong>Progress</strong> comes from the services' <code>on_progress</code> callbacks and reaches
+  the page over SSE, in the page's one event stream, which is open only
+  while one of its jobs runs or waits. After a reload, the page reconnects
+  to its jobs.</li>
+<li><strong>Cancelling</strong>: a waiting job is removed; a running one gets its
+  service's <code>cancel</code> event. Only Transcription and Topic Modeling take
+  <code>cancel</code> today; the other services get it when their page is built
+  (<code>common.jobs.run_worker</code> already stops workers).</li>
+<li><strong>Results</strong> stay in memory in the job, as they stay in Streamlit's
+  session state today, until the user removes them or the session ends.
+  Uploads are staged in the workspace and removed when the job ends, so
+  the privacy promises of the user guide stay true.</li>
+<li><strong>The job indicator</strong> in the header lists running and waiting jobs and
+  recent results, on every page.</li>
+</ul>
+<h2 id="security">Security</h2>
+<ul>
+<li><strong>Login</strong> with the session password shown on the Open OnDemand dashboard
+  (<code>TOKEN</code>), compared in constant time, then a signed session cookie
+  (itsdangerous): <code>HttpOnly</code>, <code>Secure</code>, <code>SameSite=Strict</code>, limited to the
+  session's path (<code>/node/&lt;host&gt;/&lt;port&gt;/</code>).</li>
+<li><strong>The user named by the proxy</strong> (<code>X-Forwarded-User</code>) is checked too: a
+  request naming another user is refused. The header cannot replace the
+  password: the server listens on the node's network so that the proxy
+  reaches it, and a direct connection can send any header.</li>
+<li><strong>Connect without copying the password</strong> (decided in phase 1): for the
+  web UI, the dashboard's <em>Connect</em> button posts the password to the login
+  route; only the session's owner sees the card that holds it. The card
+  needs to know the interface, which <code>before.sh.erb</code> reads from the
+  configuration (<code>template/config.sh</code>) and passes as <code>text_lab_ui</code>
+  (<code>conn_params</code>). Streamlit sessions show the password to copy, as now.
+  A login posted from another origin than the portal is refused.</li>
+<li><strong>A CSRF token</strong> on every request that changes something (HTMX sends it
+  as a header). All Open OnDemand apps share one origin, so the browser
+  alone does not keep other pages from sending requests to Text Lab.</li>
+<li><strong>A Content Security Policy</strong>: scripts only from the app's static files,
+  no inline scripts, htmx's <code>eval</code> turned off.</li>
+<li><strong>Uploads</strong>: a size limit (10 GB, as now), safe file names
+  (<code>common.upload_safety</code>), streamed to the workspace, never held in memory
+  whole.</li>
+<li><strong>Output</strong>: templates escape everything; text from models (Markdown,
+  HTML) is shown as text or sanitized (<code>common.html_safety</code>).</li>
+</ul>
+<h2 id="deployment-and-the-switch">Deployment and the switch</h2>
+<ul>
+<li><strong>One HPC redeploy, at the switch.</strong> <code>template/script.sh.erb</code> starts
+  <code>python -m textlab.ui.launch</code> instead of Streamlit. The launcher starts
+  the UI that <code>TEXT_LAB_UI</code> names (<code>streamlit</code> by default, or <code>web</code>), with
+  today's port, base path and upload limit, so production behaves as
+  before, and names its log (<code>streamlit.log</code> or <code>textlab.log</code>). For
+  releases without the launcher the script starts Streamlit directly, so
+  rollbacks keep working. The <em>Connect</em> change goes into the same
+  redeploy; <a href="../deployment/#the-launcher-and-the-connect-button">Deployment</a>
+  lists the files and the order.</li>
+<li><strong>Sandbox</strong>: <code>TEXT_LAB_UI=web</code> in <code>template/dev.env</code> shows the new UI.</li>
+<li><strong>The switch</strong>: the release with the whole UI, the HPC redeploy of its
+  Open OnDemand files, then <code>TEXT_LAB_UI=web</code> in the live <code>site.env</code>.
+  Rolling back means setting it back, without another redeploy.</li>
+<li><strong>Removal</strong>: one release later, the launcher starts only the web UI, and
+  Streamlit leaves the image at its next rebuild (<code>locks/main.txt</code> and
+  <code>text_lab.def</code>).</li>
+</ul>
+<h2 id="phases">Phases</h2>
+<table>
+<thead>
+<tr>
+<th>Phase</th>
+<th>Content</th>
+<th>Done when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0. Spike (done)</td>
+<td>A minimal FastAPI app in the sandbox, behind the Open OnDemand proxy: base path, login cookie, SSE progress, a 2 GB upload streamed to the workspace, a download</td>
+<td>All of it works, or a fallback is chosen (HTMX polling every second instead of SSE)</td>
+</tr>
+<tr>
+<td>1. Foundation (done)</td>
+<td>The launcher and the redeployment files (deployed at the switch). In <code>ui/web/</code>: app factory, login, CSRF, CSP, layout, design system and components, job runner (queue, SSE, cancelling), upload and download helpers, error pages, test harness. Mockups of Home and Transcription</td>
+<td>An empty app with login, navigation and a demo job runs in the sandbox, with tests, and the mockups are agreed</td>
+</tr>
+<tr>
+<td>2. Pilot (done)</td>
+<td>Home and Transcription: a recording or a ZIP batch, language and model, voice activity detection, speaker identification with speaker counts, the audio player with word highlighting, every download</td>
+<td>Everything the Streamlit page does works, with tests, and the UI test passes</td>
+</tr>
+<tr>
+<td>3. Pages (done)</td>
+<td>One commit each, in this order: Meeting Notes, Translation, OCR (one page with a switcher, one commit per tool: Standard (the automatic pipeline), Choose an engine (the legacy engines), then historic handwriting and Hugging Face models together; survey extraction left out), Topic Modeling, Chat, Visualize Data, Knowledge Graph</td>
+<td>As in phase 2, with the page's user guide drafted</td>
+</tr>
+<tr>
+<td>4. Switch</td>
+<td>The branch merged into <code>main</code>; the new user guide replaces the old one; a release, the HPC redeploy, <code>TEXT_LAB_UI=web</code> in production</td>
+<td>Users work in the new UI; Streamlit can still be selected as a rollback</td>
+</tr>
+<tr>
+<td>5. Removal</td>
+<td><code>ui/streamlit/</code> and its tests are removed; Streamlit leaves the image</td>
+<td>One release after the switch, without a rollback</td>
+</tr>
+</tbody>
+</table>
+<h3 id="what-is-rebuilt">What is rebuilt</h3>
+<p>The Streamlit code to replace, about 8,400 lines in all:</p>
+<table>
+<thead>
+<tr>
+<th>Page</th>
+<th>Lines</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Home</td>
+<td>120</td>
+<td></td>
+</tr>
+<tr>
+<td>Transcription</td>
+<td>900</td>
+<td>with the audio player</td>
+</tr>
+<tr>
+<td>Meeting Notes</td>
+<td>1,270</td>
+<td>transcribes first, then summarizes with citations</td>
+</tr>
+<tr>
+<td>Translation</td>
+<td>900</td>
+<td>text editor with a model kept loaded, documents</td>
+</tr>
+<tr>
+<td>OCR</td>
+<td>2,310</td>
+<td>automatic mode, results, review, legacy engines, historic handwriting, Hugging Face models</td>
+</tr>
+<tr>
+<td>Topic Modeling</td>
+<td>1,060</td>
+<td>charts, editable tables</td>
+</tr>
+<tr>
+<td>Chat</td>
+<td>520</td>
+<td>streamed answers, documents, charts</td>
+</tr>
+<tr>
+<td>Visualize Data</td>
+<td>420</td>
+<td>analysis in the background, charts</td>
+</tr>
+<tr>
+<td>Knowledge Graph</td>
+<td>710</td>
+<td>Grobid, graph view</td>
+</tr>
+<tr>
+<td>Shared</td>
+<td>200</td>
+<td>login, disclaimer, GPU notices, progress box</td>
+</tr>
+</tbody>
+</table>
+<h2 id="phase-0-results">Phase 0 results</h2>
+<p>On 26 November 2026 the spike (<code>scripts/web_ui_spike/</code>, kept until
+phase 1 replaces it) ran in a Slurm job on a GPU node and was tested in
+Chrome through the Open OnDemand proxy. Everything the plan depends on
+works; one finding changes the design.</p>
+<table>
+<thead>
+<tr>
+<th>Check</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Base path</td>
+<td>Pages, scripts and style sheets work under <code>/node/&lt;host&gt;/&lt;port&gt;/</code>, with the app mounted under that path and every link built from it</td>
+</tr>
+<tr>
+<td>Login</td>
+<td>The session cookie works behind the proxy with <code>HttpOnly</code>, <code>Secure</code>, <code>SameSite=Strict</code> and the session's path, and scripts cannot read it. A plain form posts through the proxy, so <em>Connect</em> can post the password too</td>
+</tr>
+<tr>
+<td>CSRF and CSP</td>
+<td>Requests without the token are refused. The strict Content Security Policy causes no violations with htmx 2.0.11 (<code>includeIndicatorStyles</code> and <code>allowEval</code> off)</td>
+</tr>
+<tr>
+<td>Live progress</td>
+<td>The proxy does not buffer server-sent events: 40 events in 20 seconds arrived on time (spread 0.05 s). With keep-alive comments every 15 seconds, streams lasted over 3 minutes through 50-second gaps without reconnecting. A job reattached after a page reload. Polling works as well</td>
+</tr>
+<tr>
+<td>Closed pages</td>
+<td>The server notices a closed page at its next write to the stream, within 15 seconds with the keep-alive comments, so no stream is left open</td>
+</tr>
+<tr>
+<td>Uploads</td>
+<td>100 MB, 1,100 MB and 2,200 MB passed the proxy at 50 to 120 MB/s, so no limit applies up to at least 2.2 GB. The server's memory stayed at about 80 MB: uploads go to disk</td>
+</tr>
+<tr>
+<td>Downloads</td>
+<td>A streamed 1,100 MB download arrived complete (68 MB/s); a file name with umlauts was saved correctly</td>
+</tr>
+</tbody>
+</table>
+<p>The proxy forwards the backend's own host and scheme
+(<code>Host: gnode35.hpc.unibe.ch:47983</code>, <code>http</code>), with the original ones in
+<code>X-Forwarded-Host</code> (<code>ondemand.hpc.unibe.ch</code>) and <code>X-Forwarded-Proto</code>
+(<code>https</code>), and the logged-in user in <code>X-Forwarded-User</code>.</p>
+<p>Consequences, already worked into the sections above:</p>
+<ul>
+<li><strong>The browser speaks HTTP/1.1 to the proxy</strong>, so it opens at most 6
+  connections to <code>ondemand.hpc.unibe.ch</code> at a time, for all its tabs on
+  the site together, other Open OnDemand apps included. An open event
+  stream holds one for as long as it is open. In the spike, three streams,
+  two uploads and a download held all six, and polling requests waited:
+  the 10-second polling job made 8 requests, against 11 when it ran
+  alone. Nothing failed. So each page has <strong>one
+  event stream</strong> for all its jobs and the job indicator, open only while a
+  job runs or waits, and uploads run one at a time.</li>
+<li><strong>Links are built from the base path</strong>, never from the request's host
+  and scheme, which are the backend's.</li>
+<li><strong><code>X-Forwarded-User</code> is an extra check</strong>, not a replacement for the
+  password (see <a href="#security">Security</a>).</li>
+<li><strong>Uploads</strong> are spooled to <code>TMPDIR</code>, which the launch script already
+  places in the private workspace, then copied to their job's folder
+  (1.6 seconds for 2.2 GB).</li>
+</ul>
+<h2 id="phase-1-progress">Phase 1 progress</h2>
+<p>Built on 26 November 2026, with tests (<code>src/textlab/ui/web/tests/</code>,
+<code>tests/test_launch.py</code>):</p>
+<ul>
+<li>The launcher and the redeployment files (see
+  <a href="../deployment/#the-launcher-and-the-connect-button">Deployment</a>).</li>
+<li>The app factory under the base path, with the Content Security Policy,
+  the check of <code>X-Forwarded-User</code> and the upload limit (also for uploads
+  that do not announce their size).</li>
+<li>Login with the session password (<em>Connect</em> posts it), the session
+  cookie, CSRF tokens; every route but the login requires a session.</li>
+<li>The layout (the index of tools, the status bar with the session's end,
+  the job indicator and the theme switch, the footer with the
+  disclaimer), the design system and the shared components; light and
+  dark; narrow and wide screens. The design was redone on 27 November
+  after the first review (see <a href="#design">Design</a>).</li>
+<li>The job runner: a queue, one job at a time, <code>prepare_gpu</code> at the start,
+  cancelling, progress, results and downloads; short GPU requests
+  (<code>exclusive()</code>); the event stream and the job cards.</li>
+<li>Error pages and notices, with an error id for unexpected errors.</li>
+<li>Developer pages under <code>/dev</code>: the component gallery, the mockups of Home
+  and Transcription, and a demo job. Removed before the switch (see
+  <a href="#clean-up-before-the-switch">Clean-up before the switch</a>).</li>
+</ul>
+<p>The mockups were agreed on 27 November, with their choices: the language
+is detected in the job, from the recording's first 30 seconds, instead of
+when the file is chosen (the web page uploads the file only when the job
+is submitted); the result shows the player and the transcript together,
+with the plain text and the models in tabs; every output file downloads on
+its own, besides the ZIP of all of them. The mockups were removed when the
+pages were built.</p>
+<p>Still to do from phase 1, with phase 2's sandbox test: try the foundation
+with <code>TEXT_LAB_UI=web</code> (login through <em>Connect</em>, the demo job, cancelling,
+a reload while a job runs, narrow screens) and without it (Streamlit as
+before). The spike (<code>scripts/web_ui_spike/</code>) is removed. The release and
+the HPC redeployment wait for the switch (phase 4).</p>
+<h2 id="phase-2-progress">Phase 2 progress</h2>
+<p>Built on 27 November 2026, with tests
+(<code>src/textlab/ui/web/tests/test_transcription_page.py</code>, and in
+<code>features/transcription/tests/</code> for the service's new parts):</p>
+<ul>
+<li><strong>Home</strong> (<code>pages/home.py</code>): what Text Lab is, the tools, the session's
+  jobs (updated live from the page's event stream) and where to get help.
+  A notice said which tools were not built yet, until every tool was.</li>
+<li><strong>Transcription</strong> (<code>pages/transcription.py</code>), with the three uses of the
+  Streamlit page:<ul>
+<li><em>One recording</em>: a job that prepares the recording for the browser
+  (an MP3 and its waveform, <code>service.prepare_playback</code>), transcribes it
+  and offers every export, and a ZIP of all of them with a WAV copy for
+  ELAN, as before.</li>
+<li><em>A ZIP of recordings</em>: checked when it arrives (it must hold
+  recordings), transcribed with the same settings, one ZIP with a folder
+  per recording; skipped recordings are listed.</li>
+<li><em>Review a transcript</em>: a recording and a transcript table, uploaded
+  or named by their paths on the cluster. It needs no GPU, so it runs
+  beside the queue (<code>JobRunner.submit(..., at_once=True)</code>) and does not
+  wait for a running transcription.</li>
+</ul>
+</li>
+<li><strong>The player</strong>, in <code>app.js</code>: the browser's own <code>&lt;audio&gt;</code> element plays
+  the MP3 from the job's files (with range requests, so long recordings
+  start at once and seeking works); the waveform is drawn from levels
+  measured on the server. The passage and the word being spoken are
+  marked, the transcript follows, clicking a time, a word or the waveform
+  plays from there, and the waveform works as a slider from the keyboard.
+  Unlike the Streamlit player, it plays the whole recording, not the first
+  30 minutes.</li>
+<li><strong>The service</strong> (<code>features/transcription/service.py</code>) exports what pages
+  use in <code>__all__</code>, with new helpers: the passages for a player
+  (<code>turns</code>, <code>turns_from_table</code>), the recording for the browser
+  (<code>prepare_playback</code>), the exports on disk (<code>save_transcript_files</code>,
+  <code>save_zip</code>), the recordings in a ZIP (<code>zip_recordings</code>) and language
+  names. The rules test now also checks names read as <code>service.x</code>.</li>
+<li>The user guide's draft: <code>docs/next/transcription.md</code>, left out of the
+  published site (<code>exclude_docs</code> in <code>mkdocs.yml</code>).</li>
+</ul>
+<p>A test runs a recording through the page with the real pipeline (Whisper
+"tiny" on a generated tone, in the image, marked <code>container</code> and <code>slow</code>):
+the worker, ffmpeg, the MP3 and the ZIP with its WAV work together. The
+sandbox test passed on 27 November, and phase 2 was committed.</p>
+<h2 id="phase-3-progress">Phase 3 progress</h2>
+<h3 id="meeting-notes">Meeting Notes</h3>
+<p>Built on 27 November 2026, with tests
+(<code>src/textlab/ui/web/tests/test_meeting_notes_page.py</code>, and in
+<code>features/meeting_notes/tests/</code> for <code>summarize</code>):</p>
+<ul>
+<li><strong>From a recording</strong>: one job transcribes the recording (with the
+  Transcription page's settings: language, speaker counts), then releases
+  the GPU for the language model (<code>JobContext.use_gpu</code>) and summarizes.
+  The transcription has the whole GPU: the job's language model is loaded
+  only for the second step. <strong>From a transcript</strong>: a segment table, a text
+  file or pasted text; the job names its model (<code>ollama_model</code>), so the
+  GPU release keeps it loaded.</li>
+<li><strong>While it runs</strong>, the card shows the summary as the model writes it
+  (<code>JobContext.preview</code>, at most once a second). Cancelling stops the
+  model between tokens.</li>
+<li><strong>The result</strong>: the summary rendered from Markdown on the server
+  (<code>render.markdown</code>: raw HTML escaped, no images, links in a new tab),
+  with its citations as the passages' times. With a recording, the
+  player's controls sit above the tabs and every citation plays its
+  passage; without one, a citation shows its line in the Transcript tab.
+  Sources, the transcript (with the player, as on Transcription), and the
+  downloads of the Streamlit page.</li>
+<li><strong>Speakers</strong> are named <em>Speaker 1</em>, <em>Speaker 2</em> by order of appearance,
+  as on Transcription, in the summary, its sources and the transcript.
+  <strong>Summarize again</strong> (below a result) gives them names and chooses
+  another type, model or language: a new job from the same transcript,
+  with the recording linked into it, no new transcription. The Streamlit
+  page's "Clear GPU memory" is gone: jobs release the GPU themselves.</li>
+<li><strong>A failed summary</strong> keeps the transcript as the result, with the error
+  and the form to summarize again open, as the Streamlit page's retry did.</li>
+<li><code>summarize()</code> in the meeting notes service does the single-pass or
+  chunked summary in one call, with progress, the text so far and
+  cancelling; <code>summary_models()</code> and <code>server_ready()</code> also moved out of
+  the page. The player became macros shared by both pages
+  (<code>templates/components/player.html</code>).</li>
+<li>The user guide's draft: <code>docs/next/meeting_notes.md</code>.</li>
+<li>Fixed with it: the Menu button showed on wide screens, where the index
+  is always visible, so it did nothing there; it now shows only on narrow
+  screens, where it opens the index (a test checks the rule order).</li>
+<li><code>markdown-it-py</code> is named in <code>text_lab.def</code> (it was in the lock already,
+  through <code>rich</code>), so it stays if <code>rich</code> goes; no rebuild is needed.</li>
+</ul>
+<p>Fixed after the first sandbox run: the form's language model field was
+called <code>model</code>, which the Transcription page's settings (reused here)
+read as another Whisper model, so the transcription tried to load the
+language model. The field is now <code>llm</code>, Meeting Notes reads the
+transcription settings without another model
+(<code>read_options(form, other_model=False)</code>), and a test checks it.</p>
+<p>Still to do: try Meeting Notes in the sandbox against the Streamlit page
+(both sources, each summary type, a long recording that is summarized in
+chunks, citations that play, summarizing again with names, a failure such
+as a model that is not installed, cancelling while it writes). Committed
+on 27 November (b165b39).</p>
+<h3 id="translation">Translation</h3>
+<p>Built on 27 November 2026, with tests
+(<code>src/textlab/ui/web/tests/test_translation_page.py</code>, with faked models
+and the real service, and in <code>features/translation/tests/</code> for the
+service's new parts). The Streamlit page's look and its limits were one of
+the reasons for the new UI, so the page was designed anew rather than
+ported:</p>
+<ul>
+<li><strong>One form for both uses</strong>: the languages (From, a swap button, To)
+  and two settings shared by text and documents, folded to one line each
+  (<em>Engine</em> with each engine's description, the model and formality for a
+  language model; <em>Glossary</em> as rows of term and translation). The
+  switcher shows the editor or the documents' steps.</li>
+<li><strong>The editor</strong>: the text on the left, the translation on the right.
+  There is no <em>Load model</em> step any more: the first translation with an
+  engine loads it and says so. Each translation is a job that is not
+  listed (see <a href="#jobs-and-the-gpu">Jobs and the GPU</a>); a short one comes
+  back with the answer to the request (the route waits up to 1.5 s), a
+  longer one follows over the event stream, with the previous translation
+  dimmed until the new one is ready. A new translation stops and drops the
+  one before. <strong>Stop</strong> cancels; a translation that waits names the job it
+  waits for and offers to cancel it. <em>Detect language</em> is the default
+  source: it is detected in the job, and the menu then names it. Ctrl +
+  Enter translates, <strong>Translate as I type</strong> translates after a pause (the
+  choice is remembered in the browser), the swap button translates the
+  translation back, <strong>Copy</strong> copies it. Up to 20,000 characters (longer
+  texts go through Documents as <code>.txt</code>). The page keeps the text and the
+  settings in memory for the session, so a reload shows them again.</li>
+<li><strong>Documents</strong>: files and ZIP archives, translated by a job with
+  cancelling. With <em>Detect language</em>, each document's language is
+  detected; with a chosen language, that one is used (the Streamlit
+  page's separate check box is gone). The result lists each document with
+  its language, its files, the PDF checks, and <em>Compare source and
+  translation</em>: the passages side by side in the page (the first 300; the
+  side-by-side file has all). With several files, the record's listing
+  offers the ZIP of all; with one, the file itself.</li>
+<li><strong>The service</strong> (<code>features/translation/service.py</code>): <code>cancel</code> for
+  <code>translate_text</code> and <code>translate_documents</code> (the document code now lets
+  <code>CancelledError</code> through where it ignored progress errors or blocked an
+  output), each document's pairs in <code>DocumentResults.pairs</code>, documents
+  without a source language detected or reported, and <code>languages</code>,
+  <code>language_name</code>, <code>ollama_models</code>, <code>server_ready</code>,
+  <code>SUPPORTED_EXTENSIONS</code>, <code>PDF_OUTPUTS</code> for pages. The engine table gives
+  each backend a short <code>name</code> and a <code>description</code>; the Streamlit page's
+  labels are unchanged.</li>
+<li><strong>The job runner</strong>: <code>listed=False</code> jobs stay out of the job indicator
+  and Home; <code>card_template</code> gives a job its own card; card templates also
+  get the <code>running</code> job.</li>
+<li>Two Lucide icons added (<code>arrow-left-right</code>, <code>copy</code>), from the same
+  release.</li>
+<li>The user guide's draft: <code>docs/next/translate.md</code>.</li>
+</ul>
+<p>Still to do: try Translation in the sandbox against the Streamlit page (a
+text with each engine, detection, the glossary, swapping, translating as
+you type, a long text that follows over the event stream, a translation
+while a transcription runs, Stop; documents of each type, a ZIP, a mixed
+batch with detection, PDFs with each output and LaTeX, cancelling, a PDF
+whose output is blocked; narrow screens and the dark theme), then commit
+it. The sandbox test passed on 27 November.</p>
+<h3 id="ocr">OCR</h3>
+<p>One page with a switcher for the four tools (decided on 27 November), one
+commit per tool. Survey extraction is left out (see
+<a href="#open-questions">Open questions</a>).</p>
+<p><strong>Standard</strong> (the automatic pipeline; first called Automatic, renamed
+after the first review), built on 27 November 2026, with tests
+(<code>src/textlab/ui/web/tests/test_ocr_page.py</code>, with the pipeline faked and
+the rest of the service real, and in <code>features/ocr/tests/</code>):</p>
+<ul>
+<li><strong>One drop zone</strong> for a PDF, an image or a ZIP; a ZIP is read as a batch
+  (the Streamlit page's two workflows become one). Options: searchable PDF
+  (on by default, also for batches) with the language for placing words,
+  highest quality, describe figures. The survey options are gone.</li>
+<li><strong>The result</strong> shows each page beside its text: the regions outlined on
+  the page image (an SVG of <code>&lt;rect&gt;</code>s, coloured by type, with a legend),
+  and the page's text block by block in reading order, each labelled with
+  its type in the same colour. Pointing at an outline or a block marks
+  both; clicking an outline brings its text into view. Pages one at a
+  time, with a page choice and arrows. Tabs for the tables (each with its
+  CSV), the figures (with generated descriptions apart from the printed
+  caption), and the models used, for citation. Check boxes as read
+  (filled, empty, uncertain), with a notice of uncertain marks. Every
+  download in the record's file listing, <em>Everything</em> first.</li>
+<li><strong>A batch</strong> gives the ZIP of the Streamlit page and an overview of its
+  files: pages, how many from the text layer, what was found, time.</li>
+<li><strong>The service</strong> (<code>features/ocr/service.py</code>): <code>cancel</code> for
+  <code>recognize_document</code> and <code>recognize_batch</code> (the pipeline checks between
+  pages and files; the PaddleOCR-VL worker, resident or one-shot, is
+  killed at once), <code>BatchResult.files</code>, and <code>save_document</code>, which writes
+  a result's downloads, page images, figures and table CSVs into the job's
+  outputs and returns the pages, regions (boxes, sanitized table HTML,
+  LaTeX, figure files, descriptions, marks), tables, figures and models to
+  show. The page keeps only that, not the document with its images.</li>
+<li>Region colours as tokens (<code>--region-*</code>, from the existing hues, so they
+  follow the theme); the Lucide <code>arrow-left</code> icon added.</li>
+<li>The user guide's draft: <code>docs/next/ocr.md</code>.</li>
+<li>Fixed after the first sandbox run: a ZIP batch took 16 minutes, because
+  the resident PaddleOCR-VL worker stalled on its first file until the
+  stall limit (900 s) stopped it; the one-shot fallback then read the five
+  pages in 43 s. The worker inherited the session's <code>OMP_NUM_THREADS=16</code>:
+  the Streamlit OCR page had set it to 1 for its whole process, which the
+  web UI does not do, and the workers only set it if it was unset (after
+  numpy had read it). <code>common.container.paddle_environment</code> now sets one
+  thread in the environment both Paddle workers start with.
+  The language of the searchable PDF is labelled as what it is: the
+  language for placing words (Tesseract's installed packs), not the
+  recognition's.</li>
+</ul>
+<p>Standard was tried in the sandbox and committed on 27 November.</p>
+<p><strong>Choose an engine</strong> (the Streamlit page's "legacy engines" expander),
+built on 27 November 2026, with tests (<code>test_ocr_page.py</code>, with the
+engines' recognition faked and the rest real, and <code>test_engines.py</code>,
+<code>test_manual.py</code> in <code>features/ocr/tests/</code>):</p>
+<ul>
+<li><strong>The form</strong>: one drop zone (a PDF, an image, or a ZIP read as a batch,
+  as in Standard), the engines as choices with what each is good at, and
+  the chosen engine's settings: the language (EasyOCR 86, PaddleOCR 106,
+  by name) or what to read (GLM-OCR's three modes); OlmOCR has none. An
+  engine that cannot run is shown switched off with the reason (GLM-OCR
+  without the Ollama server). The button names the engine.</li>
+<li><strong>The result</strong> shows each page beside its text, as in Standard: the
+  lines (PaddleOCR) or blocks (EasyOCR) an engine found are outlined on
+  the page image the engine read, linked to the text; GLM-OCR's tables are
+  shown as tables (sanitized) with a CSV each, and its Markdown rendered;
+  OlmOCR's one Markdown text is shown without a page. A copy button per
+  page. The downloads: <em>Everything</em> (the Streamlit ZIP, now with table
+  CSVs), the text and the engine's JSON. The Streamlit page showed the
+  engines' drawn preview images instead; the web UI does not draw them.</li>
+<li><strong>A batch</strong> gives the result ZIP and an overview: pages, characters and
+  time per file.</li>
+<li><strong>The engines</strong> (<code>features/ocr/engines/</code>): each page keeps the image it
+  was read from and its outlined lines (<code>TextLine</code>); PaddleOCR's worker
+  also returns the straightened page, as PaddleOCR turns and unwarps
+  pages before it finds lines and gives their outlines on that image.
+  Adapters give a <code>description</code>, <code>markdown</code>, <code>ollama_model</code> (so GLM-OCR's
+  model stays loaded when the GPU is released) and <code>problem()</code>.
+  Cancelling: between pages for EasyOCR and GLM-OCR; PaddleOCR's worker
+  and OlmOCR's pipeline are killed at once with the processes they started
+  (<code>run_process</code> gives each a process group; OlmOCR starts vLLM).</li>
+<li><strong>The service</strong>: <code>cancel</code> for <code>recognize_with_engine</code> and
+  <code>recognize_batch_with_engine</code>, which now returns an <code>EngineBatch</code> (the
+  ZIP and the overview; the Streamlit page takes its ZIP), and
+  <code>save_engine_run</code>, which writes the downloads, page images (TIFF and BMP
+  as PNG) and table CSVs and returns the pages to show.</li>
+<li>Shared with Standard: the pager bar (<code>ocr/macros.html</code>); the <code>markdown</code>
+  filter; nested switches re-apply the switches inside them; the
+  <code>dropzone</code> macro takes an <code>id</code>, for two drop zones on one page.</li>
+<li>Checked against the image: PaddleOCR 3.3.3 runs its document
+  preprocessor (orientation and UVDoc unwarping) by default, so its
+  outlines belong to <code>doc_preprocessor_res.output_img</code>, which the worker
+  now returns. A smoke run on a GPU node (27 November) read a drawn page
+  with EasyOCR and PaddleOCR through the service and <code>save_engine_run</code>:
+  every outline sits on its text, PaddleOCR's on its straightened page,
+  where the text had moved about 50 px from the original (outlines on
+  the original would have been off by as much). Unwarping also bends a
+  flat page slightly, as on the Streamlit page.</li>
+<li>The guide's draft: the <em>Choose an engine</em> section of <code>docs/next/ocr.md</code>.</li>
+</ul>
+<p>Choose an engine was tried in the sandbox and committed on 27 November.</p>
+<p><strong>Historic handwriting</strong> and <strong>Hugging Face model</strong>, built on 27 November
+2026 as one step (the user's choice), with tests
+(<code>test_ocr_handwriting_page.py</code> and <code>test_ocr_huggingface_page.py</code>, with
+the workers faked and the rest real, and in each feature's <code>tests/</code>):</p>
+<ul>
+<li><strong>Page modules of their own</strong>: <code>pages/ocr_handwriting.py</code> and
+  <code>pages/ocr_huggingface.py</code> hold each tool's route and work; the OCR page
+  draws their forms with what their <code>form_context()</code> gives. The switcher's
+  "Soon" mark is gone, as all four tools are built.</li>
+<li><strong>Historic handwriting</strong>: one drop zone (PDF, image or ZIP) and the
+  configured models as choices, each with its description and the models
+  it reads with; the line detector is named. The result shows each page
+  beside its numbered lines, each outlined on the page (<code>&lt;rect&gt;</code>s in the
+  full page's pixels over the page scaled down to 1,600 px) and linked to
+  its text, then the models used, for citation. Downloads: everything
+  with PAGE XML, the text, the JSON with boxes. A batch gives the ZIP and
+  an overview: pages and lines per file.</li>
+<li><strong>Hugging Face model</strong>: one drop zone, the model's name or link, the
+  prompt and the token limit. The user's downloaded models are listed
+  with their size: <em>Use</em> fills the model field, <em>Delete</em> removes one
+  (refused while a Hugging Face job of the session waits or runs). The
+  result shows each page beside the text as the model wrote it (models
+  answer in plain text, Markdown or HTML alike), and the model, revision
+  and prompt. A batch gives the ZIP and an overview: pages and characters
+  per file.</li>
+<li><strong>The services</strong>: <code>cancel</code> for <code>transcribe_document</code>/<code>transcribe_batch</code>
+  and <code>read_document</code>/<code>read_batch</code> (between files and steps; the workers
+  are stopped at once by <code>common.jobs.run_worker</code>); per-file overviews in
+  both <code>BatchRun</code>s; <code>save_transcription</code> and <code>save_run</code>, which write the
+  downloads and page images and return what to show. Handwriting runs now
+  keep the page images, scaled down. The Hugging Face service re-exports
+  the user's model folder (<code>stored_models</code>, <code>delete_model</code>, ...), so the
+  page imports only the service.</li>
+<li><strong>Shared</strong>: <code>common/outputs.py</code> (<code>SavedFile</code>, <code>OutputFolder</code>,
+  <code>web_image</code>), used by the save functions of all three features (the OCR
+  service re-exports <code>SavedFile</code>); <code>uploads.format_names</code> for the drop
+  zones' lists of file types.</li>
+<li>The guide's draft: the last two sections of <code>docs/next/ocr.md</code>.</li>
+</ul>
+<p>Both were tried in the sandbox and committed together on 27 November.</p>
+<h3 id="topic-modeling">Topic Modeling</h3>
+<p>Built on 27 November 2026, without a mockup (the user asked for the
+migration straight away), with tests (<code>test_topic_modeling_page.py</code> with
+the analysis faked, <code>features/topic_modeling/tests/test_overview.py</code>, and
+the service tests):</p>
+<ul>
+<li><strong>The collection first</strong>: choosing a table or a ZIP of text files
+  uploads it at once; it is read, and its size, columns (the likeliest
+  text column chosen) and first rows come back into the form, with the
+  topics-over-time option (timestamp column, intervals; BERTopic only).
+  The upload waits in a draft job (<code>JobRunner.draft</code>, new); each run
+  copies it into a job of its own, so the same collection can run again
+  with other settings, each run a record of its own (the Streamlit page
+  replaced its result).</li>
+<li><strong>The form</strong>: the algorithms as choices with what each does, the
+  language, each algorithm's settings in a switch (BERTopic's grouping and
+  number of topics in nested switches; its language model, keywords,
+  dimension reduction and outliers folded), and the stability check.</li>
+<li><strong>The result</strong>, drawn in SVG from the run's numbers (the libraries'
+  Plotly and pyLDAvis charts need inline scripts and a CDN, which the web
+  UI does not allow; they stay in the ZIP): the topics beside a map where
+  alike topics lie close (dots and topics linked as OCR's outlines and
+  text), each topic's keywords with weight bars and a few example
+  documents; a similarity heatmap; each topic over time as a small chart
+  to its own peak; the quality scores with what each says. Downloads:
+  everything with the interactive charts, the documents with their topic,
+  the topics with their keywords, and the run's settings and scores.</li>
+<li><strong>The feature</strong>: a new <code>overview.py</code> builds what is drawn the same way
+  for every algorithm, from the keyword weights each engine now keeps and
+  one vector per topic each engine now gives
+  (<code>bertopic_topic_vectors</code>, <code>lda_topic_vectors</code>,
+  <code>top2vec_topic_vectors</code>); classical multidimensional scaling places the
+  topics. <code>TopicModelingResult.overview</code> crosses the worker boundary;
+  <code>summarize_table</code> and <code>save_result</code> serve the page. A failing overview
+  keeps the rest of the run, with a notice.</li>
+<li>The guide's draft: <code>docs/next/topic_modeling.md</code>.</li>
+</ul>
+<p>Tried in the sandbox and committed on 27 November (the user liked the
+look and the options).</p>
+<p><strong>Second version of the result</strong> (27 November, after the user's review:
+the three algorithms looked the same, while their libraries draw them
+differently): each algorithm is now drawn as its own library draws it.</p>
+<ul>
+<li><strong>LDA, as pyLDAvis</strong>: the intertopic distance map (bubbles placed and
+  sized by pyLDAvis, by their share of the words, with its PC axes and
+  size legend) beside the terms: the 30 most salient of the collection
+  until a topic is chosen, then the chosen topic's 30 most relevant, the
+  grey bar a term's overall frequency, the red its frequency in the topic;
+  the lambda slider re-ranks them, and pointing at a term sizes the
+  bubbles by its spread over the topics (<code>app.js</code>). A Documents tab shows
+  each topic's documents with their mixture of topics as a thin bar. The
+  data is pyLDAvis's own, prepared once for its dashboard and for the page
+  (topics in model order, so the numbers match the tables).</li>
+<li><strong>BERTopic</strong>: its keyword score bar charts per topic, the topic map, the
+  documents placed by meaning (UMAP of the embeddings, as
+  <code>visualize_documents</code>; a sample of 1,500), the hierarchy (a dendrogram,
+  average linkage of the topic similarity), the heatmap in the
+  hierarchy's order, and the topics over time on one chart with each
+  interval's words in the tooltips (BERTopic's own topics over time,
+  computed once for its chart and the page).</li>
+<li><strong>Top2Vec</strong>: its word clouds, the topic sizes, the topic map, the
+  documents placed by its document vectors, the heatmap.</li>
+<li><strong>Emphasis, not a colour per topic</strong> (data-viz guidance: categorical
+  colours cap at three for scatter-like charts): grey marks, the topic
+  pointed at or chosen in the accent, the rest faded; one <code>data-region</code>
+  per topic across charts and lists. A muted grey token, <code>--ink-4</code>, for
+  reference marks, checked with the data-viz validator (3:1 on the sheet,
+  apart from the accent with colour-vision deficiency, both themes).</li>
+<li><strong>Code</strong>: <code>features/topic_modeling/overview.py</code> builds the shared parts
+  and each library's (<code>ldavis_parts</code>, the document map, the hierarchy, the
+  words per interval, the clouds, the mixtures); the engines give the
+  inputs (<code>prepare_ldavis</code>, <code>lda_document_topics</code>, <code>topics_over_time_frame</code>,
+  <code>topics_over_time_rows</code>, <code>top2vec_topic_words</code>, document vectors).
+  <code>ui/web/pages/topic_charts.py</code> holds the drawing (<code>TopicsView</code>, moved out
+  of the page module); <code>templates/topic_modeling/view_&lt;algorithm&gt;.html</code>
+  and <code>parts/</code>.</li>
+<li>Checked with real runs on a CPU node (all three algorithms, a made-up
+  corpus of four themes), rendered with the page's templates and looked
+  at as images: LDA's map, BERTopic's documents, hierarchy, heatmap and
+  over time. Fixed from that look: the size legend moved below the map,
+  bubbles kept clear of the edges, the heatmap sized by its topics.</li>
+</ul>
+<p>Tried in the sandbox and committed on 27 November.</p>
+<h3 id="chat">Chat</h3>
+<p>Built on 27 November 2026, without a mockup (the user asked for a modern
+chat interface in place of Streamlit's), with tests (<code>test_chat_page.py</code>
+with the model faked; the service's new parts in
+<code>features/chat/tests/test_service.py</code>):</p>
+<ul>
+<li><strong>A conversation</strong> as modern chat apps show it: the messages on the
+  right in a tinted block (with the files they were sent with), the
+  replies as text, the message box kept at the foot of the window (Enter
+  sends, Shift+Enter starts a new line; it grows with the text), the model
+  chosen beside Send. Streamlit's sidebar became a side panel: the
+  session's conversations, the context meter (with the same notes as
+  before), the downloads, deleting the conversation; on narrow screens it
+  slides in.</li>
+<li><strong>Several conversations per session</strong> (the Streamlit page had one, lost
+  on a reload): kept in the server's memory (<code>app.state.chat</code>) until they
+  are deleted or the session ends; <em>New chat</em> reuses an empty one.</li>
+<li><strong>Replies are jobs</strong> that are not listed (<code>chat/answer.html</code>), as the
+  translation editor's: they wait while another job holds the GPU (and
+  say which, with <em>Cancel that job</em>), and reach the page word by word over
+  the event stream (<code>context.preview(draft, every=0.15)</code>). A reasoning
+  model's <strong>thinking</strong> shows apart from the answer, folded, with its
+  newest words, and <em>Thought for 12 s</em> when done. <strong>Stop</strong> stops the model
+  at once (the stream is read in a thread of its own, so even while the
+  model loads) and keeps what was written. <strong>Again</strong> writes the last
+  answer again, with the model chosen now. <strong>Copy</strong> gives the answer as
+  Markdown; code blocks have their own.</li>
+<li><strong>Files</strong>: attached with the button or dropped anywhere on the page, up
+  to four, read once (<code>read_document</code>); a file without text is not
+  attached, and the page says why. Tables are kept for the data agents,
+  each in a folder of its own (<code>keep_table</code>; one folder for all would let
+  a second table overwrite the first).</li>
+<li><strong>The data agents</strong> answer data questions as before (the model
+  decides); the reply shows their steps as they work, then the summary,
+  the charts, the statistics and the code. Interactive charts are drawn
+  with plotly.js 3.7.0, vendored as its strict bundle (no <code>unsafe-eval</code>),
+  the version the image's plotly.py writes for; its style rules come from
+  a style sheet read from the bundle (<code>scripts/plotly_css.py</code>), since its
+  own <code>&lt;style&gt;</code> element would be blocked. Visualize Data will use the
+  same.</li>
+<li><strong>The feature</strong>: <code>service.respond</code> replies to a message (pulling the
+  model with progress, routing, the agents or the chat model, stopping);
+  the stream gives the model's thinking apart from its text (<code>Piece</code>);
+  <code>model_options</code>, <code>server_ready</code>, <code>discard_table</code>. The Streamlit page
+  works as before (<code>answer</code>).</li>
+<li><strong>The job runner</strong>: previews can be any object and come more often
+  (<code>every=</code>); <code>page_data</code> holds what a card needs besides the job; the
+  event stream sends the job indicator only when it changed (a reply
+  written word by word changes the runner's version many times a second);
+  a page can name its jobs otherwise than by its id (<code>stream_page</code>), so
+  the stream sends the cards of the conversation shown only, and the page
+  skips cards it has in the same version.</li>
+<li>The guide's draft: <code>docs/next/chat.md</code>.</li>
+</ul>
+<p>Tried in the sandbox and committed on 27 November. The user's review
+asked for two changes, made the same day:</p>
+<ul>
+<li><strong>The width</strong>: the page used the content width of the other pages
+  (78rem), which left the right part of a wide window empty. Chat now
+  takes the whole width beside the index: the conversation in a wider
+  column (60rem) in the middle, the side panel the height of the window
+  against the right edge, as the index is against the left. Below 1280px
+  the panel slides in behind the Conversations button.</li>
+<li><strong>Following the answer</strong>: the page did not keep the answer being
+  written in view. It now follows it with a <code>ResizeObserver</code> on the
+  conversation, whatever changes its size, while a reply is written and
+  for a few seconds after (its charts); scrolling up stops that, and
+  scrolling back to the end or sending a message starts it again. Scroll
+  anchoring is off on the page.</li>
+</ul>
+<p>The width was right in the sandbox, the following still not, and the
+message box stood in the middle of the window with nothing below it. The
+cause of both: the conversation's element had the class <code>transcript</code>,
+which the audio player's list of passages already had, with a height
+limit (28rem) and its own scrolling. The conversation was a box of that
+height scrolling inside itself: the page could not follow it, and the
+message box came right after it. It is the <code>thread</code> now, and a test
+checks that the Chat section of the style sheet shares no class with the
+rest (<code>test_chat_styles_have_class_names_of_their_own</code>). Before the first
+message, the welcome stands in the middle of the thread, and the message
+box at the foot of the window.</p>
+<p>Tried in the sandbox and committed on 27 November.</p>
+<h3 id="visualize-data">Visualize Data</h3>
+<p>Built on 27 November 2026, without a mockup, with tests
+(<code>test_visualize_data_page.py</code> with the agents faked; the service's new
+parts in <code>features/visualization/tests/test_service.py</code>):</p>
+<ul>
+<li><strong>One form</strong>, as Topic Modeling's: the table is read as soon as it is
+  chosen, with the agents' own readers, and kept in a draft job while the
+  user writes the request; every analysis links it into a job of its own,
+  so the same table can be asked about again (Streamlit kept one result,
+  lost on a new run or a reload). A new table replaces the one the form
+  names; after a reload the form names none, so the session keeps the
+  newest three tables.</li>
+<li><strong>The columns</strong> come back as a table to tick (Streamlit's column
+  profile and multiselect in one): the type the agents will give each
+  column (number, date, category, or text, from the same rule as their
+  summary, <code>plot_data.column_kind</code>), how full it is, its distinct values
+  and what they are like; <em>All</em> and <em>None</em>, and a count. The first rows
+  are in a second tab. All columns ticked, or none, is the whole table, of
+  which the agents are then told nothing (Streamlit sent every column's
+  name when all were selected).</li>
+<li><strong>Requests that name the table's columns</strong> are suggested under the
+  request box (a distribution, a comparison of groups, the relation of
+  two numbers, an association, a word cloud; <code>example_requests</code>), and
+  <em>What the agents can do</em> replaces Streamlit's capabilities box. The model
+  of the last analysis is offered first.</li>
+<li><strong>An analysis is a job</strong> in the GPU queue. The agents run in the job's
+  thread (<code>service.analyze</code>, new; Streamlit polled a thread of their own),
+  and each of their steps reaches the card as it is taken (the job's
+  preview, shown by a template of the page: <code>preview_template</code>, new in the
+  runner), the newest in view. Cancelling stops them after their current
+  step. A missing model is pulled with its progress, and can be
+  cancelled meanwhile.</li>
+<li><strong>The result</strong>: what was asked, the summary, the statistics (open), the
+  charts with their Python and R code (a chart without R code says why),
+  and the agents' steps folded away; the downloads are the HTML report and
+  the ZIP (<code>service.save_result</code>, which also writes each chart as a file
+  of the job for the page to draw). Charts and statistics are drawn by
+  macros Chat now shares (<code>components/analysis.html</code>), with the styles
+  in a section of their own.</li>
+<li><strong>Shared</strong>: <code>common.model_config.model_options</code> and
+  <code>common.ollama.pull_model</code> (from Chat), <code>render.shorten</code> (from Chat),
+  <code>uploads.copy_into</code> (from Topic Modeling). Every job card carries
+  <code>data-version</code>, and the page skips any card it has in the same version
+  (Chat's rule, now for all pages), so a finished analysis's charts are
+  not drawn again when a new job opens the event stream. Boxes the reader
+  opened stay open on any page (<code>data-keep-open</code>).</li>
+<li>The rules test now checks every section of the style sheets: a class is
+  styled in one section only.</li>
+<li>The guide's draft: <code>docs/next/visualize_data.md</code>.</li>
+</ul>
+<p>Tried in the sandbox and committed on 27 November.</p>
+<h3 id="knowledge-graph">Knowledge Graph</h3>
+<p>Built on 27 November 2026, without a mockup, with tests
+(<code>test_knowledge_graph_page.py</code> with the reading and the model faked; the
+feature's new parts in <code>features/knowledge_graph/tests/test_projects.py</code>):</p>
+<ul>
+<li><strong>Two levels.</strong> <code>/knowledge-graph</code> starts a project (an upload or a
+  folder of PDFs on the cluster, counted as its path is typed; a name;
+  where to save it; the model for the topics) or finds saved projects in a
+  folder and opens one. Each project of the session has a page of its own,
+  <code>/knowledge-graph/&lt;id&gt;</code>, with its graph, papers and topics in tabs and
+  its tools (add papers, extract the topics again, rebuild the paper
+  table). Streamlit showed all on one page, one project at a time; the
+  session now keeps every project it opened (<code>app.state.kg_projects</code>),
+  named in links by a random id, never by its path.</li>
+<li><strong>Builds are jobs</strong>: Streamlit ran them in the page, which stayed busy
+  for as long as Grobid and the model worked. A build with the session's
+  model takes the GPU for it; with GPUStack's it needs none. It can be
+  cancelled between papers: the papers read are kept and reused (the
+  card says so: <code>page_data["cancelled"]</code>, new). If only the topics fail,
+  the build ends done and says so, as the papers are saved. A missing
+  session model is downloaded first, with its progress. The updates of a
+  project are jobs of its page (<code>knowledge_graph:&lt;id&gt;</code>); a page id
+  <code>&lt;tool&gt;:&lt;key&gt;</code> now links to <code>&lt;tool's path&gt;/&lt;key&gt;</code> in the job indicator
+  and on Home.</li>
+<li><strong>The graph</strong> is drawn by vis-network 9.1.2, vendored as the version
+  Pyvis embeds in the downloads (its <code>dist</code> build adds no <code>&lt;style&gt;</code>
+  element and evaluates no code, so the Content Security Policy needs
+  nothing more), from the nodes, edges and options of <code>draw_graph</code>.
+  Pyvis's own page, which runs inline scripts, stays the download. The
+  options (the view, the node types, the least confidence, the papers
+  shown) draw the graph again at each change; the page keeps the last few
+  views. In the page's type and ink, also in the dark theme; the layout's
+  progress shows while it settles; <strong>Fit to view</strong>; in the whole
+  collection a click brings out a node's neighbours, as before. The dashed
+  edges the code meant (a topic's category, cited authors) are dashed now:
+  Pyvis passed <code>style</code>, which vis.js does not read. Streamlit also saved
+  each graph page into the project folder; the web UI does not, as the
+  view is downloaded as shown.</li>
+<li><strong>The feature</strong>: <code>build_project</code>, <code>extract_topics_with</code>, <code>read_project</code>,
+  <code>stage_papers</code> (an upload on disk), <code>draw_graph</code>, <code>grobid_problem</code> (a
+  warning before an upload, when Grobid cannot start), <code>gpustack_ready</code>;
+  <code>build_corpus</code> and <code>extract_topics</code> can be stopped between papers, and a
+  stopped or failed topic extraction leaves no partial file. The Streamlit
+  page works as before.</li>
+<li>With this page every tool is in the web UI.</li>
+<li>The guide's draft: <code>docs/next/knowledge_graph.md</code>.</li>
+</ul>
+<p>Tried in the sandbox and committed on 27 November. Phase 3 is done.</p>
+<h3 id="clean-up-before-the-switch">Clean-up before the switch</h3>
+<p>Done on 27 November, before phase 4:</p>
+<ul>
+<li><strong>Nothing left from the building work</strong>: the developer pages under
+  <code>/dev</code> (component gallery, mockups, demo job), <code>TEXT_LAB_WEB_DEV</code>, the
+  placeholder page and the <code>ready</code> flag of the tools with its <em>Soon</em> marks
+  and Home's "under construction" notice are removed, with their styles.
+  The demo job lives on in the tests only (<code>tests/demo_job.py</code>), for the
+  tests of the job runner through the web.</li>
+<li><strong>Email on start</strong>: a box under the job time on the launch form
+  (<code>form.yml</code>), Open OnDemand's <code>bc_email_on_started</code>: Slurm mails the user
+  when the session starts. It goes out with the redeployment of the Open
+  OnDemand files, for both interfaces. The launch guide's draft is
+  <code>docs/next/launch.md</code>.</li>
+</ul>
+<p>Next, phase 4: the switch.</p>
+<h2 id="testing">Testing</h2>
+<ul>
+<li><strong>Page tests</strong> with FastAPI's test client (httpx is in the image), in
+  <code>src/textlab/ui/web/tests/</code>: every route renders, forms refuse bad input,
+  a job runs from submission to download with a fake service, nothing is
+  reachable without logging in, and requests without the CSRF token are
+  refused.</li>
+<li><strong>Import rules</strong>: pages use only the feature services; import-linter
+  already keeps the backend from importing any UI.</li>
+<li><strong>Manual checks</strong>: each page lists in this plan what to try in the sandbox, taken
+  from the features of the Streamlit page it replaces.</li>
+<li>Browser tests (Playwright) are not planned: the image has no browser.</li>
+</ul>
+<h2 id="documentation">Documentation</h2>
+<ul>
+<li>The developer guide and the feature READMEs change with each page's
+  commit, as usual.</li>
+<li>The user guide describes what production runs. Each new page's guide is
+  written with the page under <code>docs/next/</code>, which the published site leaves out
+  (<code>exclude_docs</code> in <code>mkdocs.yml</code>), and replaces the current guide at the
+  switch.</li>
+</ul>
+<h2 id="risks">Risks</h2>
+<table>
+<thead>
+<tr>
+<th>Risk</th>
+<th>Mitigation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>The browser opens at most 6 connections to the proxy at a time (HTTP/1.1), for all its tabs on the site together</td>
+<td>One event stream per page, open only while jobs are active; one upload at a time</td>
+</tr>
+<tr>
+<td>Features are lost on the way</td>
+<td>A checklist per page, from the Streamlit page; the switch waits for every page</td>
+</tr>
+<tr>
+<td>New widgets are needed: editable tables (OCR review, Topic Modeling), charts, streamed chat, the graph view, the audio player</td>
+<td>HTML tables with inputs, or a vendored grid library; plotly.js vendored; SSE; pyvis output in a frame; the player's own JavaScript ported</td>
+</tr>
+<tr>
+<td>Most services cannot be cancelled yet</td>
+<td>Added with each page</td>
+</tr>
+<tr>
+<td>Features change in the Streamlit pages during the migration</td>
+<td>Streamlit pages get bug fixes only</td>
+</tr>
+</tbody>
+</table>
+<h2 id="out-of-scope">Out of scope</h2>
+<ul>
+<li>The command-line and batch tools (<code>cli.py</code>, <code>deploy/sbatch/</code>) stay
+  placeholders.</li>
+<li>More than one user per server: each Open OnDemand session keeps its own
+  app.</li>
+<li>Translating the interface: English only, as now.</li>
+</ul>
+<h2 id="open-questions">Open questions</h2>
+<p>None at the moment. Decided on 27 November: survey extraction (the
+experimental check box of automatic OCR, with its review of the detected
+form) is left out of the new UI; the survey feature stays in the backend
+for now.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
